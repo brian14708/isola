@@ -10,4 +10,6 @@ crate-type = ["cdylib"]
 doc = false
 
 [dependencies]
+promptkit = { version = "0.1.0", path = "../../crates/promptkit" }
 pyo3 = "0.20.0"
+serde_json = "1.0.108"

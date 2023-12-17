@@ -918,7 +918,9 @@ dependencies = [
 name = "promptkit_python"
 version = "0.1.0"
 dependencies = [
+ "promptkit",
  "pyo3",
+ "serde_json",
 ]
 
 [[package]]
