@@ -6,6 +6,12 @@ edition = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+allocative = "0.3.1"
 anyhow = "1.0.75"
+futures = "0.3.29"
+futures-executor = "0.3.29"
+serde_json = "1.0.108"
+smallvec = "1.11.2"
 starlark = "0.10.0"
 thiserror = "1.0.51"
+tokio = { version = "1.35.0", features = ["sync", "rt", "macros"] }
