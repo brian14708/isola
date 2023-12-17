@@ -1,0 +1,11 @@
+[package]
+name = "promptkit"
+version = { workspace = true }
+edition = { workspace = true }
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.75"
+starlark = "0.10.0"
+thiserror = "1.0.51"
