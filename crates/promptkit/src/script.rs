@@ -1,105 +1,121 @@
 use crate::{
-    error::{Error, Result},
-    stream::BlockingRecv,
+    error::Result,
+    stream::{make_module, BlockingRecv, Stream},
 };
+use rustpython_vm::{
+    class::PyClassImpl,
+    compiler::{compile, CompileOpts, Mode},
+    convert::ToPyObject,
+    function::{FuncArgs, KwArgs, PosArgs},
+    py_serde::{deserialize, PyObjectSerializer},
+    scope::Scope,
+    AsObject, Interpreter, PyPayload,
+};
+
 use serde_json::Value;
-use smallvec::SmallVec;
-use starlark::{
-    environment::{FrozenModule, Globals, GlobalsBuilder, LibraryExtension, Module},
-    eval::Evaluator,
-    syntax::{AstModule, Dialect, DialectTypes},
-    values::{function::FUNCTION_TYPE, Heap, Value as AllocValue},
-};
 
 pub struct Script {
-    module: FrozenModule,
+    interpreter: Interpreter,
+    scope: Scope,
 }
 
-pub enum InputValue<'a> {
+pub enum InputValue {
     Json(Value),
-    StrRef(&'a str),
     Stream(Box<dyn BlockingRecv>),
 }
 
-impl<'a> InputValue<'a> {
-    fn alloc(self, heap: &Heap) -> AllocValue<'_> {
-        match self {
-            InputValue::Json(v) => heap.alloc(v),
-            InputValue::StrRef(s) => heap.alloc(s),
-            InputValue::Stream(stream) => heap.alloc(crate::stream::Stream { stream }),
-        }
-    }
-}
-
 impl Script {
-    pub fn new(content: impl Into<String>) -> Result<Self> {
-        let ast = AstModule::parse(
-            "__main__",
-            content.into(),
-            &Dialect {
-                enable_def: true,
-                enable_lambda: true,
-                enable_load: true,
-                enable_keyword_only_arguments: true,
-                enable_types: DialectTypes::Enable,
-                enable_load_reexport: true,
-                enable_top_level_stmt: true,
-                enable_f_strings: true,
+    pub fn new(content: impl AsRef<str>) -> Result<Self> {
+        let code = compile(
+            content.as_ref(),
+            Mode::Exec,
+            "<embedded>".to_owned(),
+            CompileOpts {
                 ..Default::default()
             },
         )
-        .map_err(Error::Starlark)?;
+        .unwrap();
 
-        let globals: Globals = GlobalsBuilder::extended_by(&[
-            LibraryExtension::Map,
-            LibraryExtension::Filter,
-            LibraryExtension::Print,
-            LibraryExtension::Json,
-        ])
-        .build();
+        let interpreter = Interpreter::with_init(Default::default(), |vm| {
+            vm.add_native_modules(rustpython_vm::stdlib::get_module_inits());
+            vm.add_native_modules(rustpython_stdlib::get_module_inits());
+            vm.add_frozen(rustpython_pylib::FROZEN_STDLIB);
 
-        let module = Module::new();
-        {
-            let mut eval = Evaluator::new(&module);
-            eval.enable_static_typechecking(true);
-            eval.eval_module(ast, &globals).map_err(Error::Starlark)?;
-        }
-        Ok(Self {
-            module: module.freeze().map_err(Error::Starlark)?,
-        })
+            vm.add_native_module("_stream".to_owned(), Box::new(make_module));
+
+            Stream::make_class(&vm.ctx);
+        });
+
+        let scope = interpreter.enter(|vm| {
+            let scope = vm.new_scope_with_builtins();
+            let code = vm.ctx.new_code(code.clone());
+            vm.run_code_obj(code, scope.clone())
+                .map_err(|e| {
+                    vm.print_exception(e.clone());
+                    e
+                })
+                .unwrap();
+
+            scope
+        });
+
+        Ok(Self { interpreter, scope })
     }
 
     pub fn run<'a>(
         &self,
         name: &str,
-        positional: impl IntoIterator<Item = InputValue<'a>>,
-        named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
+        positional: impl IntoIterator<Item = InputValue>,
+        named: impl IntoIterator<Item = (&'a str, InputValue)>,
     ) -> Result<Value> {
-        let func = self.module.get(name).map_err(Error::Starlark)?;
-        let v = func.value();
-        if v.get_type() != FUNCTION_TYPE {
-            return v.to_json_value().map_err(Error::Starlark);
-        }
+        self.interpreter.enter(|vm| {
+            let m = self
+                .scope
+                .locals
+                .as_object()
+                .get_item(name, vm)
+                .map_err(|e| {
+                    vm.print_exception(e.clone());
+                    e
+                })?;
+            let m = if let Some(func) = m.to_callable() {
+                let args = FuncArgs::new(
+                    PosArgs::from(
+                        positional
+                            .into_iter()
+                            .map(|arg| match arg {
+                                InputValue::Json(v) => deserialize(vm, v).unwrap(),
+                                InputValue::Stream(s) => vm
+                                    .ctx
+                                    .new_pyref::<_, Stream>(Stream { stream: s })
+                                    .to_pyobject(vm),
+                            })
+                            .collect::<Vec<_>>(),
+                    ),
+                    KwArgs::from_iter(named.into_iter().map(|(k, v)| match v {
+                        InputValue::Json(v) => (k.to_owned(), deserialize(vm, v).unwrap()),
+                        InputValue::Stream(s) => {
+                            (k.to_owned(), Stream { stream: s }.into_pyobject(vm))
+                        }
+                    })),
+                );
 
-        let module = Module::new();
-        let heap = module.heap();
-        let positional = positional
-            .into_iter()
-            .map(|p| p.alloc(heap))
-            .collect::<SmallVec<[_; 4]>>();
-        let named = named
-            .into_iter()
-            .map(|(s, v)| (s, v.alloc(heap)))
-            .collect::<SmallVec<[_; 2]>>();
-        let result = Evaluator::new(&module)
-            .eval_function(v, &positional, &named)
-            .map_err(Error::Starlark)?;
-        result.to_json_value().map_err(Error::Starlark)
+                func.invoke(args, vm).map_err(|e| {
+                    vm.print_exception(e.clone());
+                    e
+                })?
+            } else {
+                m
+            };
+
+            Ok(serde_json::to_value(PyObjectSerializer::new(vm, &m)).unwrap())
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use serde_json::json;
     use tokio::sync::mpsc::channel;
 
