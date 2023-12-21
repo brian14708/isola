@@ -1,0 +1,64 @@
+[tasks.build-wasm]
+command = "cargo"
+args = ["build", "--profile", "release-wasm", "--target", "wasm32-wasi", "-p", "promptkit_python"]
+
+[tasks.wizer]
+install_crate = "wizer"
+install_crate_args = ["--all-features"]
+command = "wizer"
+args = [
+    "--allow-wasi",
+    "--wasm-bulk-memory",
+    "true",
+    "target/wasm32-wasi/release-wasm/promptkit_python.wasm",
+    "-o",
+    "target/wasm32-wasi/release-wasm/promptkit_python.init.wasm"
+]
+condition.files_modified.input = ["target/wasm32-wasi/release-wasm/promptkit_python.wasm"]
+condition.files_modified.output = ["target/wasm32-wasi/release-wasm/promptkit_python.init.wasm"]
+dependencies = ["build-wasm"]
+
+[tasks.opt-wasm]
+command = "wasm-opt"
+args = [
+    "-O3",
+    "--strip-debug",
+    "--enable-bulk-memory",
+    "target/wasm32-wasi/release-wasm/promptkit_python.init.wasm",
+    "-o",
+    "target/wasm32-wasi/release-wasm/promptkit_python.opt.wasm"
+]
+condition.files_modified.input = ["target/wasm32-wasi/release-wasm/promptkit_python.init.wasm"]
+condition.files_modified.output = ["target/wasm32-wasi/release-wasm/promptkit_python.opt.wasm"]
+dependencies = ["wizer"]
+
+[tasks.wasm-adapter]
+install_script = '''
+if [ ! -f target/wasi_snapshot_preview1.reactor.wasm ]; then
+    curl -L https://github.com/bytecodealliance/wasmtime/releases/download/v16.0.0/wasi_snapshot_preview1.reactor.wasm -o target/tmp_reactor
+    mv target/tmp_reactor target/wasi_snapshot_preview1.reactor.wasm
+fi
+'''
+
+[tasks.wasm-component]
+install_crate = "wasm-tools"
+command = "wasm-tools"
+args = [
+    "component",
+    "new",
+    "./target/wasm32-wasi/release-wasm/promptkit_python.opt.wasm",
+    "-o",
+    "target/promptkit_python.wasm",
+    "--adapt",
+    "target/wasi_snapshot_preview1.reactor.wasm",
+]
+dependencies = [
+    "opt-wasm",
+    "wasm-adapter",
+]
+
+[tasks.wasm]
+dependencies = [
+    "wasm-component"
+]
+workspace = false
