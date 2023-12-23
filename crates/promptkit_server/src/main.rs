@@ -2,40 +2,34 @@ use std::{path::Path, sync::Arc};
 
 use axum::{
     extract::State,
-    response::Response,
-    routing::{get, post},
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
     Json, Router,
 };
-use script_manager::{ScriptRunner};
-use serde_json::{json, Value};
 
+use serde_json::Value;
+use vm_manager::{ExecResult, VmManager};
 
-mod script_manager;
+mod vm_manager;
 
 #[derive(Clone)]
 struct AppState {
-    r: Arc<ScriptRunner>,
+    vm: Arc<VmManager>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let r = Arc::new(ScriptRunner::new(Path::new(
-        "target/promptkit_python.wasm",
-    ))?);
-    let state = AppState { r: r.clone() };
-
     tracing_subscriber::fmt::init();
-    let app = Router::new()
-        .route("/", get(root))
-        .route("/exec", post(exec))
-        .with_state(state);
+
+    let state = AppState {
+        vm: Arc::new(VmManager::new(Path::new("target/promptkit_python.wasm"))?),
+    };
+
+    let app = Router::new().route("/exec", post(exec)).with_state(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
     Ok(())
-}
-
-async fn root() -> Json<Value> {
-    Json(json!("A"))
 }
 
 #[derive(serde::Deserialize)]
@@ -45,22 +39,45 @@ struct ExecRequest {
     args: Vec<Value>,
 }
 
-async fn exec(State(state): State<AppState>, Json(req): Json<ExecRequest>) -> Response {
+async fn exec(
+    State(state): State<AppState>,
+    Json(req): Json<ExecRequest>,
+) -> Result<Json<ExecResult>, AppError> {
     let s = state
-        .r
-        .create_script()
-        .await
-        .unwrap()
-        .run(
+        .vm
+        .exec(
             &req.script,
-            req.method,
-            req.args.iter().map(|s| s.to_string()).collect(),
+            &req.method,
+            &req.args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
         )
-        .await
-        .unwrap();
-    Response::builder()
-        .status(200)
-        .header("Content-Type", "application/json")
-        .body(s.into())
-        .unwrap()
+        .await?;
+    Ok(Json(s))
+}
+
+struct AppError(anyhow::Error);
+
+#[derive(serde::Serialize)]
+struct ErrorResponse {
+    message: String,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                message: self.0.root_cause().to_string(),
+            }),
+        )
+            .into_response()
+    }
+}
+
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
 }

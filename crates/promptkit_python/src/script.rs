@@ -3,11 +3,12 @@ use std::rc::Rc;
 use crate::error::Result;
 use rustpython_vm::{
     function::{FuncArgs, KwArgs, PosArgs},
-    py_serde::{deserialize, PyObjectSerializer},
+    py_serde::{deserialize, PyObjectDeserializer, PyObjectSerializer},
     scope::Scope,
     AsObject, Interpreter,
 };
 
+use serde::de::DeserializeSeed;
 use serde_json::Value;
 
 pub struct VM {
@@ -35,7 +36,7 @@ impl VM {
     pub fn script(&self, content: impl AsRef<str>) -> Result<Script> {
         let scope = self.interpreter.enter(|vm| {
             let scope = vm.new_scope_with_builtins();
-            vm.run_code_string(scope.clone(), content.as_ref(), "<embedded>".to_owned())
+            vm.run_code_string(scope.clone(), content.as_ref(), "<init>".to_owned())
                 .map_err(|e| {
                     vm.print_exception(e.clone());
                     e
@@ -56,8 +57,9 @@ pub struct Script {
     scope: Scope,
 }
 
-pub enum InputValue {
+pub enum InputValue<'a> {
     Json(Value),
+    JsonStr(&'a str),
 }
 
 impl Script {
@@ -80,9 +82,9 @@ impl Script {
     pub fn run<'a>(
         &self,
         name: &str,
-        positional: impl IntoIterator<Item = InputValue>,
-        named: impl IntoIterator<Item = (&'a str, InputValue)>,
-    ) -> Result<Value> {
+        positional: impl IntoIterator<Item = InputValue<'a>>,
+        named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
+    ) -> Result<String> {
         self.interpreter.enter(|vm| {
             let m = self
                 .scope
@@ -100,11 +102,22 @@ impl Script {
                             .into_iter()
                             .map(|arg| match arg {
                                 InputValue::Json(v) => deserialize(vm, v).unwrap(),
+                                InputValue::JsonStr(s) => PyObjectDeserializer::new(vm)
+                                    .deserialize(&mut serde_json::Deserializer::from_str(s))
+                                    .unwrap(),
                             })
                             .collect::<Vec<_>>(),
                     ),
-                    KwArgs::from_iter(named.into_iter().map(|(k, v)| match v {
-                        InputValue::Json(v) => (k.to_owned(), deserialize(vm, v).unwrap()),
+                    KwArgs::from_iter(named.into_iter().map(|(k, v)| {
+                        match v {
+                            InputValue::Json(v) => (k.to_owned(), deserialize(vm, v).unwrap()),
+                            InputValue::JsonStr(s) => (
+                                k.to_owned(),
+                                PyObjectDeserializer::new(vm)
+                                    .deserialize(&mut serde_json::Deserializer::from_str(s))
+                                    .unwrap(),
+                            ),
+                        }
                     })),
                 );
 
@@ -116,7 +129,7 @@ impl Script {
                 m
             };
 
-            let v = serde_json::to_value(PyObjectSerializer::new(vm, &m)).unwrap();
+            let v = serde_json::to_string(&PyObjectSerializer::new(vm, &m)).unwrap();
             Ok(v)
         })
     }
@@ -147,9 +160,9 @@ i += 21
         let vm = VM::new();
         let s = vm.script(content).unwrap();
         let x = s.run("hello", [InputValue::Json(json!(32))], []).unwrap();
-        assert_eq!(x, json!("hello 54"));
+        assert_eq!(x, "\"hello 54\"");
 
         let x = s.run("i", [], []).unwrap();
-        assert_eq!(x, json!(22));
+        assert_eq!(x, "22");
     }
 }
