@@ -57,10 +57,13 @@ impl VmManager {
             match unsafe { Component::deserialize_file(&engine, Path::new(".cache.wasm")) } {
                 Ok(c) => c,
                 Err(_) => {
-                    let data = std::fs::read(path)?;
-                    let data = Engine::precompile_component(&engine, &data)?;
-                    std::fs::write(".cache.wasm", data)?;
-                    unsafe { Component::deserialize_file(&engine, ".cache.wasm") }?
+                    let component = Component::from_file(&engine, path)?;
+                    #[cfg(debug_assertions)]
+                    {
+                        let data = component.serialize()?;
+                        std::fs::write(".cache.wasm", data)?;
+                    }
+                    component
                 }
             };
         println!("Loaded module!");
