@@ -4,7 +4,7 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
     Json, Router,
 };
 
@@ -26,7 +26,13 @@ async fn main() -> anyhow::Result<()> {
         vm: Arc::new(VmManager::new(Path::new("target/promptkit_python.wasm"))?),
     };
 
-    let app = Router::new().route("/exec", post(exec)).with_state(state);
+    let app = Router::new()
+        .route(
+            "/debug/healthz",
+            get(|| async { (StatusCode::NO_CONTENT,) }),
+        )
+        .route("/exec", post(exec))
+        .with_state(state);
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
     Ok(())
