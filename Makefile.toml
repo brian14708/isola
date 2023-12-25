@@ -33,14 +33,6 @@ condition.files_modified.input = ["target/wasm32-wasi/release-wasm/promptkit_pyt
 condition.files_modified.output = ["target/wasm32-wasi/release-wasm/promptkit_python.opt.wasm"]
 dependencies = ["wizer"]
 
-[tasks.wasm-adapter]
-install_script = '''
-if [ ! -f target/wasi_snapshot_preview1.reactor.wasm ]; then
-    curl -L https://github.com/bytecodealliance/wasmtime/releases/download/v16.0.0/wasi_snapshot_preview1.reactor.wasm -o target/tmp_reactor
-    mv target/tmp_reactor target/wasi_snapshot_preview1.reactor.wasm
-fi
-'''
-
 [tasks.wasm-component]
 install_crate = "wasm-tools"
 command = "wasm-tools"
@@ -51,11 +43,10 @@ args = [
     "-o",
     "target/promptkit_python.wasm",
     "--adapt",
-    "target/wasi_snapshot_preview1.reactor.wasm",
+    "crates/promptkit_python/wit-libs/wasi_snapshot_preview1.reactor.wasm",
 ]
 dependencies = [
     "opt-wasm",
-    "wasm-adapter",
 ]
 
 [tasks.wasm]
