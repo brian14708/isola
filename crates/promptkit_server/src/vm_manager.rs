@@ -1,4 +1,4 @@
-use std::{collections::HashMap, path::Path, sync::Arc, time::Duration};
+use std::{path::Path, time::Duration};
 
 use anyhow::anyhow;
 use axum::{
@@ -9,42 +9,30 @@ use axum::{
     },
     Json,
 };
-use parking_lot::Mutex;
-use rand::Rng;
+
 use serde_json::{json, value::RawValue};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tracing::info;
 use wasmtime::{
-    component::{Component, Linker},
-    Config, Engine, Store,
+    component::{Component, InstancePre, Linker},
+    Config, Engine,
 };
-use wasmtime_wasi::preview2::{Table, WasiCtx, WasiCtxBuilder, WasiView};
 
-use crate::resource::MemoryLimiter;
-
-use self::host::Host;
-
-wasmtime::component::bindgen!({
-    world: "python-vm",
-    async: true,
-});
+use crate::{
+    vm::{host, PythonVm, Vm, VmState},
+    vm_cache::VmCache,
+};
 
 const MAX_MEMORY: usize = 64 * 1024 * 1024;
 const MAX_LOAD_FUEL: u64 = 1000 * 1000 * 1000;
 const MAX_EXEC_FUEL: u64 = 5 * 1000 * 1000 * 1000;
 
-struct SimpleState {
-    host_env: HostEnv,
-    limiter: MemoryLimiter,
-    wasi: WasiCtx,
-    table: Table,
-}
-
 pub struct VmManager {
     engine: Engine,
-    component: Component,
-    caches: Arc<Mutex<HashMap<[u8; 32], Vec<Vm>>>>,
+    instance_pre: InstancePre<VmState>,
+    cache: VmCache,
 }
 
 impl VmManager {
@@ -56,104 +44,59 @@ impl VmManager {
             .consume_fuel(true)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
         let engine = Engine::new(&config)?;
-        println!("Loading module...");
-        let component =
-            match unsafe { Component::deserialize_file(&engine, Path::new(".cache.wasm")) } {
-                Ok(c) => c,
-                Err(_) => {
-                    let component = Component::from_file(&engine, path)?;
-                    #[cfg(debug_assertions)]
-                    {
-                        let data = component.serialize()?;
-                        std::fs::write(".cache.wasm", data)?;
-                    }
-                    component
-                }
-            };
-        println!("Loaded module!");
+
+        info!("Loading module...");
+        #[cfg(debug_assertions)]
+        let component = match unsafe {
+            Component::deserialize_file(&engine, path.with_extension("wasm.cache"))
+        } {
+            Ok(c) => c,
+            Err(_) => {
+                let component = Component::from_file(&engine, path)?;
+                let data = component.serialize()?;
+                std::fs::write(path.with_extension("wasm.cache"), data)?;
+                component
+            }
+        };
+
+        #[cfg(not(debug_assertions))]
+        let component = Component::from_file(&engine, path)?;
+
+        let mut linker = Linker::<VmState>::new(&engine);
+        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+        host::add_to_linker(&mut linker, |v: &mut VmState| v)?;
+        let instance_pre = linker.instantiate_pre(&component)?;
+
+        info!("Loaded module!");
 
         Ok(Self {
             engine,
-            component,
-            caches: Arc::new(Mutex::new(HashMap::new())),
+            instance_pre,
+            cache: VmCache::new(),
         })
     }
 
-    pub async fn create(&self) -> anyhow::Result<Vm> {
-        let mut linker = Linker::new(&self.engine);
-        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
-
-        let table: Table = Table::new();
-        let mut wasi = WasiCtxBuilder::new();
-        let wasi = wasi.build();
-        let m = MemoryLimiter::new(MAX_MEMORY / 2, MAX_MEMORY);
-
-        let host_env = HostEnv { output: None };
-        let mut store = Store::new(
-            &self.engine,
-            SimpleState {
-                host_env,
-                limiter: m,
-                wasi,
-                table,
-            },
-        );
-        store.limiter(|s| &mut s.limiter);
-        host::add_to_linker(&mut linker, |v: &mut SimpleState| &mut v.host_env)?;
-
-        let (bindings, _) =
-            PythonVm::instantiate_async(&mut store, &self.component, &linker).await?;
-
+    pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
+        let mut store = VmState::new(&self.engine, MAX_MEMORY);
+        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &self.instance_pre).await?;
         Ok(Vm {
+            hash,
             store,
             python: bindings,
         })
     }
 
-    async fn put_cache(cache: Arc<Mutex<HashMap<[u8; 32], Vec<Vm>>>>, hash: [u8; 32], vm: Vm) {
-        if vm.store.data().limiter.exceed_soft() {
-            return;
-        }
-
-        let mut caches = cache.lock();
-        caches.entry(hash).or_default().push(vm);
-
-        let total = caches.values().map(|v| v.len()).sum::<usize>();
-        if total > 64 {
-            let mut rng = rand::thread_rng();
-            let rm_idx = rng.gen_range(0..total);
-
-            let mut idx = 0;
-            let mut rm_key = None;
-            for (k, v) in caches.iter_mut() {
-                if idx + v.len() > rm_idx {
-                    v.pop();
-                    if v.is_empty() {
-                        rm_key = Some(*k);
-                    }
-                    break;
-                }
-                idx += v.len();
-            }
-            if let Some(k) = rm_key {
-                caches.remove(&k);
-            }
-        }
-    }
-
     async fn exec_impl(
         &self,
-        func: &str,
-        args: &[String],
-        hash: [u8; 32],
+        func: String,
+        args: Vec<String>,
         mut vm: Vm,
     ) -> anyhow::Result<Response> {
         let (tx, mut rx) = mpsc::channel(4);
-        vm.store.data_mut().host_env.output = Some(tx.clone());
+        vm.store.data_mut().initialize(tx.clone());
         vm.store.set_fuel(MAX_EXEC_FUEL)?;
-        let func = func.to_string();
-        let args = args.to_vec();
-        let cache = Arc::downgrade(&self.caches);
+
+        let cache_weak = self.cache.downgrade();
         let exec = tokio::task::spawn(async move {
             let ret = vm
                 .python
@@ -161,12 +104,10 @@ impl VmManager {
                 .call_call_func(&mut vm.store, &func, &args)
                 .await
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
-            vm.store.data_mut().host_env.output = None;
+            vm.store.data_mut().reset();
             match ret {
                 Ok(()) => {
-                    if let Some(cache) = cache.upgrade() {
-                        Self::put_cache(cache, hash, vm).await;
-                    }
+                    cache_weak.put(vm);
                 }
                 Err(err) => {
                     _ = tx.send(Err(err)).await;
@@ -233,24 +174,20 @@ impl VmManager {
     pub async fn exec(
         &self,
         script: &str,
-        func: &str,
-        args: &[String],
+        func: String,
+        args: Vec<String>,
     ) -> anyhow::Result<Response> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
 
-        let vm = {
-            let mut cache = self.caches.lock();
-            cache.get_mut(&hash).and_then(|f| f.pop())
-        };
+        let vm = self.cache.get(hash);
 
-        if let Some(mut vm) = vm {
-            vm.store.set_fuel(MAX_EXEC_FUEL)?;
-            return self.exec_impl(func, args, hash, vm).await;
+        if let Some(vm) = vm {
+            return self.exec_impl(func, args, vm).await;
         }
 
-        let mut vm = self.create().await?;
+        let mut vm = self.create(hash).await?;
         vm.store.set_fuel(MAX_LOAD_FUEL)?;
         vm.python
             .python_vm()
@@ -258,45 +195,6 @@ impl VmManager {
             .await?
             .map_err(|e| anyhow!(e))?;
 
-        self.exec_impl(func, args, hash, vm).await
-    }
-}
-
-pub struct Vm {
-    store: Store<SimpleState>,
-    python: PythonVm,
-}
-
-impl WasiView for SimpleState {
-    fn table(&self) -> &Table {
-        &self.table
-    }
-
-    fn table_mut(&mut self) -> &mut Table {
-        &mut self.table
-    }
-
-    fn ctx(&self) -> &WasiCtx {
-        &self.wasi
-    }
-
-    fn ctx_mut(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-}
-
-pub struct HostEnv {
-    output: Option<mpsc::Sender<anyhow::Result<(String, bool)>>>,
-}
-
-#[async_trait::async_trait]
-impl Host for HostEnv {
-    async fn emit(&mut self, data: String, end: bool) -> wasmtime::Result<()> {
-        if let Some(output) = &self.output {
-            output.send(Ok((data, end))).await?;
-            Ok(())
-        } else {
-            Err(anyhow!("output channel missing"))
-        }
+        self.exec_impl(func, args, vm).await
     }
 }

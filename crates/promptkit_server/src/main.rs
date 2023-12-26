@@ -8,11 +8,13 @@ use axum::{
     Json, Router,
 };
 
-use serde_json::Value;
+use serde_json::value::RawValue;
 use vm_manager::VmManager;
 
 mod memory_buffer;
 mod resource;
+mod vm;
+mod vm_cache;
 mod vm_manager;
 
 #[derive(Clone)]
@@ -44,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 struct ExecRequest {
     script: String,
     method: String,
-    args: Vec<Value>,
+    args: Vec<Box<RawValue>>,
 }
 
 async fn exec(
@@ -55,8 +57,11 @@ async fn exec(
         .vm
         .exec(
             &req.script,
-            &req.method,
-            &req.args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+            req.method,
+            req.args
+                .into_iter()
+                .map(|s| Box::<str>::from(s).into_string())
+                .collect::<Vec<_>>(),
         )
         .await?)
 }

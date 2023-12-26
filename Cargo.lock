@@ -1995,6 +1995,7 @@ dependencies = [
  "sha2",
  "tokio",
  "tokio-stream",
+ "tracing",
  "tracing-subscriber",
  "wasmtime",
  "wasmtime-wasi",
