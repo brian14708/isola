@@ -1,4 +1,8 @@
-use std::{path::Path, sync::Arc};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    path::Path,
+    sync::Arc,
+};
 
 use axum::{
     extract::State,
@@ -8,11 +12,14 @@ use axum::{
     Json, Router,
 };
 
+use axum_server::Handle;
 use serde_json::value::RawValue;
+use server::graceful_shutdown;
 use vm_manager::VmManager;
 
 mod memory_buffer;
 mod resource;
+mod server;
 mod vm;
 mod vm_cache;
 mod vm_manager;
@@ -37,9 +44,16 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/exec", post(exec))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
-    Ok(())
+
+    let handle = Handle::new();
+    tokio::spawn(graceful_shutdown(handle.clone()));
+
+    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 3000));
+
+    Ok(axum_server::bind(addr)
+        .handle(handle)
+        .serve(app.into_make_service())
+        .await?)
 }
 
 #[derive(serde::Deserialize)]
