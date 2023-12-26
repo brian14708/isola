@@ -104,7 +104,6 @@ impl VmManager {
                 .call_call_func(&mut vm.store, &func, &args)
                 .await
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
-            vm.store.data_mut().reset();
             match ret {
                 Ok(()) => {
                     cache_weak.put(vm);
@@ -182,7 +181,6 @@ impl VmManager {
         let hash: [u8; 32] = hasher.finalize().into();
 
         let vm = self.cache.get(hash);
-
         if let Some(vm) = vm {
             return self.exec_impl(func, args, vm).await;
         }

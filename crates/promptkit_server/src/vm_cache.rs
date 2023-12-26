@@ -46,10 +46,11 @@ impl VmCacheWeak {
 }
 
 impl VmCacheInner {
-    fn put(&self, vm: Vm) {
+    fn put(&self, mut vm: Vm) {
         if !vm.store.data().reuse() {
             return;
         }
+        vm.store.data_mut().reset();
 
         let mut caches = self.caches.lock();
         caches.entry(vm.hash).or_default().push(vm);

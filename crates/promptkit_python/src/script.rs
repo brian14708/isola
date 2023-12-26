@@ -1,12 +1,13 @@
 use std::rc::Rc;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use rustpython_vm::{
+    builtins::PyBaseExceptionRef,
     function::{FuncArgs, KwArgs, PosArgs},
     protocol::{PyIter, PyIterReturn},
     py_serde::{deserialize, PyObjectDeserializer, PyObjectSerializer},
     scope::Scope,
-    AsObject, Interpreter,
+    AsObject, Interpreter, VirtualMachine,
 };
 
 use serde::de::DeserializeSeed;
@@ -38,10 +39,7 @@ impl VM {
         let scope = self.interpreter.enter(|vm| {
             let scope = vm.new_scope_with_builtins();
             vm.run_code_string(scope.clone(), content.as_ref(), "<init>".to_owned())
-                .map_err(|e| {
-                    vm.print_exception(e.clone());
-                    e
-                })?;
+                .map_err(|e| exception_to_string(vm, &e))?;
 
             Result::<Scope>::Ok(scope)
         })?;
@@ -71,10 +69,7 @@ impl Script {
                 content.as_ref(),
                 "<embedded>".to_owned(),
             )
-            .map_err(|e| {
-                vm.print_exception(e.clone());
-                e
-            })
+            .map_err(|e| exception_to_string(vm, &e))
         })?;
 
         Ok(())
@@ -93,10 +88,7 @@ impl Script {
                 .locals
                 .as_object()
                 .get_item(name, vm)
-                .map_err(|e| {
-                    vm.print_exception(e.clone());
-                    e
-                })?;
+                .map_err(|e| exception_to_string(vm, &e))?;
             let m = if let Some(func) = m.to_callable() {
                 let args = FuncArgs::new(
                     PosArgs::from(
@@ -123,10 +115,8 @@ impl Script {
                     })),
                 );
 
-                func.invoke(args, vm).map_err(|e| {
-                    vm.print_exception(e.clone());
-                    e
-                })?
+                func.invoke(args, vm)
+                    .map_err(|e| exception_to_string(vm, &e))?
             } else {
                 m
             };
@@ -157,6 +147,15 @@ impl Script {
                 ))
             }
         })
+    }
+}
+
+fn exception_to_string(vm: &VirtualMachine, e: &PyBaseExceptionRef) -> Error {
+    let mut buffer = String::new();
+    if vm.write_exception(&mut buffer, e).is_ok() {
+        Error::PythonError(buffer)
+    } else {
+        Error::UnexpectedError("fail to write exception")
     }
 }
 
