@@ -17,17 +17,12 @@ pub struct VM {
     interpreter: Rc<Interpreter>,
 }
 
-impl Default for VM {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl VM {
-    pub fn new() -> Self {
+    pub fn new(f: impl FnOnce(&mut VirtualMachine)) -> Self {
         let interpreter = Interpreter::with_init(Default::default(), |vm| {
             vm.add_native_modules(rustpython_stdlib::get_module_inits());
             vm.add_frozen(rustpython_pylib::FROZEN_STDLIB);
+            f(vm);
         });
 
         Self {
@@ -185,7 +180,7 @@ def gen():
     for i in range(10):
         yield i
 "#;
-        let vm = VM::new();
+        let vm = VM::new(|_| {});
         let s = vm.script(content).unwrap();
         let x = s
             .run("hello", [InputValue::Json(json!(32))], [], |_| {})

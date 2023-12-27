@@ -14,9 +14,5 @@ serde = "1.0.193"
 serde_json = "1.0.108"
 thiserror = "1.0.51"
 
-[features]
-default = []
-threading = ["rustpython-vm/threading", "rustpython-stdlib/threading"]
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wit-bindgen = "0.16.0"

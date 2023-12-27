@@ -21,7 +21,7 @@ use wasmtime::{
 };
 
 use crate::{
-    vm::{host, PythonVm, Vm, VmState},
+    vm::{host, http_client, PythonVm, Vm, VmState},
     vm_cache::VmCache,
 };
 
@@ -65,6 +65,7 @@ impl VmManager {
         let mut linker = Linker::<VmState>::new(&engine);
         wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
         host::add_to_linker(&mut linker, |v: &mut VmState| v)?;
+        http_client::add_to_linker(&mut linker, |v: &mut VmState| v)?;
         let instance_pre = linker.instantiate_pre(&component)?;
 
         info!("Loaded module!");
