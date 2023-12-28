@@ -8,7 +8,6 @@ members = [
 version = "0.1.0"
 edition = "2021"
 
-[profile.release-wasm]
-inherits = "release"
+[profile.release]
 lto = true
 opt-level = 3
