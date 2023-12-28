@@ -9,8 +9,10 @@ use axum::{
 };
 
 use serde_json::Value;
-use vm_manager::{ExecResult, VmManager};
+use vm_manager::VmManager;
 
+mod memory_buffer;
+mod resource;
 mod vm_manager;
 
 #[derive(Clone)]
@@ -48,16 +50,15 @@ struct ExecRequest {
 async fn exec(
     State(state): State<AppState>,
     Json(req): Json<ExecRequest>,
-) -> Result<Json<ExecResult>, AppError> {
-    let s = state
+) -> Result<Response, AppError> {
+    Ok(state
         .vm
         .exec(
             &req.script,
             &req.method,
             &req.args.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
         )
-        .await?;
-    Ok(Json(s))
+        .await?)
 }
 
 struct AppError(anyhow::Error);

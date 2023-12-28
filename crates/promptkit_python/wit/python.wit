@@ -1,8 +1,12 @@
 package promptkit:python;
 
 world python-vm {
+    import host: interface {
+        emit: func(%data: string, end: bool);
+    }
+
     export %python-vm : interface {
         eval-script: func(%script: string) -> result<_, string>;
-        call-func: func(%func: string, %args: list<string>) -> result<string, string>;
+        call-func: func(%func: string, %args: list<string>) -> result<_, string>;
     }
 }

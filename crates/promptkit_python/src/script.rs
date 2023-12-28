@@ -3,6 +3,7 @@ use std::rc::Rc;
 use crate::error::Result;
 use rustpython_vm::{
     function::{FuncArgs, KwArgs, PosArgs},
+    protocol::{PyIter, PyIterReturn},
     py_serde::{deserialize, PyObjectDeserializer, PyObjectSerializer},
     scope::Scope,
     AsObject, Interpreter,
@@ -84,7 +85,8 @@ impl Script {
         name: &str,
         positional: impl IntoIterator<Item = InputValue<'a>>,
         named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
-    ) -> Result<String> {
+        mut callback: impl FnMut(&str),
+    ) -> Result<Option<String>> {
         self.interpreter.enter(|vm| {
             let m = self
                 .scope
@@ -129,8 +131,31 @@ impl Script {
                 m
             };
 
-            let v = serde_json::to_string(&PyObjectSerializer::new(vm, &m)).unwrap();
-            Ok(v)
+            if PyIter::check(&m) {
+                let it = PyIter::new(m);
+                let mut buffer = Vec::with_capacity(128);
+                loop {
+                    match it.next(vm)? {
+                        PyIterReturn::Return(r) => {
+                            let cursor = std::io::Cursor::new(&mut buffer);
+                            serde_json::to_writer(cursor, &PyObjectSerializer::new(vm, &r))
+                                .unwrap();
+                            // SAFETY: buffer is always valid utf8
+                            callback(unsafe { std::str::from_utf8_unchecked(&buffer) });
+                            buffer.clear();
+                        }
+                        PyIterReturn::StopIteration(r) => {
+                            return Ok(r.map(|r| {
+                                serde_json::to_string(&PyObjectSerializer::new(vm, &r)).unwrap()
+                            }))
+                        }
+                    }
+                }
+            } else {
+                Ok(Some(
+                    serde_json::to_string(&PyObjectSerializer::new(vm, &m)).unwrap(),
+                ))
+            }
         })
     }
 }
@@ -156,13 +181,24 @@ def sum(i):
         total += x
     return total
 i += 21
+
+def gen():
+    for i in range(10):
+        yield i
 "#;
         let vm = VM::new();
         let s = vm.script(content).unwrap();
-        let x = s.run("hello", [InputValue::Json(json!(32))], []).unwrap();
-        assert_eq!(x, "\"hello 54\"");
+        let x = s
+            .run("hello", [InputValue::Json(json!(32))], [], |_| {})
+            .unwrap();
+        assert_eq!(x.unwrap(), "\"hello 54\"");
 
-        let x = s.run("i", [], []).unwrap();
-        assert_eq!(x, "22");
+        let x = s.run("i", [], [], |_| {}).unwrap();
+        assert_eq!(x.unwrap(), "22");
+
+        let mut v = vec![];
+        let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
+        assert_eq!(x, None);
+        assert_eq!(v, vec!["0", "1", "2", "3", "4", "5", "6", "7", "8", "9",]);
     }
 }

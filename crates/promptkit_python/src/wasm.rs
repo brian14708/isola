@@ -23,12 +23,23 @@ impl exports::python_vm::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<String>) -> Result<String, String> {
+    fn call_func(func: String, args: Vec<String>) -> Result<(), String> {
         GLOBAL_VM.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
-                return Ok(vm
-                    .run(&func, args.iter().map(|f| InputValue::JsonStr(f)), [])
-                    .map_err(|e| e.to_string())?);
+                let ret = vm
+                    .run(
+                        &func,
+                        args.iter().map(|f| InputValue::JsonStr(f)),
+                        [],
+                        |s| host::emit(s, false),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if let Some(ret) = ret {
+                    host::emit(&ret, true);
+                } else {
+                    host::emit("", true);
+                }
+                return Ok(());
             } else {
                 return Err("VM not initialized".to_string());
             }

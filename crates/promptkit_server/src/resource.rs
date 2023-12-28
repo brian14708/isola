@@ -1,0 +1,46 @@
+use wasmtime::ResourceLimiter;
+
+pub struct MemoryLimiter {
+    max_memory_soft: usize,
+    max_memory_hard: usize,
+    current: usize,
+}
+
+impl MemoryLimiter {
+    pub fn new(max_memory_soft: usize, max_memory_hard: usize) -> Self {
+        Self {
+            max_memory_soft,
+            max_memory_hard,
+            current: 0,
+        }
+    }
+
+    pub fn exceed_soft(&self) -> bool {
+        self.current > self.max_memory_soft
+    }
+}
+
+impl ResourceLimiter for MemoryLimiter {
+    fn memory_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        _maximum: Option<usize>,
+    ) -> anyhow::Result<bool> {
+        let target = self.current - current + desired;
+        if target > self.max_memory_hard {
+            return Ok(false);
+        }
+        self.current = target;
+        Ok(true)
+    }
+
+    fn table_growing(
+        &mut self,
+        _current: u32,
+        _desired: u32,
+        _maximum: Option<u32>,
+    ) -> anyhow::Result<bool> {
+        Ok(true)
+    }
+}
