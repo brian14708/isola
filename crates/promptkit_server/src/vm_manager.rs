@@ -47,15 +47,28 @@ impl VmManager {
 
         info!("Loading module...");
         #[cfg(debug_assertions)]
-        let component = match unsafe {
-            Component::deserialize_file(&engine, path.with_extension("wasm.cache"))
-        } {
-            Ok(c) => c,
-            Err(_) => {
-                let component = Component::from_file(&engine, path)?;
-                let data = component.serialize()?;
-                std::fs::write(path.with_extension("wasm.cache"), data)?;
-                component
+        let component = {
+            let cache_path = path.with_extension("wasm.cache");
+
+            let mod_time = std::fs::metadata(path)?.modified()?;
+            let cache = std::fs::metadata(&cache_path)
+                .map_err(anyhow::Error::from)
+                .and_then(|v| {
+                    if mod_time <= v.modified()? {
+                        Ok(unsafe { Component::deserialize_file(&engine, &cache_path)? })
+                    } else {
+                        Err(anyhow!("cache is outdated"))
+                    }
+                });
+
+            match cache {
+                Ok(c) => c,
+                Err(_) => {
+                    let component = Component::from_file(&engine, path)?;
+                    let data = component.serialize()?;
+                    std::fs::write(cache_path, data)?;
+                    component
+                }
             }
         };
 
