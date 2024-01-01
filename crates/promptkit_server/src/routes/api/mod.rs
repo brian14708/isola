@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use axum::{extract::State, routing::post, Json};
 use serde_json::value::RawValue;
 
@@ -17,14 +19,17 @@ struct ExecRequest {
 }
 
 async fn exec(State(state): State<VmManager>, Json(req): Json<ExecRequest>) -> Result {
-    Ok(state
-        .exec(
+    let result = tokio::time::timeout(
+        Duration::from_secs(1),
+        state.exec(
             &req.script,
             req.method,
             req.args
                 .into_iter()
                 .map(|s| Box::<str>::from(s).into_string())
                 .collect::<Vec<_>>(),
-        )
-        .await?)
+        ),
+    )
+    .await?;
+    Ok(result?)
 }

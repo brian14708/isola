@@ -23,15 +23,14 @@ impl MemoryLimiter {
 impl ResourceLimiter for MemoryLimiter {
     fn memory_growing(
         &mut self,
-        current: usize,
+        _current: usize,
         desired: usize,
         _maximum: Option<usize>,
     ) -> anyhow::Result<bool> {
-        let target = self.current - current + desired;
-        if target > self.max_memory_hard {
+        if desired > self.max_memory_hard {
             return Ok(false);
         }
-        self.current = target;
+        self.current = desired;
         Ok(true)
     }
 

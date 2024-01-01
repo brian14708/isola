@@ -1,4 +1,11 @@
-use std::{path::Path, sync::Arc, time::Duration};
+use std::{
+    future::Future,
+    path::Path,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use anyhow::anyhow;
 use axum::{
@@ -26,8 +33,7 @@ use crate::{
 };
 
 const MAX_MEMORY: usize = 64 * 1024 * 1024;
-const MAX_LOAD_FUEL: u64 = 1000 * 1000 * 1000;
-const MAX_EXEC_FUEL: u64 = 5 * 1000 * 1000 * 1000;
+const EPOCH_TICK: Duration = Duration::from_millis(10);
 
 #[derive(Clone)]
 pub struct VmManager {
@@ -38,16 +44,22 @@ struct VmManagerInner {
     engine: Engine,
     instance_pre: InstancePre<VmState>,
     cache: VmCache,
+    _epoch_ticker: ChildTask<()>,
 }
 
 impl VmManager {
-    pub fn new(path: &Path) -> anyhow::Result<Self> {
+    fn cfg() -> Config {
         let mut config = Config::new();
         config
             .wasm_component_model(true)
             .async_support(true)
-            .consume_fuel(true)
+            .epoch_interruption(true)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
+        config
+    }
+
+    pub fn new(path: &Path) -> anyhow::Result<Self> {
+        let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
         info!("Loading module...");
@@ -90,9 +102,16 @@ impl VmManager {
 
         Ok(Self {
             inner: Arc::new(VmManagerInner {
-                engine,
+                engine: engine.clone(),
                 instance_pre,
                 cache: VmCache::new(),
+                _epoch_ticker: ChildTask(tokio::spawn(async move {
+                    let mut interval = tokio::time::interval(EPOCH_TICK);
+                    loop {
+                        interval.tick().await;
+                        engine.increment_epoch();
+                    }
+                })),
             }),
         })
     }
@@ -100,6 +119,8 @@ impl VmManager {
     pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
         let inner = self.inner.as_ref();
         let mut store = VmState::new(&inner.engine, MAX_MEMORY);
+        store.epoch_deadline_async_yield_and_update(1);
+
         let (bindings, _) = PythonVm::instantiate_pre(&mut store, &inner.instance_pre).await?;
         Ok(Vm {
             hash,
@@ -116,10 +137,9 @@ impl VmManager {
     ) -> anyhow::Result<Response> {
         let (tx, mut rx) = mpsc::channel(4);
         vm.store.data_mut().initialize(tx.clone());
-        vm.store.set_fuel(MAX_EXEC_FUEL)?;
 
         let mgr_weak = Arc::downgrade(&self.inner);
-        let exec = tokio::task::spawn(async move {
+        let exec = ChildTask(tokio::spawn(async move {
             let ret = vm
                 .python
                 .python_vm()
@@ -136,7 +156,7 @@ impl VmManager {
                     _ = tx.send(Err(err)).await;
                 }
             };
-        });
+        }));
 
         let data = match rx.recv().await {
             Some(Ok((data, true))) => {
@@ -210,7 +230,6 @@ impl VmManager {
         }
 
         let mut vm = self.create(hash).await?;
-        vm.store.set_fuel(MAX_LOAD_FUEL)?;
         vm.python
             .python_vm()
             .call_eval_script(&mut vm.store, script)
@@ -218,5 +237,21 @@ impl VmManager {
             .map_err(|e| anyhow!(e))?;
 
         self.exec_impl(func, args, vm).await
+    }
+}
+
+struct ChildTask<T>(tokio::task::JoinHandle<T>);
+
+impl<T> Drop for ChildTask<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+impl<T> Future for ChildTask<T> {
+    type Output = <tokio::task::JoinHandle<T> as Future>::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Pin::new(&mut self.0).poll(cx)
     }
 }
