@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = [
+  "promptkit_python",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = true
+opt-level = 3
+panic = 'abort'
+codegen-units = 1

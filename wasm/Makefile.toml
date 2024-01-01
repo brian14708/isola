@@ -1,0 +1,56 @@
+[tasks.build-wasm]
+command = "cargo"
+args = ["rustc", "--crate-type", "cdylib", "--profile", "release", "--target", "wasm32-wasi", "-p", "promptkit_python"]
+env = { "RUSTFLAGS" = "-C target-feature=+simd128" }
+
+[tasks.wizer]
+install_crate = "wizer"
+install_crate_args = ["--all-features"]
+command = "wizer"
+args = [
+    "--allow-wasi",
+    "--wasm-bulk-memory",
+    "true",
+    "target/wasm32-wasi/release/promptkit_python.wasm",
+    "-o",
+    "target/wasm32-wasi/release/promptkit_python.init.wasm"
+]
+condition.files_modified.input = ["target/wasm32-wasi/release/promptkit_python.wasm"]
+condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.init.wasm"]
+dependencies = ["build-wasm"]
+
+[tasks.opt-wasm]
+install_crate = "wasm-opt"
+command = "wasm-opt"
+args = [
+    "-O3",
+    "--strip-debug",
+    "target/wasm32-wasi/release/promptkit_python.init.wasm",
+    "-o",
+    "target/wasm32-wasi/release/promptkit_python.opt.wasm"
+]
+condition.files_modified.input = ["target/wasm32-wasi/release/promptkit_python.init.wasm"]
+condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.opt.wasm"]
+dependencies = ["wizer"]
+
+[tasks.wasm-component]
+install_crate = "wasm-tools"
+command = "wasm-tools"
+args = [
+    "component",
+    "new",
+    "target/wasm32-wasi/release/promptkit_python.opt.wasm",
+    "-o",
+    "target/promptkit_python.wasm",
+    "--adapt",
+    "wit-libs/wasi_snapshot_preview1.reactor.wasm",
+]
+dependencies = [
+    "opt-wasm",
+]
+
+[tasks.wasm]
+dependencies = [
+    "wasm-component"
+]
+workspace = false
