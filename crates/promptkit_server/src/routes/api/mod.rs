@@ -1,22 +1,12 @@
-use std::{path::Path, sync::Arc};
-
-use axum::{extract::State, response::Response, routing::post, Json, Router};
+use axum::{extract::State, routing::post, Json};
 use serde_json::value::RawValue;
 
-use crate::error::ApiResult;
 use crate::vm_manager::VmManager;
 
-#[derive(Clone)]
-pub struct AppState {
-    vm: Arc<VmManager>,
-}
+use super::{error::Result, state::Router};
 
-pub fn router() -> anyhow::Result<(Router<AppState>, AppState)> {
-    let state = AppState {
-        vm: Arc::new(VmManager::new(Path::new("target/promptkit_python.wasm"))?),
-    };
-
-    Ok((Router::new().route("/exec", post(exec)), state))
+pub fn router() -> Router {
+    Router::new().route("/exec", post(exec))
 }
 
 #[derive(serde::Deserialize)]
@@ -26,9 +16,8 @@ struct ExecRequest {
     args: Vec<Box<RawValue>>,
 }
 
-async fn exec(State(state): State<AppState>, Json(req): Json<ExecRequest>) -> ApiResult<Response> {
+async fn exec(State(state): State<VmManager>, Json(req): Json<ExecRequest>) -> Result {
     Ok(state
-        .vm
         .exec(
             &req.script,
             req.method,

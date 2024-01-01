@@ -1,4 +1,4 @@
-use std::{path::Path, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use axum::{
@@ -29,7 +29,12 @@ const MAX_MEMORY: usize = 64 * 1024 * 1024;
 const MAX_LOAD_FUEL: u64 = 1000 * 1000 * 1000;
 const MAX_EXEC_FUEL: u64 = 5 * 1000 * 1000 * 1000;
 
+#[derive(Clone)]
 pub struct VmManager {
+    inner: Arc<VmManagerInner>,
+}
+
+struct VmManagerInner {
     engine: Engine,
     instance_pre: InstancePre<VmState>,
     cache: VmCache,
@@ -84,15 +89,18 @@ impl VmManager {
         info!("Loaded module!");
 
         Ok(Self {
-            engine,
-            instance_pre,
-            cache: VmCache::new(),
+            inner: Arc::new(VmManagerInner {
+                engine,
+                instance_pre,
+                cache: VmCache::new(),
+            }),
         })
     }
 
     pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
-        let mut store = VmState::new(&self.engine, MAX_MEMORY);
-        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &self.instance_pre).await?;
+        let inner = self.inner.as_ref();
+        let mut store = VmState::new(&inner.engine, MAX_MEMORY);
+        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &inner.instance_pre).await?;
         Ok(Vm {
             hash,
             store,
@@ -110,7 +118,7 @@ impl VmManager {
         vm.store.data_mut().initialize(tx.clone());
         vm.store.set_fuel(MAX_EXEC_FUEL)?;
 
-        let cache_weak = self.cache.downgrade();
+        let mgr_weak = Arc::downgrade(&self.inner);
         let exec = tokio::task::spawn(async move {
             let ret = vm
                 .python
@@ -120,7 +128,9 @@ impl VmManager {
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
             match ret {
                 Ok(()) => {
-                    cache_weak.put(vm);
+                    if let Some(mgr) = mgr_weak.upgrade() {
+                        mgr.cache.put(vm);
+                    }
                 }
                 Err(err) => {
                     _ = tx.send(Err(err)).await;
@@ -194,7 +204,7 @@ impl VmManager {
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
 
-        let vm = self.cache.get(hash);
+        let vm = self.inner.cache.get(hash);
         if let Some(vm) = vm {
             return self.exec_impl(func, args, vm).await;
         }

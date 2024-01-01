@@ -1,6 +1,6 @@
+use routes::State;
 use server::serve;
 
-mod error;
 mod memory_buffer;
 mod resource;
 mod routes;
@@ -13,6 +13,7 @@ mod vm_manager;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let app = routes::router()?;
+    let state = State::new("target/promptkit_python.wasm")?;
+    let app = routes::router(state);
     serve(app, 3000).await
 }

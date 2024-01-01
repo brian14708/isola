@@ -1,12 +1,13 @@
-use axum::Router;
-
 mod api;
 mod debug;
+mod error;
+mod state;
 
-pub fn router() -> anyhow::Result<Router> {
-    let (route, state) = api::router()?;
-    Ok(Router::new()
-        .nest("/api", route)
+pub use state::State;
+
+pub fn router(state: State) -> axum::Router {
+    axum::Router::new()
+        .nest("/api", api::router())
         .with_state(state)
-        .merge(debug::router()))
+        .merge(debug::router())
 }

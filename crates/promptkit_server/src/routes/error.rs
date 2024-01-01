@@ -4,7 +4,7 @@ use axum::{
     Json,
 };
 
-pub enum ApiError {
+pub enum Error {
     Boxed(anyhow::Error),
 }
 
@@ -13,10 +13,10 @@ struct ErrorResponse {
     message: String,
 }
 
-impl IntoResponse for ApiError {
+impl IntoResponse for Error {
     fn into_response(self) -> Response {
         match self {
-            ApiError::Boxed(err) => (
+            Error::Boxed(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
                     message: err.root_cause().to_string(),
@@ -27,7 +27,7 @@ impl IntoResponse for ApiError {
     }
 }
 
-impl<E> From<E> for ApiError
+impl<E> From<E> for Error
 where
     E: Into<anyhow::Error>,
 {
@@ -36,4 +36,4 @@ where
     }
 }
 
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
+pub type Result<T = Response> = std::result::Result<T, Error>;

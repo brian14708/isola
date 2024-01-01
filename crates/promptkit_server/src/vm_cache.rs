@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, Weak},
-};
+use std::collections::HashMap;
 
 use parking_lot::Mutex;
 use rand::Rng;
@@ -9,44 +6,22 @@ use rand::Rng;
 use crate::vm::Vm;
 
 pub struct VmCache {
-    inner: Arc<VmCacheInner>,
-}
-
-struct VmCacheInner {
     caches: Mutex<HashMap<[u8; 32], Vec<Vm>>>,
 }
 
 impl VmCache {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(VmCacheInner {
-                caches: Mutex::new(HashMap::new()),
-            }),
+            caches: Mutex::new(HashMap::new()),
         }
-    }
-
-    pub fn downgrade(&self) -> VmCacheWeak {
-        VmCacheWeak(Arc::downgrade(&self.inner))
     }
 
     pub fn get(&self, hash: [u8; 32]) -> Option<Vm> {
-        let mut caches = self.inner.caches.lock();
+        let mut caches = self.caches.lock();
         caches.get_mut(&hash)?.pop()
     }
-}
 
-pub struct VmCacheWeak(Weak<VmCacheInner>);
-
-impl VmCacheWeak {
-    pub fn put(&self, vm: Vm) {
-        if let Some(inner) = self.0.upgrade() {
-            inner.put(vm)
-        }
-    }
-}
-
-impl VmCacheInner {
-    fn put(&self, mut vm: Vm) {
+    pub fn put(&self, mut vm: Vm) {
         if !vm.store.data().reuse() {
             return;
         }
