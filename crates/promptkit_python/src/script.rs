@@ -122,8 +122,7 @@ impl Script {
                 loop {
                     match it.next(vm)? {
                         PyIterReturn::Return(r) => {
-                            let cursor = std::io::Cursor::new(&mut buffer);
-                            serde_json::to_writer(cursor, &PyObjectSerializer::new(vm, &r))
+                            serde_json::to_writer(&mut buffer, &PyObjectSerializer::new(vm, &r))
                                 .unwrap();
                             // SAFETY: buffer is always valid utf8
                             callback(unsafe { std::str::from_utf8_unchecked(&buffer) });
