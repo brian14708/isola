@@ -16,7 +16,7 @@ struct ErrorResponse {
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         match self {
-            Error::Boxed(err) => (
+            Self::Boxed(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
                     message: err.root_cause().to_string(),
@@ -36,4 +36,4 @@ where
     }
 }
 
-pub type Result<T = Response> = std::result::Result<T, Error>;
+pub type Result<T = Response> = core::result::Result<T, Error>;

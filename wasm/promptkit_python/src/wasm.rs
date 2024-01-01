@@ -10,17 +10,17 @@ wit_bindgen::generate!({
     },
 });
 
-pub struct Global();
+pub struct Global;
 
 impl exports::python_vm::Guest for Global {
     fn eval_script(script: String) -> Result<(), String> {
         GLOBAL_VM.with(|vm| {
-            if let Some(vm) = vm.borrow().as_ref() {
+            return if let Some(vm) = vm.borrow().as_ref() {
                 vm.load_script(&script).map_err(|e| e.to_string())?;
-                return Ok(());
+                Ok(())
             } else {
-                return Err("VM not initialized".to_string());
-            }
+                Err("VM not initialized".to_string())
+            };
         })
     }
 
@@ -35,21 +35,17 @@ impl exports::python_vm::Guest for Global {
                         |s| host::emit(s, false),
                     )
                     .map_err(|e| e.to_string())?;
-                if let Some(ret) = ret {
-                    host::emit(&ret, true);
-                } else {
-                    host::emit("", true);
-                }
-                return Ok(());
+                host::emit(ret.as_deref().unwrap_or(""), true);
+                Ok(())
             } else {
-                return Err("VM not initialized".to_string());
+                Err("VM not initialized".to_string())
             }
         })
     }
 }
 
 #[pymodule]
-mod http {
+pub mod http {
     use rustpython_vm::{
         builtins::{PyDictRef, PyStr, PyStrRef},
         function::OptionalArg::{self, Present},
@@ -92,7 +88,7 @@ mod http {
                     .deserialize(&mut serde_json::Deserializer::from_slice(&body))
                     .map_err(|e| vm.new_type_error(e.to_string()));
             }
-            Err(err) => Err(vm.new_type_error(err.to_string())),
+            Err(err) => Err(vm.new_type_error(err)),
         }
     }
 
@@ -120,10 +116,8 @@ mod http {
         }
 
         match http_client::fetch_sse(&(url.as_str().to_owned(), Method::Get, h, None), 0) {
-            Ok((_, _, body)) => loop {
-                return Ok(SseIter { body }.into_pyobject(vm));
-            },
-            Err(err) => Err(vm.new_type_error(err.to_string())),
+            Ok((_, _, body)) => Ok(SseIter { body }.into_pyobject(vm)),
+            Err(err) => Err(vm.new_type_error(err)),
         }
     }
 
@@ -163,12 +157,10 @@ mod http {
             ),
             0,
         ) {
-            Ok((_status, _headers, body)) => {
-                return PyObjectDeserializer::new(vm)
-                    .deserialize(&mut serde_json::Deserializer::from_slice(&body))
-                    .map_err(|e| vm.new_type_error(e.to_string()));
-            }
-            Err(err) => Err(vm.new_type_error(err.to_string())),
+            Ok((_status, _headers, body)) => PyObjectDeserializer::new(vm)
+                .deserialize(&mut serde_json::Deserializer::from_slice(&body))
+                .map_err(|e| vm.new_type_error(e.to_string())),
+            Err(err) => Err(vm.new_type_error(err)),
         }
     }
 
@@ -208,10 +200,8 @@ mod http {
             ),
             0,
         ) {
-            Ok((_, _, body)) => loop {
-                return Ok(SseIter { body }.into_pyobject(vm));
-            },
-            Err(err) => Err(vm.new_type_error(err.to_string())),
+            Ok((_, _, body)) => Ok(SseIter { body }.into_pyobject(vm)),
+            Err(err) => Err(vm.new_type_error(err)),
         }
     }
 
@@ -231,18 +221,17 @@ mod http {
                 Some(Ok((_, _, data))) => {
                     if data == "[DONE]" {
                         while zelf.body.read().is_some() {}
-                        return Ok(PyIterReturn::StopIteration(None));
+                        Ok(PyIterReturn::StopIteration(None))
+                    } else {
+                        Ok(PyIterReturn::Return(
+                            PyObjectDeserializer::new(vm)
+                                .deserialize(&mut serde_json::Deserializer::from_str(&data))
+                                .map_err(|e| vm.new_type_error(e.to_string()))?,
+                        ))
                     }
-                    return Ok(PyIterReturn::Return(
-                        PyObjectDeserializer::new(vm)
-                            .deserialize(&mut serde_json::Deserializer::from_str(&data))
-                            .map_err(|e| vm.new_type_error(e.to_string()))?,
-                    ));
                 }
-                Some(Err(err)) => {
-                    return Err(vm.new_type_error(err.to_string()));
-                }
-                None => return Ok(PyIterReturn::StopIteration(None)),
+                Some(Err(err)) => Err(vm.new_type_error(err)),
+                None => Ok(PyIterReturn::StopIteration(None)),
             }
         }
     }

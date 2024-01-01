@@ -120,7 +120,7 @@ impl Script {
                 let it = PyIter::new(m);
                 let mut buffer = Vec::with_capacity(128);
                 loop {
-                    match it.next(vm)? {
+                    match it.next(vm).map_err(|e| exception_to_string(vm, &e))? {
                         PyIterReturn::Return(r) => {
                             serde_json::to_writer(&mut buffer, &PyObjectSerializer::new(vm, &r))
                                 .unwrap();

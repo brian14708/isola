@@ -31,7 +31,7 @@ impl VmState {
 
         let mut s = Store::new(
             engine,
-            VmState {
+            Self {
                 limiter,
                 client: reqwest::Client::new(),
                 wasi,

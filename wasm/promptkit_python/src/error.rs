@@ -1,4 +1,3 @@
-use rustpython_vm::builtins::PyBaseExceptionRef;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -10,10 +9,4 @@ pub enum Error {
     UnexpectedError(&'static str),
 }
 
-impl From<PyBaseExceptionRef> for Error {
-    fn from(err: PyBaseExceptionRef) -> Self {
-        Self::PythonError(format!("{:?}", err))
-    }
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;
