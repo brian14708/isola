@@ -1,123 +1,16 @@
 use std::{str::FromStr, time::Duration};
 
-use anyhow::anyhow;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
-use tokio::sync::mpsc;
 use tokio_stream::{Stream, StreamExt};
-use wasmtime::component::Linker;
-use wasmtime::{component::Resource, Engine, Store};
-use wasmtime_wasi::preview2::{Table, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime::component::Resource;
+use wasmtime_wasi::preview2::Table;
 
-use crate::resource::MemoryLimiter;
-use crate::vm::promptkit::python::http_client;
+use super::bindgen::http_client;
 
-wasmtime::component::bindgen!({
-    world: "python-vm",
-    async: true,
-
-    with: {
-        "promptkit:python/http-client/request": Request,
-        "promptkit:python/http-client/response": Response,
-        "promptkit:python/http-client/response-sse-body": ResponseSseBody,
-    },
-});
-
-pub struct VmState {
-    limiter: MemoryLimiter,
-    client: reqwest::Client,
-    wasi: WasiCtx,
-    table: Table,
-    output: Option<mpsc::Sender<anyhow::Result<(String, bool)>>>,
-}
-
-impl VmState {
-    pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
-        let mut linker = Linker::<VmState>::new(&engine);
-        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
-        host::add_to_linker(&mut linker, |v: &mut VmState| v)?;
-        http_client::add_to_linker(&mut linker, |v: &mut VmState| v)?;
-        Ok(linker)
-    }
-
-    pub fn new(engine: &Engine, max_memory: usize) -> Store<Self> {
-        let wasi = WasiCtxBuilder::new().build();
-        let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
-
-        let mut s = Store::new(
-            engine,
-            Self {
-                limiter,
-                client: reqwest::Client::new(),
-                wasi,
-                table: Table::new(),
-                output: None,
-            },
-        );
-        s.limiter(|s| &mut s.limiter);
-        s
-    }
-
-    pub fn reuse(&self) -> bool {
-        !self.limiter.exceed_soft()
-    }
-
-    pub fn initialize(&mut self, sender: mpsc::Sender<anyhow::Result<(String, bool)>>) {
-        self.output = Some(sender);
-    }
-
-    pub fn reset(&mut self) {
-        self.output = None;
-    }
-}
-
-impl WasiView for VmState {
-    fn table(&self) -> &Table {
-        &self.table
-    }
-
-    fn table_mut(&mut self) -> &mut Table {
-        &mut self.table
-    }
-
-    fn ctx(&self) -> &WasiCtx {
-        &self.wasi
-    }
-
-    fn ctx_mut(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
-    }
-}
-
-#[async_trait::async_trait]
-impl host::Host for VmState {
-    async fn emit(&mut self, data: String, end: bool) -> wasmtime::Result<()> {
-        if let Some(output) = &self.output {
-            output.send(Ok((data, end))).await?;
-            Ok(())
-        } else {
-            Err(anyhow!("output channel missing"))
-        }
-    }
-}
-
-pub struct Vm {
-    pub(crate) hash: [u8; 32],
-    pub(crate) store: Store<VmState>,
-    pub(crate) python: PythonVm,
-}
-
-#[async_trait::async_trait]
-impl http_client::Host for VmState {
-    async fn fetch(
-        &mut self,
-        request: wasmtime::component::Resource<Request>,
-    ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, String>> {
-        let request = self.table_mut().delete(request)?.0;
-        match self.client.execute(request).await {
-            Ok(response) => Ok(Ok(self.table_mut().push(Response(response))?)),
-            Err(err) => Ok(Err(err.to_string())),
-        }
-    }
+pub(crate) trait HttpClientCtx: Send {
+    fn client(&self) -> &reqwest::Client;
+    fn table(&self) -> &Table;
+    fn table_mut(&mut self) -> &mut Table;
 }
 
 pub struct ResponseSseBody(
@@ -125,7 +18,10 @@ pub struct ResponseSseBody(
 );
 
 #[async_trait::async_trait]
-impl http_client::HostResponseSseBody for VmState {
+impl<I> http_client::HostResponseSseBody for I
+where
+    I: HttpClientCtx,
+{
     async fn read(
         &mut self,
         resource: Resource<http_client::ResponseSseBody>,
@@ -147,7 +43,27 @@ impl http_client::HostResponseSseBody for VmState {
 pub struct Request(reqwest::Request);
 
 #[async_trait::async_trait]
-impl http_client::HostRequest for VmState {
+impl<I> http_client::Host for I
+where
+    I: HttpClientCtx,
+{
+    async fn fetch(
+        &mut self,
+        request: wasmtime::component::Resource<Request>,
+    ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, String>> {
+        let request = self.table_mut().delete(request)?.0;
+        match self.client().execute(request).await {
+            Ok(response) => Ok(Ok(self.table_mut().push(Response(response))?)),
+            Err(err) => Ok(Err(err.to_string())),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<I> http_client::HostRequest for I
+where
+    I: HttpClientCtx,
+{
     async fn new(
         &mut self,
         url: String,
@@ -210,7 +126,10 @@ impl http_client::HostRequest for VmState {
 pub struct Response(reqwest::Response);
 
 #[async_trait::async_trait]
-impl http_client::HostResponse for VmState {
+impl<I> http_client::HostResponse for I
+where
+    I: HttpClientCtx,
+{
     async fn header(
         &mut self,
         resource: wasmtime::component::Resource<Response>,
