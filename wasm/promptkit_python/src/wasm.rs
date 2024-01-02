@@ -6,25 +6,32 @@ use std::cell::RefCell;
 wit_bindgen::generate!({
     world: "python-vm",
     exports: {
-        "python-vm": Global,
+        "vm": Global,
     },
 });
 
 pub struct Global;
 
-impl exports::python_vm::Guest for Global {
-    fn eval_script(script: String) -> Result<(), String> {
+impl exports::vm::Guest for Global {
+    fn eval_script(script: String) -> Result<(), exports::vm::Error> {
         GLOBAL_VM.with(|vm| {
             return if let Some(vm) = vm.borrow().as_ref() {
-                vm.load_script(&script).map_err(|e| e.to_string())?;
+                vm.load_script(&script).map_err(|e| match e {
+                    crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
+                    crate::error::Error::UnexpectedError(s) => {
+                        exports::vm::Error::Unknown(s.to_owned())
+                    }
+                })?;
                 Ok(())
             } else {
-                Err("VM not initialized".to_string())
+                Err(exports::vm::Error::Unknown(
+                    "VM not initialized".to_string(),
+                ))
             };
         })
     }
 
-    fn call_func(func: String, args: Vec<String>) -> Result<(), String> {
+    fn call_func(func: String, args: Vec<String>) -> Result<(), exports::vm::Error> {
         GLOBAL_VM.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
@@ -34,11 +41,18 @@ impl exports::python_vm::Guest for Global {
                         [],
                         |s| host::emit(s, false),
                     )
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| match e {
+                        crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
+                        crate::error::Error::UnexpectedError(s) => {
+                            exports::vm::Error::Unknown(s.to_owned())
+                        }
+                    })?;
                 host::emit(ret.as_deref().unwrap_or(""), true);
                 Ok(())
             } else {
-                Err("VM not initialized".to_string())
+                Err(exports::vm::Error::Unknown(
+                    "VM not initialized".to_string(),
+                ))
             }
         })
     }
@@ -47,7 +61,7 @@ impl exports::python_vm::Guest for Global {
 #[pymodule]
 pub mod http {
     use rustpython_vm::{
-        builtins::{PyDictRef, PyStr, PyStrRef},
+        builtins::{PyBaseExceptionRef, PyDictRef, PyStr, PyStrRef},
         function::OptionalArg::{self, Present},
         protocol::PyIterReturn,
         py_serde::{PyObjectDeserializer, PyObjectSerializer},
@@ -76,7 +90,7 @@ pub mod http {
                     (Some(k), Some(v)) => {
                         request
                             .set_header(k.as_str(), v.as_str())
-                            .map_err(|e| vm.new_type_error(e))?;
+                            .map_err(|e| into_exception(vm, e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -89,11 +103,11 @@ pub mod http {
                 return PyObjectDeserializer::new(vm)
                     .deserialize(&mut serde_json::Deserializer::from_slice(
                         &(http_client::Response::body(response)
-                            .map_err(|e| vm.new_type_error(e))?),
+                            .map_err(|e| into_exception(vm, e))?),
                     ))
                     .map_err(|e| vm.new_type_error(e.to_string()));
             }
-            Err(err) => Err(vm.new_type_error(err)),
+            Err(err) => Err(into_exception(vm, err)),
         }
     }
 
@@ -114,7 +128,7 @@ pub mod http {
                     (Some(k), Some(v)) => {
                         request
                             .set_header(k.as_str(), v.as_str())
-                            .map_err(|e| vm.new_type_error(e))?;
+                            .map_err(|e| into_exception(vm, e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -128,7 +142,7 @@ pub mod http {
                 body: http_client::Response::body_sse(response),
             }
             .into_pyobject(vm)),
-            Err(err) => Err(vm.new_type_error(err)),
+            Err(err) => Err(into_exception(vm, err)),
         }
     }
 
@@ -153,7 +167,7 @@ pub mod http {
                     (Some(k), Some(v)) => {
                         request
                             .set_header(k.as_str(), v.as_str())
-                            .map_err(|e| vm.new_type_error(e))?;
+                            .map_err(|e| into_exception(vm, e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -166,10 +180,10 @@ pub mod http {
         match http_client::fetch(request) {
             Ok(response) => PyObjectDeserializer::new(vm)
                 .deserialize(&mut serde_json::Deserializer::from_slice(
-                    &(http_client::Response::body(response).map_err(|e| vm.new_type_error(e))?),
+                    &(http_client::Response::body(response).map_err(|e| into_exception(vm, e))?),
                 ))
                 .map_err(|e| vm.new_type_error(e.to_string())),
-            Err(err) => Err(vm.new_type_error(err)),
+            Err(err) => Err(into_exception(vm, err)),
         }
     }
 
@@ -194,7 +208,7 @@ pub mod http {
                     (Some(k), Some(v)) => {
                         request
                             .set_header(k.as_str(), v.as_str())
-                            .map_err(|e| vm.new_type_error(e))?;
+                            .map_err(|e| into_exception(vm, e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -209,7 +223,7 @@ pub mod http {
                 body: http_client::Response::body_sse(response),
             }
             .into_pyobject(vm)),
-            Err(err) => Err(vm.new_type_error(err)),
+            Err(err) => Err(into_exception(vm, err)),
         }
     }
 
@@ -238,9 +252,15 @@ pub mod http {
                         ))
                     }
                 }
-                Some(Err(err)) => Err(vm.new_type_error(err)),
+                Some(Err(err)) => Err(into_exception(vm, err)),
                 None => Ok(PyIterReturn::StopIteration(None)),
             }
+        }
+    }
+
+    fn into_exception(vm: &VirtualMachine, err: http_client::Error) -> PyBaseExceptionRef {
+        match err {
+            http_client::Error::Unknown(err) => vm.new_value_error(err),
         }
     }
 }

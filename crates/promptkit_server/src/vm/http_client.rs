@@ -25,11 +25,11 @@ where
     async fn read(
         &mut self,
         resource: Resource<http_client::ResponseSseBody>,
-    ) -> wasmtime::Result<Option<Result<http_client::SseEvent, String>>> {
+    ) -> wasmtime::Result<Option<Result<http_client::SseEvent, http_client::Error>>> {
         let body = self.table_mut().get_mut(&resource)?;
         Ok(match body.0.next().await {
             Some(Ok(d)) => Some(Ok((d.id, d.event, d.data))),
-            Some(Err(err)) => Some(Err(err.to_string())),
+            Some(Err(err)) => Some(Err(http_client::Error::Unknown(err.to_string()))),
             None => None,
         })
     }
@@ -50,11 +50,11 @@ where
     async fn fetch(
         &mut self,
         request: wasmtime::component::Resource<Request>,
-    ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, String>> {
+    ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
         let request = self.table_mut().delete(request)?.0;
         match self.client().execute(request).await {
             Ok(response) => Ok(Ok(self.table_mut().push(Response(response))?)),
-            Err(err) => Ok(Err(err.to_string())),
+            Err(err) => Ok(Err(http_client::Error::Unknown(err.to_string()))),
         }
     }
 }
@@ -93,15 +93,15 @@ where
         resource: wasmtime::component::Resource<Request>,
         key: String,
         value: String,
-    ) -> wasmtime::Result<Result<(), String>> {
+    ) -> wasmtime::Result<Result<(), http_client::Error>> {
         let request = self.table_mut().get_mut(&resource)?;
         let key = match reqwest::header::HeaderName::from_str(&key) {
             Ok(key) => key,
-            Err(e) => return Ok(Err(e.to_string())),
+            Err(e) => return Ok(Err(http_client::Error::Unknown(e.to_string()))),
         };
         let value = match reqwest::header::HeaderValue::from_str(&value) {
             Ok(value) => value,
-            Err(e) => return Ok(Err(e.to_string())),
+            Err(e) => return Ok(Err(http_client::Error::Unknown(e.to_string()))),
         };
         request.0.headers_mut().insert(key, value);
         Ok(Ok(()))
@@ -155,11 +155,11 @@ where
     async fn body(
         &mut self,
         resource: wasmtime::component::Resource<Response>,
-    ) -> wasmtime::Result<Result<Vec<u8>, String>> {
+    ) -> wasmtime::Result<Result<Vec<u8>, http_client::Error>> {
         let response = self.table_mut().delete(resource)?;
         Ok(match response.0.bytes().await {
             Ok(data) => Ok(data.into()),
-            Err(err) => Err(err.to_string()),
+            Err(err) => Err(http_client::Error::Unknown(err.to_string())),
         })
     }
 

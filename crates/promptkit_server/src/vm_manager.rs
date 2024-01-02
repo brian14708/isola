@@ -139,7 +139,7 @@ impl VmManager {
         let exec = ChildTask::spawn(async move {
             let ret = vm
                 .python
-                .python_vm()
+                .vm()
                 .call_call_func(&mut vm.store, &func, &args)
                 .await
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
@@ -230,7 +230,7 @@ impl VmManager {
 
         let mut vm = self.create(hash).await?;
         vm.python
-            .python_vm()
+            .vm()
             .call_eval_script(&mut vm.store, script)
             .await?
             .map_err(|e| anyhow!(e))?;
