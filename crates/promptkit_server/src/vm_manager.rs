@@ -20,7 +20,7 @@ use axum::{
 use serde_json::{json, value::RawValue};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
     component::{Component, InstancePre, Linker},
@@ -105,13 +105,13 @@ impl VmManager {
                 engine: engine.clone(),
                 instance_pre,
                 cache: VmCache::new(),
-                _epoch_ticker: ChildTask(tokio::spawn(async move {
+                _epoch_ticker: ChildTask::spawn(async move {
                     let mut interval = tokio::time::interval(EPOCH_TICK);
                     loop {
                         interval.tick().await;
                         engine.increment_epoch();
                     }
-                })),
+                }),
             }),
         })
     }
@@ -139,7 +139,7 @@ impl VmManager {
         vm.store.data_mut().initialize(tx.clone());
 
         let mgr_weak = Arc::downgrade(&self.inner);
-        let exec = ChildTask(tokio::spawn(async move {
+        let exec = ChildTask::spawn(async move {
             let ret = vm
                 .python
                 .python_vm()
@@ -156,7 +156,7 @@ impl VmManager {
                     _ = tx.send(Err(err)).await;
                 }
             };
-        }));
+        });
 
         let data = match rx.recv().await {
             Some(Ok((data, true))) => {
@@ -190,20 +190,22 @@ impl VmManager {
             }
         };
 
-        let stream = tokio_stream::iter([Ok((data, false))])
-            .chain(ReceiverStream::new(rx))
-            .map::<anyhow::Result<Event>, _>(|v| match v {
-                Ok((data, true)) => {
-                    Ok(Event::default().data(if data.is_empty() { "[DONE]" } else { &data }))
-                }
-                Ok((data, false)) => Ok(Event::default().data(data)),
-                Err(err) => Ok(Event::default()
-                    .event("error")
-                    .json_data(json!({
-                        "error": err.to_string(),
-                    }))
-                    .unwrap()),
-            });
+        let stream = exec.wait_on_stream(
+            tokio_stream::once(Ok((data, false)))
+                .chain(ReceiverStream::new(rx))
+                .map::<anyhow::Result<Event>, _>(|v| match v {
+                    Ok((data, true)) => {
+                        Ok(Event::default().data(if data.is_empty() { "[DONE]" } else { &data }))
+                    }
+                    Ok((data, false)) => Ok(Event::default().data(data)),
+                    Err(err) => Ok(Event::default()
+                        .event("error")
+                        .json_data(json!({
+                            "error": err.to_string(),
+                        }))
+                        .unwrap()),
+                }),
+        );
 
         Ok(Sse::new(stream)
             .keep_alive(
@@ -240,11 +242,34 @@ impl VmManager {
     }
 }
 
+impl Drop for VmManagerInner {
+    fn drop(&mut self) {
+        // yield one last time
+        self.engine.increment_epoch();
+    }
+}
+
 struct ChildTask<T>(tokio::task::JoinHandle<T>);
+
+impl<T> ChildTask<T>
+where
+    T: Send + 'static,
+{
+    pub fn spawn(f: impl Future<Output = T> + Send + 'static) -> Self {
+        Self(tokio::spawn(f))
+    }
+
+    pub fn wait_on_stream<U, S: Stream<Item = U> + Unpin>(self, s: S) -> impl Stream<Item = U> {
+        ChildStream {
+            stream: s,
+            _task: self,
+        }
+    }
+}
 
 impl<T> Drop for ChildTask<T> {
     fn drop(&mut self) {
-        self.0.abort();
+        self.0.abort()
     }
 }
 
@@ -253,5 +278,19 @@ impl<T> Future for ChildTask<T> {
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+pub struct ChildStream<S: Stream<Item = T> + Unpin, T, U> {
+    stream: S,
+    _task: ChildTask<U>,
+}
+
+impl<S: Stream<Item = T> + Unpin, T, U> Stream for ChildStream<S, T, U> {
+    type Item = T;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let stream = Pin::new(&mut self.stream);
+        stream.poll_next(cx)
     }
 }
