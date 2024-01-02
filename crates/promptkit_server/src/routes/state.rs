@@ -1,26 +1,31 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
-use axum::extract::FromRef;
+use prometheus_client::registry::Registry;
 
 use crate::vm_manager::VmManager;
 
-#[derive(Clone)]
-pub struct State {
-    vm: VmManager,
+pub struct AppState {
+    pub vm: VmManager,
+    pub metrics: Metrics,
 }
 
-impl State {
-    pub fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        Ok(Self {
+impl AppState {
+    pub fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Arc<Self>> {
+        Ok(Arc::new(Self {
             vm: VmManager::new(vm_path.as_ref())?,
-        })
+            metrics: Metrics::new(),
+        }))
     }
 }
 
-pub type Router = axum::Router<State>;
+pub struct Metrics {
+    pub registry: Registry,
+}
 
-impl FromRef<State> for VmManager {
-    fn from_ref(app_state: &State) -> Self {
-        app_state.vm.clone()
+impl Metrics {
+    pub fn new() -> Self {
+        let registry = Registry::default();
+
+        Self { registry }
     }
 }

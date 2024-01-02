@@ -1,6 +1,3 @@
-use routes::State;
-use server::serve;
-
 mod memory_buffer;
 mod resource;
 mod routes;
@@ -16,7 +13,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let state = State::new("wasm/target/promptkit_python.wasm")?;
+    let state = routes::AppState::new("wasm/target/promptkit_python.wasm")?;
     let app = routes::router(state);
-    serve(app, 3000).await
+    server::serve(app, 3000).await
 }

@@ -1,11 +1,11 @@
-use axum::{extract::State, routing::post, Json};
+use std::sync::Arc;
+
+use axum::{extract::State, routing::post, Json, Router};
 use serde_json::value::RawValue;
 
-use crate::vm_manager::VmManager;
+use super::{error::Result, AppState};
 
-use super::{error::Result, state::Router};
-
-pub fn router() -> Router {
+pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/exec", post(exec))
 }
 
@@ -16,8 +16,9 @@ struct ExecRequest {
     args: Vec<Box<RawValue>>,
 }
 
-async fn exec(State(state): State<VmManager>, Json(req): Json<ExecRequest>) -> Result {
+async fn exec(State(state): State<Arc<AppState>>, Json(req): Json<ExecRequest>) -> Result {
     let result = state
+        .vm
         .exec(
             &req.script,
             req.method,

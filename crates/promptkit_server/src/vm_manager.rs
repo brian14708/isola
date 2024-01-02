@@ -35,15 +35,10 @@ use crate::{
 const MAX_MEMORY: usize = 64 * 1024 * 1024;
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
-#[derive(Clone)]
 pub struct VmManager {
-    inner: Arc<VmManagerInner>,
-}
-
-struct VmManagerInner {
     engine: Engine,
     instance_pre: InstancePre<VmState>,
-    cache: VmCache,
+    cache: Arc<VmCache>,
     _epoch_ticker: ChildTask<()>,
 }
 
@@ -98,27 +93,24 @@ impl VmManager {
         info!("Loaded module!");
 
         Ok(Self {
-            inner: Arc::new(VmManagerInner {
-                engine: engine.clone(),
-                instance_pre,
-                cache: VmCache::new(),
-                _epoch_ticker: ChildTask::spawn(async move {
-                    let mut interval = tokio::time::interval(EPOCH_TICK);
-                    loop {
-                        interval.tick().await;
-                        engine.increment_epoch();
-                    }
-                }),
+            engine: engine.clone(),
+            instance_pre,
+            cache: Arc::new(VmCache::new()),
+            _epoch_ticker: ChildTask::spawn(async move {
+                let mut interval = tokio::time::interval(EPOCH_TICK);
+                loop {
+                    interval.tick().await;
+                    engine.increment_epoch();
+                }
             }),
         })
     }
 
     pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
-        let inner = self.inner.as_ref();
-        let mut store = VmState::new(&inner.engine, MAX_MEMORY);
+        let mut store = VmState::new(&self.engine, MAX_MEMORY);
         store.epoch_deadline_async_yield_and_update(1);
 
-        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &inner.instance_pre).await?;
+        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &self.instance_pre).await?;
         Ok(Vm {
             hash,
             store,
@@ -135,7 +127,7 @@ impl VmManager {
         let (tx, mut rx) = mpsc::channel(4);
         vm.store.data_mut().initialize(tx.clone());
 
-        let mgr_weak = Arc::downgrade(&self.inner);
+        let cache_weak = Arc::downgrade(&self.cache);
         let exec = ChildTask::spawn(async move {
             let ret = vm
                 .python
@@ -145,8 +137,8 @@ impl VmManager {
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
             match ret {
                 Ok(()) => {
-                    if let Some(mgr) = mgr_weak.upgrade() {
-                        mgr.cache.put(vm);
+                    if let Some(cache) = cache_weak.upgrade() {
+                        cache.put(vm);
                     }
                 }
                 Err(err) => {
@@ -158,26 +150,14 @@ impl VmManager {
         let data = match rx.recv().await {
             Some(Ok((data, true))) => {
                 exec.await?;
-                return match rx.recv().await {
-                    Some(Ok(_)) => Err(anyhow!("unexpected")),
-                    Some(Err(err)) => Ok((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(json!({
-                            "error": err.to_string(),
-                        })),
-                    )
-                        .into_response()),
-                    None => {
-                        Ok((StatusCode::OK, Json(RawValue::from_string(data)?)).into_response())
-                    }
-                };
+                return Ok((StatusCode::OK, Json(RawValue::from_string(data)?)).into_response());
             }
             Some(Ok((data, false))) => data,
             Some(Err(err)) => {
                 return Ok((
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(json!({
-                        "error": err.to_string(),
+                        "message": err.to_string(),
                     })),
                 )
                     .into_response())
@@ -198,7 +178,7 @@ impl VmManager {
                     Err(err) => Ok(Event::default()
                         .event("error")
                         .json_data(json!({
-                            "error": err.to_string(),
+                            "message": err.to_string(),
                         }))
                         .unwrap()),
                 }),
@@ -223,7 +203,7 @@ impl VmManager {
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
 
-        let vm = self.inner.cache.get(hash);
+        let vm = self.cache.get(hash);
         if let Some(vm) = vm {
             return self.exec_impl(func, args, vm).await;
         }
@@ -239,7 +219,7 @@ impl VmManager {
     }
 }
 
-impl Drop for VmManagerInner {
+impl Drop for VmManager {
     fn drop(&mut self) {
         // yield one last time
         self.engine.increment_epoch();
