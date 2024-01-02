@@ -1,43 +1,41 @@
 package promptkit:python;
 
+interface http-client {
+    enum method {
+        get,
+        post,
+    }
+    variant error {
+        unknown(string),
+    }
+    resource request {
+        constructor(%url: string, %method: method);
+        set-body: func(%body: list<u8>);
+        set-header: func(%key: string, %value: string) -> result<_, string>;
+        set-timeout: func(%timeout-ms: u64);
+    }
+    resource response {
+        header: func(%key: string) -> option<string>;
+        status: func() -> u16;
+        body: static func(%response: response) -> result<list<u8>, string>;
+        body-sse: static func(%response: response) -> response-sse-body;
+    }
+    type sse-event = tuple<
+        string, // id
+        string, // event
+        string, // data
+    >;            
+    resource response-sse-body {
+        read: func() -> option<result<sse-event, string>>;
+    }
+    fetch: func(%request: request) -> result<response, string>;
+}
+
 world python-vm {
     import host: interface {
         emit: func(%data: string, end: bool);
     }
-    import http-client: interface {
-        enum method {
-            get,
-            post,
-        }
-        type headers = list<tuple<string, string>>;
-        type request = tuple<
-            string, // url
-            method, // method
-            headers, // headers
-            option<list<u8>>, // body
-        >;
-        type response = tuple<
-            u16, // status-code
-            headers, // headers
-            list<u8>, // body
-        >;
-        type response-sse = tuple<
-            u16, // status-code
-            headers, // headers
-            response-sse-body
-        >;
-        type sse-event = tuple<
-            string, // id
-            string, // event
-            string, // data
-        >;            
-        resource response-sse-body {
-            read: func() -> option<result<sse-event, string>>;
-        }
-        
-        fetch: func(%request: request, %timeout-ms: u32) -> result<response, string>;
-        fetch-sse: func(%request: request, %timeout-ms: u32) -> result<response-sse, string>;
-    }
+    import http-client;
 
     export %python-vm : interface {
         eval-script: func(%script: string) -> result<_, string>;

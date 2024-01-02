@@ -23,12 +23,12 @@ use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
-    component::{Component, InstancePre, Linker},
+    component::{Component, InstancePre},
     Config, Engine,
 };
 
 use crate::{
-    vm::{host, http_client, PythonVm, Vm, VmState},
+    vm::{PythonVm, Vm, VmState},
     vm_cache::VmCache,
 };
 
@@ -92,10 +92,7 @@ impl VmManager {
         #[cfg(not(debug_assertions))]
         let component = Component::from_file(&engine, path)?;
 
-        let mut linker = Linker::<VmState>::new(&engine);
-        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
-        host::add_to_linker(&mut linker, |v: &mut VmState| v)?;
-        http_client::add_to_linker(&mut linker, |v: &mut VmState| v)?;
+        let linker = VmState::new_linker(&engine)?;
         let instance_pre = linker.instantiate_pre(&component)?;
 
         info!("Loaded module!");

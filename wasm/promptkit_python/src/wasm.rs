@@ -57,7 +57,7 @@ pub mod http {
     };
     use serde::de::DeserializeSeed;
 
-    use super::http_client::{self, Method};
+    use super::promptkit::python::http_client::{self, Method};
 
     #[pyfunction]
     fn get(
@@ -65,7 +65,8 @@ pub mod http {
         headers: OptionalArg<PyDictRef>,
         vm: &VirtualMachine,
     ) -> PyResult<PyObjectRef> {
-        let mut h = vec![("accept".to_owned(), "application/json".to_owned())];
+        let request = http_client::Request::new(url.as_str(), Method::Get);
+        request.set_header("accept", "application/json").unwrap();
         if let Present(headers) = headers {
             for (k, v) in headers.into_iter() {
                 let k = k.downcast_ref::<PyStr>();
@@ -73,7 +74,9 @@ pub mod http {
 
                 match (k, v) {
                     (Some(k), Some(v)) => {
-                        h.push((k.as_str().to_owned(), v.as_str().to_owned()));
+                        request
+                            .set_header(k.as_str(), v.as_str())
+                            .map_err(|e| vm.new_type_error(e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -81,11 +84,13 @@ pub mod http {
                 }
             }
         }
-
-        match http_client::fetch(&(url.as_str().to_owned(), Method::Get, h, None), 0) {
-            Ok((_status, _headers, body)) => {
+        match http_client::fetch(request) {
+            Ok(response) => {
                 return PyObjectDeserializer::new(vm)
-                    .deserialize(&mut serde_json::Deserializer::from_slice(&body))
+                    .deserialize(&mut serde_json::Deserializer::from_slice(
+                        &(http_client::Response::body(response)
+                            .map_err(|e| vm.new_type_error(e))?),
+                    ))
                     .map_err(|e| vm.new_type_error(e.to_string()));
             }
             Err(err) => Err(vm.new_type_error(err)),
@@ -98,7 +103,8 @@ pub mod http {
         headers: OptionalArg<PyDictRef>,
         vm: &VirtualMachine,
     ) -> PyResult<PyObjectRef> {
-        let mut h = vec![("accept".to_owned(), "text/event-stream".to_owned())];
+        let request = http_client::Request::new(url.as_str(), Method::Get);
+        request.set_header("accept", "text/event-stream").unwrap();
         if let Present(headers) = headers {
             for (k, v) in headers.into_iter() {
                 let k = k.downcast_ref::<PyStr>();
@@ -106,7 +112,9 @@ pub mod http {
 
                 match (k, v) {
                     (Some(k), Some(v)) => {
-                        h.push((k.as_str().to_owned(), v.as_str().to_owned()));
+                        request
+                            .set_header(k.as_str(), v.as_str())
+                            .map_err(|e| vm.new_type_error(e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -115,8 +123,11 @@ pub mod http {
             }
         }
 
-        match http_client::fetch_sse(&(url.as_str().to_owned(), Method::Get, h, None), 0) {
-            Ok((_, _, body)) => Ok(SseIter { body }.into_pyobject(vm)),
+        match http_client::fetch(request) {
+            Ok(response) => Ok(SseIter {
+                body: http_client::Response::body_sse(response),
+            }
+            .into_pyobject(vm)),
             Err(err) => Err(vm.new_type_error(err)),
         }
     }
@@ -128,10 +139,11 @@ pub mod http {
         headers: OptionalArg<PyDictRef>,
         vm: &VirtualMachine,
     ) -> PyResult<PyObjectRef> {
-        let mut h = vec![
-            ("content-type".to_owned(), "application/json".to_owned()),
-            ("accept".to_owned(), "application/json".to_owned()),
-        ];
+        let request = http_client::Request::new(url.as_str(), Method::Post);
+        request
+            .set_header("content-type", "application/json")
+            .unwrap();
+        request.set_header("accept", "application/json").unwrap();
         if let Present(headers) = headers {
             for (k, v) in headers.into_iter() {
                 let k = k.downcast_ref::<PyStr>();
@@ -139,7 +151,9 @@ pub mod http {
 
                 match (k, v) {
                     (Some(k), Some(v)) => {
-                        h.push((k.as_str().to_owned(), v.as_str().to_owned()));
+                        request
+                            .set_header(k.as_str(), v.as_str())
+                            .map_err(|e| vm.new_type_error(e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -147,18 +161,13 @@ pub mod http {
                 }
             }
         }
+        request.set_body(&serde_json::to_vec(&PyObjectSerializer::new(vm, &data)).unwrap());
 
-        match http_client::fetch(
-            &(
-                url.as_str().to_owned(),
-                Method::Post,
-                h,
-                Some(serde_json::to_vec(&PyObjectSerializer::new(vm, &data)).unwrap()),
-            ),
-            0,
-        ) {
-            Ok((_status, _headers, body)) => PyObjectDeserializer::new(vm)
-                .deserialize(&mut serde_json::Deserializer::from_slice(&body))
+        match http_client::fetch(request) {
+            Ok(response) => PyObjectDeserializer::new(vm)
+                .deserialize(&mut serde_json::Deserializer::from_slice(
+                    &(http_client::Response::body(response).map_err(|e| vm.new_type_error(e))?),
+                ))
                 .map_err(|e| vm.new_type_error(e.to_string())),
             Err(err) => Err(vm.new_type_error(err)),
         }
@@ -171,10 +180,11 @@ pub mod http {
         headers: OptionalArg<PyDictRef>,
         vm: &VirtualMachine,
     ) -> PyResult<PyObjectRef> {
-        let mut h = vec![
-            ("content-type".to_owned(), "application/json".to_owned()),
-            ("accept".to_owned(), "text/event-stream".to_owned()),
-        ];
+        let request = http_client::Request::new(url.as_str(), Method::Post);
+        request
+            .set_header("content-type", "application/json")
+            .unwrap();
+        request.set_header("accept", "text/event-stream").unwrap();
         if let Present(headers) = headers {
             for (k, v) in headers.into_iter() {
                 let k = k.downcast_ref::<PyStr>();
@@ -182,7 +192,9 @@ pub mod http {
 
                 match (k, v) {
                     (Some(k), Some(v)) => {
-                        h.push((k.as_str().to_owned(), v.as_str().to_owned()));
+                        request
+                            .set_header(k.as_str(), v.as_str())
+                            .map_err(|e| vm.new_type_error(e))?;
                     }
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
@@ -190,17 +202,13 @@ pub mod http {
                 }
             }
         }
+        request.set_body(&serde_json::to_vec(&PyObjectSerializer::new(vm, &data)).unwrap());
 
-        match http_client::fetch_sse(
-            &(
-                url.as_str().to_owned(),
-                Method::Post,
-                h,
-                Some(serde_json::to_vec(&PyObjectSerializer::new(vm, &data)).unwrap()),
-            ),
-            0,
-        ) {
-            Ok((_, _, body)) => Ok(SseIter { body }.into_pyobject(vm)),
+        match http_client::fetch(request) {
+            Ok(response) => Ok(SseIter {
+                body: http_client::Response::body_sse(response),
+            }
+            .into_pyobject(vm)),
             Err(err) => Err(vm.new_type_error(err)),
         }
     }
