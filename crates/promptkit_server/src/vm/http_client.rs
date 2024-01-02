@@ -7,7 +7,7 @@ use wasmtime_wasi::preview2::Table;
 
 use super::bindgen::http_client;
 
-pub(crate) trait HttpClientCtx: Send {
+pub trait HttpClientCtx: Send {
     fn client(&self) -> &reqwest::Client;
     fn table(&self) -> &Table;
     fn table_mut(&mut self) -> &mut Table;

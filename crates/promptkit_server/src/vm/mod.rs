@@ -21,10 +21,10 @@ pub struct VmState {
 
 impl VmState {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
-        let mut linker = Linker::<VmState>::new(engine);
+        let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
-        bindgen::host::add_to_linker(&mut linker, |v: &mut VmState| v)?;
-        bindgen::promptkit::python::http_client::add_to_linker(&mut linker, |v: &mut VmState| v)?;
+        bindgen::host::add_to_linker(&mut linker, |v: &mut Self| v)?;
+        bindgen::promptkit::python::http_client::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Ok(linker)
     }
 
@@ -46,7 +46,7 @@ impl VmState {
         s
     }
 
-    pub fn reuse(&self) -> bool {
+    pub const fn reuse(&self) -> bool {
         !self.limiter.exceed_soft()
     }
 

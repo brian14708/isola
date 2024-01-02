@@ -54,6 +54,7 @@ impl HostOutputStream for MemoryOutputBuffer {
             )));
         }
         buf.extend_from_slice(bytes.as_ref());
+        drop(buf);
         Ok(())
     }
 

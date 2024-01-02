@@ -7,7 +7,7 @@ pub struct MemoryLimiter {
 }
 
 impl MemoryLimiter {
-    pub fn new(max_memory_soft: usize, max_memory_hard: usize) -> Self {
+    pub const fn new(max_memory_soft: usize, max_memory_hard: usize) -> Self {
         Self {
             max_memory_soft,
             max_memory_hard,
@@ -15,7 +15,7 @@ impl MemoryLimiter {
         }
     }
 
-    pub fn exceed_soft(&self) -> bool {
+    pub const fn exceed_soft(&self) -> bool {
         self.current > self.max_memory_soft
     }
 }
