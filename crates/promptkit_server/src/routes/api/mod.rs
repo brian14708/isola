@@ -1,3 +1,5 @@
+mod user;
+
 use std::sync::Arc;
 
 use axum::{extract::State, routing::post, Json, Router};
@@ -8,7 +10,9 @@ use crate::vm_manager::VmManager;
 use super::{AppState, Result};
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/exec", post(exec))
+    Router::new()
+        .route("/exec", post(exec))
+        .nest("/user", user::router())
 }
 
 #[derive(serde::Deserialize)]
