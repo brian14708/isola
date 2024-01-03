@@ -1,7 +1,12 @@
 use std::{path::Path, sync::Arc};
 
-use axum::extract::FromRef;
-use prometheus_client::registry::Registry;
+use axum::{
+    body::Body,
+    extract::FromRef,
+    http::{header::CONTENT_TYPE, HeaderValue, Response, StatusCode},
+    response::IntoResponse,
+};
+use prometheus_client::{encoding::text::encode, registry::Registry};
 
 use crate::vm_manager::VmManager;
 
@@ -41,5 +46,24 @@ impl Default for Metrics {
         let registry = Registry::default();
 
         Self { registry }
+    }
+}
+
+impl IntoResponse for &Metrics {
+    fn into_response(self) -> axum::response::Response {
+        let mut buffer = String::new();
+        if let Err(err) = encode(&mut buffer, &self.registry) {
+            tracing::error!("failed to encode metrics: {}", err);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        } else {
+            let mut resp = Response::new(Body::from(buffer));
+            resp.headers_mut().insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static(
+                    "application/openmetrics-text; version=1.0.0; charset=utf-8",
+                ),
+            );
+            resp
+        }
     }
 }
