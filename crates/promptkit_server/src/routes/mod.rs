@@ -3,11 +3,10 @@ mod debug;
 mod error;
 mod state;
 
-use std::sync::Arc;
+pub use error::Result;
+pub use state::{AppState, Metrics};
 
-pub use state::AppState;
-
-pub fn router(state: Arc<AppState>) -> axum::Router {
+pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
         .nest("/api", api::router())
         .merge(debug::router())
