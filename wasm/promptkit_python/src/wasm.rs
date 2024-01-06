@@ -56,6 +56,24 @@ impl exports::vm::Guest for Global {
             }
         })
     }
+
+    fn get_jsonschema(name: String) -> Result<String, exports::vm::Error> {
+        GLOBAL_VM.with(|vm| {
+            if let Some(vm) = vm.borrow().as_ref() {
+                let ret = vm.get_jsonschema(&name).map_err(|e| match e {
+                    crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
+                    crate::error::Error::UnexpectedError(s) => {
+                        exports::vm::Error::Unknown(s.to_owned())
+                    }
+                })?;
+                Ok(ret.to_string())
+            } else {
+                Err(exports::vm::Error::Unknown(
+                    "VM not initialized".to_string(),
+                ))
+            }
+        })
+    }
 }
 
 #[pymodule]
@@ -273,7 +291,7 @@ thread_local! {
 pub extern "C" fn init() {
     GLOBAL_VM.with(|vm| {
         let v = VM::new(|vm| vm.add_native_module("http", Box::new(http::make_module)));
-        let s = v.script("import json, re").unwrap();
+        let s = v.script("").unwrap();
         vm.borrow_mut().replace(s);
     });
 }
