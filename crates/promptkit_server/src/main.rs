@@ -23,8 +23,10 @@ async fn main() -> anyhow::Result<()> {
     let redirect = Some("http://localhost:3000/api/user/oidc-callback".to_owned());
     let issuer = reqwest::Url::parse(&issuer_url)?;
 
+    tracing::info!("Discovering OIDC client");
     let client = DiscoveredClient::discover(client_id, client_secret, redirect, issuer).await?;
 
+    tracing::info!("Connecting to database");
     let pool = sqlx::postgres::PgPoolOptions::new()
         .connect(&env::var("DATABASE_URL")?)
         .await?;
