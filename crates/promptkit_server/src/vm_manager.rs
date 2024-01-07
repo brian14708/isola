@@ -28,7 +28,7 @@ use wasmtime::{
 };
 
 use crate::{
-    vm::{PythonVm, Vm, VmState},
+    vm::{exports::Argument, PythonVm, Vm, VmState},
     vm_cache::VmCache,
 };
 
@@ -132,7 +132,11 @@ impl VmManager {
             let ret = vm
                 .python
                 .vm()
-                .call_call_func(&mut vm.store, &func, &args)
+                .call_call_func(
+                    &mut vm.store,
+                    &func,
+                    &args.into_iter().map(Argument::Json).collect::<Vec<_>>(),
+                )
                 .await
                 .and_then(|v| v.map_err(|e| anyhow!(e)));
             match ret {

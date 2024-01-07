@@ -12,8 +12,11 @@ world python-vm {
             python(string),
             unknown(string),
         }
+        variant argument {
+            json(string),
+        }
         eval-script: func(%script: string) -> result<_, error>;
-        call-func: func(%func: string, %args: list<string>) -> result<_, error>;
+        call-func: func(%func: string, %args: list<argument>) -> result<_, error>;
         get-jsonschema: func(%name: string) -> result<string, error>;
     }
 }

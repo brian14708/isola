@@ -3,6 +3,8 @@ use crate::script::{InputValue, Script, VM};
 use rustpython_vm::pymodule;
 use std::cell::RefCell;
 
+use self::exports::vm::Argument;
+
 wit_bindgen::generate!({
     world: "python-vm",
     exports: {
@@ -31,13 +33,15 @@ impl exports::vm::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<String>) -> Result<(), exports::vm::Error> {
+    fn call_func(func: String, args: Vec<Argument>) -> Result<(), exports::vm::Error> {
         GLOBAL_VM.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
                     .run(
                         &func,
-                        args.iter().map(|f| InputValue::JsonStr(f)),
+                        args.iter().map(|f| match f {
+                            Argument::Json(s) => InputValue::JsonStr(s),
+                        }),
                         [],
                         |s| host::emit(s, false),
                     )

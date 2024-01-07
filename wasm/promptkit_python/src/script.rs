@@ -260,20 +260,18 @@ impl Script {
                                 Type::Array
                             } else if origin.is(vm.ctx.types.dict_type) {
                                 Type::Object
-                            } else {
-                                if let Some(name) = origin
-                                    .get_attr("__name__", vm)
-                                    .ok()
-                                    .and_then(|e| e.downcast_exact::<PyStr>(vm).ok())
-                                {
-                                    match name.as_str() {
-                                        "Union" | "Literal" => Type::Union,
-                                        "Generator" => Type::Generator,
-                                        _ => return None,
-                                    }
-                                } else {
-                                    return None;
+                            } else if let Some(name) = origin
+                                .get_attr("__name__", vm)
+                                .ok()
+                                .and_then(|e| e.downcast_exact::<PyStr>(vm).ok())
+                            {
+                                match name.as_str() {
+                                    "Union" | "Literal" => Type::Union,
+                                    "Generator" => Type::Generator,
+                                    _ => return None,
                                 }
+                            } else {
+                                return None;
                             }
                         } else {
                             Type::Union

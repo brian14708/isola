@@ -9,6 +9,7 @@ use wasmtime_wasi::preview2::{Table, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::resource::MemoryLimiter;
 
+pub use bindgen::exports::vm as exports;
 pub use bindgen::PythonVm;
 
 pub struct VmState {
