@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Theme, ThemeContext } from '@/hooks/theme';
 
-export default function ThemeProvider({ children }: { children: React.ReactNode }) {
+export default function ThemeProvider({ children }: { children?: React.ReactNode }) {
 	const [theme, setTheme] = useState<Theme>({
 		mode: 'auto',
 		current: 'light'

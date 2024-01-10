@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO promptkit.users (name, email, profile) VALUES ($1, $2, $3) ON CONFLICT (email) DO UPDATE SET (name, profile) = ($1, $3) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f1a8ccf13be663ef562edddc4dc14f6bf9cee33eaf40180015426d28b4d7261c"
+}

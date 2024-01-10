@@ -1,3 +1,4 @@
 /target
 /wasm/target
 *.wasm
+.DS_Store

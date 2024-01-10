@@ -11,18 +11,21 @@
 		"format": "prettier --write ."
 	},
 	"dependencies": {
-		"@monaco-editor/react": "^4.6.0",
+		"@fontsource-variable/inter": "^5.0.16",
 		"@nextui-org/react": "^2.2.9",
-		"framer-motion": "^10.17.12",
-		"monaco-editor": "^0.45.0",
+		"@tanstack/react-query": "^5.17.10",
+		"@tanstack/react-query-devtools": "^5.17.10",
+		"@tanstack/react-router": "^1.4.2",
+		"@tanstack/router-devtools": "^1.4.2",
+		"framer-motion": "^10.18.0",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
-		"react-icons": "^4.12.0",
-		"react-router-dom": "^6.21.1",
-		"swr": "^2.2.4"
+		"react-icons": "^5.0.1",
+		"zod": "^3.22.4"
 	},
 	"devDependencies": {
-		"@types/node": "^20.10.8",
+		"@tanstack/router-vite-plugin": "^1.4.2",
+		"@types/node": "^20.11.0",
 		"@types/react": "^18.2.47",
 		"@types/react-dom": "^18.2.18",
 		"@typescript-eslint/eslint-plugin": "^6.18.1",
@@ -33,7 +36,7 @@
 		"eslint-plugin-react-hooks": "^4.6.0",
 		"eslint-plugin-react-refresh": "^0.4.5",
 		"postcss": "^8.4.33",
-		"prettier": "^3.1.1",
+		"prettier": "^3.2.1",
 		"tailwindcss": "^3.4.1",
 		"typescript": "^5.3.3",
 		"vite": "^5.0.11"

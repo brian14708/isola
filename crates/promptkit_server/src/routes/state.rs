@@ -9,6 +9,7 @@ use axum::{
 use prometheus_client::{encoding::text::encode, registry::Registry};
 use sqlx::PgPool;
 
+use crate::user::UserTokenSigner;
 use crate::vm_manager::VmManager;
 
 #[derive(Clone)]
@@ -17,6 +18,7 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub pool: PgPool,
     pub openid_client: Arc<openid::Client>,
+    pub token_signer: Arc<UserTokenSigner>,
 }
 
 impl AppState {
@@ -24,12 +26,14 @@ impl AppState {
         vm_path: impl AsRef<Path>,
         pool: PgPool,
         oidc: openid::Client,
+        token_signer: UserTokenSigner,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             vm: Arc::new(VmManager::new(vm_path.as_ref())?),
             metrics: Arc::new(Metrics::default()),
             pool,
             openid_client: Arc::new(oidc),
+            token_signer: Arc::new(token_signer),
         })
     }
 }
@@ -55,6 +59,12 @@ impl FromRef<AppState> for PgPool {
 impl FromRef<AppState> for Arc<openid::Client> {
     fn from_ref(state: &AppState) -> Self {
         state.openid_client.clone()
+    }
+}
+
+impl FromRef<AppState> for Arc<UserTokenSigner> {
+    fn from_ref(state: &AppState) -> Self {
+        state.token_signer.clone()
     }
 }
 
