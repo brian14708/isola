@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "WITH inserted AS (INSERT INTO promptkit.functions (endpoint, name, visibility) VALUES ($1, $2, $3) RETURNING id) INSERT INTO promptkit.users_functions (function_id, user_id, permission) SELECT id, $4, 'owner' FROM inserted RETURNING function_id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "function_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        {
+          "Custom": {
+            "name": "function_visibility",
+            "kind": {
+              "Enum": [
+                "public",
+                "internal",
+                "private"
+              ]
+            }
+          }
+        },
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "84ba1d02aeb346c21bbb303560566f88f71371a5c2146d68ad1d284093ffbe4b"
+}

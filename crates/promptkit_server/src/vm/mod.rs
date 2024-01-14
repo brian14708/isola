@@ -2,15 +2,14 @@ mod bindgen;
 mod http_client;
 
 use anyhow::anyhow;
+pub use bindgen::exports::vm as exports;
+pub use bindgen::PythonVm;
 use tokio::sync::mpsc;
 use wasmtime::component::Linker;
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::preview2::{Table, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::resource::MemoryLimiter;
-
-pub use bindgen::exports::vm as exports;
-pub use bindgen::PythonVm;
 
 pub struct VmState {
     limiter: MemoryLimiter,

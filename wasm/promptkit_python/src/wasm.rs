@@ -1,9 +1,9 @@
-use crate::script::{InputValue, Script, VM};
-
-use rustpython_vm::pymodule;
 use std::cell::RefCell;
 
+use rustpython_vm::pymodule;
+
 use self::exports::vm::Argument;
+use crate::script::{InputValue, Script, VM};
 
 wit_bindgen::generate!({
     world: "python-vm",
@@ -22,7 +22,7 @@ impl exports::vm::Guest for Global {
                     crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
                     crate::error::Error::UnexpectedError(s) => {
                         exports::vm::Error::Unknown(s.to_owned())
-                    }
+                    },
                 })?;
                 Ok(())
             } else {
@@ -49,7 +49,7 @@ impl exports::vm::Guest for Global {
                         crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
                         crate::error::Error::UnexpectedError(s) => {
                             exports::vm::Error::Unknown(s.to_owned())
-                        }
+                        },
                     })?;
                 host::emit(ret.as_deref().unwrap_or(""), true);
                 Ok(())
@@ -68,7 +68,7 @@ impl exports::vm::Guest for Global {
                     crate::error::Error::PythonError(s) => exports::vm::Error::Python(s),
                     crate::error::Error::UnexpectedError(s) => {
                         exports::vm::Error::Unknown(s.to_owned())
-                    }
+                    },
                 })?;
                 Ok(ret.to_string())
             } else {
@@ -113,10 +113,10 @@ pub mod http {
                         request
                             .set_header(k.as_str(), v.as_str())
                             .map_err(|e| into_exception(vm, e))?;
-                    }
+                    },
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
-                    }
+                    },
                 }
             }
         }
@@ -128,7 +128,7 @@ pub mod http {
                             .map_err(|e| into_exception(vm, e))?),
                     ))
                     .map_err(|e| vm.new_type_error(e.to_string()));
-            }
+            },
             Err(err) => Err(into_exception(vm, err)),
         }
     }
@@ -151,10 +151,10 @@ pub mod http {
                         request
                             .set_header(k.as_str(), v.as_str())
                             .map_err(|e| into_exception(vm, e))?;
-                    }
+                    },
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
-                    }
+                    },
                 }
             }
         }
@@ -190,10 +190,10 @@ pub mod http {
                         request
                             .set_header(k.as_str(), v.as_str())
                             .map_err(|e| into_exception(vm, e))?;
-                    }
+                    },
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
-                    }
+                    },
                 }
             }
         }
@@ -231,10 +231,10 @@ pub mod http {
                         request
                             .set_header(k.as_str(), v.as_str())
                             .map_err(|e| into_exception(vm, e))?;
-                    }
+                    },
                     _ => {
                         return Err(vm.new_type_error("invalid headers".to_owned()));
-                    }
+                    },
                 }
             }
         }
@@ -273,7 +273,7 @@ pub mod http {
                                 .map_err(|e| vm.new_type_error(e.to_string()))?,
                         ))
                     }
-                }
+                },
                 Some(Err(err)) => Err(into_exception(vm, err)),
                 None => Ok(PyIterReturn::StopIteration(None)),
             }

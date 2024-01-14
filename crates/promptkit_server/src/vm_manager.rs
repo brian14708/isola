@@ -16,7 +16,6 @@ use axum::{
     },
     Json,
 };
-
 use serde_json::{json, value::RawValue};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
@@ -164,7 +163,7 @@ impl VmManager {
                         "message": err.to_string(),
                     })),
                 )
-                    .into_response())
+                    .into_response());
             }
             None => {
                 return Err(anyhow!("unexpected error"));

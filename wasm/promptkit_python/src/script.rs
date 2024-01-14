@@ -1,6 +1,5 @@
 use std::{collections::HashMap, rc::Rc};
 
-use crate::error::{Error, Result};
 use rustpython_vm::{
     builtins::{PyBaseExceptionRef, PyCode, PyDict, PyFunction, PyStr},
     function::{FuncArgs, KwArgs, PosArgs},
@@ -9,9 +8,10 @@ use rustpython_vm::{
     scope::Scope,
     AsObject, Interpreter, PyObjectRef, PyPayload, VirtualMachine,
 };
-
 use serde::de::DeserializeSeed;
 use serde_json::{json, Map, Value};
+
+use crate::error::{Error, Result};
 
 pub struct VM {
     interpreter: Rc<Interpreter>,
@@ -127,12 +127,12 @@ impl Script {
                             // SAFETY: buffer is always valid utf8
                             callback(unsafe { std::str::from_utf8_unchecked(&buffer) });
                             buffer.clear();
-                        }
+                        },
                         PyIterReturn::StopIteration(r) => {
                             return Ok(r.map(|r| {
                                 serde_json::to_string(&PyObjectSerializer::new(vm, &r)).unwrap()
-                            }))
-                        }
+                            }));
+                        },
                     }
                 }
             } else {
@@ -247,13 +247,13 @@ impl Script {
                             match field.remove(key.as_str()) {
                                 Some(Value::String(desc)) => {
                                     v.insert("description".into(), Value::String(desc));
-                                }
+                                },
                                 Some(Value::Object(desc)) => {
                                     for (k, vv) in desc {
                                         v.insert(k, vv);
                                     }
-                                }
-                                _ => {}
+                                },
+                                _ => {},
                             }
                             properties.insert(key.as_str().into(), Value::Object(v));
                             if req {
@@ -335,7 +335,7 @@ impl Script {
                                 }
                             }
                             return Some((schema, true));
-                        }
+                        },
                         Type::Object => {
                             // dict
                             let mut schema =
@@ -353,7 +353,7 @@ impl Script {
                                 }
                             }
                             return Some((schema, true));
-                        }
+                        },
                         Type::Union => {
                             // union
                             let mut oneof = Vec::new();
@@ -378,7 +378,7 @@ impl Script {
                                             ]);
                                         }
                                         return Some((o, required));
-                                    }
+                                    },
                                     _ => unreachable!(),
                                 }
                             }
@@ -386,7 +386,7 @@ impl Script {
                                 Map::from_iter([("oneOf".into(), Value::Array(oneof))]),
                                 required,
                             ))
-                        }
+                        },
                         Type::Generator => {
                             let mut schema = Map::from_iter([(
                                 "type".into(),
@@ -411,7 +411,7 @@ impl Script {
                             }
 
                             Some((schema, true))
-                        }
+                        },
                         Type::Tuple => {
                             let mut elems = Vec::new();
                             let mut required = true;
@@ -437,7 +437,7 @@ impl Script {
                                 ]),
                                 required,
                             ))
-                        }
+                        },
                     }
                 } else {
                     serde_json::to_value(PyObjectSerializer::new(vm, &obj))

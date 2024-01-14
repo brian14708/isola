@@ -3,7 +3,8 @@ import {
 	NavbarBrand,
 	NavbarContent,
 	NavbarItem,
-	Switch
+	Switch,
+	Link
 } from '@nextui-org/react';
 import { FiSun, FiMoon } from 'react-icons/fi';
 import { useTheme } from '@/hooks/theme';
@@ -13,7 +14,9 @@ export default function Navbar() {
 	return (
 		<NextNavbar>
 			<NavbarBrand>
-				<p className="font-bold text-inherit">PromptKit</p>
+				<Link href="/" className="font-bold text-inherit">
+					PromptKit
+				</Link>
 			</NavbarBrand>
 			<NavbarContent justify="end">
 				<NavbarItem>

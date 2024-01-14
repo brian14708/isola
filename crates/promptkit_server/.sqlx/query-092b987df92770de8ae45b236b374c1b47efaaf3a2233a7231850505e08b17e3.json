@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT permission AS \"permission: FunctionPermission\" FROM promptkit.users_functions WHERE function_id = $1 AND user_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "permission: FunctionPermission",
+        "type_info": {
+          "Custom": {
+            "name": "function_permission",
+            "kind": {
+              "Enum": [
+                "owner",
+                "editor",
+                "viewer"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "092b987df92770de8ae45b236b374c1b47efaaf3a2233a7231850505e08b17e3"
+}

@@ -1,0 +1,39 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, visibility AS \"visibility: FunctionVisibility\" FROM promptkit.functions WHERE endpoint = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "visibility: FunctionVisibility",
+        "type_info": {
+          "Custom": {
+            "name": "function_visibility",
+            "kind": {
+              "Enum": [
+                "public",
+                "internal",
+                "private"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "e3aebf23142cc1e77901354155e358245f596ade260f601f2336d359212c9143"
+}

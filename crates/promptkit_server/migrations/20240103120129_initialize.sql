@@ -28,13 +28,13 @@ CREATE TABLE promptkit.functions (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE promptkit.functions_users (
-    function_id UUID NOT NULL REFERENCES promptkit.functions(id) ON DELETE CASCADE,
+CREATE TABLE promptkit.users_functions (
     user_id UUID NOT NULL REFERENCES promptkit.users(id) ON DELETE CASCADE,
+    function_id UUID NOT NULL REFERENCES promptkit.functions(id) ON DELETE CASCADE,
     permission promptkit.function_permission NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (function_id, user_id)
+    PRIMARY KEY (user_id, function_id)
 );
 
 CREATE TABLE promptkit.revisions (

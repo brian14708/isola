@@ -5,6 +5,7 @@ use openid::DiscoveredClient;
 use crate::user::UserTokenSigner;
 
 mod memory_buffer;
+mod model;
 mod resource;
 mod routes;
 mod server;
