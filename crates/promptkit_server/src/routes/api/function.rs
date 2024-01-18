@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, put},
@@ -47,9 +47,21 @@ async fn create_function(
     .into_response())
 }
 
-async fn list_functions(auth: AuthSession, State(pool): State<PgPool>) -> Result {
+#[derive(Deserialize)]
+struct ListFunctions {
+    offset: Option<i64>,
+    count: Option<i64>,
+}
+
+async fn list_functions(
+    auth: AuthSession,
+    Query(params): Query<ListFunctions>,
+    State(pool): State<PgPool>,
+) -> Result {
     #[derive(Serialize)]
     struct Function {
+        #[serde(skip_serializing)]
+        total: i64,
         id: Uuid,
         endpoint: Option<String>,
         name: String,
@@ -58,21 +70,25 @@ async fn list_functions(auth: AuthSession, State(pool): State<PgPool>) -> Result
 
     let e = sqlx::query_as!(
         Function,
-        r#"SELECT id, endpoint, name,
+        r#"SELECT COUNT(1) OVER() as "total!", id, endpoint, name,
                 visibility AS "visibility: FunctionVisibility"
             FROM promptkit.functions
             JOIN promptkit.users_functions
                 ON functions.id = users_functions.function_id
             WHERE user_id = $1
             ORDER BY functions.created_at DESC
-            OFFSET $2 LIMIT 10"#,
+            OFFSET $2 LIMIT $3"#,
         auth.user_id,
-        0
+        params.offset.unwrap_or(0),
+        params.count.unwrap_or(5)
     )
     .fetch_all(&pool)
     .await?;
 
-    Ok(Json(json!({ "functions": e })).into_response())
+    Ok(
+        Json(json!({ "functions": e, "total": e.first().map(|f| f.total).unwrap_or(0) }))
+            .into_response(),
+    )
 }
 
 async fn check_access(

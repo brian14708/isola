@@ -8,7 +8,7 @@ const searchSchema = z.object({
 
 export const Route = new FileRoute('/login').createRoute({
 	component: Login,
-	validateSearch: (search) => searchSchema.parse(search)
+	validateSearch: searchSchema.parse
 });
 
 function Login() {

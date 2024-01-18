@@ -1,6 +1,6 @@
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 
-export const useListFunctions = (page: number) => {
+export const useFunctionList = (page: number, pageSize: number) => {
 	return useQuery<{
 		functions: {
 			id: string;
@@ -8,10 +8,13 @@ export const useListFunctions = (page: number) => {
 			name: string;
 			visibility: 'public' | 'private' | 'internal';
 		}[];
+		total: number;
 	}>({
-		queryKey: ['/functions', page],
-		queryFn: () => fetch(`/api/functions?page=${page || 0}`).then((res) => res.json()),
-		staleTime: 15 * 1000,
-		placeholderData: keepPreviousData
+		queryKey: ['/functions', page, pageSize],
+		queryFn: () =>
+			fetch(`/api/functions?offset=${(page - 1) * pageSize || 0}&count=${pageSize}`).then((res) =>
+				res.json()
+			),
+		staleTime: 15 * 1000
 	});
 };
