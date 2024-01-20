@@ -6,16 +6,16 @@
 	"scripts": {
 		"dev": "vite",
 		"build": "vite build",
-		"lint": "prettier --check . && tsc && eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+		"lint": "biome format . && biome lint . && tsc",
 		"preview": "vite preview",
-		"format": "prettier --write ."
+		"format": "biome format . --write"
 	},
 	"dependencies": {
 		"@fontsource-variable/inter": "^5.0.16",
 		"@monaco-editor/react": "^4.6.0",
 		"@nextui-org/react": "^2.2.9",
 		"@tanstack/react-query": "^5.17.19",
-		"@tanstack/react-query-devtools": "^5.17.19",
+		"@tanstack/react-query-devtools": "^5.17.21",
 		"@tanstack/react-router": "^1.8.3",
 		"@tanstack/router-devtools": "^1.8.3",
 		"framer-motion": "^10.18.0",
@@ -24,23 +24,18 @@
 		"react-dom": "^18.2.0",
 		"react-hook-form": "^7.49.3",
 		"react-icons": "^5.0.1",
-		"react-toastify": "^10.0.3",
+		"react-toastify": "^10.0.4",
 		"valibot": "^0.26.0"
 	},
 	"devDependencies": {
+		"@biomejs/biome": "1.5.3",
 		"@tanstack/router-vite-plugin": "^1.8.2",
 		"@types/node": "^20.11.5",
 		"@types/react": "^18.2.48",
 		"@types/react-dom": "^18.2.18",
-		"@typescript-eslint/eslint-plugin": "^6.19.0",
-		"@typescript-eslint/parser": "^6.19.0",
 		"@vitejs/plugin-react-swc": "^3.5.0",
 		"autoprefixer": "^10.4.17",
-		"eslint": "^8.56.0",
-		"eslint-plugin-react-hooks": "^4.6.0",
-		"eslint-plugin-react-refresh": "^0.4.5",
 		"postcss": "^8.4.33",
-		"prettier": "^3.2.4",
 		"tailwindcss": "^3.4.1",
 		"typescript": "^5.3.3",
 		"vite": "^5.0.12"

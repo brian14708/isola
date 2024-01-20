@@ -1,49 +1,48 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Theme, ThemeContext } from '@/hooks/theme';
 
+const calcTheme = (theme: Omit<Theme, 'current'>): Theme => {
+	let dark = theme.mode === 'dark';
+	if (theme.mode === 'auto') {
+		dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+	}
+	const t = {
+		mode: theme.mode,
+		current: dark ? 'dark' : 'light'
+	} satisfies Theme;
+	return t;
+};
+
 export default function ThemeProvider({ children }: { children?: React.ReactNode }) {
-	const [theme, setTheme] = useState<Theme>({
-		mode: 'auto',
-		current: 'light'
-	});
-	const toggleTheme = (theme?: Omit<Theme, 'current'>) => {
-		if (theme) {
-			let dark = theme.mode === 'dark';
-			if (theme.mode === 'auto') {
-				dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-			}
-			const t = {
-				mode: theme.mode,
-				current: dark ? 'dark' : 'light'
-			} satisfies Theme;
-			setTheme(t);
-			localStorage.setItem('theme', JSON.stringify(t));
-			document.documentElement.classList.toggle('dark', dark);
-		} else {
-			let dark = false;
-			setTheme((curr) => {
-				dark = curr.current === 'light';
-				return {
-					mode: dark ? 'dark' : 'light',
-					current: dark ? 'dark' : 'light'
-				};
-			});
-			localStorage.setItem(
-				'theme',
-				JSON.stringify({
-					mode: dark ? 'dark' : 'light',
-					current: dark ? 'dark' : 'light'
-				})
-			);
-			document.documentElement.classList.toggle('dark', dark);
-		}
-	};
-	useEffect(() => {
+	const [theme, setTheme] = useState<Theme>(() => {
 		const store = localStorage.getItem('theme');
 		if (store) {
-			toggleTheme(JSON.parse(store));
+			try {
+				const t = calcTheme(JSON.parse(store) as Theme);
+				localStorage.setItem('theme', JSON.stringify(t));
+				document.documentElement.classList.toggle('dark', t.current === 'dark');
+				return t;
+			} catch (e) {}
+		}
+
+		return {
+			mode: 'auto',
+			current: 'light'
+		};
+	});
+	const toggleTheme = useCallback((theme?: Omit<Theme, 'current'>) => {
+		if (theme) {
+			const t = calcTheme(theme);
+			setTheme(t);
+			localStorage.setItem('theme', JSON.stringify(t));
+			document.documentElement.classList.toggle('dark', t.current === 'dark');
 		} else {
-			toggleTheme({ mode: 'auto' });
+			setTheme((curr) => {
+				const t = calcTheme({ mode: curr.current === 'dark' ? 'light' : 'dark' });
+				localStorage.setItem('theme', JSON.stringify(t));
+				document.documentElement.classList.toggle('dark', t.current === 'dark');
+				return t;
+			});
 		}
 	}, []);
 	return <ThemeContext.Provider value={{ theme, toggleTheme }}>{children}</ThemeContext.Provider>;

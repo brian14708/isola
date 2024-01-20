@@ -26,7 +26,7 @@ export const getFunctionQueryOptions = (id: string) =>
 	}>({
 		queryKey: ['functions', 'get', id],
 		queryFn: async () => {
-			const d = await fetch('/api/functions/' + encodeURIComponent(id), {
+			const d = await fetch(`/api/functions/${encodeURIComponent(id)}`, {
 				method: 'GET',
 				headers: {
 					'Content-Type': 'application/json'
@@ -41,7 +41,9 @@ export const listRevisionsQueryOptions = (id: string, page: number | undefined, 
 		queryKey: ['functions', 'revisions', 'list', page ?? 1, pageSize],
 		queryFn: () =>
 			fetch(
-				`/api/functions/${id}/revisions?offset=${((page ?? 1) - 1) * pageSize || 0}&count=${pageSize}`
+				`/api/functions/${id}/revisions?offset=${
+					((page ?? 1) - 1) * pageSize || 0
+				}&count=${pageSize}`
 			).then((res) => res.json()),
 		staleTime: 15 * 1000
 	});

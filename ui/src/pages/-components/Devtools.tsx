@@ -8,7 +8,7 @@ const TanStackRouterDevtools = production
 			import('@tanstack/router-devtools').then((res) => ({
 				default: res.TanStackRouterDevtools
 			}))
-		);
+	  );
 
 const ReactQueryDevtools = production
 	? () => null
@@ -16,7 +16,7 @@ const ReactQueryDevtools = production
 			import('@tanstack/react-query-devtools').then((res) => ({
 				default: res.ReactQueryDevtools
 			}))
-		);
+	  );
 
 export default function Devtools() {
 	if (production) {

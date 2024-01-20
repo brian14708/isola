@@ -1,4 +1,4 @@
-import { type EditorProps, loader, Editor as MonacoEditor } from '@monaco-editor/react';
+import { loader, Editor as MonacoEditor } from '@monaco-editor/react';
 
 import * as monaco from 'monaco-editor';
 import editorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -26,6 +26,6 @@ self.MonacoEnvironment = {
 };
 
 loader.config({ monaco });
-loader.init();
+export const init = loader.init();
 
 export default MonacoEditor;

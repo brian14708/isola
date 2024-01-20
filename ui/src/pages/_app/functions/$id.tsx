@@ -23,7 +23,9 @@ function Page() {
 	const { page } = Route.useSearch();
 	const { data } = useSuspenseQuery(getFunctionQueryOptions(id));
 
-	const url = `${window.location.protocol}//${window.location.host}/invoke/functions/${data.function.endpoint || data.function.id}`;
+	const url = `${window.location.protocol}//${window.location.host}/invoke/functions/${
+		data.function.endpoint || data.function.id
+	}`;
 
 	useQuery(listRevisionsQueryOptions(id, page, PAGE_SIZE));
 	return (
