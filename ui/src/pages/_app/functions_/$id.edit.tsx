@@ -1,3 +1,5 @@
+import Editor from '@/components/Editor';
+import { useTheme } from '@/hooks/theme';
 import { FileRoute } from '@tanstack/react-router';
 
 export const Route = new FileRoute('/_app/functions/$id/edit').createRoute({
@@ -5,5 +7,15 @@ export const Route = new FileRoute('/_app/functions/$id/edit').createRoute({
 });
 
 function Page() {
-	return <div>Edit</div>;
+	const { theme } = useTheme();
+	return (
+		<Editor
+			wrapperProps={{
+				className: 'flex-1'
+			}}
+			theme={theme.current === 'dark' ? 'vs-dark' : 'vs-light'}
+			defaultLanguage="python"
+			defaultValue="# some comment"
+		/>
+	);
 }

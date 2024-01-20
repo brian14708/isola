@@ -23,11 +23,10 @@ function RootComponent() {
 					to: path
 				})
 			}
+			className="min-h-screen flex flex-col"
 		>
 			<Navbar />
-			<div className="flex">
-				<Outlet />
-			</div>
+			<Outlet />
 			<Devtools />
 			<ToastContainer position="top-center" theme={theme.current} />
 		</NextUIProvider>

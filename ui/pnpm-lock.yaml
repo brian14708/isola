@@ -8,24 +8,30 @@ dependencies:
   '@fontsource-variable/inter':
     specifier: ^5.0.16
     version: 5.0.16
+  '@monaco-editor/react':
+    specifier: ^4.6.0
+    version: 4.6.0(monaco-editor@0.45.0)(react-dom@18.2.0)(react@18.2.0)
   '@nextui-org/react':
     specifier: ^2.2.9
     version: 2.2.9(@types/react@18.2.48)(framer-motion@10.18.0)(react-dom@18.2.0)(react@18.2.0)(tailwind-variants@0.1.20)(tailwindcss@3.4.1)
   '@tanstack/react-query':
-    specifier: ^5.17.15
-    version: 5.17.15(react@18.2.0)
+    specifier: ^5.17.19
+    version: 5.17.19(react@18.2.0)
   '@tanstack/react-query-devtools':
-    specifier: ^5.17.18
-    version: 5.17.18(@tanstack/react-query@5.17.15)(react@18.2.0)
+    specifier: ^5.17.19
+    version: 5.17.19(@tanstack/react-query@5.17.19)(react@18.2.0)
   '@tanstack/react-router':
-    specifier: ^1.8.2
-    version: 1.8.2(react-dom@18.2.0)(react@18.2.0)
+    specifier: ^1.8.3
+    version: 1.8.3(react-dom@18.2.0)(react@18.2.0)
   '@tanstack/router-devtools':
-    specifier: ^1.8.2
-    version: 1.8.2(react-dom@18.2.0)(react@18.2.0)
+    specifier: ^1.8.3
+    version: 1.8.3(react-dom@18.2.0)(react@18.2.0)
   framer-motion:
     specifier: ^10.18.0
     version: 10.18.0(react-dom@18.2.0)(react@18.2.0)
+  monaco-editor:
+    specifier: ^0.45.0
+    version: 0.45.0
   react:
     specifier: ^18.2.0
     version: 18.2.0
@@ -489,6 +495,28 @@ packages:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.1
       '@jridgewell/sourcemap-codec': 1.4.15
+
+  /@monaco-editor/loader@1.4.0(monaco-editor@0.45.0):
+    resolution: {integrity: sha512-00ioBig0x642hytVspPl7DbQyaSWRaolYie/UFNjoTdvoKPzo6xrXLhTk9ixgIKcLH5b5vDOjVNiGyY+uDCUlg==}
+    peerDependencies:
+      monaco-editor: '>= 0.21.0 < 1'
+    dependencies:
+      monaco-editor: 0.45.0
+      state-local: 1.0.7
+    dev: false
+
+  /@monaco-editor/react@4.6.0(monaco-editor@0.45.0)(react-dom@18.2.0)(react@18.2.0):
+    resolution: {integrity: sha512-RFkU9/i7cN2bsq/iTkurMWOEErmYcY6JiQI3Jn+WeR/FGISH8JbHERjpS9oRuSOPvDMJI0Z8nJeKkbOs9sBYQw==}
+    peerDependencies:
+      monaco-editor: '>= 0.25.0 < 1'
+      react: ^16.8.0 || ^17.0.0 || ^18.0.0
+      react-dom: ^16.8.0 || ^17.0.0 || ^18.0.0
+    dependencies:
+      '@monaco-editor/loader': 1.4.0(monaco-editor@0.45.0)
+      monaco-editor: 0.45.0
+      react: 18.2.0
+      react-dom: 18.2.0(react@18.2.0)
+    dev: false
 
   /@nextui-org/accordion@2.0.28(@nextui-org/system@2.0.15)(@nextui-org/theme@2.1.17)(framer-motion@10.18.0)(react-dom@18.2.0)(react@18.2.0)(tailwind-variants@0.1.20):
     resolution: {integrity: sha512-WzD7sscL+4K0TFyUutTn1AhU0wcS68TqNCTNv7KgON6ODdwieydilMxAyXvwo3RgXeWG+8BbdxJC/6W+/iLBTg==}
@@ -2960,36 +2988,36 @@ packages:
     engines: {node: '>=12'}
     dev: false
 
-  /@tanstack/query-core@5.17.15:
-    resolution: {integrity: sha512-QURxpu77/ICA4d61aPvV7EcJ2MwmksxUejKBaq/xLcO2TUJAlXf4PFKHC/WxnVFI/7F1jeLx85AO3Vpk0+uBXw==}
+  /@tanstack/query-core@5.17.19:
+    resolution: {integrity: sha512-Lzw8FUtnLCc9Jwz0sw9xOjZB+/mCCmJev38v2wHMUl/ioXNIhnNWeMxu0NKUjIhAd62IRB3eAtvxAGDJ55UkyA==}
     dev: false
 
   /@tanstack/query-devtools@5.17.7:
     resolution: {integrity: sha512-TfgvOqza5K7Sk6slxqkRIvXlEJoUoPSsGGwpuYSrpqgSwLSSvPPpZhq7hv7hcY5IvRoTNGoq6+MT01C/jILqoQ==}
     dev: false
 
-  /@tanstack/react-query-devtools@5.17.18(@tanstack/react-query@5.17.15)(react@18.2.0):
-    resolution: {integrity: sha512-La1+8aKacGBZ4qvEdXx6ugVbHhm48fC/aBKfaHIkVB6lWKGiYq0pJm+kmzcRKsHmVz5BwfFoz6HCCnR5kByPnw==}
+  /@tanstack/react-query-devtools@5.17.19(@tanstack/react-query@5.17.19)(react@18.2.0):
+    resolution: {integrity: sha512-DvUuEsrN4Ndmf52t1fN7VuW0dPwP55Q7mXmHF3jI0ORsjsaviZF8C9SdOEwhaXVKdPH+lvM+jJOuxv/1IrDy9Q==}
     peerDependencies:
-      '@tanstack/react-query': ^5.17.15
+      '@tanstack/react-query': ^5.17.19
       react: ^18.0.0
     dependencies:
       '@tanstack/query-devtools': 5.17.7
-      '@tanstack/react-query': 5.17.15(react@18.2.0)
+      '@tanstack/react-query': 5.17.19(react@18.2.0)
       react: 18.2.0
     dev: false
 
-  /@tanstack/react-query@5.17.15(react@18.2.0):
-    resolution: {integrity: sha512-9qur91mOihaUN7pXm6ioDtS+4qgkBcCiIaZyvi3lZNcQZsrMGCYZ+eP3hiFrV4khoJyJrFUX1W0NcCVlgwNZxQ==}
+  /@tanstack/react-query@5.17.19(react@18.2.0):
+    resolution: {integrity: sha512-qaQENB6/03Gj3dFZGvdmUoqeUGlGm7P1p0RmaR04Bf1Ib1T9lLGimcC9T3oCFbrx0b2ZF21ngjFZNjj9uPJMcg==}
     peerDependencies:
       react: ^18.0.0
     dependencies:
-      '@tanstack/query-core': 5.17.15
+      '@tanstack/query-core': 5.17.19
       react: 18.2.0
     dev: false
 
-  /@tanstack/react-router@1.8.2(react-dom@18.2.0)(react@18.2.0):
-    resolution: {integrity: sha512-rZtxOc+GSqdPY4PXChY9Wu+0D5e23Bzbzc36pHd03y4sPfkLFugWsaVOx29HKAuzCDjujzaNPXBh7fKg8nDFOA==}
+  /@tanstack/react-router@1.8.3(react-dom@18.2.0)(react@18.2.0):
+    resolution: {integrity: sha512-FrTFIuiyDhKemNBA1kegoS0aMkNT1qxlmoEIZ9uDlHJ+RBfYlnxwqzI3R3i2Ewj9FWsGf0h+TP0xNqj+1/wJYg==}
     engines: {node: '>=12'}
     peerDependencies:
       react: '>=16'
@@ -3015,14 +3043,14 @@ packages:
       use-sync-external-store: 1.2.0(react@18.2.0)
     dev: false
 
-  /@tanstack/router-devtools@1.8.2(react-dom@18.2.0)(react@18.2.0):
-    resolution: {integrity: sha512-o2xKcjETOJB/xYso47XTlAD/uPyx9wj3DkMjzLi7K28Cv7vJcvni0Gz0DaVRXHT5IVFTimYxKXaC+wJukcCyBQ==}
+  /@tanstack/router-devtools@1.8.3(react-dom@18.2.0)(react@18.2.0):
+    resolution: {integrity: sha512-5fw5/fucKwu3w6ivcGYW0sSfoYA81Ysyh7dj5tNOJBCosIqpIJTNv0p19Q6LEPTTI3vlWc+5al+wAGxrlHcyGg==}
     engines: {node: '>=12'}
     peerDependencies:
       react: '>=16'
       react-dom: '>=16'
     dependencies:
-      '@tanstack/react-router': 1.8.2(react-dom@18.2.0)(react@18.2.0)
+      '@tanstack/react-router': 1.8.3(react-dom@18.2.0)(react@18.2.0)
       date-fns: 2.30.0
       react: 18.2.0
       react-dom: 18.2.0(react@18.2.0)
@@ -4066,6 +4094,10 @@ packages:
     resolution: {integrity: sha512-jYofLM5Dam9279rdkWzqHozUo4ybjdZmCsDHePy5V/PbBcVMiSZR97gmAy45aqi8CK1lG2ECd356FU86avfwUQ==}
     engines: {node: '>=16 || 14 >=14.17'}
 
+  /monaco-editor@0.45.0:
+    resolution: {integrity: sha512-mjv1G1ZzfEE3k9HZN0dQ2olMdwIfaeAAjFiwNprLfYNRSz7ctv9XuCT7gPtBGrMUeV1/iZzYKj17Khu1hxoHOA==}
+    dev: false
+
   /ms@2.1.2:
     resolution: {integrity: sha512-sGkPx+VjMtmA6MX27oA4FBFELFCZZ4S4XqeGOXCv68tT+jb3vk/RyaKWP0PTKyWtmLSM0b+adUTEvbs1PEaH2w==}
     dev: true
@@ -4498,6 +4530,10 @@ packages:
   /source-map-js@1.0.2:
     resolution: {integrity: sha512-R0XvVJ9WusLiqTCEiGCmICCMplcCkIwwR11mOSD9CR5u+IXYdiseeEuXCVAjS54zqwkLcPNnmU4OeJ6tUrWhDw==}
     engines: {node: '>=0.10.0'}
+
+  /state-local@1.0.7:
+    resolution: {integrity: sha512-HTEHMNieakEnoe33shBYcZ7NX83ACUjCu8c40iOGEZsngj9zRnkqS9j1pqQPXwobB0ZcVTk27REb7COQ0UR59w==}
+    dev: false
 
   /string-width@4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
