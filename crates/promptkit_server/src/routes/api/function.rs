@@ -18,6 +18,10 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", put(create_function).get(list_functions))
         .route("/:id_or_endpoint", get(get_function))
+        .route(
+            "/:id_or_endpoint/revisions",
+            get(list_revisions).put(create_revision),
+        )
 }
 
 #[derive(Deserialize)]
@@ -91,39 +95,24 @@ async fn list_functions(
     )
 }
 
-async fn check_access(
-    function_id_or_endpoint: &str,
+async fn check_access_id(
+    function_id: &Uuid,
     permission: FunctionPermission,
     user_id: Option<Uuid>,
     pool: &PgPool,
 ) -> Option<Uuid> {
-    struct Function {
-        id: Uuid,
-        visibility: FunctionVisibility,
-    }
-
-    let f: Function = match if let Ok(uuid) = Uuid::parse_str(function_id_or_endpoint) {
-        sqlx::query_as!(Function,
+    let f = sqlx::query!(
             r#"SELECT id, visibility AS "visibility: FunctionVisibility" FROM promptkit.functions WHERE id = $1"#,
-            uuid
+            function_id
         )
         .fetch_one(pool)
-        .await
-    } else {
-        sqlx::query_as!(Function,
-            r#"SELECT id, visibility AS "visibility: FunctionVisibility" FROM promptkit.functions WHERE endpoint = $1"#,
-            function_id_or_endpoint
-        )
-        .fetch_one(pool)
-        .await
-    } {
-        Ok(f) => f,
-        Err(_) => return None,
-    };
+        .await.ok()?;
 
     match (permission, f.visibility, user_id) {
-        (FunctionPermission::Viewer, FunctionVisibility::Public, _) => true,
-        (FunctionPermission::Viewer, FunctionVisibility::Internal, Some(_)) => true,
+        (FunctionPermission::Viewer, FunctionVisibility::Public, _)
+        | (FunctionPermission::Viewer, FunctionVisibility::Internal, Some(_)) => {
+            true
+        },
         (_, _, Some(id)) => {
             sqlx::query!(
                 r#"SELECT permission AS "permission: FunctionPermission" FROM promptkit.users_functions WHERE function_id = $1 AND user_id = $2"#,
@@ -138,10 +127,18 @@ async fn check_access(
 async fn get_function(
     auth: Option<AuthSession>,
     State(pool): State<PgPool>,
-    Path(id_or_endpoint): Path<String>,
+    Path(id): Path<Uuid>,
 ) -> Result {
-    let f = match check_access(
-        &id_or_endpoint,
+    #[derive(Serialize)]
+    struct Function {
+        id: Uuid,
+        endpoint: Option<String>,
+        name: String,
+        visibility: FunctionVisibility,
+    }
+
+    let f = match check_access_id(
+        &id,
         FunctionPermission::Viewer,
         auth.map(|a| a.user_id),
         &pool,
@@ -151,6 +148,45 @@ async fn get_function(
         Some(f) => f,
         None => return Ok(StatusCode::FORBIDDEN.into_response()),
     };
-    println!("{:?}", f);
-    Ok(Json(json!({})).into_response())
+    let f = sqlx::query_as!(
+        Function,
+        r#"SELECT id, endpoint, name, visibility AS "visibility: FunctionVisibility" FROM promptkit.functions WHERE id = $1"#,
+        f
+    ).fetch_one(&pool).await?;
+    Ok(Json(json!({
+        "function": f
+    }))
+    .into_response())
+}
+
+async fn list_revisions(
+    auth: Option<AuthSession>,
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+) -> Result {
+    let f = match check_access_id(
+        &id,
+        FunctionPermission::Viewer,
+        auth.map(|a| a.user_id),
+        &pool,
+    )
+    .await
+    {
+        Some(f) => f,
+        None => return Ok(StatusCode::FORBIDDEN.into_response()),
+    };
+
+    Ok(Json(json!({
+        "revisions": []
+    }))
+    .into_response())
+}
+
+async fn create_revision(
+    auth: AuthSession,
+    State(pool): State<PgPool>,
+    Path(id): Path<Uuid>,
+    Json(params): Json<CreateFunction>,
+) -> Result {
+    return Ok(Json(json!(null)).into_response());
 }

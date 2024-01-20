@@ -1,4 +1,3 @@
-import { useFunctionList } from '@/api/functions';
 import {
 	Button,
 	Link,
@@ -8,34 +7,33 @@ import {
 	TableBody,
 	TableRow,
 	TableCell,
-	Pagination,
-	Spinner
+	Pagination
 } from '@nextui-org/react';
-
 import { FileRoute, useNavigate } from '@tanstack/react-router';
-import { FiGlobe, FiLock, FiPlus, FiShield } from 'react-icons/fi';
-import { z } from 'zod';
+import { FiPlus } from 'react-icons/fi';
+import * as v from 'valibot';
 
-const searchSchema = z.object({
-	page: z.number().optional()
+import { listFunctionsQueryOptions } from '@/api/functions';
+import { useSuspenseQuery } from '@tanstack/react-query';
+
+const searchSchema = v.object({
+	page: v.optional(v.number())
 });
+
+const PAGE_SIZE = 20;
 
 export const Route = new FileRoute('/_app/functions/').createRoute({
+	validateSearch: (d) => v.parse(searchSchema, d),
+	loaderDeps: ({ search: { page } }) => ({ page }),
 	component: Page,
-	validateSearch: searchSchema.parse
+	loader: (opts) =>
+		opts.context.queryClient.ensureQueryData(listFunctionsQueryOptions(opts.deps.page, PAGE_SIZE))
 });
 
-const ICON_MAP = {
-	public: <FiGlobe className="text-gray-500" />,
-	internal: <FiShield className="text-gray-500" />,
-	private: <FiLock className="text-gray-500" />
-} as const;
-const PAGE_SIZE = 15;
-
 function Page() {
-	const { page } = Route.useSearch();
+	const { page } = Route.useLoaderDeps();
 	const navigate = useNavigate();
-	const { data, isLoading } = useFunctionList(page ?? 1, PAGE_SIZE);
+	const { data } = useSuspenseQuery(listFunctionsQueryOptions(page, PAGE_SIZE));
 
 	return (
 		<div className="w-full items-center max-w-[640px] m-auto gap-5 flex flex-col">
@@ -67,17 +65,20 @@ function Page() {
 						</div>
 					)
 				}
+				selectionMode="single"
+				onRowAction={(key) => {
+					navigate({
+						to: `/functions/${key}`
+					});
+				}}
 			>
 				<TableHeader>
 					<TableColumn>Name</TableColumn>
 				</TableHeader>
-				<TableBody items={data?.functions || []} isLoading={isLoading} loadingContent={<Spinner />}>
+				<TableBody items={data?.functions || []}>
 					{(item) => (
 						<TableRow key={item.id}>
-							<TableCell className="flex items-center gap-2">
-								{ICON_MAP[item.visibility]}
-								{item.name}
-							</TableCell>
+							<TableCell>{item.name}</TableCell>
 						</TableRow>
 					)}
 				</TableBody>

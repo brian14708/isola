@@ -1,14 +1,14 @@
 import { Button } from '@nextui-org/react';
 import { FileRoute } from '@tanstack/react-router';
-import { z } from 'zod';
+import * as v from 'valibot';
 
-const searchSchema = z.object({
-	redirect: z.string().optional()
+const searchSchema = v.object({
+	redirect: v.optional(v.string())
 });
 
 export const Route = new FileRoute('/login').createRoute({
 	component: Login,
-	validateSearch: searchSchema.parse
+	validateSearch: (d) => v.parse(searchSchema, d)
 });
 
 function Login() {

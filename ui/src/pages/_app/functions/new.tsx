@@ -37,7 +37,7 @@ function Page() {
 				toast.error(`Error: ${msg}`);
 				return;
 			}
-			queryClient.invalidateQueries({ queryKey: ['/functions'] });
+			queryClient.invalidateQueries({ queryKey: ['functions'] });
 
 			toast.success('Function created successfully!');
 			navigate({

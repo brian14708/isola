@@ -1,13 +1,13 @@
-import { useQuery, type FetchQueryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 
-export const getUserProfileQuery: FetchQueryOptions<{
+export const getUserProfileQueryOptions = queryOptions<{
 	id: string;
 	name: string;
 	profile: {
 		avatar_url: string | null;
 	};
-}> = {
-	queryKey: ['/user/me'],
+}>({
+	queryKey: ['users', 'me'],
 	queryFn: async () => {
 		const d = await fetch('/api/user/me', {
 			method: 'GET',
@@ -22,8 +22,4 @@ export const getUserProfileQuery: FetchQueryOptions<{
 		return await d.json();
 	},
 	staleTime: 15 * 1000
-};
-
-export const useUserProfile = () => {
-	return useQuery(getUserProfileQuery);
-};
+});
