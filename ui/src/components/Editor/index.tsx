@@ -1,5 +1,6 @@
-import type { EditorProps } from '@monaco-editor/react';
+import { editor } from 'monaco-editor';
 import React from 'react';
+import type { EditorImplProps } from './EditorImpl';
 
 const EditorImpl = React.lazy(async () => {
 	const mod = await import('./EditorImpl');
@@ -7,10 +8,12 @@ const EditorImpl = React.lazy(async () => {
 	return mod;
 });
 
-export default function Editor(props: EditorProps) {
-	return (
-		<React.Suspense fallback={<div>Loading...</div>}>
-			<EditorImpl {...props} />
-		</React.Suspense>
-	);
-}
+export default React.forwardRef<editor.IStandaloneCodeEditor, EditorImplProps>(
+	function Editor(props, ref) {
+		return (
+			<React.Suspense fallback={<div>Loading...</div>}>
+				<EditorImpl ref={ref} {...props} />
+			</React.Suspense>
+		);
+	}
+);

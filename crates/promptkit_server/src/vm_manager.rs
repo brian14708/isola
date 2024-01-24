@@ -207,18 +207,46 @@ impl VmManager {
         let hash: [u8; 32] = hasher.finalize().into();
 
         let vm = self.cache.get(hash);
-        if let Some(vm) = vm {
-            return self.exec_impl(func, args, vm).await;
-        }
+        let vm = if let Some(vm) = vm {
+            vm
+        } else {
+            let mut vm = self.create(hash).await?;
+            vm.python
+                .vm()
+                .call_eval_script(&mut vm.store, script)
+                .await?
+                .map_err(|e| anyhow!(e))?;
+            vm
+        };
 
-        let mut vm = self.create(hash).await?;
-        vm.python
+        self.exec_impl(func, args, vm).await
+    }
+
+    pub async fn schema(&self, script: &str, func: &str) -> anyhow::Result<Response> {
+        let mut hasher = Sha256::new();
+        hasher.update(script);
+        let hash: [u8; 32] = hasher.finalize().into();
+
+        let vm = self.cache.get(hash);
+        let mut vm = if let Some(vm) = vm {
+            vm
+        } else {
+            let mut vm = self.create(hash).await?;
+            vm.python
+                .vm()
+                .call_eval_script(&mut vm.store, script)
+                .await?
+                .map_err(|e| anyhow!(e))?;
+            vm
+        };
+        let r = vm
+            .python
             .vm()
-            .call_eval_script(&mut vm.store, script)
+            .call_get_jsonschema(&mut vm.store, func)
             .await?
             .map_err(|e| anyhow!(e))?;
 
-        self.exec_impl(func, args, vm).await
+        Ok((StatusCode::OK, Json(RawValue::from_string(r)?)).into_response())
     }
 }
 
