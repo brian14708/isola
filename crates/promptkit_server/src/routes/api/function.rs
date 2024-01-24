@@ -164,7 +164,7 @@ async fn list_revisions(
     State(pool): State<PgPool>,
     Path(id): Path<Uuid>,
 ) -> Result {
-    let f = match check_access_id(
+    let _f = match check_access_id(
         &id,
         FunctionPermission::Viewer,
         auth.map(|a| a.user_id),
@@ -183,10 +183,10 @@ async fn list_revisions(
 }
 
 async fn create_revision(
-    auth: AuthSession,
-    State(pool): State<PgPool>,
-    Path(id): Path<Uuid>,
-    Json(params): Json<CreateFunction>,
+    _auth: AuthSession,
+    State(_pool): State<PgPool>,
+    Path(_id): Path<Uuid>,
+    Json(_params): Json<CreateFunction>,
 ) -> Result {
-    return Ok(Json(json!(null)).into_response());
+    Ok(Json(json!(null)).into_response())
 }

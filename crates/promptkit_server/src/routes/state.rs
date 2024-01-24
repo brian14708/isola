@@ -7,10 +7,10 @@ use axum::{
     response::IntoResponse,
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
+use promptkit_executor::VmManager;
 use sqlx::PgPool;
 
 use crate::user::UserTokenSigner;
-use crate::vm_manager::VmManager;
 
 #[derive(Clone)]
 pub struct AppState {

@@ -4,15 +4,10 @@ use openid::DiscoveredClient;
 
 use crate::user::UserTokenSigner;
 
-mod memory_buffer;
 mod model;
-mod resource;
 mod routes;
 mod server;
 mod user;
-mod vm;
-mod vm_cache;
-mod vm_manager;
 
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;

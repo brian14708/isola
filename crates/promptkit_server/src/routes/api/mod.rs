@@ -1,12 +1,21 @@
 mod function;
 mod user;
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
-use axum::{extract::State, routing::post, Json, Router};
-use serde_json::value::RawValue;
-
-use crate::vm_manager::VmManager;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{
+        sse::{Event, KeepAlive},
+        IntoResponse, Sse,
+    },
+    routing::post,
+    Json, Router,
+};
+use promptkit_executor::{ExecResult, ExecStreamItem, VmManager};
+use serde_json::{json, value::RawValue};
+use tokio_stream::StreamExt;
 
 use super::AppState;
 
@@ -29,7 +38,7 @@ async fn exec(
     State(vm): State<Arc<VmManager>>,
     Json(req): Json<ExecRequest>,
 ) -> crate::routes::Result {
-    Ok(vm
+    let exec = vm
         .exec(
             &req.script,
             req.method,
@@ -38,7 +47,40 @@ async fn exec(
                 .map(|s| Box::<str>::from(s).into_string())
                 .collect::<Vec<_>>(),
         )
-        .await?)
+        .await?;
+
+    match exec {
+        ExecResult::Error(err) => Ok((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "message": err.to_string() })),
+        )
+            .into_response()),
+        ExecResult::Response(resp) => {
+            Ok((StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response())
+        }
+        ExecResult::Stream(stream) => {
+            let s = stream.map::<anyhow::Result<Event>, _>(|f| match f {
+                ExecStreamItem::Data(data) => Ok(Event::default().data(data)),
+                ExecStreamItem::End(end) => Ok(match end {
+                    Some(data) => Event::default().data(data),
+                    None => Event::default().data("[DONE]"),
+                }),
+                ExecStreamItem::Error(err) => Ok(Event::default()
+                    .event("error")
+                    .json_data(json!({
+                        "message": err.to_string(),
+                    }))
+                    .unwrap()),
+            });
+            Ok(Sse::new(s)
+                .keep_alive(
+                    KeepAlive::new()
+                        .interval(Duration::from_secs(1))
+                        .text("keepalive"),
+                )
+                .into_response())
+        }
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -51,5 +93,11 @@ async fn schema(
     State(vm): State<Arc<VmManager>>,
     Json(req): Json<SchemaRequest>,
 ) -> crate::routes::Result {
-    Ok(vm.schema(&req.script, &req.method).await?)
+    Ok((
+        StatusCode::OK,
+        Json(RawValue::from_string(
+            vm.schema(&req.script, &req.method).await?,
+        )?),
+    )
+        .into_response())
 }

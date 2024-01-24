@@ -8,15 +8,6 @@ use std::{
 };
 
 use anyhow::anyhow;
-use axum::{
-    http::StatusCode,
-    response::{
-        sse::{Event, KeepAlive},
-        IntoResponse, Response, Sse,
-    },
-    Json,
-};
-use serde_json::{json, value::RawValue};
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
@@ -39,6 +30,18 @@ pub struct VmManager {
     instance_pre: InstancePre<VmState>,
     cache: Arc<VmCache>,
     _epoch_ticker: ChildTask<()>,
+}
+
+pub enum ExecStreamItem {
+    Data(String),
+    End(Option<String>),
+    Error(anyhow::Error),
+}
+
+pub enum ExecResult {
+    Error(anyhow::Error),
+    Response(String),
+    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>),
 }
 
 impl VmManager {
@@ -122,7 +125,7 @@ impl VmManager {
         func: String,
         args: Vec<String>,
         mut vm: Vm,
-    ) -> anyhow::Result<Response> {
+    ) -> anyhow::Result<ExecResult> {
         let (tx, mut rx) = mpsc::channel(4);
         vm.store.data_mut().initialize(tx.clone());
 
@@ -153,17 +156,11 @@ impl VmManager {
         let data = match rx.recv().await {
             Some(Ok((data, true))) => {
                 exec.await?;
-                return Ok((StatusCode::OK, Json(RawValue::from_string(data)?)).into_response());
+                return Ok(ExecResult::Response(data));
             }
             Some(Ok((data, false))) => data,
             Some(Err(err)) => {
-                return Ok((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(json!({
-                        "message": err.to_string(),
-                    })),
-                )
-                    .into_response());
+                return Ok(ExecResult::Error(err));
             }
             None => {
                 return Err(anyhow!("unexpected error"));
@@ -173,27 +170,16 @@ impl VmManager {
         let stream = exec.wait_on_stream(
             tokio_stream::once(Ok((data, false)))
                 .chain(ReceiverStream::new(rx))
-                .map::<anyhow::Result<Event>, _>(|v| match v {
+                .map(|v| match v {
                     Ok((data, true)) => {
-                        Ok(Event::default().data(if data.is_empty() { "[DONE]" } else { &data }))
+                        ExecStreamItem::End(if data.is_empty() { None } else { Some(data) })
                     }
-                    Ok((data, false)) => Ok(Event::default().data(data)),
-                    Err(err) => Ok(Event::default()
-                        .event("error")
-                        .json_data(json!({
-                            "message": err.to_string(),
-                        }))
-                        .unwrap()),
+                    Ok((data, false)) => ExecStreamItem::Data(data),
+                    Err(err) => ExecStreamItem::Error(err),
                 }),
         );
 
-        Ok(Sse::new(stream)
-            .keep_alive(
-                KeepAlive::new()
-                    .interval(Duration::from_secs(1))
-                    .text("keepalive"),
-            )
-            .into_response())
+        Ok(ExecResult::Stream(Box::pin(Box::new(stream))))
     }
 
     pub async fn exec(
@@ -201,7 +187,7 @@ impl VmManager {
         script: &str,
         func: String,
         args: Vec<String>,
-    ) -> anyhow::Result<Response> {
+    ) -> anyhow::Result<ExecResult> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
@@ -222,7 +208,7 @@ impl VmManager {
         self.exec_impl(func, args, vm).await
     }
 
-    pub async fn schema(&self, script: &str, func: &str) -> anyhow::Result<Response> {
+    pub async fn schema(&self, script: &str, func: &str) -> anyhow::Result<String> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
@@ -246,7 +232,7 @@ impl VmManager {
             .await?
             .map_err(|e| anyhow!(e))?;
 
-        Ok((StatusCode::OK, Json(RawValue::from_string(r)?)).into_response())
+        Ok(r)
     }
 }
 
