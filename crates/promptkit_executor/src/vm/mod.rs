@@ -6,8 +6,9 @@ pub use bindgen::exports::vm as exports;
 pub use bindgen::PythonVm;
 use tokio::sync::mpsc;
 use wasmtime::component::Linker;
+use wasmtime::component::ResourceTable;
 use wasmtime::{Engine, Store};
-use wasmtime_wasi::preview2::{Table, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::preview2::{WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::resource::MemoryLimiter;
 
@@ -15,7 +16,7 @@ pub struct VmState {
     limiter: MemoryLimiter,
     client: reqwest::Client,
     wasi: WasiCtx,
-    table: Table,
+    table: ResourceTable,
     output: Option<mpsc::Sender<anyhow::Result<(String, bool)>>>,
 }
 
@@ -38,7 +39,7 @@ impl VmState {
                 limiter,
                 client: reqwest::Client::new(),
                 wasi,
-                table: Table::new(),
+                table: ResourceTable::new(),
                 output: None,
             },
         );
@@ -60,11 +61,11 @@ impl VmState {
 }
 
 impl WasiView for VmState {
-    fn table(&self) -> &Table {
+    fn table(&self) -> &ResourceTable {
         &self.table
     }
 
-    fn table_mut(&mut self) -> &mut Table {
+    fn table_mut(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 
@@ -96,11 +97,11 @@ pub struct Vm {
 }
 
 impl http_client::HttpClientCtx for VmState {
-    fn table_mut(&mut self) -> &mut Table {
+    fn table_mut(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 
-    fn table(&self) -> &Table {
+    fn table(&self) -> &ResourceTable {
         &self.table
     }
 

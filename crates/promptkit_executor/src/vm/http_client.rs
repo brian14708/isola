@@ -2,15 +2,14 @@ use std::{str::FromStr, time::Duration};
 
 use eventsource_stream::{Event, EventStreamError, Eventsource};
 use tokio_stream::{Stream, StreamExt};
-use wasmtime::component::Resource;
-use wasmtime_wasi::preview2::Table;
+use wasmtime::component::{Resource, ResourceTable};
 
 use super::bindgen::http_client;
 
 pub trait HttpClientCtx: Send {
     fn client(&self) -> &reqwest::Client;
-    fn table(&self) -> &Table;
-    fn table_mut(&mut self) -> &mut Table;
+    fn table(&self) -> &ResourceTable;
+    fn table_mut(&mut self) -> &mut ResourceTable;
 }
 
 pub struct ResponseSseBody(
