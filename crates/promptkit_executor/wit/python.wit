@@ -17,6 +17,5 @@ world python-vm {
         }
         eval-script: func(%script: string) -> result<_, error>;
         call-func: func(%func: string, %args: list<argument>) -> result<_, error>;
-        get-jsonschema: func(%name: string) -> result<string, error>;
     }
 }

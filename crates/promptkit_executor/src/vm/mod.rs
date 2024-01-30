@@ -1,6 +1,8 @@
 mod bindgen;
 mod http_client;
 
+use std::fs::File;
+
 use anyhow::anyhow;
 pub use bindgen::exports::vm as exports;
 pub use bindgen::PythonVm;
@@ -8,7 +10,10 @@ use tokio::sync::mpsc;
 use wasmtime::component::Linker;
 use wasmtime::component::ResourceTable;
 use wasmtime::{Engine, Store};
+use wasmtime_wasi::preview2::DirPerms;
+use wasmtime_wasi::preview2::FilePerms;
 use wasmtime_wasi::preview2::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::Dir;
 
 use crate::resource::MemoryLimiter;
 
@@ -30,7 +35,14 @@ impl VmState {
     }
 
     pub fn new(engine: &Engine, max_memory: usize) -> Store<Self> {
-        let wasi = WasiCtxBuilder::new().build();
+        let wasi = WasiCtxBuilder::new()
+            .preopened_dir(
+                Dir::from_std_file(File::open("./wasm/target/wasm32-wasi/wasi-deps/usr").unwrap()),
+                DirPerms::READ,
+                FilePerms::READ,
+                "/usr",
+            )
+            .build();
         let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
 
         let mut s = Store::new(

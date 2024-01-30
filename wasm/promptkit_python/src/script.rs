@@ -1,476 +1,114 @@
-use std::{collections::HashMap, rc::Rc};
-
-use rustpython_vm::{
-    builtins::{PyBaseExceptionRef, PyCode, PyDict, PyFunction, PyStr},
-    function::{FuncArgs, KwArgs, PosArgs},
-    protocol::{PyIter, PyIterReturn},
-    py_serde::{deserialize, PyObjectDeserializer, PyObjectSerializer},
-    scope::Scope,
-    AsObject, Interpreter, PyObjectRef, PyPayload, VirtualMachine,
+use pyo3::{
+    prelude::*,
+    prepare_freethreaded_python,
+    types::{PyDict, PyTuple},
 };
 use serde::de::DeserializeSeed;
-use serde_json::{json, Map, Value};
 
-use crate::error::{Error, Result};
+use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 
-pub struct VM {
-    interpreter: Rc<Interpreter>,
+pub struct Scope {
+    locals: PyObject,
 }
-
-impl VM {
-    pub fn new(f: impl FnOnce(&mut VirtualMachine)) -> Self {
-        let interpreter = Interpreter::with_init(Default::default(), |vm| {
-            vm.add_native_modules(rustpython_stdlib::get_module_inits());
-            vm.add_frozen(rustpython_pylib::FROZEN_STDLIB);
-            f(vm);
-        });
-
-        Self {
-            interpreter: Rc::new(interpreter),
-        }
-    }
-
-    pub fn script(&self, content: impl AsRef<str>) -> Result<Script> {
-        let scope = self.interpreter.enter(|vm| {
-            let scope = vm.new_scope_with_builtins();
-            vm.run_code_string(scope.clone(), content.as_ref(), "<init>".to_owned())
-                .map_err(|e| exception_to_string(vm, &e))?;
-
-            Result::<Scope>::Ok(scope)
-        })?;
-
-        Ok(Script {
-            interpreter: self.interpreter.clone(),
-            scope,
-        })
-    }
-}
-
-pub struct Script {
-    interpreter: Rc<Interpreter>,
-    scope: Scope,
-}
-
 pub enum InputValue<'a> {
-    Json(Value),
+    Json(serde_json::Value),
     JsonStr(&'a str),
 }
 
-impl Script {
-    pub fn load_script(&self, content: impl AsRef<str>) -> Result<()> {
-        self.interpreter.enter(|vm| {
-            vm.run_code_string(
-                self.scope.clone(),
-                content.as_ref(),
-                "<embedded>".to_owned(),
-            )
-            .map_err(|e| exception_to_string(vm, &e))
-        })?;
-
-        Ok(())
+impl Scope {
+    pub fn new() -> Self {
+        prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let locals = PyDict::new(py);
+            Scope {
+                locals: locals.to_object(py),
+            }
+        })
     }
 
-    pub fn run<'a>(
+    pub fn load_script(&self, code: &str) -> PyResult<()> {
+        Python::with_gil(|py| {
+            py.run(code, Some(self.locals.downcast(py)?), None)?;
+            Ok(())
+        })
+    }
+
+    pub fn run<'a, U>(
         &self,
         name: &str,
-        positional: impl IntoIterator<Item = InputValue<'a>>,
+        positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
         named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
         mut callback: impl FnMut(&str),
-    ) -> Result<Option<String>> {
-        self.interpreter.enter(|vm| {
-            let m = self
-                .scope
-                .locals
-                .as_object()
-                .get_item(name, vm)
-                .map_err(|e| exception_to_string(vm, &e))?;
-            let m = if let Some(func) = m.to_callable() {
-                let args = FuncArgs::new(
-                    PosArgs::from(
-                        positional
-                            .into_iter()
-                            .map(|arg| match arg {
-                                InputValue::Json(v) => deserialize(vm, v).unwrap(),
-                                InputValue::JsonStr(s) => PyObjectDeserializer::new(vm)
-                                    .deserialize(&mut serde_json::Deserializer::from_str(s))
-                                    .unwrap(),
-                            })
-                            .collect::<Vec<_>>(),
-                    ),
-                    KwArgs::from_iter(named.into_iter().map(|(k, v)| {
-                        match v {
-                            InputValue::Json(v) => (k.to_owned(), deserialize(vm, v).unwrap()),
-                            InputValue::JsonStr(s) => (
-                                k.to_owned(),
-                                PyObjectDeserializer::new(vm)
-                                    .deserialize(&mut serde_json::Deserializer::from_str(s))
-                                    .unwrap(),
-                            ),
-                        }
-                    })),
-                );
-
-                func.invoke(args, vm)
-                    .map_err(|e| exception_to_string(vm, &e))?
+    ) -> PyResult<Option<String>>
+    where
+        U: ExactSizeIterator<Item = InputValue<'a>>,
+    {
+        Python::with_gil(|py| {
+            let dict: &PyDict = self.locals.downcast(py)?;
+            let f = if let Some(f) = dict.get_item(name)? {
+                f
             } else {
-                m
+                return Ok(None);
             };
 
-            if PyIter::check(&m) {
-                let it = PyIter::new(m);
-                let mut buffer = Vec::with_capacity(128);
-                loop {
-                    match it.next(vm).map_err(|e| exception_to_string(vm, &e))? {
-                        PyIterReturn::Return(r) => {
-                            serde_json::to_writer(&mut buffer, &PyObjectSerializer::new(vm, &r))
-                                .unwrap();
-                            // SAFETY: buffer is always valid utf8
-                            callback(unsafe { std::str::from_utf8_unchecked(&buffer) });
-                            buffer.clear();
-                        },
-                        PyIterReturn::StopIteration(r) => {
-                            return Ok(r.map(|r| {
-                                serde_json::to_string(&PyObjectSerializer::new(vm, &r)).unwrap()
-                            }));
-                        },
+            let obj = if f.is_callable() {
+                let args = PyTuple::new(
+                    py,
+                    positional.into_iter().map(|v| match v {
+                        InputValue::Json(v) => {
+                            PyObjectDeserializer::new(py).deserialize(v).unwrap()
+                        }
+                        InputValue::JsonStr(v) => PyObjectDeserializer::new(py)
+                            .deserialize(&mut serde_json::Deserializer::from_str(v))
+                            .unwrap(),
+                    }),
+                );
+                let kwargs = PyDict::new(py);
+                for (k, v) in named {
+                    match v {
+                        InputValue::Json(v) => {
+                            kwargs.set_item(
+                                k,
+                                PyObjectDeserializer::new(py).deserialize(v).unwrap(),
+                            )?;
+                        }
+                        InputValue::JsonStr(v) => {
+                            kwargs.set_item(
+                                k,
+                                PyObjectDeserializer::new(py)
+                                    .deserialize(&mut serde_json::Deserializer::from_str(v))
+                                    .unwrap(),
+                            )?;
+                        }
                     }
                 }
+                f.call(args, Some(kwargs))?
             } else {
-                Ok(Some(
-                    serde_json::to_string(&PyObjectSerializer::new(vm, &m)).unwrap(),
-                ))
-            }
-        })
-    }
+                f
+            };
 
-    pub fn get_jsonschema(&self, name: &str) -> Result<Value> {
-        self.interpreter.enter(|vm| {
-            let m = self
-                .scope
-                .locals
-                .as_object()
-                .get_item(name, vm)
-                .map_err(|e| exception_to_string(vm, &e))?;
-
-            let typing = vm.import("typing", None, 0).unwrap();
-            let any = typing.get_attr("Any", vm).unwrap();
-
-            let typing = HashMap::from_iter([
-                (vm.ctx.types.int_type.get_id(), "number"),
-                (vm.ctx.types.float_type.get_id(), "number"),
-                (vm.ctx.types.str_type.get_id(), "string"),
-                (vm.ctx.types.none_type.get_id(), "null"),
-                (vm.ctx.types.bool_type.get_id(), "boolean"),
-                (vm.ctx.types.dict_type.get_id(), "object"),
-                (any.get_id(), ""),
-            ]);
-
-            fn to_value(
-                obj: PyObjectRef,
-                mapping: &HashMap<usize, &str>,
-                vm: &VirtualMachine,
-            ) -> Option<(Map<String, Value>, bool)> {
-                // basic types
-                if let Some(&v) = mapping.get(&obj.get_id()) {
-                    return Some((
-                        if v.is_empty() {
-                            Map::new()
-                        } else {
-                            Map::from_iter([("type".into(), Value::String(v.into()))])
-                        },
-                        v != "null",
-                    ));
-                }
-
-                if let Ok(annotations) = obj.get_attr("__annotations__", vm) {
-                    if obj.class().is(PyFunction::class(&vm.ctx)) {
-                        // function
-                        let dict = match annotations.downcast_ref_if_exact::<PyDict>(vm) {
-                            Some(it) => it,
-                            _ => return None,
-                        };
-
-                        let c = obj
-                            .get_attr("__code__", vm)
-                            .unwrap()
-                            .downcast_exact::<PyCode>(vm)
-                            .unwrap();
-
-                        let mut ret = Value::Object(Map::new());
-                        if let Ok(v) = dict.get_item(vm.ctx.intern_str("return"), vm) {
-                            if let Some((v, _)) = to_value(v, mapping, vm) {
-                                ret = Value::Object(v);
-                            }
-                        }
-
-                        let mut args = Vec::new();
-                        for &arg in c.arg_names().args {
-                            let mut a = Map::new();
-                            if let Ok(v) = dict.get_item(arg, vm) {
-                                if let Some((v, _)) = to_value(v, mapping, vm) {
-                                    a = v;
-                                }
-                            }
-                            args.push(Value::Object(a));
-                        }
-                        let schema = Map::from_iter([
-                            ("type".into(), Value::String("function".into())),
-                            ("parameters".into(), Value::Array(args)),
-                            ("return".into(), ret),
-                        ]);
-                        return Some((schema, true));
-                    }
-                    // struct
-                    let dict = match annotations.downcast_ref_if_exact::<PyDict>(vm) {
-                        Some(it) => it,
-                        _ => return None,
-                    };
-                    let mut properties = Map::new();
-                    let mut required = Vec::new();
-                    let mut field = if let Ok(desc) = obj.get_attr("__field__", vm) {
-                        if let Ok(Value::Object(o)) =
-                            serde_json::to_value(PyObjectSerializer::new(vm, &desc))
-                        {
-                            o
-                        } else {
-                            Map::new()
-                        }
-                    } else {
-                        Map::new()
-                    };
-
-                    for (k, v) in dict.into_iter() {
-                        let key = k.downcast_ref::<PyStr>().unwrap();
-                        let value = v;
-
-                        if let Some((mut v, req)) = to_value(value, mapping, vm) {
-                            match field.remove(key.as_str()) {
-                                Some(Value::String(desc)) => {
-                                    v.insert("description".into(), Value::String(desc));
-                                },
-                                Some(Value::Object(desc)) => {
-                                    for (k, vv) in desc {
-                                        v.insert(k, vv);
-                                    }
-                                },
-                                _ => {},
-                            }
-                            properties.insert(key.as_str().into(), Value::Object(v));
-                            if req {
-                                required.push(Value::String(key.as_str().into()));
-                            }
-                        }
-                    }
-                    let mut schema = Map::from_iter([
-                        ("type".into(), Value::String("object".into())),
-                        ("properties".into(), Value::Object(properties)),
-                        ("required".into(), Value::Array(required)),
-                    ]);
-
-                    if let Some(name) = obj
-                        .get_attr("__name__", vm)
-                        .ok()
-                        .and_then(|e| e.downcast_exact::<PyStr>(vm).ok())
-                    {
-                        schema.insert("title".into(), Value::String(name.as_str().into()));
-                    };
-
-                    if let Some(s) = obj
-                        .get_attr("__doc__", vm)
-                        .ok()
-                        .and_then(|e| e.downcast_exact::<PyStr>(vm).ok())
-                    {
-                        schema.insert("description".into(), Value::String(s.as_str().into()));
-                    }
-                    Some((schema, true))
-                } else if let Ok(args) = obj.get_attr("__args__", vm) {
-                    let it = if let Ok(it) = args.get_iter(vm) {
-                        it
-                    } else {
-                        return None;
-                    };
-                    #[derive(PartialEq, Eq)]
-                    enum Type {
-                        Array,
-                        Object,
-                        Tuple,
-                        Union,
-                        Generator,
-                    }
-                    let origin = {
-                        let origin = obj.get_attr("__origin__", vm);
-                        if let Ok(origin) = origin {
-                            if origin.is(vm.ctx.types.list_type) {
-                                Type::Array
-                            } else if origin.is(vm.ctx.types.tuple_type) {
-                                Type::Tuple
-                            } else if origin.is(vm.ctx.types.dict_type) {
-                                Type::Object
-                            } else if let Some(name) = origin
-                                .get_attr("__name__", vm)
-                                .ok()
-                                .and_then(|e| e.downcast_exact::<PyStr>(vm).ok())
-                            {
-                                match name.as_str() {
-                                    "Union" | "Literal" => Type::Union,
-                                    "Generator" => Type::Generator,
-                                    _ => return None,
-                                }
-                            } else {
-                                return None;
-                            }
-                        } else {
-                            Type::Union
-                        }
-                    };
-
-                    match origin {
-                        Type::Array => {
-                            // array
-                            let mut schema = Map::new();
-                            if let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                let value = t;
-                                if let Some((v, _)) = to_value(value, mapping, vm) {
-                                    schema.insert("items".into(), Value::Object(v));
-                                }
-                            }
-                            return Some((schema, true));
-                        },
-                        Type::Object => {
-                            // dict
-                            let mut schema =
-                                Map::from_iter([("type".into(), Value::String("object".into()))]);
-                            if let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                if t.get_id() != vm.ctx.types.str_type.get_id() {
-                                    return None;
-                                }
-                            }
-                            if let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                // get last
-                                let value = t;
-                                if let Some((v, _)) = to_value(value, mapping, vm) {
-                                    schema.insert("additionalProperties".into(), Value::Object(v));
-                                }
-                            }
-                            return Some((schema, true));
-                        },
-                        Type::Union => {
-                            // union
-                            let mut oneof = Vec::new();
-                            let mut required = true;
-                            while let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                let value = t;
-                                if value.get_id() == vm.ctx.types.none_type.get_id() {
-                                    required = false;
-                                    continue;
-                                }
-                                if let Some((v, _)) = to_value(value, mapping, vm) {
-                                    oneof.push(Value::Object(v));
-                                }
-                            }
-                            if oneof.len() == 1 {
-                                match oneof.remove(0) {
-                                    Value::Object(mut o) => {
-                                        if !required {
-                                            o["type"] = Value::Array(vec![
-                                                Value::String("null".into()),
-                                                o["type"].clone(),
-                                            ]);
-                                        }
-                                        return Some((o, required));
-                                    },
-                                    _ => unreachable!(),
-                                }
-                            }
-                            Some((
-                                Map::from_iter([("oneOf".into(), Value::Array(oneof))]),
-                                required,
-                            ))
-                        },
-                        Type::Generator => {
-                            let mut schema = Map::from_iter([(
-                                "type".into(),
-                                Value::String("generator".into()),
-                            )]);
-                            // elem
-                            if let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                let value = t;
-                                if let Some((v, _)) = to_value(value, mapping, vm) {
-                                    schema.insert("items".into(), Value::Object(v));
-                                }
-                            }
-                            // send
-                            let _ = it.next(vm);
-                            // return
-                            if let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                if !t.is(vm.ctx.types.none_type) {
-                                    if let Some((v, _)) = to_value(t, mapping, vm) {
-                                        schema.insert("return".into(), Value::Object(v));
-                                    }
-                                }
-                            }
-
-                            Some((schema, true))
-                        },
-                        Type::Tuple => {
-                            let mut elems = Vec::new();
-                            let mut required = true;
-                            while let Ok(PyIterReturn::Return(t)) = it.next(vm) {
-                                let value = t;
-                                if value.get_id() == vm.ctx.types.none_type.get_id() {
-                                    required = false;
-                                    continue;
-                                }
-                                if let Some((v, _)) = to_value(value, mapping, vm) {
-                                    elems.push(Value::Object(v));
-                                }
-                            }
-                            Some((
-                                Map::from_iter([
-                                    ("type".into(), Value::String("array".into())),
-                                    (
-                                        "minItems".into(),
-                                        Value::Number(serde_json::Number::from(elems.len())),
-                                    ),
-                                    ("prefixItems".into(), Value::Array(elems)),
-                                    ("items".into(), Value::Bool(false)),
-                                ]),
-                                required,
-                            ))
-                        },
-                    }
-                } else {
-                    serde_json::to_value(PyObjectSerializer::new(vm, &obj))
-                        .ok()
-                        .map(|v| (Map::from_iter([("const".into(), v)]), true))
-                }
+            if let Ok(s) = serde_json::to_string(&PyObjectSerializer::new(py, obj)) {
+                return Ok(Some(s));
             }
 
-            Ok(if let Some((schema, _)) = to_value(m, &typing, vm) {
-                Value::Object(schema)
-            } else {
-                json!({
-                    "type": "object",
-                })
-            })
-        })
-    }
-}
+            if let Ok(iter) = obj.iter() {
+                for el in iter {
+                    callback(
+                        &serde_json::to_string(&PyObjectSerializer::new(py, el.unwrap())).unwrap(),
+                    );
+                }
+                return Ok(None);
+            }
 
-fn exception_to_string(vm: &VirtualMachine, e: &PyBaseExceptionRef) -> Error {
-    let mut buffer = String::new();
-    if vm.write_exception(&mut buffer, e).is_ok() {
-        Error::PythonError(buffer)
-    } else {
-        Error::UnexpectedError("fail to write exception")
+            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "unsupported return type",
+            ))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use assert_json_diff::assert_json_eq;
-    use jsonschema::JSONSchema;
     use serde_json::json;
 
     use super::*;
@@ -494,8 +132,8 @@ def gen():
     for i in range(10):
         yield i
 "#;
-        let vm = VM::new(|_| {});
-        let s = vm.script(content).unwrap();
+        let s = Scope::new();
+        s.load_script(content).unwrap();
         let x = s
             .run("hello", [InputValue::Json(json!(32))], [], |_| {})
             .unwrap();
@@ -508,163 +146,5 @@ def gen():
         let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
         assert_eq!(x, None);
         assert_eq!(v, vec!["0", "1", "2", "3", "4", "5", "6", "7", "8", "9",]);
-    }
-
-    #[test]
-    fn typing() {
-        let content = r#"
-import typing, json
-
-class Nested:
-    data: str
-
-class Data(typing.TypedDict):
-    __field__ = {
-        's': 'THIS IS A TEST',
-        'i': {
-            'title': 'int',
-        }
-    }
-
-    s: str
-    i: int
-    f: float
-    b: bool
-    d: dict[str, int]
-    o: typing.Optional[str]
-    nested: Nested | list[str] | str
-    literal: typing.Literal[123, 'abc']
-    any: typing.Any
-    t: typing.Tuple[str, int]
-
-Generator = typing.Generator[int, None, None]
-
-def test_func(a: int, b, c: str) -> int:
-    ...
-"#;
-        let vm = VM::new(|_| {});
-        let s = vm.script(content).unwrap();
-        let x = s.get_jsonschema("Data").unwrap();
-        JSONSchema::compile(&x).unwrap();
-        assert_json_eq!(
-            x,
-            json!({
-              "properties": {
-                "b": {
-                  "type": "boolean"
-                },
-                "d": {
-                  "additionalProperties": {
-                    "type": "number"
-                  },
-                  "type": "object"
-                },
-                "f": {
-                  "type": "number"
-                },
-                "i": {
-                  "title": "int",
-                  "type": "number"
-                },
-                "literal": {
-                  "oneOf": [
-                    {
-                      "const": 123
-                    },
-                    {
-                      "const": "abc"
-                    }
-                  ]
-                },
-                "nested": {
-                  "oneOf": [
-                    {
-                      "properties": {
-                        "data": {
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "data"
-                      ],
-                      "title": "Nested",
-                      "type": "object"
-                    },
-                    {
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    {
-                      "type": "string"
-                    }
-                  ],
-                },
-                "o": {
-                  "type": ["null", "string"]
-                },
-                "s": {
-                  "description": "THIS IS A TEST",
-                  "type": "string"
-                },
-                "any": {},
-                "t": {
-                    "type": "array",
-                    "prefixItems": [
-                        {
-                            "type": "string"
-                        },
-                        {
-                            "type": "number"
-                        }
-                    ],
-                    "minItems": 2,
-                    "items": false
-                }
-              },
-              "required": [
-                "s",
-                "i",
-                "f",
-                "b",
-                "d",
-                "nested",
-                "literal",
-                "any",
-                "t",
-              ],
-              "title": "Data",
-              "type": "object"
-            })
-        );
-
-        assert_json_eq!(
-            s.get_jsonschema("Generator").unwrap(),
-            json!({
-                "type": "generator",
-                "items": {
-                    "type": "number"
-                },
-            })
-        );
-
-        assert_json_eq!(
-            s.get_jsonschema("test_func").unwrap(),
-            json!({
-                "type": "function",
-                "parameters": [
-                    {
-                        "type": "number"
-                    },
-                    {},
-                    {
-                        "type": "string"
-                    }
-                ],
-                "return": {
-                    "type": "number"
-                }
-            })
-        );
     }
 }

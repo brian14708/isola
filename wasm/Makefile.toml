@@ -11,6 +11,8 @@ args = [
     "--wasm-bulk-memory",
     "true",
     "target/wasm32-wasi/release/promptkit_python.wasm",
+    "--mapdir",
+    "/usr::target/wasm32-wasi/wasi-deps/usr",
     "-o",
     "target/wasm32-wasi/release/promptkit_python.init.wasm"
 ]
