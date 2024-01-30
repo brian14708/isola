@@ -21,7 +21,8 @@ use tokio_stream::StreamExt;
 
 pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
-        .route("/api/exec", post(exec))
+        .route("/exec", post(exec))
+        .route("/v1/code/exec", post(exec))
         .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
         .route(
             "/debug/metrics",

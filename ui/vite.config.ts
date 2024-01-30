@@ -11,4 +11,21 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/v1/": {
+        target: "http://localhost:3000",
+      },
+    },
+  },
+  build: {
+    chunkSizeWarningLimit: 4096,
+    rollupOptions: {
+      output: {
+        manualChunks: (e) => {
+          if (e.includes("/node_modules/monaco-editor/")) return "monaco";
+        },
+      },
+    },
+  },
 });

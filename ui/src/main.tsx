@@ -10,7 +10,7 @@ const router = createRouter({ routeTree });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <ThemeProvider defaultTheme="system" storageKey="ui-theme">
+    <ThemeProvider>
       <RouterProvider router={router} />
     </ThemeProvider>
   </React.StrictMode>,
