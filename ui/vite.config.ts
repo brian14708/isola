@@ -1,24 +1,13 @@
-import { defineConfig } from 'vite';
-import { fileURLToPath, URL } from 'url';
-import react from '@vitejs/plugin-react-swc';
-import { TanStackRouterVite } from '@tanstack/router-vite-plugin';
+import { defineConfig } from "vite";
+import path from "path";
+import react from "@vitejs/plugin-react-swc";
 
 // https://vitejs.dev/config/
 export default defineConfig({
-	plugins: [react(), TanStackRouterVite()],
-	resolve: {
-		alias: {
-			'@': fileURLToPath(new URL('./src', import.meta.url))
-		}
-	},
-	server: {
-		proxy: {
-			'/api': {
-				target: 'http://localhost:3000'
-			},
-			'/invoke': {
-				target: 'http://localhost:3000'
-			}
-		}
-	}
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
+  },
 });

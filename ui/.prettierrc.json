@@ -1,0 +1,13 @@
+{
+  "plugins": ["prettier-plugin-tailwindcss"],
+  "tailwindFunctions": ["cn", "cva"],
+  "overrides": [
+    {
+      "files": "src/components/ui/*.tsx",
+      "options": {
+        "semi": false,
+        "trailingComma": "es5"
+      }
+    }
+  ]
+}
