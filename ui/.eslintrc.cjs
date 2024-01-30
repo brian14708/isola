@@ -7,7 +7,7 @@ module.exports = {
     "plugin:react-hooks/recommended",
     "plugin:tailwindcss/recommended",
   ],
-  ignorePatterns: ["dist", ".eslintrc.cjs"],
+  ignorePatterns: ["dist", ".eslintrc.cjs", "src/routeTree.gen.ts"],
   parser: "@typescript-eslint/parser",
   overrides: [
     {
