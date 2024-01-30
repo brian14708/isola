@@ -18,6 +18,7 @@ use promptkit_executor::{ExecResult, ExecStreamItem, VmManager};
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
 use tokio_stream::StreamExt;
+use tower_http::services::{ServeDir, ServeFile};
 
 pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
@@ -29,6 +30,10 @@ pub fn router(state: AppState) -> axum::Router {
             get(|State(metrics): State<Arc<Metrics>>| ready(metrics.into_response())),
         )
         .with_state(state.clone())
+        .nest_service(
+            "/ui",
+            ServeDir::new("ui/dist").fallback(ServeFile::new("ui/dist/index.html")),
+        )
 }
 
 #[derive(serde::Deserialize)]

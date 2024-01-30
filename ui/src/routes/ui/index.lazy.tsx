@@ -6,7 +6,7 @@ import { EditorMenu } from "@/components/editor-menu";
 import { useCallback, useEffect, useRef } from "react";
 import JSON5 from "json5";
 
-export const Route = createLazyFileRoute("/")({
+export const Route = createLazyFileRoute("/ui/")({
   component: Index,
 });
 
