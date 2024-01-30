@@ -22,7 +22,6 @@ use tower_http::services::{ServeDir, ServeFile};
 
 pub fn router(state: AppState) -> axum::Router {
     axum::Router::new()
-        .route("/exec", post(exec))
         .route("/v1/code/exec", post(exec))
         .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
         .route(
