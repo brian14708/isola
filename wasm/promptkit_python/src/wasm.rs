@@ -1,8 +1,16 @@
 use std::cell::RefCell;
 
+use pyo3::append_to_inittab;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
+use pyo3::types::PyString;
+use serde::de::DeserializeSeed;
+
 use self::exports::vm::Argument;
-use crate::script::InputValue;
-use crate::script::Scope;
+use self::promptkit::python::http_client::Request;
+use crate::script::{InputValue, Scope};
+use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
+use crate::wasm::promptkit::python::http_client::{self, Method};
 
 wit_bindgen::generate!({
     world: "python-vm",
@@ -52,6 +60,184 @@ impl exports::vm::Guest for Global {
     }
 }
 
+#[pymodule]
+#[pyo3(name = "promptkit")]
+fn promptkit_module(py: Python<'_>, module: &PyModule) -> PyResult<()> {
+    let http_module = PyModule::new(py, "http")?;
+    http(py, http_module)?;
+
+    module.add_submodule(http_module)?;
+    Ok(())
+}
+
+fn set_headers(req: &Request, headers: &PyDict) -> PyResult<()> {
+    for (k, v) in headers.iter() {
+        let k = k.downcast::<PyString>();
+        let v = v.downcast::<PyString>();
+
+        match (k, v) {
+            (Ok(k), Ok(v)) => {
+                req.set_header(k.to_str()?, v.to_str()?)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+            }
+            _ => {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "invalid headers".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[pymodule]
+fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
+    #[pyfn(module)]
+    fn get(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Get);
+        request.set_header("accept", "application/json").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        match http_client::fetch(request) {
+            Ok(response) => {
+                return PyObjectDeserializer::new(py)
+                    .deserialize(&mut serde_json::Deserializer::from_slice(
+                        &(http_client::Response::body(response).map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                        })?),
+                    ))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
+            }
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                e.to_string(),
+            )),
+        }
+    }
+
+    #[pyfn(module)]
+    fn get_sse(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Get);
+        request.set_header("accept", "text/event-stream").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        match http_client::fetch(request) {
+            Ok(response) => Ok(SseIter {
+                body: http_client::Response::body_sse(response),
+            }
+            .into_py(py)),
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                e.to_string(),
+            )),
+        }
+    }
+
+    #[pyfn(module)]
+    fn post(
+        py: Python<'_>,
+        url: &PyString,
+        body: Option<PyObject>,
+        headers: Option<&PyDict>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Post);
+        request
+            .set_header("content-type", "application/json")
+            .unwrap();
+        request.set_header("accept", "application/json").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        if let Some(body) = body {
+            request.set_body(
+                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+            );
+        }
+        match http_client::fetch(request) {
+            Ok(response) => {
+                return PyObjectDeserializer::new(py)
+                    .deserialize(&mut serde_json::Deserializer::from_slice(
+                        &(http_client::Response::body(response).map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                        })?),
+                    ))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
+            }
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                e.to_string(),
+            )),
+        }
+    }
+
+    #[pyfn(module)]
+    fn post_sse(
+        py: Python<'_>,
+        url: &PyString,
+        body: Option<PyObject>,
+        headers: Option<&PyDict>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Post);
+        request
+            .set_header("content-type", "application/json")
+            .unwrap();
+        request.set_header("accept", "text/event-stream").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        if let Some(body) = body {
+            request.set_body(
+                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+            );
+        }
+        match http_client::fetch(request) {
+            Ok(response) => Ok(SseIter {
+                body: http_client::Response::body_sse(response),
+            }
+            .into_py(py)),
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                e.to_string(),
+            )),
+        }
+    }
+
+    Ok(())
+}
+
+#[pyclass]
+struct SseIter {
+    body: http_client::ResponseSseBody,
+}
+
+#[pymethods]
+impl SseIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
+        match slf.body.read() {
+            Some(Ok((_, _, data))) => {
+                if data == "[DONE]" {
+                    while slf.body.read().is_some() {}
+                    Ok(None)
+                } else {
+                    Ok(Some(
+                        PyObjectDeserializer::new(slf.py())
+                            .deserialize(&mut serde_json::Deserializer::from_str(&data))
+                            .map_err(|e| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                            })?,
+                    ))
+                }
+            }
+            Some(Err(err)) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                err.to_string(),
+            )),
+            None => Ok(None),
+        }
+    }
+}
+
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
 }
@@ -64,6 +250,7 @@ pub extern "C" fn _initialize() {
     unsafe { __wasm_call_ctors() };
 
     GLOBAL_SCOPE.with(|scope| {
+        append_to_inittab!(promptkit_module);
         let v = Scope::new();
         v.load_script("").unwrap();
         scope.borrow_mut().replace(v);
