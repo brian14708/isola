@@ -14,6 +14,7 @@ module.exports = {
       files: ["src/components/ui/*.tsx"],
       rules: {
         "tailwindcss/enforces-shorthand": "off",
+        "tailwindcss/no-custom-classname": "off",
       },
     },
   ],

@@ -1,14 +1,25 @@
-import type { editor } from "monaco-editor";
+import { useCallback, useEffect, useRef } from "react";
 import { createLazyFileRoute } from "@tanstack/react-router";
+import JSON5 from "json5";
+import type { editor } from "monaco-editor";
+import pako from "pako";
 
 import { Editor } from "@/components/editor";
 import { EditorMenu } from "@/components/editor-menu";
-import { useCallback, useEffect, useRef } from "react";
-import JSON5 from "json5";
+import { useToast } from "@/components/ui/use-toast";
 
 export const Route = createLazyFileRoute("/ui/")({
   component: Index,
 });
+
+function encode(uint8array: Uint8Array) {
+  const output = [];
+  for (let i = 0, length = uint8array.length; i < length; i++) {
+    output.push(String.fromCharCode(uint8array[i]));
+  }
+  const base64 = btoa(output.join(""));
+  return base64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 const CODE_TEMPLATE = `\
 def handle(request):
@@ -29,6 +40,7 @@ function Index() {
   const editorRef = useRef<editor.IStandaloneCodeEditor>(null);
   const requestRef = useRef<editor.IStandaloneCodeEditor>(null);
   const previewRef = useRef<editor.IStandaloneCodeEditor>(null);
+  const { toast } = useToast();
 
   const save = useCallback(() => {
     if (!editorRef.current || !requestRef.current) {
@@ -42,6 +54,9 @@ function Index() {
         request: requestRef.current.getValue(),
       }),
     );
+    if (window.location.hash) {
+      window.location.hash = "";
+    }
   }, []);
 
   useEffect(() => {
@@ -88,6 +103,24 @@ function Index() {
     }
 
     try {
+      const hash = window.location.hash.substring(1);
+      if (hash) {
+        //  from url safe base64
+        const data = pako.inflateRaw(
+          Uint8Array.from(
+            atob(hash.replace(/_/g, "/").replace(/-/g, "+")),
+            (c) => c.charCodeAt(0),
+          ),
+        );
+        const { script, request } = JSON.parse(new TextDecoder().decode(data));
+        editorRef.current.setValue(script);
+        requestRef.current.setValue(request);
+        return;
+      }
+    } catch (err) {
+      // ignore
+    }
+    try {
       const data = window.localStorage.getItem("editor");
       if (data) {
         const { script, request } = JSON.parse(data);
@@ -103,11 +136,40 @@ function Index() {
     <div className="flex h-screen w-screen flex-col">
       <div className="p-2">
         <EditorMenu
-          onLoad={({ url }) => {
-            if (!url) {
-              editorRef.current?.setValue(CODE_TEMPLATE);
-              requestRef.current?.setValue(REQUEST_TEMPLATE);
-              save();
+          onEvent={async (evt) => {
+            switch (evt.type) {
+              case "run":
+                execute();
+                break;
+              case "save":
+                save();
+                break;
+              case "load":
+                if (!evt.url) {
+                  editorRef.current?.setValue(CODE_TEMPLATE);
+                  requestRef.current?.setValue(REQUEST_TEMPLATE);
+                  save();
+                }
+                break;
+              case "share": {
+                if (!editorRef.current || !requestRef.current) {
+                  return;
+                }
+
+                const data = JSON.stringify({
+                  script: editorRef.current.getValue(),
+                  request: requestRef.current.getValue(),
+                });
+                const compressed = encode(pako.deflateRaw(data, { level: 9 }));
+                const u = new URL(window.location.toString());
+                u.hash = compressed;
+                await navigator.clipboard.writeText(u.toString());
+                console.log(u.toString());
+                toast({
+                  title: "Copied to clipboard",
+                });
+                break;
+              }
             }
           }}
         />

@@ -40,22 +40,25 @@ struct ExecRequest {
     script: String,
     method: String,
     args: Vec<Box<RawValue>>,
+    timeout: Option<u64>,
 }
 
 async fn exec(
     State(vm): State<Arc<VmManager>>,
     Json(req): Json<ExecRequest>,
 ) -> crate::routes::Result {
-    let exec = vm
-        .exec(
+    let exec = tokio::time::timeout(
+        Duration::from_secs(req.timeout.unwrap_or(5)),
+        vm.exec(
             &req.script,
             req.method,
             req.args
                 .into_iter()
                 .map(|s| Box::<str>::from(s).into_string())
                 .collect::<Vec<_>>(),
-        )
-        .await?;
+        ),
+    )
+    .await??;
 
     match exec {
         ExecResult::Error(err) => Ok((

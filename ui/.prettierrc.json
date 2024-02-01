@@ -1,9 +1,13 @@
 {
-  "plugins": ["prettier-plugin-tailwindcss"],
+  "plugins": [
+    "prettier-plugin-tailwindcss",
+    "@ianvs/prettier-plugin-sort-imports"
+  ],
   "tailwindFunctions": ["cn", "cva"],
+  "importOrder": ["^react$", "<THIRD_PARTY_MODULES>", "", "^@/", "", "^[./]"],
   "overrides": [
     {
-      "files": "src/components/ui/*.tsx",
+      "files": "src/components/ui/*.{ts,tsx}",
       "options": {
         "semi": false,
         "trailingComma": "es5"

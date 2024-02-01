@@ -5,12 +5,24 @@ import {
   MenubarMenu,
   MenubarRadioGroup,
   MenubarRadioItem,
+  MenubarSeparator,
+  MenubarShortcut,
   MenubarTrigger,
 } from "@/components/ui/menubar";
+
 import { useTheme } from "./theme-provider";
 
+export type EditorEvent =
+  | {
+      type: "run" | "save" | "share";
+    }
+  | {
+      type: "load";
+      url?: string;
+    };
+
 export interface EditorMenuProps {
-  onLoad?: (_: { url?: string }) => void;
+  onEvent?: (_: EditorEvent) => void;
 }
 
 export function EditorMenu(props: EditorMenuProps) {
@@ -26,7 +38,32 @@ export function EditorMenu(props: EditorMenuProps) {
         <MenubarContent>
           <MenubarItem
             onClick={() => {
-              props.onLoad?.({});
+              props.onEvent?.({ type: "run" });
+            }}
+          >
+            Run
+            <MenubarShortcut>⌘⏎</MenubarShortcut>
+          </MenubarItem>
+          <MenubarItem
+            onClick={() => {
+              props.onEvent?.({ type: "save" });
+            }}
+          >
+            Save
+            <MenubarShortcut>⌘S</MenubarShortcut>
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem
+            onClick={() => {
+              props.onEvent?.({ type: "share" });
+            }}
+          >
+            Share
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem
+            onClick={() => {
+              props.onEvent?.({ type: "load" });
             }}
           >
             Reset
