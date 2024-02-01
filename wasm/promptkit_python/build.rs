@@ -6,6 +6,7 @@ fn download(url: &str, dest: &str) -> PathBuf {
     let url = Url::parse(url).unwrap();
 
     let mut dest = PathBuf::from(dest);
+    dest.push("downloads");
     fs::create_dir_all(&dest).unwrap();
     dest.push(url.path_segments().unwrap().last().unwrap());
     if dest.is_file() {

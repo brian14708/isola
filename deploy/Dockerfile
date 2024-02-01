@@ -32,8 +32,9 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-tools --locked
 WORKDIR /src
 COPY wasm .
-RUN --mount=type=cache,target=/src/target/wasm32-wasi \
-    --mount=type=cache,target=/src/target/release-wasm \
+RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
+    --mount=type=cache,target=/src/target/wasm32-wasi/wasi-deps/downloads \
+    --mount=type=cache,target=/src/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo make wasm
 
@@ -44,6 +45,7 @@ USER nonroot
 COPY --from=server-build --chown=nonroot:nonroot /src/target/promptkit_server .
 COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
+COPY --from=wasm-build --chown=nonroot:nonroot /src/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
 
 EXPOSE 3000
 CMD ["./promptkit_server"]
