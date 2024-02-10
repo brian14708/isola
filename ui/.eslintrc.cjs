@@ -11,7 +11,7 @@ module.exports = {
   parser: "@typescript-eslint/parser",
   overrides: [
     {
-      files: ["src/components/ui/*.tsx"],
+      files: ["src/components/ui/*.{ts,tsx}"],
       rules: {
         "tailwindcss/enforces-shorthand": "off",
         "tailwindcss/no-custom-classname": "off",
