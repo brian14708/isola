@@ -1,5 +1,6 @@
-mod memory_buffer;
 mod resource;
+pub mod trace;
+mod trace_output;
 mod vm;
 mod vm_cache;
 mod vm_manager;

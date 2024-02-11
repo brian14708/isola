@@ -14,7 +14,10 @@ use axum::{
     Json,
 };
 pub use error::Result;
-use promptkit_executor::{ExecResult, ExecStreamItem, VmManager};
+use promptkit_executor::{
+    trace::{MemoryTracer, NoopTracer, TraceEvent, TraceLogLevel},
+    ExecResult, ExecStreamItem, VmManager,
+};
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
 use tokio_stream::StreamExt;
@@ -41,24 +44,51 @@ struct ExecRequest {
     method: String,
     args: Vec<Box<RawValue>>,
     timeout: Option<u64>,
+    trace: Option<bool>,
+}
+
+#[derive(serde::Serialize)]
+enum HttpTraceEvent {
+    Log {
+        level: &'static str,
+        content: String,
+    },
+}
+
+impl From<TraceEvent> for HttpTraceEvent {
+    fn from(value: TraceEvent) -> Self {
+        match value {
+            TraceEvent::Log { content, level } => Self::Log {
+                content,
+                level: match level {
+                    TraceLogLevel::Stdout => "info",
+                    TraceLogLevel::Stderr => "error",
+                },
+            },
+        }
+    }
 }
 
 async fn exec(
     State(vm): State<Arc<VmManager>>,
     Json(req): Json<ExecRequest>,
 ) -> crate::routes::Result {
-    let exec = tokio::time::timeout(
-        Duration::from_secs(req.timeout.unwrap_or(5)),
-        vm.exec(
-            &req.script,
-            req.method,
-            req.args
-                .into_iter()
-                .map(|s| Box::<str>::from(s).into_string())
-                .collect::<Vec<_>>(),
-        ),
-    )
-    .await??;
+    let mut tracer = req.trace.unwrap_or_default().then(MemoryTracer::new);
+    let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
+    let args = req
+        .args
+        .into_iter()
+        .map(|s| Box::<str>::from(s).into_string())
+        .collect::<Vec<_>>();
+    let exec = if let Some(ref mut t) = tracer {
+        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, t)).await??
+    } else {
+        tokio::time::timeout(
+            timeout,
+            vm.exec(&req.script, req.method, args, &mut NoopTracer::default()),
+        )
+        .await??
+    };
 
     match exec {
         ExecResult::Error(err) => Ok((
@@ -66,9 +96,18 @@ async fn exec(
             Json(json!({ "message": err.to_string() })),
         )
             .into_response()),
-        ExecResult::Response(resp) => {
-            Ok((StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response())
-        }
+        ExecResult::Response(resp) => Ok(if let Some(tracer) = tracer {
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "return": RawValue::from_string(resp)?,
+                    "trace": tracer.events().into_iter().map(|e| e.into()).collect::<Vec<HttpTraceEvent>>(),
+                })),
+            )
+                .into_response()
+        } else {
+            (StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response()
+        }),
         ExecResult::Stream(stream) => {
             let s = stream.map::<anyhow::Result<Event>, _>(|f| match f {
                 ExecStreamItem::Data(data) => Ok(Event::default().data(data)),

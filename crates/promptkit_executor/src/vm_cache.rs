@@ -21,11 +21,10 @@ impl VmCache {
         caches.get_mut(&hash)?.pop()
     }
 
-    pub fn put(&self, mut vm: Vm) {
+    pub fn put(&self, vm: Vm) {
         if !vm.store.data().reuse() {
             return;
         }
-        vm.store.data_mut().reset();
 
         let mut caches = self.caches.lock();
         caches.entry(vm.hash).or_default().push(vm);

@@ -1533,6 +1533,7 @@ dependencies = [
  "rand",
  "reqwest",
  "sha2",
+ "smallvec",
  "tokio",
  "tokio-stream",
  "tracing",

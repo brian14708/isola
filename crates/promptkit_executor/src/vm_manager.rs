@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::anyhow;
 use sha2::{Digest, Sha256};
+use smallvec::SmallVec;
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
@@ -18,7 +19,8 @@ use wasmtime::{
 };
 
 use crate::{
-    vm::{exports::Argument, PythonVm, Vm, VmState},
+    trace::Tracer,
+    vm::{exports::Argument, PythonVm, Vm, VmRun, VmState},
     vm_cache::VmCache,
 };
 
@@ -124,27 +126,32 @@ impl VmManager {
         &self,
         func: String,
         args: Vec<String>,
-        mut vm: Vm,
+        tracer: &mut impl Tracer,
+        vm: Vm,
     ) -> anyhow::Result<ExecResult> {
         let (tx, mut rx) = mpsc::channel(4);
-        vm.store.data_mut().initialize(tx.clone());
+        let mut run = VmRun::new(vm, tracer, tx.clone());
 
         let cache_weak = Arc::downgrade(&self.cache);
         let exec = ChildTask::spawn(async move {
-            let ret = vm
-                .python
-                .vm()
-                .call_call_func(
-                    &mut vm.store,
-                    &func,
-                    &args.into_iter().map(Argument::Json).collect::<Vec<_>>(),
-                )
-                .await
-                .and_then(|v| v.map_err(|e| anyhow!(e)));
+            let ret = run
+                .exec(|vm, store| async {
+                    vm.call_call_func(
+                        store,
+                        &func,
+                        &args
+                            .into_iter()
+                            .map(Argument::Json)
+                            .collect::<SmallVec<[_; 4]>>(),
+                    )
+                    .await
+                    .and_then(|v| v.map_err(|e| anyhow!(e)))
+                })
+                .await;
             match ret {
                 Ok(()) => {
                     if let Some(cache) = cache_weak.upgrade() {
-                        cache.put(vm);
+                        cache.put(run.finalize());
                     }
                 }
                 Err(err) => {
@@ -187,6 +194,7 @@ impl VmManager {
         script: &str,
         func: String,
         args: Vec<String>,
+        tracer: &mut impl Tracer,
     ) -> anyhow::Result<ExecResult> {
         let mut hasher = Sha256::new();
         hasher.update(script);
@@ -205,7 +213,7 @@ impl VmManager {
             vm
         };
 
-        self.exec_impl(func, args, vm).await
+        self.exec_impl(func, args, tracer, vm).await
     }
 }
 
