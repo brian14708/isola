@@ -9,6 +9,7 @@ edition.workspace = true
 anyhow = "1.0.79"
 async-trait = "0.1.77"
 bytes = "1.5.0"
+coarsetime = "0.1.34"
 eventsource-stream = "0.2.3"
 parking_lot = "0.12.1"
 rand = "0.8.5"

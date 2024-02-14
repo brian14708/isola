@@ -121,11 +121,13 @@ pub(crate) struct VmRun {
 impl VmRun {
     pub fn new(
         mut vm: Vm,
-        tracer: &mut impl Tracer,
+        tracer: Option<&mut impl Tracer>,
         sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
     ) -> Self {
         let o: &mut VmState = vm.store.data_mut();
-        o.tracer_ctx.set(tracer.box_clone());
+        if let Some(tracer) = tracer {
+            o.tracer_ctx.set(Some(tracer.boxed_logger()));
+        }
         o.run = Some(VmRunState { output: sender });
         Self { vm }
     }
@@ -145,7 +147,7 @@ impl VmRun {
     pub fn finalize(mut self) -> Vm {
         let o: &mut VmState = self.vm.store.data_mut();
         o.run = None;
-        o.tracer_ctx.unset();
+        o.tracer_ctx.set(None);
         self.vm
     }
 }

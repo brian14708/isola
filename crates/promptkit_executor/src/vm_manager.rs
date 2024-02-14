@@ -126,7 +126,7 @@ impl VmManager {
         &self,
         func: String,
         args: Vec<String>,
-        tracer: &mut impl Tracer,
+        tracer: Option<&mut impl Tracer>,
         vm: Vm,
     ) -> anyhow::Result<ExecResult> {
         let (tx, mut rx) = mpsc::channel(4);
@@ -194,7 +194,7 @@ impl VmManager {
         script: &str,
         func: String,
         args: Vec<String>,
-        tracer: &mut impl Tracer,
+        tracer: Option<&mut impl Tracer>,
     ) -> anyhow::Result<ExecResult> {
         let mut hasher = Sha256::new();
         hasher.update(script);

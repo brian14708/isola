@@ -15,9 +15,10 @@ use axum::{
 };
 pub use error::Result;
 use promptkit_executor::{
-    trace::{MemoryTracer, NoopTracer, TraceEvent, TraceLogLevel},
+    trace::{MemoryTracer, TraceEvent, TraceLogLevel},
     ExecResult, ExecStreamItem, VmManager,
 };
+use serde::Serialize;
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
 use tokio_stream::StreamExt;
@@ -48,22 +49,29 @@ struct ExecRequest {
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 enum HttpTraceEvent {
     Log {
         level: &'static str,
         content: String,
+        timestamp: f32,
     },
 }
 
 impl From<TraceEvent> for HttpTraceEvent {
     fn from(value: TraceEvent) -> Self {
         match value {
-            TraceEvent::Log { content, level } => Self::Log {
+            TraceEvent::Log {
+                content,
+                level,
+                timestamp,
+            } => Self::Log {
                 content,
                 level: match level {
                     TraceLogLevel::Stdout => "info",
                     TraceLogLevel::Stderr => "error",
                 },
+                timestamp: timestamp.as_f64() as f32,
             },
         }
     }
@@ -80,28 +88,34 @@ async fn exec(
         .into_iter()
         .map(|s| Box::<str>::from(s).into_string())
         .collect::<Vec<_>>();
-    let exec = if let Some(ref mut t) = tracer {
-        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, t)).await??
-    } else {
-        tokio::time::timeout(
-            timeout,
-            vm.exec(&req.script, req.method, args, &mut NoopTracer::default()),
-        )
-        .await??
-    };
+    let exec = tokio::time::timeout(
+        timeout,
+        vm.exec(&req.script, req.method, args, tracer.as_mut()),
+    )
+    .await??;
 
     match exec {
-        ExecResult::Error(err) => Ok((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({ "message": err.to_string() })),
-        )
-            .into_response()),
+        ExecResult::Error(err) => {
+            #[derive(Serialize)]
+            struct Error {
+                message: String,
+                trace: Option<Vec<HttpTraceEvent>>,
+            }
+            Ok((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(Error {
+                    message: err.to_string(),
+                    trace: tracer.map(|t| t.events().map(HttpTraceEvent::from).collect::<Vec<_>>()),
+                }),
+            )
+                .into_response())
+        }
         ExecResult::Response(resp) => Ok(if let Some(tracer) = tracer {
             (
                 StatusCode::OK,
                 Json(json!({
                     "return": RawValue::from_string(resp)?,
-                    "trace": tracer.events().into_iter().map(|e| e.into()).collect::<Vec<HttpTraceEvent>>(),
+                    "trace": tracer.events().map(HttpTraceEvent::from).collect::<Vec<_>>(),
                 })),
             )
                 .into_response()

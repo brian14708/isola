@@ -7,6 +7,7 @@ use std::{
     },
 };
 
+use coarsetime::{Duration, Instant};
 use parking_lot::RwLock;
 use smallvec::SmallVec;
 
@@ -20,15 +21,18 @@ pub enum TraceEvent {
     Log {
         level: TraceLogLevel,
         content: String,
+        timestamp: Duration,
     },
 }
 
-pub trait Tracer: Send + Sync {
+pub trait Logger {
+    fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
+}
+
+pub trait Tracer: Logger {
     fn next_id(&self) -> i16;
 
-    fn box_clone(&self) -> Box<dyn Tracer>;
-
-    fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
+    fn boxed_logger(&self) -> Box<dyn Logger>;
 }
 
 #[derive(Clone)]
@@ -39,6 +43,7 @@ pub struct MemoryTracer {
 struct MemoryTracerInner {
     id: AtomicI16,
     events: RwLock<SmallVec<[TraceEvent; 8]>>,
+    epoch: Instant,
 }
 
 impl Tracer for MemoryTracer {
@@ -46,15 +51,18 @@ impl Tracer for MemoryTracer {
         self.inner.id.fetch_add(1, Ordering::Relaxed)
     }
 
+    fn boxed_logger(&self) -> Box<dyn Logger> {
+        Box::new(self.clone())
+    }
+}
+
+impl Logger for MemoryTracer {
     fn log(&self, level: TraceLogLevel, s: Cow<'_, str>) {
         self.inner.events.write().push(TraceEvent::Log {
             level,
             content: s.to_string(),
+            timestamp: self.inner.epoch.elapsed(),
         });
-    }
-
-    fn box_clone(&self) -> Box<dyn Tracer> {
-        Box::new(self.clone())
     }
 }
 
@@ -64,11 +72,12 @@ impl MemoryTracer {
             inner: Arc::new(MemoryTracerInner {
                 id: AtomicI16::new(0),
                 events: RwLock::new(SmallVec::new()),
+                epoch: Instant::now(),
             }),
         }
     }
 
-    pub fn events(self) -> impl IntoIterator<Item = TraceEvent> {
+    pub fn events(self) -> impl Iterator<Item = TraceEvent> {
         std::mem::take(self.inner.events.write().deref_mut()).into_iter()
     }
 }
@@ -76,20 +85,5 @@ impl MemoryTracer {
 impl Default for MemoryTracer {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-#[derive(Default, Clone)]
-pub struct NoopTracer();
-
-impl Tracer for NoopTracer {
-    fn next_id(&self) -> i16 {
-        0
-    }
-
-    fn log(&self, _: TraceLogLevel, _: Cow<'_, str>) {}
-
-    fn box_clone(&self) -> Box<dyn Tracer> {
-        Box::new(self.clone())
     }
 }
