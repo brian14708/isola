@@ -29,7 +29,7 @@ pub trait Logger {
     fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
 }
 
-pub trait Tracer: Logger {
+pub trait Tracer: Logger + Send + Sync {
     fn next_id(&self) -> i16;
 
     fn boxed_logger(&self) -> Box<dyn Logger>;

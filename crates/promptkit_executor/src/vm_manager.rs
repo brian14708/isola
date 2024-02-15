@@ -1,16 +1,17 @@
 use std::{
     future::Future,
     path::Path,
-    pin::Pin,
+    pin::{pin, Pin},
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use anyhow::anyhow;
+use pin_project::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::sync::mpsc;
+use tokio::{select, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
@@ -31,7 +32,7 @@ pub struct VmManager {
     engine: Engine,
     instance_pre: InstancePre<VmState>,
     cache: Arc<VmCache>,
-    _epoch_ticker: ChildTask<()>,
+    epoch_ticker: JoinHandle<()>,
 }
 
 pub enum ExecStreamItem {
@@ -40,10 +41,10 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub enum ExecResult {
+pub enum ExecResult<'a> {
     Error(anyhow::Error),
     Response(String),
-    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>),
+    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send + 'a>>),
 }
 
 impl VmManager {
@@ -100,7 +101,7 @@ impl VmManager {
             engine: engine.clone(),
             instance_pre,
             cache: Arc::new(VmCache::new()),
-            _epoch_ticker: ChildTask::spawn(async move {
+            epoch_ticker: tokio::task::spawn(async move {
                 let mut interval = tokio::time::interval(EPOCH_TICK);
                 loop {
                     interval.tick().await;
@@ -122,18 +123,21 @@ impl VmManager {
         })
     }
 
-    async fn exec_impl(
+    async fn exec_impl<'a, 'b>(
         &self,
         func: String,
         args: Vec<String>,
-        tracer: Option<&mut impl Tracer>,
+        tracer: Option<&'b mut impl Tracer>,
         vm: Vm,
-    ) -> anyhow::Result<ExecResult> {
+    ) -> anyhow::Result<ExecResult<'a>>
+    where
+        'a: 'b,
+    {
         let (tx, mut rx) = mpsc::channel(4);
         let mut run = VmRun::new(vm, tracer, tx.clone());
 
         let cache_weak = Arc::downgrade(&self.cache);
-        let exec = ChildTask::spawn(async move {
+        let mut exec = Some(Box::pin(async move {
             let ret = run
                 .exec(|vm, store| async {
                     vm.call_call_func(
@@ -142,7 +146,7 @@ impl VmManager {
                         &args
                             .into_iter()
                             .map(Argument::Json)
-                            .collect::<SmallVec<[_; 4]>>(),
+                            .collect::<SmallVec<[_; 2]>>(),
                     )
                     .await
                     .and_then(|v| v.map_err(|e| anyhow!(e)))
@@ -158,11 +162,18 @@ impl VmManager {
                     _ = tx.send(Err(err)).await;
                 }
             };
-        });
+        }));
 
-        let data = match rx.recv().await {
+        let first = select! {
+            _ = exec.as_mut().unwrap() => {
+                exec.take();
+                rx.recv().await
+            },
+            data = rx.recv() => data,
+        };
+
+        let data = match first {
             Some(Ok((data, true))) => {
-                exec.await?;
                 return Ok(ExecResult::Response(data));
             }
             Some(Ok((data, false))) => data,
@@ -174,7 +185,7 @@ impl VmManager {
             }
         };
 
-        let stream = exec.wait_on_stream(
+        let stream = join_with(
             tokio_stream::once(Ok((data, false)))
                 .chain(ReceiverStream::new(rx))
                 .map(|v| match v {
@@ -184,18 +195,22 @@ impl VmManager {
                     Ok((data, false)) => ExecStreamItem::Data(data),
                     Err(err) => ExecStreamItem::Error(err),
                 }),
+            exec,
         );
 
-        Ok(ExecResult::Stream(Box::pin(Box::new(stream))))
+        Ok(ExecResult::Stream(Box::pin(stream)))
     }
 
-    pub async fn exec(
-        &self,
+    pub async fn exec<'a, 'b>(
+        &'_ self,
         script: &str,
         func: String,
         args: Vec<String>,
-        tracer: Option<&mut impl Tracer>,
-    ) -> anyhow::Result<ExecResult> {
+        tracer: Option<&'b mut impl Tracer>,
+    ) -> anyhow::Result<ExecResult<'a>>
+    where
+        'a: 'b,
+    {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
@@ -219,53 +234,57 @@ impl VmManager {
 
 impl Drop for VmManager {
     fn drop(&mut self) {
+        self.epoch_ticker.abort();
         // yield one last time
         self.engine.increment_epoch();
     }
 }
 
-struct ChildTask<T>(tokio::task::JoinHandle<T>);
-
-impl<T> ChildTask<T>
-where
-    T: Send + 'static,
-{
-    pub fn spawn(f: impl Future<Output = T> + Send + 'static) -> Self {
-        Self(tokio::spawn(f))
-    }
-
-    pub fn wait_on_stream<U, S: Stream<Item = U> + Unpin>(self, s: S) -> impl Stream<Item = U> {
-        ChildStream {
-            stream: s,
-            _task: self,
-        }
+fn join_with<T>(
+    stream: impl Stream<Item = T>,
+    task: Option<impl Future<Output = ()>>,
+) -> impl Stream<Item = T> {
+    StreamJoin {
+        stream: Some(stream),
+        task,
     }
 }
 
-impl<T> Drop for ChildTask<T> {
-    fn drop(&mut self) {
-        self.0.abort()
-    }
+#[pin_project]
+pub struct StreamJoin<S: Stream<Item = T>, F: Future<Output = ()>, T> {
+    #[pin]
+    stream: Option<S>,
+    #[pin]
+    task: Option<F>,
 }
 
-impl<T> Future for ChildTask<T> {
-    type Output = <tokio::task::JoinHandle<T> as Future>::Output;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.0).poll(cx)
-    }
-}
-
-pub struct ChildStream<S: Stream<Item = T> + Unpin, T, U> {
-    stream: S,
-    _task: ChildTask<U>,
-}
-
-impl<S: Stream<Item = T> + Unpin, T, U> Stream for ChildStream<S, T, U> {
+impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F, T> {
     type Item = T;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let stream = Pin::new(&mut self.stream);
-        stream.poll_next(cx)
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        if let Some(task) = this.task.as_mut().as_pin_mut() {
+            if let Poll::Ready(()) = task.poll(cx) {
+                this.task.set(None);
+            }
+        }
+
+        if let Some(stream) = this.stream.as_mut().as_pin_mut() {
+            match stream.poll_next(cx) {
+                Poll::Ready(None) => {
+                    this.stream.set(None);
+                }
+                Poll::Ready(Some(v)) => {
+                    return Poll::Ready(Some(v));
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        if this.stream.is_none() && this.task.is_none() {
+            Poll::Ready(None)
+        } else {
+            Poll::Pending
+        }
     }
 }

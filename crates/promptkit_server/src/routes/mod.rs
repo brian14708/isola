@@ -95,33 +95,39 @@ async fn exec(
     .await??;
 
     match exec {
-        ExecResult::Error(err) => {
+        ExecResult::Error(ref err) => {
             #[derive(Serialize)]
             struct Error {
                 message: String,
                 trace: Option<Vec<HttpTraceEvent>>,
             }
+            let e = err.to_string();
+            drop(exec);
             Ok((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(Error {
-                    message: err.to_string(),
+                    message: e.to_string(),
                     trace: tracer.map(|t| t.events().map(HttpTraceEvent::from).collect::<Vec<_>>()),
                 }),
             )
                 .into_response())
         }
-        ExecResult::Response(resp) => Ok(if let Some(tracer) = tracer {
-            (
-                StatusCode::OK,
-                Json(json!({
-                    "return": RawValue::from_string(resp)?,
-                    "trace": tracer.events().map(HttpTraceEvent::from).collect::<Vec<_>>(),
-                })),
-            )
-                .into_response()
-        } else {
-            (StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response()
-        }),
+        ExecResult::Response(ref resp) => {
+            let resp = resp.clone();
+            drop(exec);
+            Ok(if let Some(tracer) = tracer {
+                (
+                    StatusCode::OK,
+                    Json(json!({
+                        "return": RawValue::from_string(resp)?,
+                        "trace": tracer.events().map(HttpTraceEvent::from).collect::<Vec<_>>(),
+                    })),
+                )
+                    .into_response()
+            } else {
+                (StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response()
+            })
+        }
         ExecResult::Stream(stream) => {
             let s = stream.map::<anyhow::Result<Event>, _>(|f| match f {
                 ExecStreamItem::Data(data) => Ok(Event::default().data(data)),
