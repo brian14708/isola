@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use reqwest::Url;
+use url::Url;
 
 fn download(url: &str, dest: &str) -> PathBuf {
     let url = Url::parse(url).unwrap();
@@ -14,10 +14,7 @@ fn download(url: &str, dest: &str) -> PathBuf {
     }
 
     {
-        let mut response = reqwest::blocking::get(url.clone()).unwrap();
-        if !response.status().is_success() {
-            panic!("Failed to download {}", url);
-        }
+        let mut response = ureq::get(url.as_str()).call().unwrap().into_reader();
         let mut tmp = dest.clone();
         tmp.set_extension("tmp");
         let mut f = std::fs::File::create(&tmp).unwrap();
