@@ -82,15 +82,21 @@ function Index() {
           script: editorRef.current.getValue(),
         }),
       });
-      const body = res.body?.getReader();
-      if (!body) throw new Error("No body");
 
-      let result = "";
-      for (;;) {
-        const { done, value } = await body.read();
-        if (done) break;
-        result += new TextDecoder().decode(value);
-        previewRef.current.setValue(result);
+      if (res.headers.get("content-type")?.includes("application/json")) {
+        const data = await res.json();
+        previewRef.current.setValue(JSON.stringify(data, null, 2));
+      } else {
+        const body = res.body?.getReader();
+        if (!body) throw new Error("No body");
+
+        let result = "";
+        for (;;) {
+          const { done, value } = await body.read();
+          if (done) break;
+          result += new TextDecoder().decode(value);
+          previewRef.current.setValue(result);
+        }
       }
     } catch (err) {
       previewRef.current.setValue(`/* ERROR: ${err} */`);
@@ -105,7 +111,7 @@ function Index() {
     try {
       const hash = window.location.hash.substring(1);
       if (hash) {
-        //  from url safe base64
+        // from url safe base64
         const data = pako.inflateRaw(
           Uint8Array.from(
             atob(hash.replace(/_/g, "/").replace(/-/g, "+")),
@@ -181,6 +187,7 @@ function Index() {
             onExecute={execute}
             onSave={save}
             options={{
+              unicodeHighlight: { ambiguousCharacters: false },
               minimap: { enabled: false },
             }}
             language="python"
@@ -197,6 +204,7 @@ function Index() {
             onExecute={execute}
             onSave={save}
             options={{
+              unicodeHighlight: { ambiguousCharacters: false },
               minimap: { enabled: false },
               lineNumbers: "off",
               scrollbar: { vertical: "hidden" },
@@ -212,6 +220,7 @@ function Index() {
           <Editor
             ref={previewRef}
             options={{
+              unicodeHighlight: { ambiguousCharacters: false },
               minimap: { enabled: false },
               lineNumbers: "off",
               readOnly: true,
