@@ -82,6 +82,7 @@ impl StdoutStream for TraceOutput {
             ctx: self.ctx.clone(),
             level: self.level,
             buffer: vec![],
+            prev_write: vec![],
         })
     }
 
@@ -94,30 +95,49 @@ pub struct TraceOutputStream {
     ctx: TraceContext,
     level: TraceLogLevel,
     buffer: Vec<u8>,
+    prev_write: Vec<u8>,
 }
 
 #[async_trait::async_trait]
 impl Subscribe for TraceOutputStream {
-    async fn ready(&mut self) {}
+    async fn ready(&mut self) {
+        if self.prev_write.is_empty() {
+            return;
+        }
+
+        if let Some(t) = self.ctx.inner.get() {
+            let s = String::from_utf8_lossy(&self.prev_write);
+            t.log(self.level, s).await;
+            self.prev_write.clear()
+        }
+    }
 }
 
 impl HostOutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
         if !self.ctx.inner.is_null() {
             self.buffer.extend(bytes);
+            if self.buffer.len() >= 1024 {
+                std::mem::swap(&mut self.buffer, &mut self.prev_write);
+            }
         }
         Ok(())
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        if let Some(t) = self.ctx.inner.get() {
-            t.log(self.level, String::from_utf8_lossy(&self.buffer));
+        if !self.ctx.inner.is_null() {
+            self.prev_write = std::mem::take(&mut self.buffer);
+        } else {
+            self.buffer.clear();
         }
-        self.buffer.clear();
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        Ok(1024)
+        if !self.prev_write.is_empty() {
+            Ok(0)
+        } else {
+            Ok(1024)
+        }
     }
 }

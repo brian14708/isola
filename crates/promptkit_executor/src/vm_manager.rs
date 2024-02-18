@@ -11,7 +11,7 @@ use anyhow::anyhow;
 use pin_project::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{select, sync::mpsc, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
@@ -43,7 +43,6 @@ pub enum ExecStreamItem {
 
 pub enum ExecResult<'a> {
     Error(anyhow::Error),
-    Response(String),
     Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send + 'a>>),
 }
 
@@ -127,17 +126,17 @@ impl VmManager {
         &self,
         func: String,
         args: Vec<String>,
-        tracer: Option<&'b mut impl Tracer>,
+        tracer: Option<impl Tracer>,
         vm: Vm,
     ) -> anyhow::Result<ExecResult<'a>>
     where
         'a: 'b,
     {
-        let (tx, mut rx) = mpsc::channel(4);
+        let (tx, rx) = mpsc::channel(4);
         let mut run = VmRun::new(vm, tracer, tx.clone());
 
         let cache_weak = Arc::downgrade(&self.cache);
-        let mut exec = Some(Box::pin(async move {
+        let exec = Some(Box::pin(async move {
             let ret = run
                 .exec(|vm, store| async {
                     vm.call_call_func(
@@ -164,37 +163,14 @@ impl VmManager {
             };
         }));
 
-        let first = select! {
-            _ = exec.as_mut().unwrap() => {
-                exec.take();
-                rx.recv().await
-            },
-            data = rx.recv() => data,
-        };
-
-        let data = match first {
-            Some(Ok((data, true))) => {
-                return Ok(ExecResult::Response(data));
-            }
-            Some(Ok((data, false))) => data,
-            Some(Err(err)) => {
-                return Ok(ExecResult::Error(err));
-            }
-            None => {
-                return Err(anyhow!("unexpected error"));
-            }
-        };
-
         let stream = join_with(
-            tokio_stream::once(Ok((data, false)))
-                .chain(ReceiverStream::new(rx))
-                .map(|v| match v {
-                    Ok((data, true)) => {
-                        ExecStreamItem::End(if data.is_empty() { None } else { Some(data) })
-                    }
-                    Ok((data, false)) => ExecStreamItem::Data(data),
-                    Err(err) => ExecStreamItem::Error(err),
-                }),
+            ReceiverStream::new(rx).map(|v| match v {
+                Ok((data, true)) => {
+                    ExecStreamItem::End(if data.is_empty() { None } else { Some(data) })
+                }
+                Ok((data, false)) => ExecStreamItem::Data(data),
+                Err(err) => ExecStreamItem::Error(err),
+            }),
             exec,
         );
 
@@ -206,7 +182,7 @@ impl VmManager {
         script: &str,
         func: String,
         args: Vec<String>,
-        tracer: Option<&'b mut impl Tracer>,
+        tracer: Option<impl Tracer>,
     ) -> anyhow::Result<ExecResult<'a>>
     where
         'a: 'b,

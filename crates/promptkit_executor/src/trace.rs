@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    ops::DerefMut,
     sync::{
         atomic::{AtomicI16, Ordering},
         Arc,
@@ -8,8 +7,7 @@ use std::{
 };
 
 use coarsetime::{Duration, Instant};
-use parking_lot::RwLock;
-use smallvec::SmallVec;
+use tokio::sync::mpsc;
 
 #[derive(Clone, Copy)]
 pub enum TraceLogLevel {
@@ -25,8 +23,9 @@ pub enum TraceEvent {
     },
 }
 
+#[async_trait::async_trait]
 pub trait Logger {
-    fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
+    async fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
 }
 
 pub trait Tracer: Logger + Send + Sync {
@@ -42,7 +41,7 @@ pub struct MemoryTracer {
 
 struct MemoryTracerInner {
     id: AtomicI16,
-    events: RwLock<SmallVec<[TraceEvent; 8]>>,
+    events: mpsc::Sender<TraceEvent>,
     epoch: Instant,
 }
 
@@ -56,34 +55,33 @@ impl Tracer for MemoryTracer {
     }
 }
 
+#[async_trait::async_trait]
 impl Logger for MemoryTracer {
-    fn log(&self, level: TraceLogLevel, s: Cow<'_, str>) {
-        self.inner.events.write().push(TraceEvent::Log {
-            level,
-            content: s.to_string(),
-            timestamp: self.inner.epoch.elapsed(),
-        });
+    async fn log(&self, level: TraceLogLevel, s: Cow<'_, str>) {
+        let _ = self
+            .inner
+            .events
+            .send(TraceEvent::Log {
+                level,
+                content: s.to_string(),
+                timestamp: self.inner.epoch.elapsed(),
+            })
+            .await;
     }
 }
 
 impl MemoryTracer {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(MemoryTracerInner {
-                id: AtomicI16::new(0),
-                events: RwLock::new(SmallVec::new()),
-                epoch: Instant::now(),
-            }),
-        }
-    }
-
-    pub fn events(self) -> impl Iterator<Item = TraceEvent> {
-        std::mem::take(self.inner.events.write().deref_mut()).into_iter()
-    }
-}
-
-impl Default for MemoryTracer {
-    fn default() -> Self {
-        Self::new()
+    pub fn new() -> (Self, mpsc::Receiver<TraceEvent>) {
+        let (tx, rx) = mpsc::channel(1);
+        (
+            Self {
+                inner: Arc::new(MemoryTracerInner {
+                    id: AtomicI16::new(0),
+                    events: tx,
+                    epoch: Instant::now(),
+                }),
+            },
+            rx,
+        )
     }
 }

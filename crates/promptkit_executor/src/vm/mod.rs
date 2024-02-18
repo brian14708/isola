@@ -121,7 +121,7 @@ pub(crate) struct VmRun {
 impl VmRun {
     pub fn new(
         mut vm: Vm,
-        tracer: Option<&mut impl Tracer>,
+        tracer: Option<impl Tracer>,
         sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
     ) -> Self {
         let o: &mut VmState = vm.store.data_mut();

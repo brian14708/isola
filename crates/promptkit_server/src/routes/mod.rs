@@ -5,10 +5,10 @@ use std::{future::ready, sync::Arc, time::Duration};
 
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{
         sse::{Event, KeepAlive},
-        IntoResponse, Sse,
+        IntoResponse, Response, Sse,
     },
     routing::{get, post},
     Json,
@@ -21,7 +21,7 @@ use promptkit_executor::{
 use serde::Serialize;
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
-use tokio_stream::StreamExt;
+use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tower_http::services::{ServeDir, ServeFile};
 
 pub fn router(state: AppState) -> axum::Router {
@@ -81,74 +81,91 @@ async fn exec(
     State(vm): State<Arc<VmManager>>,
     Json(req): Json<ExecRequest>,
 ) -> crate::routes::Result {
-    let mut tracer = req.trace.unwrap_or_default().then(MemoryTracer::new);
+    let (tracer, trace_events) = req
+        .trace
+        .unwrap_or_default()
+        .then(MemoryTracer::new)
+        .map(|(a, b)| (Some(a), Some(b)))
+        .unwrap_or_default();
     let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
     let args = req
         .args
         .into_iter()
         .map(|s| Box::<str>::from(s).into_string())
         .collect::<Vec<_>>();
-    let exec = tokio::time::timeout(
-        timeout,
-        vm.exec(&req.script, req.method, args, tracer.as_mut()),
-    )
-    .await??;
+    let exec =
+        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer)).await??;
 
-    match exec {
-        ExecResult::Error(ref err) => {
+    let resp = match exec {
+        ExecResult::Error(err) => {
             #[derive(Serialize)]
             struct Error {
                 message: String,
-                trace: Option<Vec<HttpTraceEvent>>,
             }
-            let e = err.to_string();
-            drop(exec);
-            Ok((
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(Error {
-                    message: e.to_string(),
-                    trace: tracer.map(|t| t.events().map(HttpTraceEvent::from).collect::<Vec<_>>()),
+                    message: err.to_string(),
                 }),
             )
-                .into_response())
+                .into_response()
         }
-        ExecResult::Response(ref resp) => {
-            let resp = resp.clone();
-            drop(exec);
-            Ok(if let Some(tracer) = tracer {
-                (
-                    StatusCode::OK,
-                    Json(json!({
-                        "return": RawValue::from_string(resp)?,
-                        "trace": tracer.events().map(HttpTraceEvent::from).collect::<Vec<_>>(),
-                    })),
-                )
-                    .into_response()
+        ExecResult::Stream(mut stream) => {
+            if let Some(tracer) = trace_events {
+                let s = stream.map(exec_to_event);
+                let tracer = ReceiverStream::new(tracer).map::<anyhow::Result<Event>, _>(|e| {
+                    Ok(Event::default()
+                        .event("trace")
+                        .json_data(HttpTraceEvent::from(e))?)
+                });
+                stream_response(s.merge(tracer))
             } else {
-                (StatusCode::OK, Json(RawValue::from_string(resp)?)).into_response()
-            })
+                let first = match stream.next().await {
+                    Some(ExecStreamItem::End(end)) => {
+                        return Ok(match end {
+                            Some(data) => Response::builder()
+                                .status(StatusCode::OK)
+                                .header(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static(mime::APPLICATION_JSON.as_ref()),
+                                )
+                                .body(data.into())?,
+                            None => StatusCode::NO_CONTENT.into_response(),
+                        });
+                    }
+                    Some(first) => first,
+                    None => return Ok(StatusCode::NO_CONTENT.into_response()),
+                };
+
+                stream_response(tokio_stream::once(first).chain(stream).map(exec_to_event))
+            }
         }
-        ExecResult::Stream(stream) => {
-            let s = stream.map::<anyhow::Result<Event>, _>(|f| match f {
-                ExecStreamItem::Data(data) => Ok(Event::default().data(data)),
-                ExecStreamItem::End(end) => Ok(match end {
-                    Some(data) => Event::default().data(data),
-                    None => Event::default().data("[DONE]"),
-                }),
-                ExecStreamItem::Error(err) => Ok(Event::default()
-                    .event("error")
-                    .json_data(json!({
-                        "message": err.to_string(),
-                    }))
-                    .unwrap()),
-            });
-            Ok(Sse::new(s)
-                .keep_alive(
-                    KeepAlive::new()
-                        .interval(Duration::from_secs(1))
-                        .text("keepalive"),
-                )
-                .into_response())
-        }
-    }
+    };
+    Ok(resp)
+}
+
+fn exec_to_event(e: ExecStreamItem) -> anyhow::Result<Event> {
+    Ok(match e {
+        ExecStreamItem::Data(data) => Event::default().data(data),
+        ExecStreamItem::End(end) => match end {
+            Some(data) => Event::default().data(data),
+            None => Event::default().data("[DONE]"),
+        },
+        ExecStreamItem::Error(err) => Event::default().event("error").json_data(json!({
+            "message": err.to_string(),
+        }))?,
+    })
+}
+
+fn stream_response<S>(stream: S) -> Response
+where
+    S: Stream<Item = anyhow::Result<Event>> + Send + 'static,
+{
+    Sse::new(stream)
+        .keep_alive(
+            KeepAlive::new()
+                .interval(Duration::from_secs(1))
+                .text("keepalive"),
+        )
+        .into_response()
 }
