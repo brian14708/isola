@@ -27,7 +27,7 @@ impl<T> AtomicCell<T> {
     }
 
     pub fn set(&mut self, t: Option<T>) {
-        let ptr = t.map(|t| Box::into_raw(Box::new(t))).unwrap_or(null_mut());
+        let ptr = t.map_or(null_mut(), |t| Box::into_raw(Box::new(t)));
         let old = self.ptr.swap(ptr, Ordering::Release);
         if !old.is_null() {
             drop(unsafe { Box::from_raw(old) });
@@ -35,7 +35,7 @@ impl<T> AtomicCell<T> {
     }
 
     pub unsafe fn set_unguarded(&self, t: Option<T>) {
-        let ptr = t.map(|t| Box::into_raw(Box::new(t))).unwrap_or(null_mut());
+        let ptr = t.map_or(null_mut(), |t| Box::into_raw(Box::new(t)));
         let old = self.ptr.swap(ptr, Ordering::Release);
         if !old.is_null() {
             drop(unsafe { Box::from_raw(old) });

@@ -41,10 +41,7 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub enum ExecResult {
-    Error(anyhow::Error),
-    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>),
-}
+pub type ExecResult = Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>;
 
 impl VmManager {
     fn cfg() -> Config {
@@ -77,14 +74,13 @@ impl VmManager {
                     }
                 });
 
-            match cache {
-                Ok(c) => c,
-                Err(_) => {
-                    let component = Component::from_file(&engine, path)?;
-                    let data = component.serialize()?;
-                    std::fs::write(cache_path, data)?;
-                    component
-                }
+            if let Ok(c) = cache {
+                c
+            } else {
+                let component = Component::from_file(&engine, path)?;
+                let data = component.serialize()?;
+                std::fs::write(cache_path, data)?;
+                component
             }
         };
 
@@ -122,32 +118,26 @@ impl VmManager {
         })
     }
 
-    async fn exec_impl(
+    fn exec_impl(
         &self,
         func: String,
         args: Vec<String>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
-    ) -> anyhow::Result<ExecResult> {
+    ) -> ExecResult {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
         let mut run = vm.run(tracer, tx.clone());
         let exec = Some(Box::pin(async move {
+            let args = args
+                .into_iter()
+                .map(Argument::Json)
+                .collect::<SmallVec<[_; 2]>>();
             let ret = run
-                .exec(|vm, store| async {
-                    vm.call_call_func(
-                        store,
-                        &func,
-                        &args
-                            .into_iter()
-                            .map(Argument::Json)
-                            .collect::<SmallVec<[_; 2]>>(),
-                    )
-                    .await
-                    .and_then(|v| v.map_err(|e| anyhow!(e)))
-                })
-                .await;
+                .exec(|vm, store| vm.call_call_func(store, &func, &args))
+                .await
+                .and_then(|v| v.map_err(|e| anyhow!(e)));
             match ret {
                 Ok(()) => {
                     cache.put(run.reuse());
@@ -169,7 +159,7 @@ impl VmManager {
             exec,
         );
 
-        Ok(ExecResult::Stream(Box::pin(stream)))
+        Box::pin(stream)
     }
 
     pub async fn exec(
@@ -196,7 +186,7 @@ impl VmManager {
             vm
         };
 
-        self.exec_impl(func, args, tracer, vm).await
+        Ok(self.exec_impl(func, args, tracer, vm))
     }
 }
 

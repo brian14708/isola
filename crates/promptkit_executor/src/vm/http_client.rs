@@ -1,5 +1,6 @@
 use std::{str::FromStr, time::Duration};
 
+use bytes::Bytes;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
 use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
@@ -201,7 +202,7 @@ where
             .headers()
             .get(key)
             .and_then(|e| e.to_str().ok())
-            .map(|s| s.to_owned()))
+            .map(str::to_string))
     }
 
     async fn status(
@@ -225,7 +226,7 @@ where
                         "http",
                         span_id,
                         to_raw_value(&json!({
-                            "content_length": body.as_ref().map(|b| b.len()).unwrap_or_default()
+                            "content_length": body.as_ref().map(Bytes::len).unwrap_or_default()
                         }))
                         .ok(),
                     )

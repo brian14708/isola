@@ -16,15 +16,14 @@ use axum::{
 pub use error::Result;
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer, TraceEvent, TraceEventKind},
-    ExecResult, ExecStreamItem, VmManager,
+    ExecStreamItem, VmManager,
 };
-use serde::Serialize;
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tower_http::services::{ServeDir, ServeFile};
 
-pub fn router(state: AppState) -> axum::Router {
+pub fn router(state: &AppState) -> axum::Router {
     axum::Router::new()
         .route("/v1/code/exec", post(exec))
         .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
@@ -90,6 +89,7 @@ impl From<TraceEvent> for HttpTraceEvent {
         Self {
             id: value.id,
             group: value.group,
+            #[allow(clippy::cast_possible_truncation)]
             timestamp: value.timestamp.as_f64() as f32,
             kind: match value.kind {
                 TraceEventKind::Log { content } => HttpTraceEventKind::Log { content },
@@ -136,53 +136,36 @@ async fn exec(
         .into_iter()
         .map(|s| Box::<str>::from(s).into_string())
         .collect::<Vec<_>>();
-    let exec =
+    let mut stream =
         tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer)).await??;
 
-    let resp = match exec {
-        ExecResult::Error(err) => {
-            #[derive(Serialize)]
-            struct Error {
-                message: String,
-            }
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(Error {
-                    message: err.to_string(),
-                }),
-            )
-                .into_response()
-        }
-        ExecResult::Stream(mut stream) => {
-            if let Some(tracer) = trace_events {
-                let s = stream.map(exec_to_event);
-                let tracer = ReceiverStream::new(tracer).map::<anyhow::Result<Event>, _>(|e| {
-                    Ok(Event::default()
-                        .event("trace")
-                        .json_data(HttpTraceEvent::from(e))?)
+    let resp = if let Some(tracer) = trace_events {
+        let s = stream.map(exec_to_event);
+        let tracer = ReceiverStream::new(tracer).map::<anyhow::Result<Event>, _>(|e| {
+            Ok(Event::default()
+                .event("trace")
+                .json_data(HttpTraceEvent::from(e))?)
+        });
+        stream_response(s.merge(tracer))
+    } else {
+        let first = match stream.next().await {
+            Some(ExecStreamItem::End(end)) => {
+                return Ok(match end {
+                    Some(data) => Response::builder()
+                        .status(StatusCode::OK)
+                        .header(
+                            CONTENT_TYPE,
+                            HeaderValue::from_static(mime::APPLICATION_JSON.as_ref()),
+                        )
+                        .body(data.into())?,
+                    None => StatusCode::NO_CONTENT.into_response(),
                 });
-                stream_response(s.merge(tracer))
-            } else {
-                let first = match stream.next().await {
-                    Some(ExecStreamItem::End(end)) => {
-                        return Ok(match end {
-                            Some(data) => Response::builder()
-                                .status(StatusCode::OK)
-                                .header(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(mime::APPLICATION_JSON.as_ref()),
-                                )
-                                .body(data.into())?,
-                            None => StatusCode::NO_CONTENT.into_response(),
-                        });
-                    }
-                    Some(first) => first,
-                    None => return Ok(StatusCode::NO_CONTENT.into_response()),
-                };
-
-                stream_response(tokio_stream::once(first).chain(stream).map(exec_to_event))
             }
-        }
+            Some(first) => first,
+            None => return Ok(StatusCode::NO_CONTENT.into_response()),
+        };
+
+        stream_response(tokio_stream::once(first).chain(stream).map(exec_to_event))
     };
     Ok(resp)
 }

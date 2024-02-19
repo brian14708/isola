@@ -153,6 +153,7 @@ impl Tracer for MemoryTracer {
 }
 
 impl MemoryTracer {
+    #[must_use]
     pub fn new() -> (Box<Self>, mpsc::Receiver<TraceEvent>) {
         let (tx, rx) = mpsc::channel(1);
         (

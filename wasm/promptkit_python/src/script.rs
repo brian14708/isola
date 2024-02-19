@@ -11,6 +11,7 @@ pub struct Scope {
     locals: PyObject,
 }
 pub enum InputValue<'a> {
+    #[allow(dead_code)]
     Json(serde_json::Value),
     JsonStr(&'a str),
 }
@@ -45,9 +46,7 @@ impl Scope {
     {
         Python::with_gil(|py| {
             let dict: &PyDict = self.locals.downcast(py)?;
-            let f = if let Some(f) = dict.get_item(name)? {
-                f
-            } else {
+            let Some(f) = dict.get_item(name)? else {
                 return Ok(None);
             };
 

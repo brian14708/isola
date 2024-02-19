@@ -29,7 +29,7 @@ impl VmCache {
         let mut caches = self.caches.lock();
         caches.entry(vm.hash).or_default().push(vm);
 
-        let total = caches.values().map(|v| v.len()).sum::<usize>();
+        let total = caches.values().map(Vec::len).sum::<usize>();
         if total > 64 {
             let mut rng = rand::thread_rng();
             let rm_idx = rng.gen_range(0..total);

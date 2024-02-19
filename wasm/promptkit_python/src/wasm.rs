@@ -71,7 +71,7 @@ fn promptkit_module(py: Python<'_>, module: &PyModule) -> PyResult<()> {
 }
 
 fn set_headers(req: &Request, headers: &PyDict) -> PyResult<()> {
-    for (k, v) in headers.iter() {
+    for (k, v) in headers {
         let k = k.downcast::<PyString>();
         let v = v.downcast::<PyString>();
 
@@ -100,15 +100,13 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
             set_headers(&request, headers)?;
         }
         match http_client::fetch(request) {
-            Ok(response) => {
-                return PyObjectDeserializer::new(py)
-                    .deserialize(&mut serde_json::Deserializer::from_slice(
-                        &(http_client::Response::body(response).map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                        })?),
-                    ))
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
-            }
+            Ok(response) => PyObjectDeserializer::new(py)
+                .deserialize(&mut serde_json::Deserializer::from_slice(
+                    &(http_client::Response::body(response).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                    })?),
+                ))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 e.to_string(),
             )),
@@ -214,6 +212,7 @@ impl SseIter {
         slf
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
         match slf.body.read() {
             Some(Ok((_, _, data))) => {

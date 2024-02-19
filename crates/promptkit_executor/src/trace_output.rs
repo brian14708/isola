@@ -12,10 +12,7 @@ pub struct TraceOutput {
 
 impl TraceOutput {
     pub fn new(ctx: Arc<TracerContext>, group: &'static str) -> Self {
-        Self {
-            ctx: ctx.clone(),
-            group,
-        }
+        Self { ctx, group }
     }
 }
 
@@ -52,7 +49,7 @@ impl Subscribe for TraceOutputStream {
 
         let s = String::from_utf8_lossy(&self.prev_write);
         self.ctx.with_async(|t| t.log(self.group, s)).await;
-        self.prev_write.clear()
+        self.prev_write.clear();
     }
 }
 
@@ -68,19 +65,19 @@ impl HostOutputStream for TraceOutputStream {
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        if !self.ctx.is_null() {
-            self.prev_write = std::mem::take(&mut self.buffer);
-        } else {
+        if self.ctx.is_null() {
             self.buffer.clear();
+        } else {
+            self.prev_write = std::mem::take(&mut self.buffer);
         }
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        if !self.prev_write.is_empty() {
-            Ok(0)
-        } else {
+        if self.prev_write.is_empty() {
             Ok(MAX_BUFFER - self.buffer.len())
+        } else {
+            Ok(0)
         }
     }
 }
