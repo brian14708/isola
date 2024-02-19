@@ -1448,6 +1448,7 @@ dependencies = [
  "pin-project-lite",
  "rand",
  "reqwest",
+ "serde_json",
  "sha2",
  "smallvec",
  "tokio",

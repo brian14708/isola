@@ -9,28 +9,60 @@ use std::{
 use coarsetime::{Duration, Instant};
 use tokio::sync::mpsc;
 
-#[derive(Clone, Copy)]
-pub enum TraceLogLevel {
-    Stdout,
-    Stderr,
-}
+use crate::atomic_cell::AtomicCell;
+
+type ValueSet = Vec<(Cow<'static, str>, Option<Box<serde_json::value::RawValue>>)>;
 
 pub enum TraceEventKind {
     Log {
-        level: TraceLogLevel,
         content: String,
-        timestamp: Duration,
+    },
+    Event {
+        parent_id: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    },
+    SpanBegin {
+        parent_id: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    },
+    SpanEnd {
+        parent_id: i16,
+        fields: ValueSet,
     },
 }
 
 pub struct TraceEvent {
     pub id: i16,
+    pub group: &'static str,
+    pub timestamp: Duration,
     pub kind: TraceEventKind,
 }
 
+pub type TracerContext = AtomicCell<Box<dyn Tracer + Send + Sync>>;
+
 #[async_trait::async_trait]
 pub trait Tracer {
-    async fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
+    async fn log(&self, group: &'static str, s: Cow<'_, str>);
+
+    async fn span_begin(
+        &self,
+        group: &'static str,
+        parent: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    ) -> i16;
+
+    async fn event(
+        &self,
+        group: &'static str,
+        parent: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    );
+
+    async fn span_end(&self, group: &'static str, id: i16, fields: ValueSet);
 
     fn boxed(self) -> Box<dyn Tracer + Send + Sync>;
 }
@@ -46,6 +78,10 @@ impl MemoryTracer {
     fn next_id(&self) -> i16 {
         self.id.fetch_add(1, Ordering::Relaxed)
     }
+
+    async fn record(&self, event: TraceEvent) {
+        let _ = self.events.send(event).await;
+    }
 }
 
 #[async_trait::async_trait]
@@ -54,18 +90,71 @@ impl Tracer for MemoryTracer {
         Box::new(self)
     }
 
-    async fn log(&self, level: TraceLogLevel, s: Cow<'_, str>) {
-        let _ = self
-            .events
-            .send(TraceEvent {
-                id: self.next_id(),
-                kind: TraceEventKind::Log {
-                    level,
-                    content: s.into_owned(),
-                    timestamp: self.epoch.elapsed(),
-                },
-            })
-            .await;
+    async fn log(&self, group: &'static str, s: Cow<'_, str>) {
+        self.record(TraceEvent {
+            id: self.next_id(),
+            group,
+            timestamp: self.epoch.elapsed(),
+            kind: TraceEventKind::Log {
+                content: s.into_owned(),
+            },
+        })
+        .await;
+    }
+
+    async fn event(
+        &self,
+        group: &'static str,
+        parent_id: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    ) {
+        self.record(TraceEvent {
+            id: self.next_id(),
+            group,
+            timestamp: self.epoch.elapsed(),
+            kind: TraceEventKind::Event {
+                kind,
+                parent_id,
+                fields,
+            },
+        })
+        .await;
+    }
+
+    async fn span_begin(
+        &self,
+        group: &'static str,
+        parent_id: Option<i16>,
+        kind: Cow<'static, str>,
+        fields: ValueSet,
+    ) -> i16 {
+        let id = self.next_id();
+        self.record(TraceEvent {
+            id,
+            group,
+            timestamp: self.epoch.elapsed(),
+            kind: TraceEventKind::SpanBegin {
+                kind,
+                parent_id,
+                fields,
+            },
+        })
+        .await;
+        id
+    }
+
+    async fn span_end(&self, group: &'static str, id: i16, fields: ValueSet) {
+        self.record(TraceEvent {
+            id: self.next_id(),
+            group,
+            timestamp: self.epoch.elapsed(),
+            kind: TraceEventKind::SpanEnd {
+                parent_id: id,
+                fields,
+            },
+        })
+        .await;
     }
 }
 

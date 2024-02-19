@@ -3,21 +3,18 @@ use std::sync::Arc;
 use bytes::Bytes;
 use wasmtime_wasi::preview2::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
 
-use crate::{
-    atomic_cell::AtomicCell,
-    trace::{TraceLogLevel, Tracer},
-};
+use crate::trace::TracerContext;
 
 pub struct TraceOutput {
-    ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
-    level: TraceLogLevel,
+    ctx: Arc<TracerContext>,
+    group: &'static str,
 }
 
 impl TraceOutput {
-    pub fn new(ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>, level: TraceLogLevel) -> Self {
+    pub fn new(ctx: Arc<TracerContext>, group: &'static str) -> Self {
         Self {
             ctx: ctx.clone(),
-            level,
+            group,
         }
     }
 }
@@ -26,7 +23,7 @@ impl StdoutStream for TraceOutput {
     fn stream(&self) -> Box<dyn HostOutputStream> {
         Box::new(TraceOutputStream {
             ctx: self.ctx.clone(),
-            level: self.level,
+            group: self.group,
             buffer: vec![],
             prev_write: vec![],
         })
@@ -38,8 +35,8 @@ impl StdoutStream for TraceOutput {
 }
 
 pub struct TraceOutputStream {
-    ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
-    level: TraceLogLevel,
+    ctx: Arc<TracerContext>,
+    group: &'static str,
     buffer: Vec<u8>,
     prev_write: Vec<u8>,
 }
@@ -54,7 +51,7 @@ impl Subscribe for TraceOutputStream {
         }
 
         let s = String::from_utf8_lossy(&self.prev_write);
-        self.ctx.with_async(|t| t.log(self.level, s)).await;
+        self.ctx.with_async(|t| t.log(self.group, s)).await;
         self.prev_write.clear()
     }
 }

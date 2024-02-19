@@ -11,12 +11,8 @@ use wasmtime_wasi::preview2::FilePerms;
 use wasmtime_wasi::preview2::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::Dir;
 
-use crate::{
-    atomic_cell::AtomicCell,
-    resource::MemoryLimiter,
-    trace::{TraceLogLevel, Tracer},
-    trace_output::TraceOutput,
-};
+use crate::trace::TracerContext;
+use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::TraceOutput};
 
 use super::bindgen;
 use super::http_client;
@@ -30,7 +26,7 @@ pub struct VmState {
     client: reqwest::Client,
     wasi: WasiCtx,
     table: ResourceTable,
-    pub(crate) tracer: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
+    pub(crate) tracer: Arc<TracerContext>,
     pub(crate) run: Option<VmRunState>,
 }
 
@@ -52,8 +48,8 @@ impl VmState {
                 FilePerms::READ,
                 "/usr",
             )
-            .stdout(TraceOutput::new(tracer.clone(), TraceLogLevel::Stdout))
-            .stderr(TraceOutput::new(tracer.clone(), TraceLogLevel::Stderr))
+            .stdout(TraceOutput::new(tracer.clone(), "stdout"))
+            .stderr(TraceOutput::new(tracer.clone(), "stderr"))
             .build();
         let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
 
@@ -118,5 +114,9 @@ impl http_client::HttpClientCtx for VmState {
 
     fn client(&self) -> &reqwest::Client {
         &self.client
+    }
+
+    fn tracer(&self) -> &TracerContext {
+        &self.tracer
     }
 }

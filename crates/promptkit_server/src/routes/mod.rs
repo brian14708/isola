@@ -1,7 +1,7 @@
 mod error;
 mod state;
 
-use std::{future::ready, sync::Arc, time::Duration};
+use std::{borrow::Cow, future::ready, sync::Arc, time::Duration};
 
 use axum::{
     extract::State,
@@ -15,7 +15,7 @@ use axum::{
 };
 pub use error::Result;
 use promptkit_executor::{
-    trace::{MemoryTracer, TraceEvent, TraceEventKind, TraceLogLevel},
+    trace::{MemoryTracer, TraceEvent, TraceEventKind},
     ExecResult, ExecStreamItem, VmManager,
 };
 use serde::Serialize;
@@ -50,28 +50,70 @@ struct ExecRequest {
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-enum HttpTraceEvent {
+struct HttpTraceEvent {
+    id: i16,
+    group: &'static str,
+    timestamp: f32,
+    #[serde(flatten)]
+    kind: HttpTraceEventKind,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum HttpTraceEventKind {
     Log {
-        level: &'static str,
         content: String,
-        timestamp: f32,
+    },
+    Event {
+        kind: Cow<'static, str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_id: Option<i16>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
+    },
+    SpanBegin {
+        kind: Cow<'static, str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parent_id: Option<i16>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
+    },
+    SpanEnd {
+        parent_id: i16,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
     },
 }
 
 impl From<TraceEvent> for HttpTraceEvent {
     fn from(value: TraceEvent) -> Self {
-        match value.kind {
-            TraceEventKind::Log {
-                content,
-                level,
-                timestamp,
-            } => Self::Log {
-                content,
-                level: match level {
-                    TraceLogLevel::Stdout => "info",
-                    TraceLogLevel::Stderr => "error",
+        Self {
+            id: value.id,
+            group: value.group,
+            timestamp: value.timestamp.as_f64() as f32,
+            kind: match value.kind {
+                TraceEventKind::Log { content } => HttpTraceEventKind::Log { content },
+                TraceEventKind::Event {
+                    kind,
+                    parent_id,
+                    fields,
+                } => HttpTraceEventKind::Event {
+                    kind,
+                    parent_id,
+                    fields,
                 },
-                timestamp: timestamp.as_f64() as f32,
+                TraceEventKind::SpanBegin {
+                    kind,
+                    parent_id,
+                    fields,
+                } => HttpTraceEventKind::SpanBegin {
+                    kind,
+                    parent_id,
+                    fields,
+                },
+                TraceEventKind::SpanEnd { parent_id, fields } => {
+                    HttpTraceEventKind::SpanEnd { parent_id, fields }
+                }
             },
         }
     }
