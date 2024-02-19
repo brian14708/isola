@@ -9,6 +9,7 @@ axum = "0.7.2"
 axum-server = "0.6.0"
 mimalloc = { version = "0.1.39", default-features = false }
 mime = "0.3.17"
+pin-project-lite = "0.2.13"
 prometheus-client = "0.22.0"
 promptkit_executor = { version = "0.1.0", path = "../promptkit_executor" }
 serde = { version = "1.0.193", features = ["derive"] }

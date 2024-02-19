@@ -1467,6 +1467,7 @@ dependencies = [
  "axum-server",
  "mimalloc",
  "mime",
+ "pin-project-lite",
  "prometheus-client",
  "promptkit_executor",
  "serde",

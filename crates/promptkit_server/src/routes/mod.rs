@@ -6,10 +6,7 @@ use std::{borrow::Cow, future::ready, sync::Arc, time::Duration};
 use axum::{
     extract::State,
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
-    response::{
-        sse::{Event, KeepAlive},
-        IntoResponse, Response, Sse,
-    },
+    response::{sse::Event, IntoResponse, Response},
     routing::{get, post},
     Json,
 };
@@ -20,8 +17,10 @@ use promptkit_executor::{
 };
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 use tower_http::services::{ServeDir, ServeFile};
+
+use crate::utils::stream::StreamResponse;
 
 pub fn router(state: &AppState) -> axum::Router {
     axum::Router::new()
@@ -136,8 +135,15 @@ async fn exec(
         .into_iter()
         .map(|s| Box::<str>::from(s).into_string())
         .collect::<Vec<_>>();
-    let mut stream =
-        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer)).await??;
+    let mut stream = Box::pin(
+        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer))
+            .await??
+            .timeout(timeout)
+            .map(|e| match e {
+                Ok(data) => data,
+                Err(_) => ExecStreamItem::Error(anyhow::anyhow!("timeout")),
+            }),
+    );
 
     let resp = if let Some(tracer) = trace_events {
         let s = stream.map(exec_to_event);
@@ -146,7 +152,7 @@ async fn exec(
                 .event("trace")
                 .json_data(HttpTraceEvent::from(e))?)
         });
-        stream_response(s.merge(tracer))
+        StreamResponse(s.merge(tracer)).into_response()
     } else {
         let first = match stream.next().await {
             Some(ExecStreamItem::End(end)) => {
@@ -161,11 +167,25 @@ async fn exec(
                     None => StatusCode::NO_CONTENT.into_response(),
                 });
             }
-            Some(first) => first,
+            Some(ExecStreamItem::Data(first)) => first,
+            Some(ExecStreamItem::Error(err)) => {
+                return Ok((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({
+                        "message": err.to_string(),
+                    })),
+                )
+                    .into_response())
+            }
             None => return Ok(StatusCode::NO_CONTENT.into_response()),
         };
 
-        stream_response(tokio_stream::once(first).chain(stream).map(exec_to_event))
+        StreamResponse(
+            tokio_stream::once(ExecStreamItem::Data(first))
+                .chain(stream)
+                .map(exec_to_event),
+        )
+        .into_response()
     };
     Ok(resp)
 }
@@ -177,21 +197,6 @@ fn exec_to_event(e: ExecStreamItem) -> anyhow::Result<Event> {
             Some(data) => Event::default().data(data),
             None => Event::default().data("[DONE]"),
         },
-        ExecStreamItem::Error(err) => Event::default().event("error").json_data(json!({
-            "message": err.to_string(),
-        }))?,
+        ExecStreamItem::Error(err) => return Err(err),
     })
-}
-
-fn stream_response<S>(stream: S) -> Response
-where
-    S: Stream<Item = anyhow::Result<Event>> + Send + 'static,
-{
-    Sse::new(stream)
-        .keep_alive(
-            KeepAlive::new()
-                .interval(Duration::from_secs(1))
-                .text("keepalive"),
-        )
-        .into_response()
 }
