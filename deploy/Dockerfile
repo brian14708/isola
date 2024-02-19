@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # server
 FROM docker.io/library/rust:bookworm AS server-build
 WORKDIR /src
@@ -32,6 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-tools --locked
 WORKDIR /src
 COPY wasm .
+COPY crates/promptkit_executor/wit ./crates/promptkit_executor/wit
 RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
     --mount=type=cache,target=/src/target/wasm32-wasi/wasi-deps/downloads \
     --mount=type=cache,target=/src/target/release \
