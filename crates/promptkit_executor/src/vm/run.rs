@@ -5,7 +5,11 @@ use wasmtime::Store;
 
 use crate::trace::Tracer;
 
-use super::{exports, Vm, VmRunState, VmState};
+use super::{
+    exports,
+    state::{VmRunState, VmState},
+    Vm,
+};
 
 pub struct VmRun {
     vm: Option<Vm>,
