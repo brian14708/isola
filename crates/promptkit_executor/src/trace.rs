@@ -40,7 +40,8 @@ pub struct TraceEvent {
     pub kind: TraceEventKind,
 }
 
-pub type TracerContext = AtomicCell<Box<dyn Tracer + Send + Sync>>;
+pub type BoxedTracer = Box<dyn Tracer + Send + Sync>;
+pub type TracerContext = AtomicCell<BoxedTracer>;
 
 #[async_trait::async_trait]
 pub trait Tracer {
@@ -63,8 +64,6 @@ pub trait Tracer {
     );
 
     async fn span_end(&self, group: &'static str, id: i16, fields: ValueSet);
-
-    fn boxed(self) -> Box<dyn Tracer + Send + Sync>;
 }
 
 #[derive(Clone)]
@@ -86,10 +85,6 @@ impl MemoryTracer {
 
 #[async_trait::async_trait]
 impl Tracer for MemoryTracer {
-    fn boxed(self) -> Box<dyn Tracer + Send + Sync> {
-        Box::new(self)
-    }
-
     async fn log(&self, group: &'static str, s: Cow<'_, str>) {
         self.record(TraceEvent {
             id: self.next_id(),
@@ -159,14 +154,14 @@ impl Tracer for MemoryTracer {
 }
 
 impl MemoryTracer {
-    pub fn new() -> (Self, mpsc::Receiver<TraceEvent>) {
+    pub fn new() -> (Box<Self>, mpsc::Receiver<TraceEvent>) {
         let (tx, rx) = mpsc::channel(1);
         (
-            Self {
+            Box::new(Self {
                 id: Arc::new(AtomicI16::new(0)),
                 events: tx,
                 epoch: Instant::now(),
-            },
+            }),
             rx,
         )
     }

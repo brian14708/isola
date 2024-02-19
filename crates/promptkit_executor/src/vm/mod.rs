@@ -10,7 +10,7 @@ pub use state::VmState;
 use tokio::sync::mpsc;
 use wasmtime::Store;
 
-use crate::trace::Tracer;
+use crate::trace::BoxedTracer;
 
 use self::run::VmRun;
 
@@ -21,14 +21,11 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn run<T>(
+    pub fn run(
         self,
-        tracer: Option<T>,
+        tracer: Option<BoxedTracer>,
         sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
-    ) -> VmRun
-    where
-        T: Tracer,
-    {
+    ) -> VmRun {
         VmRun::new(self, tracer, sender)
     }
 }

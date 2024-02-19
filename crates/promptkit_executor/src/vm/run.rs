@@ -3,7 +3,7 @@ use std::future::Future;
 use tokio::sync::mpsc;
 use wasmtime::Store;
 
-use crate::trace::Tracer;
+use crate::trace::BoxedTracer;
 
 use super::{
     exports,
@@ -16,18 +16,15 @@ pub struct VmRun {
 }
 
 impl VmRun {
-    pub fn new<T>(
+    pub fn new(
         mut vm: Vm,
-        tracer: Option<T>,
+        tracer: Option<BoxedTracer>,
         sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
-    ) -> Self
-    where
-        T: Tracer,
-    {
+    ) -> Self {
         let o: &mut VmState = vm.store.data_mut();
         if let Some(tracer) = tracer {
             // SAFETY: no other reference to tracer is in use
-            unsafe { o.tracer.set_unguarded(Some(tracer.boxed())) };
+            unsafe { o.tracer.set_unguarded(Some(tracer)) };
         }
         o.run = Some(VmRunState { output: sender });
         Self { vm: Some(vm) }

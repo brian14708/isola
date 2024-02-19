@@ -20,7 +20,7 @@ use wasmtime::{
 };
 
 use crate::{
-    trace::Tracer,
+    trace::BoxedTracer,
     vm::{exports::Argument, PythonVm, Vm, VmState},
     vm_cache::VmCache,
 };
@@ -122,16 +122,13 @@ impl VmManager {
         })
     }
 
-    async fn exec_impl<'t, T>(
+    async fn exec_impl<'t>(
         &self,
         func: String,
         args: Vec<String>,
-        tracer: Option<T>,
+        tracer: Option<BoxedTracer>,
         vm: Vm,
-    ) -> anyhow::Result<ExecResult<'t>>
-    where
-        T: Tracer + 't,
-    {
+    ) -> anyhow::Result<ExecResult<'t>> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -180,7 +177,7 @@ impl VmManager {
         script: &str,
         func: String,
         args: Vec<String>,
-        tracer: Option<impl Tracer + 't>,
+        tracer: Option<BoxedTracer>,
     ) -> anyhow::Result<ExecResult<'t>> {
         let mut hasher = Sha256::new();
         hasher.update(script);

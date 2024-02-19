@@ -15,7 +15,7 @@ use axum::{
 };
 pub use error::Result;
 use promptkit_executor::{
-    trace::{MemoryTracer, TraceEvent, TraceEventKind},
+    trace::{BoxedTracer, MemoryTracer, TraceEvent, TraceEventKind},
     ExecResult, ExecStreamItem, VmManager,
 };
 use serde::Serialize;
@@ -127,8 +127,9 @@ async fn exec(
         .trace
         .unwrap_or_default()
         .then(MemoryTracer::new)
-        .map(|(a, b)| (Some(a), Some(b)))
+        .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
         .unwrap_or_default();
+
     let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
     let args = req
         .args
