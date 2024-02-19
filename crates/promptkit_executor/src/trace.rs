@@ -7,11 +7,10 @@ use std::{
 };
 
 use coarsetime::{Duration, Instant};
+use serde_json::value::RawValue;
 use tokio::sync::mpsc;
 
 use crate::atomic_cell::AtomicCell;
-
-type ValueSet = Vec<(Cow<'static, str>, Option<Box<serde_json::value::RawValue>>)>;
 
 pub enum TraceEventKind {
     Log {
@@ -20,16 +19,16 @@ pub enum TraceEventKind {
     Event {
         parent_id: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     },
     SpanBegin {
         parent_id: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     },
     SpanEnd {
         parent_id: i16,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     },
 }
 
@@ -52,7 +51,7 @@ pub trait Tracer {
         group: &'static str,
         parent: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     ) -> i16;
 
     async fn event(
@@ -60,10 +59,10 @@ pub trait Tracer {
         group: &'static str,
         parent: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     );
 
-    async fn span_end(&self, group: &'static str, id: i16, fields: ValueSet);
+    async fn span_end(&self, group: &'static str, id: i16, data: Option<Box<RawValue>>);
 }
 
 #[derive(Clone)]
@@ -102,7 +101,7 @@ impl Tracer for MemoryTracer {
         group: &'static str,
         parent_id: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     ) {
         self.record(TraceEvent {
             id: self.next_id(),
@@ -111,7 +110,7 @@ impl Tracer for MemoryTracer {
             kind: TraceEventKind::Event {
                 kind,
                 parent_id,
-                fields,
+                data,
             },
         })
         .await;
@@ -122,7 +121,7 @@ impl Tracer for MemoryTracer {
         group: &'static str,
         parent_id: Option<i16>,
         kind: Cow<'static, str>,
-        fields: ValueSet,
+        data: Option<Box<RawValue>>,
     ) -> i16 {
         let id = self.next_id();
         self.record(TraceEvent {
@@ -132,21 +131,21 @@ impl Tracer for MemoryTracer {
             kind: TraceEventKind::SpanBegin {
                 kind,
                 parent_id,
-                fields,
+                data,
             },
         })
         .await;
         id
     }
 
-    async fn span_end(&self, group: &'static str, id: i16, fields: ValueSet) {
+    async fn span_end(&self, group: &'static str, id: i16, data: Option<Box<RawValue>>) {
         self.record(TraceEvent {
             id: self.next_id(),
             group,
             timestamp: self.epoch.elapsed(),
             kind: TraceEventKind::SpanEnd {
                 parent_id: id,
-                fields,
+                data,
             },
         })
         .await;

@@ -68,20 +68,20 @@ enum HttpTraceEventKind {
         kind: Cow<'static, str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         parent_id: Option<i16>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<Box<RawValue>>,
     },
     SpanBegin {
         kind: Cow<'static, str>,
         #[serde(skip_serializing_if = "Option::is_none")]
         parent_id: Option<i16>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<Box<RawValue>>,
     },
     SpanEnd {
         parent_id: i16,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        fields: Vec<(Cow<'static, str>, Option<Box<RawValue>>)>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        data: Option<Box<RawValue>>,
     },
 }
 
@@ -96,23 +96,23 @@ impl From<TraceEvent> for HttpTraceEvent {
                 TraceEventKind::Event {
                     kind,
                     parent_id,
-                    fields,
+                    data,
                 } => HttpTraceEventKind::Event {
                     kind,
                     parent_id,
-                    fields,
+                    data,
                 },
                 TraceEventKind::SpanBegin {
                     kind,
                     parent_id,
-                    fields,
+                    data,
                 } => HttpTraceEventKind::SpanBegin {
                     kind,
                     parent_id,
-                    fields,
+                    data,
                 },
-                TraceEventKind::SpanEnd { parent_id, fields } => {
-                    HttpTraceEventKind::SpanEnd { parent_id, fields }
+                TraceEventKind::SpanEnd { parent_id, data } => {
+                    HttpTraceEventKind::SpanEnd { parent_id, data }
                 }
             },
         }

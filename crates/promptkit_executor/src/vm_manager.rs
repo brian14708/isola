@@ -41,9 +41,9 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub enum ExecResult<'a> {
+pub enum ExecResult {
     Error(anyhow::Error),
-    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send + 'a>>),
+    Stream(Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>),
 }
 
 impl VmManager {
@@ -122,13 +122,13 @@ impl VmManager {
         })
     }
 
-    async fn exec_impl<'t>(
+    async fn exec_impl(
         &self,
         func: String,
         args: Vec<String>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
-    ) -> anyhow::Result<ExecResult<'t>> {
+    ) -> anyhow::Result<ExecResult> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -172,13 +172,13 @@ impl VmManager {
         Ok(ExecResult::Stream(Box::pin(stream)))
     }
 
-    pub async fn exec<'t>(
+    pub async fn exec(
         &'_ self,
         script: &str,
         func: String,
         args: Vec<String>,
         tracer: Option<BoxedTracer>,
-    ) -> anyhow::Result<ExecResult<'t>> {
+    ) -> anyhow::Result<ExecResult> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();

@@ -1,7 +1,7 @@
 use std::{str::FromStr, time::Duration};
 
 use eventsource_stream::{Event, EventStreamError, Eventsource};
-use serde_json::value::to_raw_value;
+use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
 use wasmtime::component::{Resource, ResourceTable};
 
@@ -40,7 +40,7 @@ where
                 // end
                 if let Some(span_id) = body.span_id {
                     self.tracer()
-                        .with_async(|t| t.span_end("http", span_id, vec![]))
+                        .with_async(|t| t.span_end("http", span_id, None))
                         .await;
                 }
                 None
@@ -76,34 +76,11 @@ where
                     "http",
                     None,
                     "request".into(),
-                    vec![
-                        (
-                            "url".into(),
-                            Some(to_raw_value(&request.url().to_string()).unwrap()),
-                        ),
-                        (
-                            "method".into(),
-                            Some(to_raw_value(&request.method().to_string()).unwrap()),
-                        ),
-                        (
-                            "headers".into(),
-                            Some(
-                                to_raw_value(
-                                    &request
-                                        .headers()
-                                        .iter()
-                                        .map(|(k, v)| {
-                                            (
-                                                k.as_str().to_string(),
-                                                v.to_str().unwrap().to_string(),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                )
-                                .unwrap(),
-                            ),
-                        ),
-                    ],
+                    to_raw_value(&json!({
+                        "url": request.url().to_string(),
+                        "method": request.method().to_string(),
+                    }))
+                    .ok(),
                 )
             })
             .await;
@@ -116,18 +93,13 @@ where
                     "http",
                     span_id,
                     "response_start".into(),
-                    vec![(
-                        "status".into(),
-                        Some(
-                            to_raw_value(
-                                &exec
-                                    .as_ref()
-                                    .map(|r| r.status().as_u16())
-                                    .unwrap_or_default(),
-                            )
-                            .unwrap(),
-                        ),
-                    )],
+                    to_raw_value(&json!({
+                        "status": exec
+                            .as_ref()
+                            .map(|r| r.status().as_u16())
+                            .unwrap_or_default(),
+                    }))
+                    .ok(),
                 )
             })
             .await;
@@ -252,13 +224,10 @@ where
                     t.span_end(
                         "http",
                         span_id,
-                        vec![(
-                            "content_length".into(),
-                            Some(
-                                to_raw_value(&body.as_ref().map(|b| b.len()).unwrap_or_default())
-                                    .unwrap(),
-                            ),
-                        )],
+                        to_raw_value(&json!({
+                            "content_length": body.as_ref().map(|b| b.len()).unwrap_or_default()
+                        }))
+                        .ok(),
                     )
                 })
                 .await;
