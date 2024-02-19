@@ -1,3 +1,4 @@
+mod atomic_cell;
 mod resource;
 pub mod trace;
 mod trace_output;

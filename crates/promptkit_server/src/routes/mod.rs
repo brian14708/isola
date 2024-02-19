@@ -15,7 +15,7 @@ use axum::{
 };
 pub use error::Result;
 use promptkit_executor::{
-    trace::{MemoryTracer, TraceEvent, TraceLogLevel},
+    trace::{MemoryTracer, TraceEvent, TraceEventKind, TraceLogLevel},
     ExecResult, ExecStreamItem, VmManager,
 };
 use serde::Serialize;
@@ -60,8 +60,8 @@ enum HttpTraceEvent {
 
 impl From<TraceEvent> for HttpTraceEvent {
     fn from(value: TraceEvent) -> Self {
-        match value {
-            TraceEvent::Log {
+        match value.kind {
+            TraceEventKind::Log {
                 content,
                 level,
                 timestamp,

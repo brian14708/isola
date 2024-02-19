@@ -1,8 +1,9 @@
 mod bindgen;
 mod http_client;
+mod run;
 
 use std::fs::File;
-use std::future::Future;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 pub use bindgen::exports::vm as exports;
@@ -16,18 +17,20 @@ use wasmtime_wasi::preview2::FilePerms;
 use wasmtime_wasi::preview2::{WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi::Dir;
 
+use crate::atomic_cell::AtomicCell;
 use crate::resource::MemoryLimiter;
 use crate::trace::TraceLogLevel;
 use crate::trace::Tracer;
-use crate::trace_output::TraceContext;
 use crate::trace_output::TraceOutput;
+
+use self::run::VmRun;
 
 struct VmRunState {
     output: mpsc::Sender<anyhow::Result<(String, bool)>>,
 }
 
 pub struct VmState {
-    tracer_ctx: TraceContext,
+    tracer: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
     limiter: MemoryLimiter,
     client: reqwest::Client,
     wasi: WasiCtx,
@@ -45,7 +48,7 @@ impl VmState {
     }
 
     pub fn new(engine: &Engine, max_memory: usize) -> Store<Self> {
-        let ctx = TraceContext::new();
+        let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
                 Dir::from_std_file(File::open("./wasm/target/wasm32-wasi/wasi-deps/usr").unwrap()),
@@ -53,15 +56,15 @@ impl VmState {
                 FilePerms::READ,
                 "/usr",
             )
-            .stdout(TraceOutput::new(&ctx, TraceLogLevel::Stdout))
-            .stderr(TraceOutput::new(&ctx, TraceLogLevel::Stderr))
+            .stdout(TraceOutput::new(tracer.clone(), TraceLogLevel::Stdout))
+            .stderr(TraceOutput::new(tracer.clone(), TraceLogLevel::Stderr))
             .build();
         let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
 
         let mut s = Store::new(
             engine,
             Self {
-                tracer_ctx: ctx,
+                tracer,
                 limiter,
                 client: reqwest::Client::new(),
                 wasi,
@@ -114,41 +117,16 @@ pub struct Vm {
     pub(crate) python: PythonVm,
 }
 
-pub(crate) struct VmRun {
-    vm: Vm,
-}
-
-impl VmRun {
-    pub fn new(
-        mut vm: Vm,
-        tracer: Option<impl Tracer>,
+impl Vm {
+    pub fn run<T>(
+        self,
+        tracer: Option<T>,
         sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
-    ) -> Self {
-        let o: &mut VmState = vm.store.data_mut();
-        if let Some(tracer) = tracer {
-            o.tracer_ctx.set(Some(tracer.boxed_logger()));
-        }
-        o.run = Some(VmRunState { output: sender });
-        Self { vm }
-    }
-
-    pub async fn exec<'a, F, Output>(
-        &'a mut self,
-        f: impl FnOnce(&'a exports::Vm, &'a mut Store<VmState>) -> F,
-    ) -> Output
+    ) -> VmRun
     where
-        F: Future<Output = Output>,
+        T: Tracer,
     {
-        let vm = self.vm.python.vm();
-        let store = &mut self.vm.store;
-        f(vm, store).await
-    }
-
-    pub fn finalize(mut self) -> Vm {
-        let o: &mut VmState = self.vm.store.data_mut();
-        o.run = None;
-        o.tracer_ctx.set(None);
-        self.vm
+        VmRun::new(self, tracer, sender)
     }
 }
 

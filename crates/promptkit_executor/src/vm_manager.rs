@@ -21,7 +21,7 @@ use wasmtime::{
 
 use crate::{
     trace::Tracer,
-    vm::{exports::Argument, PythonVm, Vm, VmRun, VmState},
+    vm::{exports::Argument, PythonVm, Vm, VmState},
     vm_cache::VmCache,
 };
 
@@ -122,20 +122,20 @@ impl VmManager {
         })
     }
 
-    async fn exec_impl<'a, 'b>(
+    async fn exec_impl<'t, T>(
         &self,
         func: String,
         args: Vec<String>,
-        tracer: Option<impl Tracer>,
+        tracer: Option<T>,
         vm: Vm,
-    ) -> anyhow::Result<ExecResult<'a>>
+    ) -> anyhow::Result<ExecResult<'t>>
     where
-        'a: 'b,
+        T: Tracer + 't,
     {
         let (tx, rx) = mpsc::channel(4);
-        let mut run = VmRun::new(vm, tracer, tx.clone());
+        let cache = self.cache.clone();
 
-        let cache_weak = Arc::downgrade(&self.cache);
+        let mut run = vm.run(tracer, tx.clone());
         let exec = Some(Box::pin(async move {
             let ret = run
                 .exec(|vm, store| async {
@@ -153,9 +153,7 @@ impl VmManager {
                 .await;
             match ret {
                 Ok(()) => {
-                    if let Some(cache) = cache_weak.upgrade() {
-                        cache.put(run.finalize());
-                    }
+                    cache.put(run.reuse());
                 }
                 Err(err) => {
                     _ = tx.send(Err(err)).await;
@@ -177,16 +175,13 @@ impl VmManager {
         Ok(ExecResult::Stream(Box::pin(stream)))
     }
 
-    pub async fn exec<'a, 'b>(
+    pub async fn exec<'t>(
         &'_ self,
         script: &str,
         func: String,
         args: Vec<String>,
-        tracer: Option<impl Tracer>,
-    ) -> anyhow::Result<ExecResult<'a>>
-    where
-        'a: 'b,
-    {
+        tracer: Option<impl Tracer + 't>,
+    ) -> anyhow::Result<ExecResult<'t>> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();

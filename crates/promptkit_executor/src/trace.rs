@@ -15,7 +15,7 @@ pub enum TraceLogLevel {
     Stderr,
 }
 
-pub enum TraceEvent {
+pub enum TraceEventKind {
     Log {
         level: TraceLogLevel,
         content: String,
@@ -23,48 +23,47 @@ pub enum TraceEvent {
     },
 }
 
-#[async_trait::async_trait]
-pub trait Logger {
-    async fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
+pub struct TraceEvent {
+    pub id: i16,
+    pub kind: TraceEventKind,
 }
 
-pub trait Tracer: Logger + Send + Sync {
-    fn next_id(&self) -> i16;
+#[async_trait::async_trait]
+pub trait Tracer {
+    async fn log(&self, lvl: TraceLogLevel, s: Cow<'_, str>);
 
-    fn boxed_logger(&self) -> Box<dyn Logger>;
+    fn boxed(self) -> Box<dyn Tracer + Send + Sync>;
 }
 
 #[derive(Clone)]
 pub struct MemoryTracer {
-    inner: Arc<MemoryTracerInner>,
-}
-
-struct MemoryTracerInner {
-    id: AtomicI16,
+    id: Arc<AtomicI16>,
     events: mpsc::Sender<TraceEvent>,
     epoch: Instant,
 }
 
-impl Tracer for MemoryTracer {
+impl MemoryTracer {
     fn next_id(&self) -> i16 {
-        self.inner.id.fetch_add(1, Ordering::Relaxed)
-    }
-
-    fn boxed_logger(&self) -> Box<dyn Logger> {
-        Box::new(self.clone())
+        self.id.fetch_add(1, Ordering::Relaxed)
     }
 }
 
 #[async_trait::async_trait]
-impl Logger for MemoryTracer {
+impl Tracer for MemoryTracer {
+    fn boxed(self) -> Box<dyn Tracer + Send + Sync> {
+        Box::new(self)
+    }
+
     async fn log(&self, level: TraceLogLevel, s: Cow<'_, str>) {
         let _ = self
-            .inner
             .events
-            .send(TraceEvent::Log {
-                level,
-                content: s.to_string(),
-                timestamp: self.inner.epoch.elapsed(),
+            .send(TraceEvent {
+                id: self.next_id(),
+                kind: TraceEventKind::Log {
+                    level,
+                    content: s.into_owned(),
+                    timestamp: self.epoch.elapsed(),
+                },
             })
             .await;
     }
@@ -75,11 +74,9 @@ impl MemoryTracer {
         let (tx, rx) = mpsc::channel(1);
         (
             Self {
-                inner: Arc::new(MemoryTracerInner {
-                    id: AtomicI16::new(0),
-                    events: tx,
-                    epoch: Instant::now(),
-                }),
+                id: Arc::new(AtomicI16::new(0)),
+                events: tx,
+                epoch: Instant::now(),
             },
             rx,
         )

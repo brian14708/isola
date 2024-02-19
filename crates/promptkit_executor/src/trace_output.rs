@@ -1,74 +1,20 @@
-use std::{
-    ptr::null_mut,
-    sync::{
-        atomic::{AtomicPtr, Ordering},
-        Arc,
-    },
-};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use wasmtime_wasi::preview2::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
 
-use crate::trace::{Logger, TraceLogLevel};
-
-#[derive(Clone)]
-pub struct TraceContext {
-    inner: Arc<TraceContextInner>,
-}
-
-struct TraceContextInner {
-    ptr: AtomicPtr<Box<dyn Logger>>,
-}
-
-impl TraceContext {
-    pub fn new() -> Self {
-        Self {
-            inner: Arc::new(TraceContextInner {
-                ptr: AtomicPtr::new(null_mut()),
-            }),
-        }
-    }
-
-    pub fn set(&mut self, b: Option<Box<dyn Logger>>) {
-        self.inner.set(b)
-    }
-}
-
-impl TraceContextInner {
-    fn set(&self, b: Option<Box<dyn Logger>>) {
-        let old = self.ptr.swap(
-            b.map(|b| Box::into_raw(Box::new(b)))
-                .unwrap_or_else(null_mut),
-            Ordering::Release,
-        );
-        if !old.is_null() {
-            drop(unsafe { Box::from_raw(old) });
-        }
-    }
-
-    fn is_null(&self) -> bool {
-        self.ptr.load(Ordering::Relaxed).is_null()
-    }
-
-    fn get(&self) -> Option<&dyn Logger> {
-        let m = self.ptr.load(Ordering::Acquire);
-        (!m.is_null()).then(|| unsafe { (*m).as_ref() })
-    }
-}
-
-impl Drop for TraceContextInner {
-    fn drop(&mut self) {
-        self.set(None)
-    }
-}
+use crate::{
+    atomic_cell::AtomicCell,
+    trace::{TraceLogLevel, Tracer},
+};
 
 pub struct TraceOutput {
-    ctx: TraceContext,
+    ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
     level: TraceLogLevel,
 }
 
 impl TraceOutput {
-    pub fn new(ctx: &TraceContext, level: TraceLogLevel) -> Self {
+    pub fn new(ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>, level: TraceLogLevel) -> Self {
         Self {
             ctx: ctx.clone(),
             level,
@@ -92,11 +38,13 @@ impl StdoutStream for TraceOutput {
 }
 
 pub struct TraceOutputStream {
-    ctx: TraceContext,
+    ctx: Arc<AtomicCell<Box<dyn Tracer + Send + Sync>>>,
     level: TraceLogLevel,
     buffer: Vec<u8>,
     prev_write: Vec<u8>,
 }
+
+const MAX_BUFFER: usize = 1024;
 
 #[async_trait::async_trait]
 impl Subscribe for TraceOutputStream {
@@ -105,27 +53,25 @@ impl Subscribe for TraceOutputStream {
             return;
         }
 
-        if let Some(t) = self.ctx.inner.get() {
-            let s = String::from_utf8_lossy(&self.prev_write);
-            t.log(self.level, s).await;
-            self.prev_write.clear()
-        }
+        let s = String::from_utf8_lossy(&self.prev_write);
+        self.ctx.with_async(|t| t.log(self.level, s)).await;
+        self.prev_write.clear()
     }
 }
 
 impl HostOutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
-        if !self.ctx.inner.is_null() {
+        if !self.ctx.is_null() {
             self.buffer.extend(bytes);
-            if self.buffer.len() >= 1024 {
-                std::mem::swap(&mut self.buffer, &mut self.prev_write);
+            if self.buffer.len() >= MAX_BUFFER {
+                self.prev_write = std::mem::take(&mut self.buffer);
             }
         }
         Ok(())
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        if !self.ctx.inner.is_null() {
+        if !self.ctx.is_null() {
             self.prev_write = std::mem::take(&mut self.buffer);
         } else {
             self.buffer.clear();
@@ -137,7 +83,7 @@ impl HostOutputStream for TraceOutputStream {
         if !self.prev_write.is_empty() {
             Ok(0)
         } else {
-            Ok(1024)
+            Ok(MAX_BUFFER - self.buffer.len())
         }
     }
 }
