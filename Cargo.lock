@@ -1445,7 +1445,7 @@ dependencies = [
  "coarsetime",
  "eventsource-stream",
  "parking_lot",
- "pin-project",
+ "pin-project-lite",
  "rand",
  "reqwest",
  "sha2",

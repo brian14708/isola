@@ -1,14 +1,14 @@
 use std::{
     future::Future,
     path::Path,
-    pin::{pin, Pin},
+    pin::Pin,
     sync::Arc,
     task::{Context, Poll},
     time::Duration,
 };
 
 use anyhow::anyhow;
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -221,12 +221,13 @@ fn join_with<T>(
     }
 }
 
-#[pin_project]
-pub struct StreamJoin<S: Stream<Item = T>, F: Future<Output = ()>, T> {
-    #[pin]
-    stream: Option<S>,
-    #[pin]
-    task: Option<F>,
+pin_project! {
+    pub struct StreamJoin<S: Stream<Item = T>, F: Future<Output = ()>, T> {
+        #[pin]
+        stream: Option<S>,
+        #[pin]
+        task: Option<F>,
+    }
 }
 
 impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F, T> {
@@ -242,12 +243,8 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
 
         if let Some(stream) = this.stream.as_mut().as_pin_mut() {
             match stream.poll_next(cx) {
-                Poll::Ready(None) => {
-                    this.stream.set(None);
-                }
-                Poll::Ready(Some(v)) => {
-                    return Poll::Ready(Some(v));
-                }
+                Poll::Ready(None) => this.stream.set(None),
+                Poll::Ready(Some(v)) => return Poll::Ready(Some(v)),
                 Poll::Pending => return Poll::Pending,
             }
         }
