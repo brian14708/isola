@@ -29,4 +29,5 @@ interface http-client {
         read: func() -> option<result<sse-event, error>>;
     }
     fetch: func(%request: request) -> result<response, error>;
+    fetch-all: func(%requests: list<request>) -> list<result<response, error>>;
 }

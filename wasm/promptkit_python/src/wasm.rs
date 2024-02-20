@@ -115,6 +115,20 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    fn get_async(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Get);
+        request.set_eager(true);
+        request.set_header("accept", "application/json").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        Ok(AsyncRequest {
+            request: Some(request),
+        }
+        .into_py(py))
+    }
+
+    #[pyfn(module)]
     fn get_sse(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Get);
         request.set_header("accept", "text/event-stream").unwrap();
@@ -170,6 +184,33 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    fn post_async(
+        py: Python<'_>,
+        url: &PyString,
+        body: Option<PyObject>,
+        headers: Option<&PyDict>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(url.to_str()?, Method::Post);
+        request.set_eager(true);
+        request
+            .set_header("content-type", "application/json")
+            .unwrap();
+        request.set_header("accept", "application/json").unwrap();
+        if let Some(headers) = headers {
+            set_headers(&request, headers)?;
+        }
+        if let Some(body) = body {
+            request.set_body(
+                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+            );
+        }
+        Ok(AsyncRequest {
+            request: Some(request),
+        }
+        .into_py(py))
+    }
+
+    #[pyfn(module)]
     fn post_sse(
         py: Python<'_>,
         url: &PyString,
@@ -200,7 +241,50 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
         }
     }
 
+    #[pyfn(module)]
+    fn fetch_all(
+        py: Python<'_>,
+        mut requests: Vec<PyRefMut<AsyncRequest>>,
+    ) -> PyResult<Vec<PyObject>> {
+        let mut results = vec![];
+
+        for e in http_client::fetch_all(
+            requests
+                .iter_mut()
+                .map(|r| r.request.take().unwrap())
+                .collect::<Vec<_>>(),
+        ) {
+            match e {
+                Ok(response) => {
+                    results.push(
+                        PyObjectDeserializer::new(py)
+                            .deserialize(&mut serde_json::Deserializer::from_slice(
+                                &(http_client::Response::body(response).map_err(|e| {
+                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                                })?),
+                            ))
+                            .map_err(|e| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                            })?,
+                    );
+                }
+                Err(e) => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        e.to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
     Ok(())
+}
+
+#[pyclass]
+struct AsyncRequest {
+    request: Option<Request>,
 }
 
 #[pyclass]

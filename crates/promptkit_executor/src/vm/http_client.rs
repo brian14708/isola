@@ -63,7 +63,7 @@ pub struct Request {
 #[async_trait::async_trait]
 impl<I> http_client::Host for I
 where
-    I: HttpClientCtx,
+    I: HttpClientCtx + Sync,
 {
     async fn fetch(
         &mut self,
@@ -91,7 +91,7 @@ where
         let exec = self.client().execute(inner).await;
 
         self.tracer()
-            .with_async(|f| {
+            .with_async(|f| async {
                 f.event(
                     "http",
                     span_id,
@@ -104,30 +104,144 @@ where
                     }))
                     .ok(),
                 )
+                .await;
+
+                if let (true, Some(span_id)) = (request.eager, span_id) {
+                    f.span_end("http", span_id, None).await;
+                }
             })
             .await;
 
         match exec {
             Ok(response) => {
-                let kind = if request.eager {
+                let r = if request.eager {
                     let headers = response.headers().clone();
                     let status = response.status();
-                    let body = response.bytes().await?;
-                    ResponseKind::Eager {
-                        headers,
-                        status,
-                        body,
+                    let body = match response.bytes().await {
+                        Ok(body) => body,
+                        Err(err) => {
+                            return Ok(Err(http_client::Error::Unknown(format!(
+                                "failed to read response body: {err}"
+                            ))))
+                        }
+                    };
+                    Response {
+                        kind: ResponseKind::Eager {
+                            headers,
+                            status,
+                            body,
+                        },
+                        span_id: None,
                     }
                 } else {
-                    ResponseKind::Lazy(response)
+                    Response {
+                        kind: ResponseKind::Lazy(response),
+                        span_id,
+                    }
                 };
-                Ok(Ok(self.table_mut().push(Response {
-                    kind: kind,
-                    span_id,
-                })?))
+                Ok(Ok(self.table_mut().push(r)?))
             }
             Err(err) => Ok(Err(http_client::Error::Unknown(err.to_string()))),
         }
+    }
+
+    async fn fetch_all(
+        &mut self,
+        requests: Vec<wasmtime::component::Resource<Request>>,
+    ) -> wasmtime::Result<Vec<Result<wasmtime::component::Resource<Response>, http_client::Error>>>
+    {
+        let requests = requests
+            .into_iter()
+            .map(|r| self.table_mut().delete(r))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if requests.iter().any(|r| !r.eager) {
+            return Err(anyhow::anyhow!("fetch_all only supports eager requests"));
+        }
+
+        let span_id = self
+            .tracer()
+            .with_async(|f| {
+                f.span_begin(
+                    "http",
+                    None,
+                    "request-multi".into(),
+                    to_raw_value(
+                        &requests
+                            .iter()
+                            .map(|r| {
+                                json!({
+                                    "url": r.inner.url().to_string(),
+                                    "method": r.inner.method().to_string(),
+                                })
+                            })
+                            .collect::<Vec<_>>(),
+                    )
+                    .ok(),
+                )
+            })
+            .await;
+
+        let client = self.client();
+        let tracer = self.tracer();
+        let ret = futures_util::future::join_all(requests.into_iter().enumerate().map(
+            |(idx, r)| async move {
+                let inner = r.inner;
+                let r = client
+                    .execute(inner)
+                    .await
+                    .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
+                let headers = r.headers().clone();
+                let status = r.status();
+                let body = r
+                    .bytes()
+                    .await
+                    .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
+                if let Some(span_id) = span_id {
+                    tracer
+                        .with_async(|f| {
+                            f.event(
+                                "http",
+                                Some(span_id),
+                                "response-finished".into(),
+                                to_raw_value(&json!({
+                                    "status": status.as_u16(),
+                                    "index": idx,
+                                }))
+                                .ok(),
+                            )
+                        })
+                        .await;
+                }
+                Ok((
+                    Response {
+                        kind: ResponseKind::Eager {
+                            headers,
+                            status,
+                            body,
+                        },
+                        span_id: None,
+                    },
+                    status,
+                ))
+            },
+        ))
+        .await;
+
+        if let Some(span_id) = span_id {
+            self.tracer()
+                .with_async(|f| f.span_end("http", span_id, None))
+                .await;
+        }
+
+        let mut result = vec![];
+        for r in ret {
+            match r {
+                Ok((r, _)) => result.push(Ok(self.table_mut().push(r)?)),
+                Err(err) => result.push(Err(err)),
+            }
+        }
+        Ok(result)
     }
 }
 
@@ -294,7 +408,7 @@ where
 
         let body = match response.kind {
             ResponseKind::Eager { .. } => {
-                return Err(anyhow::anyhow!("SSE is not supported for eager responses").into())
+                return Err(anyhow::anyhow!("SSE is not supported for eager responses"))
             }
             ResponseKind::Lazy(response) => response.bytes_stream().eventsource(),
         };

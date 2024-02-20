@@ -1444,6 +1444,7 @@ dependencies = [
  "bytes",
  "coarsetime",
  "eventsource-stream",
+ "futures-util",
  "parking_lot",
  "pin-project-lite",
  "rand",
