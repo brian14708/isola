@@ -1,0 +1,31 @@
+
+interface http-client {
+    enum method {
+        get,
+        post,
+    }
+    variant error {
+        unknown(string),
+    }
+    resource request {
+        constructor(%url: string, %method: method);
+        set-body: func(%body: list<u8>);
+        set-header: func(%key: string, %value: string) -> result<_, error>;
+        set-timeout: func(%timeout-ms: u64);
+    }
+    resource response {
+        header: func(%key: string) -> option<string>;
+        status: func() -> u16;
+        body: static func(%response: response) -> result<list<u8>, error>;
+        body-sse: static func(%response: response) -> response-sse-body;
+    }
+    type sse-event = tuple<
+        string, // id
+        string, // event
+        string, // data
+    >;
+    resource response-sse-body {
+        read: func() -> option<result<sse-event, error>>;
+    }
+    fetch: func(%request: request) -> result<response, error>;
+}

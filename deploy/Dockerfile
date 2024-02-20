@@ -4,6 +4,7 @@
 FROM docker.io/library/rust:bookworm AS server-build
 WORKDIR /src
 COPY crates crates
+COPY wit wit
 COPY Cargo.toml .
 COPY Cargo.lock .
 RUN --mount=type=cache,target=/src/target/release \
@@ -34,7 +35,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-tools --locked
 WORKDIR /src
 COPY wasm .
-COPY crates/promptkit_executor/wit ../crates/promptkit_executor/wit
+COPY wit ../wit
 RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
     --mount=type=cache,target=/src/target/wasm32-wasi/wasi-deps/downloads \
     --mount=type=cache,target=/src/target/release \
