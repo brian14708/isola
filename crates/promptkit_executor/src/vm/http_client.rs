@@ -57,6 +57,7 @@ where
 
 pub struct Request {
     inner: reqwest::Request,
+    eager: bool,
 }
 
 #[async_trait::async_trait]
@@ -68,7 +69,8 @@ where
         &mut self,
         request: wasmtime::component::Resource<Request>,
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
-        let request = self.table_mut().delete(request)?.inner;
+        let request = self.table_mut().delete(request)?;
+        let inner = request.inner;
 
         let span_id = self
             .tracer()
@@ -78,15 +80,15 @@ where
                     None,
                     "request".into(),
                     to_raw_value(&json!({
-                        "url": request.url().to_string(),
-                        "method": request.method().to_string(),
+                        "url": inner.url().to_string(),
+                        "method": inner.method().to_string(),
                     }))
                     .ok(),
                 )
             })
             .await;
 
-        let exec = self.client().execute(request).await;
+        let exec = self.client().execute(inner).await;
 
         self.tracer()
             .with_async(|f| {
@@ -106,10 +108,24 @@ where
             .await;
 
         match exec {
-            Ok(response) => Ok(Ok(self.table_mut().push(Response {
-                inner: response,
-                span_id,
-            })?)),
+            Ok(response) => {
+                let kind = if request.eager {
+                    let headers = response.headers().clone();
+                    let status = response.status();
+                    let body = response.bytes().await?;
+                    ResponseKind::Eager {
+                        headers,
+                        status,
+                        body,
+                    }
+                } else {
+                    ResponseKind::Lazy(response)
+                };
+                Ok(Ok(self.table_mut().push(Response {
+                    kind: kind,
+                    span_id,
+                })?))
+            }
             Err(err) => Ok(Err(http_client::Error::Unknown(err.to_string()))),
         }
     }
@@ -133,6 +149,7 @@ where
                 },
                 reqwest::Url::parse(&url)?,
             ),
+            eager: false,
         })?)
     }
 
@@ -175,6 +192,16 @@ where
         Ok(())
     }
 
+    async fn set_eager(
+        &mut self,
+        resource: wasmtime::component::Resource<Request>,
+        eager: bool,
+    ) -> wasmtime::Result<()> {
+        let request = self.table_mut().get_mut(&resource)?;
+        request.eager = eager;
+        Ok(())
+    }
+
     fn drop(&mut self, req: wasmtime::component::Resource<Request>) -> wasmtime::Result<()> {
         self.table_mut().delete(req)?;
         Ok(())
@@ -182,8 +209,17 @@ where
 }
 
 pub struct Response {
-    inner: reqwest::Response,
+    kind: ResponseKind,
     span_id: Option<i16>,
+}
+
+enum ResponseKind {
+    Eager {
+        headers: reqwest::header::HeaderMap,
+        status: reqwest::StatusCode,
+        body: Bytes,
+    },
+    Lazy(reqwest::Response),
 }
 
 #[async_trait::async_trait]
@@ -197,12 +233,13 @@ where
         key: String,
     ) -> wasmtime::Result<Option<String>> {
         let response = self.table().get(&resource)?;
-        Ok(response
-            .inner
-            .headers()
-            .get(key)
-            .and_then(|e| e.to_str().ok())
-            .map(str::to_string))
+        Ok(match &response.kind {
+            ResponseKind::Eager { headers, .. } => headers,
+            ResponseKind::Lazy(response) => response.headers(),
+        }
+        .get(&key)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string))
     }
 
     async fn status(
@@ -210,7 +247,11 @@ where
         resource: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<u16> {
         let response = self.table().get(&resource)?;
-        Ok(response.inner.status().as_u16())
+        Ok(match &response.kind {
+            ResponseKind::Eager { status, .. } => *status,
+            ResponseKind::Lazy(response) => response.status(),
+        }
+        .as_u16())
     }
 
     async fn body(
@@ -218,7 +259,12 @@ where
         resource: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<Result<Vec<u8>, http_client::Error>> {
         let response = self.table_mut().delete(resource)?;
-        let body = response.inner.bytes().await;
+
+        let body = match response.kind {
+            ResponseKind::Eager { body, .. } => Ok(body),
+            ResponseKind::Lazy(response) => response.bytes().await,
+        };
+
         if let Some(span_id) = response.span_id {
             self.tracer()
                 .with_async(|t| {
@@ -233,6 +279,7 @@ where
                 })
                 .await;
         }
+
         Ok(match body {
             Ok(data) => Ok(data.into()),
             Err(err) => Err(http_client::Error::Unknown(err.to_string())),
@@ -244,8 +291,16 @@ where
         resource: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<wasmtime::component::Resource<ResponseSseBody>> {
         let response = self.table_mut().delete(resource)?;
+
+        let body = match response.kind {
+            ResponseKind::Eager { .. } => {
+                return Err(anyhow::anyhow!("SSE is not supported for eager responses").into())
+            }
+            ResponseKind::Lazy(response) => response.bytes_stream().eventsource(),
+        };
+
         Ok(self.table_mut().push(ResponseSseBody {
-            inner: Box::new(response.inner.bytes_stream().eventsource()),
+            inner: Box::new(body),
             span_id: response.span_id,
         })?)
     }

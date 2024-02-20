@@ -12,6 +12,7 @@ interface http-client {
         set-body: func(%body: list<u8>);
         set-header: func(%key: string, %value: string) -> result<_, error>;
         set-timeout: func(%timeout-ms: u64);
+        set-eager: func(%eager: bool);
     }
     resource response {
         header: func(%key: string) -> option<string>;

@@ -95,6 +95,7 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyfn(module)]
     fn get(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Get);
+        request.set_eager(true);
         request.set_header("accept", "application/json").unwrap();
         if let Some(headers) = headers {
             set_headers(&request, headers)?;
@@ -139,6 +140,7 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
         headers: Option<&PyDict>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
+        request.set_eager(true);
         request
             .set_header("content-type", "application/json")
             .unwrap();
