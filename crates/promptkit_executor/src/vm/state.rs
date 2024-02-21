@@ -17,7 +17,7 @@ use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::Trac
 use super::bindgen;
 use super::http_client;
 
-pub(crate) struct VmRunState {
+pub struct VmRunState {
     pub(crate) output: mpsc::Sender<anyhow::Result<(String, bool)>>,
 }
 

@@ -223,7 +223,7 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         if let Some(task) = this.task.as_mut().as_pin_mut() {
-            if let Poll::Ready(()) = task.poll(cx) {
+            if task.poll(cx) == Poll::Ready(()) {
                 this.task.set(None);
             }
         }

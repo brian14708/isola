@@ -191,12 +191,11 @@ async fn exec(
 }
 
 fn exec_to_event(e: ExecStreamItem) -> anyhow::Result<Event> {
-    Ok(match e {
-        ExecStreamItem::Data(data) => Event::default().data(data),
-        ExecStreamItem::End(end) => match end {
-            Some(data) => Event::default().data(data),
-            None => Event::default().data("[DONE]"),
-        },
-        ExecStreamItem::Error(err) => return Err(err),
-    })
+    match e {
+        ExecStreamItem::Data(data) | ExecStreamItem::End(Some(data)) => {
+            Ok(Event::default().data(data))
+        }
+        ExecStreamItem::End(None) => Ok(Event::default().data("[DONE]")),
+        ExecStreamItem::Error(err) => Err(err),
+    }
 }

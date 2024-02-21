@@ -19,7 +19,7 @@ impl<T> AtomicCell<T> {
         }
     }
 
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self {
             ptr: AtomicPtr::new(null_mut()),
             phantom: PhantomData,
@@ -34,6 +34,7 @@ impl<T> AtomicCell<T> {
         }
     }
 
+    // Must ensure that there is no concurrent access (with, with_async) to the cell
     pub unsafe fn set_unguarded(&self, t: Option<T>) {
         let ptr = t.map_or(null_mut(), |t| Box::into_raw(Box::new(t)));
         let old = self.ptr.swap(ptr, Ordering::Release);
@@ -53,7 +54,7 @@ impl<T> Drop for AtomicCell<T> {
     }
 }
 
-impl<T: Send> AtomicCell<T> {
+impl<T> AtomicCell<T> {
     pub fn with_mut<O>(&mut self, f: impl FnOnce(&mut T) -> O) -> Option<O> {
         let ptr = self.ptr.load(Ordering::Acquire);
         unsafe { ptr.as_mut() }.map(f)

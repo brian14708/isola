@@ -36,7 +36,7 @@ impl<S, E> StreamUntilError<S>
 where
     S: Stream<Item = anyhow::Result<E>> + Send + 'static,
 {
-    fn new(stream: S) -> Self {
+    const fn new(stream: S) -> Self {
         Self {
             stream: Some(stream),
         }

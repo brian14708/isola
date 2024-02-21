@@ -23,7 +23,7 @@ impl VmRun {
     ) -> Self {
         let o: &mut VmState = vm.store.data_mut();
         if let Some(tracer) = tracer {
-            // SAFETY: no other reference to tracer is in use
+            // SAFETY: vm is not running yet
             unsafe { o.tracer.set_unguarded(Some(tracer)) };
         }
         o.run = Some(VmRunState { output: sender });
@@ -32,10 +32,10 @@ impl VmRun {
 
     pub async fn exec<'a, F, Output>(
         &'a mut self,
-        f: impl FnOnce(&'a exports::Vm, &'a mut Store<VmState>) -> F,
+        f: impl FnOnce(&'a exports::Vm, &'a mut Store<VmState>) -> F + Send,
     ) -> Output
     where
-        F: Future<Output = Output>,
+        F: Future<Output = Output> + Send,
     {
         let vm = self.vm.as_mut().unwrap();
         f(vm.python.vm(), &mut vm.store).await
@@ -45,7 +45,7 @@ impl VmRun {
         if let Some(vm) = self.vm.as_mut() {
             let o: &mut VmState = vm.store.data_mut();
             o.run = None;
-            // SAFETY: no other reference to tracer is in use
+            // SAFETY: vm is not running anymore
             unsafe { o.tracer.set_unguarded(None) };
         }
     }
