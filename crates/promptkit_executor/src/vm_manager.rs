@@ -137,7 +137,12 @@ impl VmManager {
             let ret = run
                 .exec(|vm, store| vm.call_call_func(store, &func, &args))
                 .await
-                .and_then(|v| v.map_err(|e| anyhow!(e)));
+                .and_then(|v| {
+                    v.map_err(|e| match e {
+                        crate::vm::exports::Error::Python(err) => anyhow!("[Python] {0}", err),
+                        crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
+                    })
+                });
             match ret {
                 Ok(()) => {
                     cache.put(run.reuse());
@@ -182,7 +187,10 @@ impl VmManager {
                 .vm()
                 .call_eval_script(&mut vm.store, script)
                 .await?
-                .map_err(|e| anyhow!(e))?;
+                .map_err(|e| match e {
+                    crate::vm::exports::Error::Python(err) => anyhow!("[Python] {0}", err),
+                    crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
+                })?;
             vm
         };
 

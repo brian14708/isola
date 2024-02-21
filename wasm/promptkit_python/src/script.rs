@@ -5,6 +5,7 @@ use pyo3::{
 };
 use serde::de::DeserializeSeed;
 
+use crate::error::{Error, Result};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 
 pub struct Scope {
@@ -27,9 +28,14 @@ impl Scope {
         })
     }
 
-    pub fn load_script(&self, code: &str) -> PyResult<()> {
+    pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
         Python::with_gil(|py| {
-            py.run(code, Some(self.locals.downcast(py)?), None)?;
+            py.run(
+                code,
+                Some(self.locals.downcast(py).map_err(|e| pyerr_to_err(py, e))?),
+                None,
+            )
+            .map_err(|e| pyerr_to_err(py, e))?;
             Ok(())
         })
     }
@@ -40,13 +46,13 @@ impl Scope {
         positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
         named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
         mut callback: impl FnMut(&str),
-    ) -> PyResult<Option<String>>
+    ) -> Result<Option<String>>
     where
         U: ExactSizeIterator<Item = InputValue<'a>>,
     {
         Python::with_gil(|py| {
-            let dict: &PyDict = self.locals.downcast(py)?;
-            let Some(f) = dict.get_item(name)? else {
+            let dict: &PyDict = self.locals.downcast(py).map_err(|e| pyerr_to_err(py, e))?;
+            let Some(f) = dict.get_item(name).map_err(|e| pyerr_to_err(py, e))? else {
                 return Ok(None);
             };
 
@@ -66,22 +72,24 @@ impl Scope {
                 for (k, v) in named {
                     match v {
                         InputValue::Json(v) => {
-                            kwargs.set_item(
-                                k,
-                                PyObjectDeserializer::new(py).deserialize(v).unwrap(),
-                            )?;
+                            kwargs
+                                .set_item(k, PyObjectDeserializer::new(py).deserialize(v).unwrap())
+                                .map_err(|e| pyerr_to_err(py, e))?;
                         }
                         InputValue::JsonStr(v) => {
-                            kwargs.set_item(
-                                k,
-                                PyObjectDeserializer::new(py)
-                                    .deserialize(&mut serde_json::Deserializer::from_str(v))
-                                    .unwrap(),
-                            )?;
+                            kwargs
+                                .set_item(
+                                    k,
+                                    PyObjectDeserializer::new(py)
+                                        .deserialize(&mut serde_json::Deserializer::from_str(v))
+                                        .unwrap(),
+                                )
+                                .map_err(|e| pyerr_to_err(py, e))?;
                         }
                     }
                 }
-                f.call(args, Some(kwargs))?
+                f.call(args, Some(kwargs))
+                    .map_err(|e| pyerr_to_err(py, e))?
             } else {
                 f
             };
@@ -99,10 +107,16 @@ impl Scope {
                 return Ok(None);
             }
 
-            Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "unsupported return type",
-            ))
+            Err(Error::UnexpectedError("unsupported return type"))
         })
+    }
+}
+
+fn pyerr_to_err(py: Python<'_>, e: impl Into<PyErr>) -> Error {
+    let e = e.into();
+    Error::PythonError {
+        cause: e.to_string(),
+        traceback: e.traceback(py).and_then(|e| e.format().ok()),
     }
 }
 

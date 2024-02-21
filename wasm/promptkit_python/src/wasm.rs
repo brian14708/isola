@@ -8,6 +8,7 @@ use serde::de::DeserializeSeed;
 
 use self::exports::vm::Argument;
 use self::promptkit::python::http_client::Request;
+use crate::error::Error;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::python::http_client::{self, Method};
@@ -48,7 +49,16 @@ impl exports::vm::Guest for Global {
                         [],
                         |s| host::emit(s, false),
                     )
-                    .map_err(|e| exports::vm::Error::Python(e.to_string()))?;
+                    .map_err(|e| match e {
+                        Error::PythonError { cause, traceback } => {
+                            exports::vm::Error::Python(if let Some(traceback) = traceback {
+                                format!("{cause}\n\n{traceback}")
+                            } else {
+                                cause
+                            })
+                        }
+                        Error::UnexpectedError(e) => exports::vm::Error::Unknown(e.to_string()),
+                    })?;
                 host::emit(ret.as_deref().unwrap_or(""), true);
                 Ok(())
             } else {
