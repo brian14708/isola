@@ -22,5 +22,5 @@ smallvec = "1.13.1"
 tokio = "1.35.1"
 tokio-stream = "0.1.14"
 tracing = "0.1.40"
-wasmtime = { version = "17.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation", "pooling-allocator"] }
-wasmtime-wasi = "17.0.0"
+wasmtime = { version = "18.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation", "pooling-allocator"] }
+wasmtime-wasi = "18.0.0"

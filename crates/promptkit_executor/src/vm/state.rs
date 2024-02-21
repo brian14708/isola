@@ -2,6 +2,7 @@ use std::fs::File;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use wasmtime::component::Linker;
 use wasmtime::component::ResourceTable;
@@ -24,8 +25,8 @@ pub struct VmRunState {
 pub struct VmState {
     limiter: MemoryLimiter,
     client: reqwest::Client,
-    wasi: WasiCtx,
-    table: ResourceTable,
+    wasi: Mutex<WasiCtx>,
+    table: Mutex<ResourceTable>,
     pub(crate) tracer: Arc<TracerContext>,
     pub(crate) run: Option<VmRunState>,
 }
@@ -59,8 +60,8 @@ impl VmState {
                 tracer,
                 limiter,
                 client: reqwest::Client::new(),
-                wasi,
-                table: ResourceTable::new(),
+                wasi: Mutex::new(wasi),
+                table: Mutex::new(ResourceTable::new()),
                 run: None,
             },
         );
@@ -74,20 +75,12 @@ impl VmState {
 }
 
 impl WasiView for VmState {
-    fn table(&self) -> &ResourceTable {
-        &self.table
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
     }
 
-    fn table_mut(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
-    fn ctx(&self) -> &WasiCtx {
-        &self.wasi
-    }
-
-    fn ctx_mut(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
+    fn ctx(&mut self) -> &mut WasiCtx {
+        self.wasi.get_mut()
     }
 }
 
@@ -104,12 +97,8 @@ impl bindgen::host::Host for VmState {
 }
 
 impl http_client::HttpClientCtx for VmState {
-    fn table_mut(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
-    fn table(&self) -> &ResourceTable {
-        &self.table
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
     }
 
     fn client(&self) -> &reqwest::Client {

@@ -32,7 +32,7 @@ impl VmRun {
 
     pub async fn exec<'a, F, Output>(
         &'a mut self,
-        f: impl FnOnce(&'a exports::Vm, &'a mut Store<VmState>) -> F + Send,
+        f: impl FnOnce(&'a exports::Guest, &'a mut Store<VmState>) -> F + Send,
     ) -> Output
     where
         F: Future<Output = Output> + Send,

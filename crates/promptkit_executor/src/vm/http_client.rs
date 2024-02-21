@@ -13,8 +13,7 @@ use super::bindgen::http_client;
 pub trait HttpClientCtx: Send {
     fn tracer(&self) -> &TracerContext;
     fn client(&self) -> &reqwest::Client;
-    fn table(&self) -> &ResourceTable;
-    fn table_mut(&mut self) -> &mut ResourceTable;
+    fn table(&mut self) -> &mut ResourceTable;
 }
 
 pub struct ResponseSseBody {
@@ -33,7 +32,7 @@ where
         &mut self,
         resource: Resource<http_client::ResponseSseBody>,
     ) -> wasmtime::Result<Option<Result<http_client::SseEvent, http_client::Error>>> {
-        let body = self.table_mut().get_mut(&resource)?;
+        let body = self.table().get_mut(&resource)?;
         Ok(match body.inner.next().await {
             Some(Ok(d)) => Some(Ok((d.id, d.event, d.data))),
             Some(Err(err)) => Some(Err(http_client::Error::Unknown(err.to_string()))),
@@ -50,7 +49,7 @@ where
     }
 
     fn drop(&mut self, resource: Resource<http_client::ResponseSseBody>) -> wasmtime::Result<()> {
-        self.table_mut().delete(resource)?;
+        self.table().delete(resource)?;
         Ok(())
     }
 }
@@ -69,7 +68,7 @@ where
         &mut self,
         request: wasmtime::component::Resource<Request>,
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
-        let request = self.table_mut().delete(request)?;
+        let request = self.table().delete(request)?;
         let inner = request.inner;
 
         let span_id = self
@@ -139,7 +138,7 @@ where
                         span_id,
                     }
                 };
-                Ok(Ok(self.table_mut().push(r)?))
+                Ok(Ok(self.table().push(r)?))
             }
             Err(err) => Ok(Err(http_client::Error::Unknown(err.to_string()))),
         }
@@ -152,7 +151,7 @@ where
     {
         let requests = requests
             .into_iter()
-            .map(|r| self.table_mut().delete(r))
+            .map(|r| self.table().delete(r))
             .collect::<Result<Vec<_>, _>>()?;
 
         if requests.iter().any(|r| !r.eager) {
@@ -237,7 +236,7 @@ where
         let mut result = vec![];
         for r in ret {
             match r {
-                Ok((r, _)) => result.push(Ok(self.table_mut().push(r)?)),
+                Ok((r, _)) => result.push(Ok(self.table().push(r)?)),
                 Err(err) => result.push(Err(err)),
             }
         }
@@ -255,7 +254,7 @@ where
         url: String,
         method: http_client::Method,
     ) -> wasmtime::Result<wasmtime::component::Resource<Request>> {
-        Ok(self.table_mut().push(Request {
+        Ok(self.table().push(Request {
             inner: reqwest::Request::new(
                 match method {
                     http_client::Method::Get => reqwest::Method::GET,
@@ -272,7 +271,7 @@ where
         resource: wasmtime::component::Resource<Request>,
         body: Vec<u8>,
     ) -> wasmtime::Result<()> {
-        let request = self.table_mut().get_mut(&resource)?;
+        let request = self.table().get_mut(&resource)?;
         *request.inner.body_mut() = Some(reqwest::Body::from(body));
         Ok(())
     }
@@ -283,7 +282,7 @@ where
         key: String,
         value: String,
     ) -> wasmtime::Result<Result<(), http_client::Error>> {
-        let request = self.table_mut().get_mut(&resource)?;
+        let request = self.table().get_mut(&resource)?;
         let key = match reqwest::header::HeaderName::from_str(&key) {
             Ok(key) => key,
             Err(e) => return Ok(Err(http_client::Error::Unknown(e.to_string()))),
@@ -301,7 +300,7 @@ where
         resource: wasmtime::component::Resource<Request>,
         timeout_ms: u64,
     ) -> wasmtime::Result<()> {
-        let request = self.table_mut().get_mut(&resource)?;
+        let request = self.table().get_mut(&resource)?;
         *request.inner.timeout_mut() = Some(Duration::from_millis(timeout_ms));
         Ok(())
     }
@@ -311,13 +310,13 @@ where
         resource: wasmtime::component::Resource<Request>,
         eager: bool,
     ) -> wasmtime::Result<()> {
-        let request = self.table_mut().get_mut(&resource)?;
+        let request = self.table().get_mut(&resource)?;
         request.eager = eager;
         Ok(())
     }
 
     fn drop(&mut self, req: wasmtime::component::Resource<Request>) -> wasmtime::Result<()> {
-        self.table_mut().delete(req)?;
+        self.table().delete(req)?;
         Ok(())
     }
 }
@@ -372,7 +371,7 @@ where
         &mut self,
         resource: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<Result<Vec<u8>, http_client::Error>> {
-        let response = self.table_mut().delete(resource)?;
+        let response = self.table().delete(resource)?;
 
         let body = match response.kind {
             ResponseKind::Eager { body, .. } => Ok(body),
@@ -404,7 +403,7 @@ where
         &mut self,
         resource: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<wasmtime::component::Resource<ResponseSseBody>> {
-        let response = self.table_mut().delete(resource)?;
+        let response = self.table().delete(resource)?;
 
         let body = match response.kind {
             ResponseKind::Eager { .. } => {
@@ -413,14 +412,14 @@ where
             ResponseKind::Lazy(response) => response.bytes_stream().eventsource(),
         };
 
-        Ok(self.table_mut().push(ResponseSseBody {
+        Ok(self.table().push(ResponseSseBody {
             inner: Box::new(body),
             span_id: response.span_id,
         })?)
     }
 
     fn drop(&mut self, rep: wasmtime::component::Resource<Response>) -> wasmtime::Result<()> {
-        self.table_mut().delete(rep)?;
+        self.table().delete(rep)?;
         Ok(())
     }
 }
