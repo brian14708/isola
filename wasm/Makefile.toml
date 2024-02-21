@@ -44,7 +44,7 @@ args = [
     "-o",
     "target/promptkit_python.wasm",
     "--adapt",
-    "wit-libs/wasi_snapshot_preview1.reactor.wasm",
+    "lib/wasi_snapshot_preview1.reactor.wasm",
 ]
 dependencies = [
     "opt-wasm",

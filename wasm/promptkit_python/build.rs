@@ -26,9 +26,15 @@ fn download(url: &str, dest: &str) -> PathBuf {
     dest
 }
 
-fn download_and_unarchive(url: &str, dest: &str) {
-    let t = download(url, dest);
-    let decoder = flate2::read::GzDecoder::new(std::fs::File::open(t).unwrap());
+fn download_and_unarchive(url: &str, local_override: Option<&str>, dest: &str) {
+    let t = if let Some(file) = local_override.and_then(|f| std::fs::File::open(f).ok()) {
+        println!("cargo:rerun-if-changed={}", local_override.unwrap());
+        file
+    } else {
+        let t = download(url, dest);
+        std::fs::File::open(t).unwrap()
+    };
+    let decoder = flate2::read::GzDecoder::new(t);
     let mut archive = tar::Archive::new(decoder);
     archive.unpack(dest).unwrap();
 }
@@ -41,15 +47,20 @@ fn main() {
             env!("CARGO_MANIFEST_DIR"),
             "../target/wasm32-wasi/wasi-deps"
         );
+        let libpython_binary = "python3.11";
+
         // https://github.com/vmware-labs/webassembly-language-runtimes/blob/main/python/tools/wlr-libpy/src/bld_cfg.rs
         let wasi_sdk_sysroot_url= "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sysroot-20.0.tar.gz";
         let wasi_sdk_clang_builtins_url = "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/libclang_rt.builtins-wasm32-wasi-20.0.tar.gz";
         let libpython_url= "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.11.4%2B20230714-11be424/libpython-3.11.4-wasi-sdk-20.0.tar.gz";
-        let libpython_binary = "python3.11";
 
-        download_and_unarchive(wasi_sdk_sysroot_url, &wasi_deps_path);
-        download_and_unarchive(wasi_sdk_clang_builtins_url, &wasi_deps_path);
-        download_and_unarchive(libpython_url, &wasi_deps_path);
+        download_and_unarchive(wasi_sdk_sysroot_url, None, &wasi_deps_path);
+        download_and_unarchive(wasi_sdk_clang_builtins_url, None, &wasi_deps_path);
+        download_and_unarchive(
+            libpython_url,
+            Some("../lib/libpython.tar.gz"),
+            &wasi_deps_path,
+        );
 
         let lib_paths = vec![
             "wasi-sysroot/lib/wasm32-wasi",
