@@ -8,7 +8,6 @@ use serde::de::DeserializeSeed;
 
 use self::exports::vm::Argument;
 use self::promptkit::python::http_client::Request;
-use crate::error::Error;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::python::http_client::{self, Method};
@@ -27,8 +26,7 @@ impl exports::vm::Guest for Global {
         GLOBAL_SCOPE.with(|vm| {
             return if let Some(vm) = vm.borrow().as_ref() {
                 vm.load_script(&script)
-                    .map_err(|e| exports::vm::Error::Python(e.to_string()))?;
-                Ok(())
+                    .map_err(Into::<exports::vm::Error>::into)
             } else {
                 Err(exports::vm::Error::Unknown(
                     "VM not initialized".to_string(),
@@ -49,16 +47,7 @@ impl exports::vm::Guest for Global {
                         [],
                         |s| host::emit(s, false),
                     )
-                    .map_err(|e| match e {
-                        Error::PythonError { cause, traceback } => {
-                            exports::vm::Error::Python(if let Some(traceback) = traceback {
-                                format!("{cause}\n\n{traceback}")
-                            } else {
-                                cause
-                            })
-                        }
-                        Error::UnexpectedError(e) => exports::vm::Error::Unknown(e.to_string()),
-                    })?;
+                    .map_err(Into::<exports::vm::Error>::into)?;
                 host::emit(ret.as_deref().unwrap_or(""), true);
                 Ok(())
             } else {

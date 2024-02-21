@@ -32,10 +32,14 @@ impl Scope {
         Python::with_gil(|py| {
             py.run(
                 code,
-                Some(self.locals.downcast(py).map_err(|e| pyerr_to_err(py, e))?),
+                Some(
+                    self.locals
+                        .downcast(py)
+                        .map_err(|e| Error::from_pyerr(py, e))?,
+                ),
                 None,
             )
-            .map_err(|e| pyerr_to_err(py, e))?;
+            .map_err(|e| Error::from_pyerr(py, e))?;
             Ok(())
         })
     }
@@ -51,8 +55,11 @@ impl Scope {
         U: ExactSizeIterator<Item = InputValue<'a>>,
     {
         Python::with_gil(|py| {
-            let dict: &PyDict = self.locals.downcast(py).map_err(|e| pyerr_to_err(py, e))?;
-            let Some(f) = dict.get_item(name).map_err(|e| pyerr_to_err(py, e))? else {
+            let dict: &PyDict = self
+                .locals
+                .downcast(py)
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            let Some(f) = dict.get_item(name).map_err(|e| Error::from_pyerr(py, e))? else {
                 return Ok(None);
             };
 
@@ -74,7 +81,7 @@ impl Scope {
                         InputValue::Json(v) => {
                             kwargs
                                 .set_item(k, PyObjectDeserializer::new(py).deserialize(v).unwrap())
-                                .map_err(|e| pyerr_to_err(py, e))?;
+                                .map_err(|e| Error::from_pyerr(py, e))?;
                         }
                         InputValue::JsonStr(v) => {
                             kwargs
@@ -84,12 +91,12 @@ impl Scope {
                                         .deserialize(&mut serde_json::Deserializer::from_str(v))
                                         .unwrap(),
                                 )
-                                .map_err(|e| pyerr_to_err(py, e))?;
+                                .map_err(|e| Error::from_pyerr(py, e))?;
                         }
                     }
                 }
                 f.call(args, Some(kwargs))
-                    .map_err(|e| pyerr_to_err(py, e))?
+                    .map_err(|e| Error::from_pyerr(py, e))?
             } else {
                 f
             };
@@ -109,14 +116,6 @@ impl Scope {
 
             Err(Error::UnexpectedError("unsupported return type"))
         })
-    }
-}
-
-fn pyerr_to_err(py: Python<'_>, e: impl Into<PyErr>) -> Error {
-    let e = e.into();
-    Error::PythonError {
-        cause: e.to_string(),
-        traceback: e.traceback(py).and_then(|e| e.format().ok()),
     }
 }
 
