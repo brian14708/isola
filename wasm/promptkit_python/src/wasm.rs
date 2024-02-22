@@ -337,7 +337,8 @@ pub extern "C" fn _initialize() {
     GLOBAL_SCOPE.with(|scope| {
         append_to_inittab!(promptkit_module);
         let v = Scope::new();
-        v.load_script("").unwrap();
+        let code = include_str!("prelude.py");
+        v.load_script(code).unwrap();
         v.flush();
         scope.borrow_mut().replace(v);
     });
