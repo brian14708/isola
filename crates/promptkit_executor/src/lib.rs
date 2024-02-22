@@ -10,4 +10,4 @@ mod vm;
 mod vm_cache;
 mod vm_manager;
 
-pub use vm_manager::{ExecResult, ExecStreamItem, VmManager};
+pub use vm_manager::{ExecStreamItem, VmManager};

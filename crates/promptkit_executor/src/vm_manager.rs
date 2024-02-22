@@ -41,8 +41,6 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub type ExecResult = Pin<Box<dyn tokio_stream::Stream<Item = ExecStreamItem> + Send>>;
-
 impl VmManager {
     fn cfg() -> Config {
         let mut config = Config::new();
@@ -124,7 +122,7 @@ impl VmManager {
         args: Vec<String>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
-    ) -> ExecResult {
+    ) -> impl Stream<Item = ExecStreamItem> + Send {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -153,7 +151,7 @@ impl VmManager {
             };
         }));
 
-        let stream = join_with(
+        join_with(
             ReceiverStream::new(rx).map(|v| match v {
                 Ok((data, true)) => {
                     ExecStreamItem::End(if data.is_empty() { None } else { Some(data) })
@@ -162,9 +160,7 @@ impl VmManager {
                 Err(err) => ExecStreamItem::Error(err),
             }),
             exec,
-        );
-
-        Box::pin(stream)
+        )
     }
 
     pub async fn exec(
@@ -173,7 +169,7 @@ impl VmManager {
         func: String,
         args: Vec<String>,
         tracer: Option<BoxedTracer>,
-    ) -> anyhow::Result<ExecResult> {
+    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
@@ -230,17 +226,17 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        if let Some(task) = this.task.as_mut().as_pin_mut() {
-            if task.poll(cx) == Poll::Ready(()) {
-                this.task.set(None);
-            }
-        }
-
         if let Some(stream) = this.stream.as_mut().as_pin_mut() {
             match stream.poll_next(cx) {
                 Poll::Ready(None) => this.stream.set(None),
-                Poll::Ready(Some(v)) => return Poll::Ready(Some(v)),
-                Poll::Pending => return Poll::Pending,
+                v @ Poll::Ready(Some(_)) => return v,
+                Poll::Pending => {}
+            }
+        }
+
+        if let Some(task) = this.task.as_mut().as_pin_mut() {
+            if task.poll(cx) == Poll::Ready(()) {
+                this.task.set(None);
             }
         }
 

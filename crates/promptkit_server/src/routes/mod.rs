@@ -156,6 +156,7 @@ async fn exec(
     } else {
         let first = match stream.next().await {
             Some(ExecStreamItem::End(end)) => {
+                while stream.next().await.is_some() {}
                 return Ok(match end {
                     Some(data) => Response::builder()
                         .status(StatusCode::OK)
