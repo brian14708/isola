@@ -1,4 +1,5 @@
 use pyo3::{
+    intern,
     prelude::*,
     prepare_freethreaded_python,
     types::{PyDict, PyTuple},
@@ -10,6 +11,7 @@ use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 
 pub struct Scope {
     locals: PyObject,
+    stdio: Option<(PyObject, PyObject)>,
 }
 pub enum InputValue<'a> {
     #[allow(dead_code)]
@@ -22,10 +24,35 @@ impl Scope {
         prepare_freethreaded_python();
         Python::with_gil(|py| {
             let locals = PyDict::new(py);
+            let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
+                if let (Ok(stdout), Ok(stderr)) = (
+                    sys.getattr(intern!(py, "stdout")),
+                    sys.getattr(intern!(py, "stderr")),
+                ) {
+                    Some((stdout.to_object(py), stderr.to_object(py)))
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+
             Scope {
                 locals: locals.to_object(py),
+                stdio,
             }
         })
+    }
+
+    pub fn flush(&self) {
+        let _ = Python::with_gil(|py| {
+            if let Some((stdout, stderr)) = &self.stdio {
+                let flush = intern!(py, "flush");
+                stdout.call_method0(py, flush)?;
+                stderr.call_method0(py, flush)?;
+            }
+            Ok::<_, PyErr>(())
+        });
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {

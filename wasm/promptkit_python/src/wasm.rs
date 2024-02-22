@@ -49,6 +49,7 @@ impl exports::vm::Guest for Global {
                     )
                     .map_err(Into::<exports::vm::Error>::into)?;
                 host::emit(ret.as_deref().unwrap_or(""), true);
+                vm.flush();
                 Ok(())
             } else {
                 Err(exports::vm::Error::Unknown(
@@ -337,6 +338,7 @@ pub extern "C" fn _initialize() {
         append_to_inittab!(promptkit_module);
         let v = Scope::new();
         v.load_script("").unwrap();
+        v.flush();
         scope.borrow_mut().replace(v);
     });
 }
