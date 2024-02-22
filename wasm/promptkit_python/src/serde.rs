@@ -1,13 +1,12 @@
 use pyo3::{
-    types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple},
-    IntoPy, PyAny, PyObject, Python,
+    types::{PyDict, PyList, PyNone, PyTuple},
+    FromPyObject, IntoPy, PyAny, PyObject, Python,
 };
 use serde::{
     de::{DeserializeSeed, Visitor},
     ser::{SerializeMap, SerializeSeq},
 };
 
-#[derive(Clone)]
 pub struct PyObjectDeserializer<'c> {
     py: Python<'c>,
 }
@@ -18,7 +17,7 @@ impl<'c> PyObjectDeserializer<'c> {
     }
 }
 
-impl<'de> DeserializeSeed<'de> for PyObjectDeserializer<'de> {
+impl<'de> DeserializeSeed<'de> for &PyObjectDeserializer<'de> {
     type Value = PyObject;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -29,7 +28,7 @@ impl<'de> DeserializeSeed<'de> for PyObjectDeserializer<'de> {
     }
 }
 
-impl<'de> Visitor<'de> for PyObjectDeserializer<'de> {
+impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
     type Value = PyObject;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -188,7 +187,7 @@ impl<'de> Visitor<'de> for PyObjectDeserializer<'de> {
         A: serde::de::SeqAccess<'de>,
     {
         let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(elem) = seq.next_element_seed(self.clone())? {
+        while let Some(elem) = seq.next_element_seed(self)? {
             elems.push(elem);
         }
         Ok(elems.into_py(self.py))
@@ -199,7 +198,7 @@ impl<'de> Visitor<'de> for PyObjectDeserializer<'de> {
         A: serde::de::MapAccess<'de>,
     {
         let dict = PyDict::new(self.py);
-        while let Some((key, value)) = map.next_entry_seed(self.clone(), self.clone())? {
+        while let Some((key, value)) = map.next_entry_seed(self, self)? {
             dict.set_item(key, value).unwrap();
         }
         Ok(dict.into_py(self.py))
@@ -245,53 +244,60 @@ impl<'s> PyObjectSerializer<'s> {
     }
 }
 
+#[derive(FromPyObject)]
+enum PyType<'a> {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    None(&'a PyNone),
+    String(&'a str),
+    Dict(&'a PyDict),
+    List(&'a PyList),
+    Tuple(&'a PyTuple),
+}
+
 impl<'s> serde::Serialize for PyObjectSerializer<'s> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        if self.pyobject.is_instance_of::<PyDict>() {
-            let dict = self.pyobject.downcast::<PyDict>().unwrap();
-            let mut map = serializer.serialize_map(Some(dict.len()))?;
-            for (key, value) in dict {
-                map.serialize_entry(&self.clone_with_object(key), &self.clone_with_object(value))?;
+        if let Ok(t) = self.pyobject.extract::<PyType>() {
+            match t {
+                PyType::Dict(dict) => {
+                    let mut map = serializer.serialize_map(Some(dict.len()))?;
+                    for (key, value) in dict {
+                        map.serialize_entry(
+                            &self.clone_with_object(key),
+                            &self.clone_with_object(value),
+                        )?;
+                    }
+                    map.end()
+                }
+                PyType::List(list) => {
+                    let mut seq = serializer.serialize_seq(Some(list.len()))?;
+                    for elem in list {
+                        seq.serialize_element(&self.clone_with_object(elem))?;
+                    }
+                    seq.end()
+                }
+                PyType::Tuple(tuple) => {
+                    let mut seq = serializer.serialize_seq(Some(tuple.len()))?;
+                    for elem in tuple {
+                        seq.serialize_element(&self.clone_with_object(elem))?;
+                    }
+                    seq.end()
+                }
+                PyType::None(_) => serializer.serialize_unit(),
+                PyType::String(s) => serializer.serialize_str(s),
+                PyType::Bool(b) => serializer.serialize_bool(b),
+                PyType::Int(i) => serializer.serialize_i64(i),
+                PyType::Float(f) => serializer.serialize_f64(f),
             }
-            return map.end();
+        } else {
+            Err(serde::ser::Error::custom(format!(
+                "Object of type '{}' is not serializable",
+                self.pyobject.get_type()
+            )))
         }
-        if self.pyobject.is_instance_of::<PyList>() {
-            let list = self.pyobject.downcast::<PyList>().unwrap();
-            let mut seq = serializer.serialize_seq(Some(list.len()))?;
-            for elem in list {
-                seq.serialize_element(&self.clone_with_object(elem))?;
-            }
-            return seq.end();
-        }
-        if self.pyobject.is_instance_of::<PyTuple>() {
-            let tuple = self.pyobject.downcast::<PyTuple>().unwrap();
-            let mut seq = serializer.serialize_seq(Some(tuple.len()))?;
-            for elem in tuple {
-                seq.serialize_element(&self.clone_with_object(elem))?;
-            }
-            return seq.end();
-        }
-        if self.pyobject.is_instance_of::<PyString>() {
-            return serializer.serialize_str(self.pyobject.extract().unwrap());
-        }
-        if self.pyobject.is_instance_of::<PyBool>() {
-            return serializer.serialize_bool(self.pyobject.extract().unwrap());
-        }
-        if self.pyobject.is_instance_of::<PyInt>() {
-            return serializer.serialize_i64(self.pyobject.extract().unwrap());
-        }
-        if self.pyobject.is_instance_of::<PyFloat>() {
-            return serializer.serialize_f64(self.pyobject.extract().unwrap());
-        }
-        if self.pyobject.is_none() {
-            return serializer.serialize_none();
-        }
-        Err(serde::ser::Error::custom(format!(
-            "Object of type '{}' is not serializable",
-            self.pyobject.get_type()
-        )))
     }
 }
