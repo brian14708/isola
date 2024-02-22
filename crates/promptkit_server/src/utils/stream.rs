@@ -1,8 +1,11 @@
 use std::{task::Poll, time::Duration};
 
-use axum::response::{
-    sse::{Event, KeepAlive},
-    IntoResponse, Response, Sse,
+use axum::{
+    http::{header::CONTENT_TYPE, HeaderValue},
+    response::{
+        sse::{Event, KeepAlive},
+        IntoResponse, Response, Sse,
+    },
 };
 use pin_project_lite::pin_project;
 use serde_json::json;
@@ -15,13 +18,18 @@ where
     S: Stream<Item = anyhow::Result<Event>> + Send + 'static,
 {
     fn into_response(self) -> Response {
-        Sse::new(StreamUntilError::new(self.0))
+        let mut response = Sse::new(StreamUntilError::new(self.0))
             .keep_alive(
                 KeepAlive::new()
                     .interval(Duration::from_secs(1))
                     .text("keepalive"),
             )
-            .into_response()
+            .into_response();
+        response.headers_mut().insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("text/event-stream; charset=utf-8"),
+        );
+        response
     }
 }
 
