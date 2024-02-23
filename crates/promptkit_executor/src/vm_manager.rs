@@ -9,6 +9,7 @@ use std::{
 
 use anyhow::anyhow;
 use pin_project_lite::pin_project;
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -35,10 +36,33 @@ pub struct VmManager {
     epoch_ticker: JoinHandle<()>,
 }
 
+#[derive(Debug)]
 pub enum ExecStreamItem {
     Data(String),
     End(Option<String>),
     Error(anyhow::Error),
+}
+
+pub trait ExecArgument {
+    fn to_argument(self, ctx: &mut Vm) -> wasmtime::Result<Argument>;
+}
+
+impl ExecArgument for Box<RawValue> {
+    fn to_argument(self, _ctx: &mut Vm) -> wasmtime::Result<Argument> {
+        let v: Box<str> = self.into();
+        Ok(Argument::Json(v.into_string()))
+    }
+}
+
+impl ExecArgument for Pin<Box<dyn Stream<Item = Box<RawValue>> + Send>> {
+    fn to_argument(self, ctx: &mut Vm) -> wasmtime::Result<Argument> {
+        Ok(Argument::Iterator(ctx.new_iter(Box::pin(self.map(
+            |v| {
+                let v: Box<str> = v.into();
+                Argument::Json(v.into_string())
+            },
+        )))?))
+    }
 }
 
 impl VmManager {
@@ -119,7 +143,7 @@ impl VmManager {
     fn exec_impl(
         &self,
         func: String,
-        args: Vec<String>,
+        args: SmallVec<[Argument; 2]>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
     ) -> impl Stream<Item = ExecStreamItem> + Send {
@@ -128,10 +152,6 @@ impl VmManager {
 
         let mut run = vm.run(tracer, tx.clone());
         let exec = Some(Box::pin(async move {
-            let args = args
-                .into_iter()
-                .map(Argument::Json)
-                .collect::<SmallVec<[_; 2]>>();
             let ret = run
                 .exec(|vm, store| vm.call_call_func(store, &func, &args))
                 .await
@@ -167,7 +187,7 @@ impl VmManager {
         &'_ self,
         script: &str,
         func: String,
-        args: Vec<String>,
+        args: impl IntoIterator<Item = impl ExecArgument>,
         tracer: Option<BoxedTracer>,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
         let mut hasher = Sha256::new();
@@ -175,7 +195,7 @@ impl VmManager {
         let hash: [u8; 32] = hasher.finalize().into();
 
         let vm = self.cache.get(hash);
-        let vm = if let Some(vm) = vm {
+        let mut vm = if let Some(vm) = vm {
             vm
         } else {
             let mut vm = self.create(hash).await?;
@@ -189,8 +209,14 @@ impl VmManager {
                 })?;
             vm
         };
-
-        Ok(self.exec_impl(func, args, tracer, vm))
+        Ok(self.exec_impl(
+            func,
+            args.into_iter()
+                .map(|a| a.to_argument(&mut vm))
+                .collect::<Result<_, _>>()?,
+            tracer,
+            vm,
+        ))
     }
 }
 

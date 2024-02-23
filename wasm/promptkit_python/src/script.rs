@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use pyo3::{
     intern,
     prelude::*,
@@ -6,8 +8,11 @@ use pyo3::{
 };
 use serde::de::DeserializeSeed;
 
-use crate::error::{Error, Result};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
+use crate::{
+    error::{Error, Result},
+    wasm::ArgIter,
+};
 
 pub struct Scope {
     locals: PyObject,
@@ -16,7 +21,8 @@ pub struct Scope {
 pub enum InputValue<'a> {
     #[allow(dead_code)]
     Json(serde_json::Value),
-    JsonStr(&'a str),
+    JsonStr(Cow<'a, str>),
+    Iter(ArgIter),
 }
 
 impl Scope {
@@ -98,8 +104,9 @@ impl Scope {
                             PyObjectDeserializer::new(py).deserialize(v).unwrap()
                         }
                         InputValue::JsonStr(v) => PyObjectDeserializer::new(py)
-                            .deserialize(&mut serde_json::Deserializer::from_str(v))
+                            .deserialize(&mut serde_json::Deserializer::from_str(&v))
                             .unwrap(),
+                        InputValue::Iter(it) => it.into_py(py),
                     }),
                 );
                 let kwargs = PyDict::new(py);
@@ -115,11 +122,14 @@ impl Scope {
                                 .set_item(
                                     k,
                                     PyObjectDeserializer::new(py)
-                                        .deserialize(&mut serde_json::Deserializer::from_str(v))
+                                        .deserialize(&mut serde_json::Deserializer::from_str(&v))
                                         .unwrap(),
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
+                        InputValue::Iter(it) => kwargs
+                            .set_item(k, it.into_py(py))
+                            .map_err(|e| Error::from_pyerr(py, e))?,
                     }
                 }
                 f.call(args, Some(kwargs))

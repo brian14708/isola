@@ -1,30 +1,38 @@
 mod error;
 mod state;
 
-use std::{borrow::Cow, future::ready, sync::Arc, time::Duration};
+use std::{borrow::Cow, future::ready, pin::Pin, sync::Arc, time::Duration};
 
 use axum::{
-    extract::State,
+    extract::{
+        ws::{
+            close_code::{ABNORMAL, NORMAL, UNSUPPORTED},
+            CloseFrame, Message,
+        },
+        State, WebSocketUpgrade,
+    },
     http::{header::CONTENT_TYPE, HeaderValue, StatusCode},
     response::{sse::Event, IntoResponse, Response},
     routing::{get, post},
     Json,
 };
 pub use error::Result;
+use futures_util::{FutureExt, Sink, SinkExt, StreamExt};
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer, TraceEvent, TraceEventKind},
     ExecStreamItem, VmManager,
 };
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
-use tokio_stream::{wrappers::ReceiverStream, StreamExt};
+use tokio::select;
+use tokio_stream::{wrappers::ReceiverStream, Stream};
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::utils::stream::StreamResponse;
 
 pub fn router(state: &AppState) -> axum::Router {
     axum::Router::new()
-        .route("/v1/code/exec", post(exec))
+        .route("/v1/code/exec", post(exec).get(exec_ws))
         .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
         .route(
             "/debug/metrics",
@@ -41,7 +49,7 @@ pub fn router(state: &AppState) -> axum::Router {
 struct ExecRequest {
     script: String,
     method: String,
-    args: Vec<Box<RawValue>>,
+    args: Option<Vec<Box<RawValue>>>,
     timeout: Option<u64>,
     trace: Option<bool>,
 }
@@ -130,19 +138,16 @@ async fn exec(
         .unwrap_or_default();
 
     let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
-    let args = req
-        .args
-        .into_iter()
-        .map(|s| Box::<str>::from(s).into_string())
-        .collect::<Vec<_>>();
+    let args = req.args.unwrap_or_default().into_iter().collect::<Vec<_>>();
     let mut stream = Box::pin(
-        tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer))
-            .await??
-            .timeout(timeout)
-            .map(|e| match e {
-                Ok(data) => data,
-                Err(_) => ExecStreamItem::Error(anyhow::anyhow!("timeout")),
-            }),
+        tokio_stream::StreamExt::timeout(
+            tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer)).await??,
+            timeout,
+        )
+        .map(|e| match e {
+            Ok(data) => data,
+            Err(_) => ExecStreamItem::Error(anyhow::anyhow!("timeout")),
+        }),
     );
 
     let resp = if let Some(tracer) = trace_events {
@@ -152,7 +157,7 @@ async fn exec(
                 .event("trace")
                 .json_data(HttpTraceEvent::from(e))?)
         });
-        StreamResponse(s.merge(tracer)).into_response()
+        StreamResponse(tokio_stream::StreamExt::merge(s, tracer)).into_response()
     } else {
         let first = match stream.next().await {
             Some(ExecStreamItem::End(end)) => {
@@ -198,5 +203,178 @@ fn exec_to_event(e: ExecStreamItem) -> anyhow::Result<Event> {
         }
         ExecStreamItem::End(None) => Ok(Event::default().data("[DONE]")),
         ExecStreamItem::Error(err) => Err(err),
+    }
+}
+
+async fn exec_ws(ws: WebSocketUpgrade, State(vm): State<Arc<VmManager>>) -> impl IntoResponse {
+    ws.on_upgrade(move |mut socket| async move {
+        let r: Option<ExecRequest> = if let Some(Ok(first)) = socket.recv().await {
+            first
+                .to_text()
+                .ok()
+                .and_then(|s| serde_json::from_str(s).ok())
+        } else {
+            None
+        };
+        let Some(req) = r else {
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: UNSUPPORTED,
+                    reason: "invalid request".into(),
+                })))
+                .await;
+            return;
+        };
+        let (mut send, mut recv) = socket.split();
+        if let Err(e) = handle_socket(&mut send, &mut recv, req, vm).await {
+            let _ = send
+                .send(Message::Close(Some(CloseFrame {
+                    code: ABNORMAL,
+                    reason: e.to_string().into(),
+                })))
+                .await;
+        } else {
+            let _ = send
+                .send(Message::Close(Some(CloseFrame {
+                    code: NORMAL,
+                    reason: "".into(),
+                })))
+                .await;
+        }
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum WsMessage {
+    Trace(HttpTraceEvent),
+    Data(Box<RawValue>),
+}
+
+#[allow(clippy::too_many_lines)]
+async fn handle_socket(
+    send: &mut (impl Sink<Message> + Unpin),
+    recv: &mut (impl Stream<Item = core::result::Result<Message, axum::Error>> + Unpin),
+    req: ExecRequest,
+    vm: Arc<VmManager>,
+) -> anyhow::Result<()> {
+    let (tracer, mut trace_events) = req
+        .trace
+        .unwrap_or_default()
+        .then(MemoryTracer::new)
+        .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
+        .unwrap_or_default();
+
+    let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
+    let (tx, rx) = tokio::sync::mpsc::channel::<Box<RawValue>>(1);
+    let rx: Pin<Box<dyn Stream<Item = _> + Send>> = Box::pin(ReceiverStream::new(rx));
+
+    let mut stream = Box::pin(
+        tokio_stream::StreamExt::timeout(
+            tokio::time::timeout(timeout, vm.exec(&req.script, req.method, [rx], tracer)).await??,
+            timeout,
+        )
+        .map(|e| match e {
+            Ok(data) => data,
+            Err(_) => ExecStreamItem::Error(anyhow::anyhow!("timeout")),
+        }),
+    );
+
+    let mut input = Box::pin(
+        async move {
+            loop {
+                let msg = recv.next().await;
+                let msg = if let Some(Ok(e)) = msg {
+                    let e = e.into_text();
+                    if let Ok(e) = e {
+                        if e == "[DONE]" {
+                            break;
+                        }
+                        if let Ok(e) = RawValue::from_string(e) {
+                            e
+                        } else {
+                            return Err(anyhow::anyhow!("invalid message"));
+                        }
+                    } else {
+                        return Err(anyhow::anyhow!("invalid message"));
+                    }
+                } else {
+                    return Err(anyhow::anyhow!("invalid message"));
+                };
+
+                tx.send(msg).await?;
+            }
+            Ok(())
+        }
+        .fuse(),
+    );
+
+    if let Some(te) = trace_events.as_mut() {
+        loop {
+            let e = select! {
+                Err(e) = &mut input => return Err(e),
+                Some(e) = stream.next() => e,
+                Some(e) = te.recv() => {
+                    let _ = send
+                        .send(Message::Text(
+                            serde_json::to_string(&WsMessage::Trace(HttpTraceEvent::from(e)))
+                                .unwrap(),
+                        ))
+                        .await;
+                    continue;
+                },
+                else => return Ok(()),
+            };
+            match e {
+                ExecStreamItem::Data(d) => {
+                    let _ = send
+                        .send(Message::Text(
+                            serde_json::to_string(&WsMessage::Data(
+                                RawValue::from_string(d).unwrap(),
+                            ))
+                            .unwrap(),
+                        ))
+                        .await;
+                }
+                ExecStreamItem::End(d) => {
+                    if let Some(d) = d {
+                        let _ = send
+                            .send(Message::Text(
+                                serde_json::to_string(&WsMessage::Data(
+                                    RawValue::from_string(d).unwrap(),
+                                ))
+                                .unwrap(),
+                            ))
+                            .await;
+                    }
+                    return Ok(());
+                }
+                ExecStreamItem::Error(err) => {
+                    return Err(err);
+                }
+            }
+        }
+    } else {
+        loop {
+            let e = select! {
+                Err(e) = &mut input => return Err(e),
+                Some(e) = stream.next() => e,
+                else => return Ok(()),
+            };
+            match e {
+                ExecStreamItem::Data(d) => {
+                    let _ = send.send(Message::Text(d)).await;
+                }
+                ExecStreamItem::End(d) => {
+                    if let Some(d) = d {
+                        let _ = send.send(Message::Text(d)).await;
+                    }
+                    return Ok(());
+                }
+                ExecStreamItem::Error(err) => {
+                    return Err(err);
+                }
+            }
+        }
     }
 }

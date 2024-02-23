@@ -1,19 +1,26 @@
 package promptkit:python;
 
+interface types {
+    variant argument {
+        json(string),
+        iterator(argument-iterator),
+    }
+    resource argument-iterator {
+        read: func() -> option<argument>;
+    }
+}
+
 world python-vm {
     import http-client;
 
     import host: interface {
         emit: func(%data: string, %end: bool);
     }
-
     export vm : interface {
+        use types.{argument};
         variant error {
             python(string),
             unknown(string),
-        }
-        variant argument {
-            json(string),
         }
         eval-script: func(%script: string) -> result<_, error>;
         call-func: func(%func: string, %args: list<argument>) -> result<_, error>;

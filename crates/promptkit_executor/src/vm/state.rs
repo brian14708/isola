@@ -16,7 +16,9 @@ use crate::trace::TracerContext;
 use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::TraceOutput};
 
 use super::bindgen;
+use super::host_types;
 use super::http_client;
+use super::PythonVm;
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<anyhow::Result<(String, bool)>>,
@@ -35,8 +37,7 @@ impl VmState {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
-        bindgen::host::add_to_linker(&mut linker, |v: &mut Self| v)?;
-        bindgen::promptkit::python::http_client::add_to_linker(&mut linker, |v: &mut Self| v)?;
+        PythonVm::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Ok(linker)
     }
 
@@ -107,5 +108,11 @@ impl http_client::HttpClientCtx for VmState {
 
     fn tracer(&self) -> &TracerContext {
         &self.tracer
+    }
+}
+
+impl host_types::HostTypesCtx for VmState {
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
     }
 }

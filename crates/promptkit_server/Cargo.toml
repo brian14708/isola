@@ -5,8 +5,9 @@ edition.workspace = true
 
 [dependencies]
 anyhow = "1.0.76"
-axum = "0.7.2"
+axum = { version = "0.7.2", features = ["ws"] }
 axum-server = "0.6.0"
+futures-util = "0.3.30"
 mimalloc = { version = "0.1.39", default-features = false }
 mime = "0.3.17"
 pin-project-lite = "0.2.13"

@@ -10,6 +10,7 @@ use url::Url;
 
 use self::exports::vm::Argument;
 use self::promptkit::python::http_client::Request;
+use self::promptkit::python::types;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::python::http_client::{self, Method};
@@ -43,8 +44,9 @@ impl exports::vm::Guest for Global {
                 let ret = vm
                     .run(
                         &func,
-                        args.iter().map(|f| match f {
-                            Argument::Json(s) => InputValue::JsonStr(s),
+                        args.into_iter().map(|f| match f {
+                            Argument::Json(s) => InputValue::JsonStr(s.into()),
+                            Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         }),
                         [],
                         |s| host::emit(s, false),
@@ -328,6 +330,35 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
 #[pyclass]
 struct AsyncRequest {
     request: Option<Request>,
+}
+
+#[pyclass]
+pub struct ArgIter {
+    iter: types::ArgumentIterator,
+}
+
+#[pymethods]
+impl ArgIter {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
+        match slf.iter.read() {
+            Some(a) => match a {
+                types::Argument::Json(j) => Ok(Some(
+                    PyObjectDeserializer::new(slf.py())
+                        .deserialize(&mut serde_json::Deserializer::from_str(&j))
+                        .map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                        })?,
+                )),
+                types::Argument::Iterator(_) => todo!(),
+            },
+            None => Ok(None),
+        }
+    }
 }
 
 #[pyclass]
