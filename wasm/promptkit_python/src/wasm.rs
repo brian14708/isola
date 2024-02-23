@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::cell::RefCell;
 
 use pyo3::append_to_inittab;
@@ -5,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use pyo3::types::PyString;
 use serde::de::DeserializeSeed;
+use url::Url;
 
 use self::exports::vm::Argument;
 use self::promptkit::python::http_client::Request;
@@ -70,36 +72,62 @@ fn promptkit_module(py: Python<'_>, module: &PyModule) -> PyResult<()> {
     Ok(())
 }
 
-fn set_headers(req: &Request, headers: &PyDict) -> PyResult<()> {
-    for (k, v) in headers {
-        let k = k.downcast::<PyString>();
-        let v = v.downcast::<PyString>();
-
-        match (k, v) {
-            (Ok(k), Ok(v)) => {
-                req.set_header(k.to_str()?, v.to_str()?)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-            }
-            _ => {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "invalid headers".to_owned(),
-                ));
+fn set_headers(req: &Request, headers: Option<&PyDict>) -> PyResult<()> {
+    if let Some(headers) = headers {
+        for (k, v) in headers {
+            match (k.extract::<&str>(), v.extract::<&str>()) {
+                (Ok(k), Ok(v)) => {
+                    req.set_header(k, v).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                    })?;
+                }
+                _ => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        "invalid headers".to_owned(),
+                    ));
+                }
             }
         }
     }
     Ok(())
 }
 
+fn url_with_params<'a>(url: &'a PyString, params: Option<&PyDict>) -> PyResult<Cow<'a, str>> {
+    if let Some(params) = params {
+        let mut u = Url::parse(url.to_str()?)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        for (k, v) in params {
+            u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
+        }
+        Ok(u.to_string().into())
+    } else {
+        Ok(url.to_str()?.into())
+    }
+}
+
+fn set_timeout(request: &Request, timeout: Option<f32>) {
+    if let Some(timeout) = timeout {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        request.set_timeout((timeout * 1000.0) as u64);
+    }
+}
+
 #[pymodule]
 fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyfn(module)]
-    fn get(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
-        let request = http_client::Request::new(url.to_str()?, Method::Get);
+    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    fn get(
+        py: Python<'_>,
+        url: &PyString,
+        params: Option<&PyDict>,
+        headers: Option<&PyDict>,
+        timeout: Option<f32>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
         request.set_header("accept", "application/json").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
         match http_client::fetch(request) {
             Ok(response) => PyObjectDeserializer::new(py)
                 .deserialize(&mut serde_json::Deserializer::from_slice(
@@ -115,13 +143,19 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    fn get_async(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
-        let request = http_client::Request::new(url.to_str()?, Method::Get);
+    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    fn get_async(
+        py: Python<'_>,
+        url: &PyString,
+        params: Option<&PyDict>,
+        headers: Option<&PyDict>,
+        timeout: Option<f32>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
         request.set_header("accept", "application/json").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
         Ok(AsyncRequest {
             request: Some(request),
         }
@@ -129,12 +163,18 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    fn get_sse(py: Python<'_>, url: &PyString, headers: Option<&PyDict>) -> PyResult<PyObject> {
-        let request = http_client::Request::new(url.to_str()?, Method::Get);
+    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    fn get_sse(
+        py: Python<'_>,
+        url: &PyString,
+        params: Option<&PyDict>,
+        headers: Option<&PyDict>,
+        timeout: Option<f32>,
+    ) -> PyResult<PyObject> {
+        let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_header("accept", "text/event-stream").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
         match http_client::fetch(request) {
             Ok(response) => Ok(SseIter {
                 body: http_client::Response::body_sse(response),
@@ -147,11 +187,13 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post(
         py: Python<'_>,
         url: &PyString,
-        body: Option<PyObject>,
+        data: Option<PyObject>,
         headers: Option<&PyDict>,
+        timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
@@ -159,12 +201,11 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
             .set_header("content-type", "application/json")
             .unwrap();
         request.set_header("accept", "application/json").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
-        if let Some(body) = body {
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
+        if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
             );
         }
         match http_client::fetch(request) {
@@ -184,11 +225,13 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post_async(
         py: Python<'_>,
         url: &PyString,
-        body: Option<PyObject>,
+        data: Option<PyObject>,
         headers: Option<&PyDict>,
+        timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
@@ -196,12 +239,11 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
             .set_header("content-type", "application/json")
             .unwrap();
         request.set_header("accept", "application/json").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
-        if let Some(body) = body {
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
+        if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
             );
         }
         Ok(AsyncRequest {
@@ -211,23 +253,24 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post_sse(
         py: Python<'_>,
         url: &PyString,
-        body: Option<PyObject>,
+        data: Option<PyObject>,
         headers: Option<&PyDict>,
+        timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request
             .set_header("content-type", "application/json")
             .unwrap();
         request.set_header("accept", "text/event-stream").unwrap();
-        if let Some(headers) = headers {
-            set_headers(&request, headers)?;
-        }
-        if let Some(body) = body {
+        set_headers(&request, headers)?;
+        set_timeout(&request, timeout);
+        if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, body.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
             );
         }
         match http_client::fetch(request) {
