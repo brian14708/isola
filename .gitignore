@@ -1,3 +1,4 @@
 /target
+/result
 /wasm/target
 .DS_Store
