@@ -38,7 +38,7 @@ impl exports::vm::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<Argument>) -> Result<(), exports::vm::Error> {
+    fn call_func(func: String, args: Vec<Argument>) -> Result<Option<String>, exports::vm::Error> {
         GLOBAL_SCOPE.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
@@ -49,12 +49,11 @@ impl exports::vm::Guest for Global {
                             Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         }),
                         [],
-                        |s| host::emit(s, false),
+                        |s| host::emit(s),
                     )
                     .map_err(Into::<exports::vm::Error>::into)?;
-                host::emit(ret.as_deref().unwrap_or(""), true);
                 vm.flush();
-                Ok(())
+                Ok(ret)
             } else {
                 Err(exports::vm::Error::Unknown(
                     "VM not initialized".to_string(),

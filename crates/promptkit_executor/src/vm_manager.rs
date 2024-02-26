@@ -162,7 +162,8 @@ impl VmManager {
                     })
                 });
             match ret {
-                Ok(()) => {
+                Ok(e) => {
+                    let _ = tx.send(Ok((e.unwrap_or_default(), true))).await;
                     cache.put(run.reuse());
                 }
                 Err(err) => {

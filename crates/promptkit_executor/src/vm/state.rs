@@ -87,9 +87,9 @@ impl WasiView for VmState {
 
 #[async_trait::async_trait]
 impl bindgen::host::Host for VmState {
-    async fn emit(&mut self, data: String, end: bool) -> wasmtime::Result<()> {
+    async fn emit(&mut self, data: String) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
-            run.output.send(Ok((data, end))).await?;
+            run.output.send(Ok((data, false))).await?;
             Ok(())
         } else {
             Err(anyhow!("output channel missing"))

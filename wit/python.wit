@@ -14,7 +14,7 @@ world python-vm {
     import http-client;
 
     import host: interface {
-        emit: func(%data: string, %end: bool);
+        emit: func(%data: string);
     }
     export vm : interface {
         use types.{argument};
@@ -23,6 +23,6 @@ world python-vm {
             unknown(string),
         }
         eval-script: func(%script: string) -> result<_, error>;
-        call-func: func(%func: string, %args: list<argument>) -> result<_, error>;
+        call-func: func(%func: string, %args: list<argument>) -> result<option<string>, error>;
     }
 }
