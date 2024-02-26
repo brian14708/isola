@@ -1,0 +1,111 @@
+syntax = "proto3";
+package promptkit.script.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/struct.proto";
+
+message ScriptSource {
+  string code = 1;
+  string method = 2;
+  string runtime = 3;
+}
+
+message Argument {
+  oneof argument_type {
+    google.protobuf.Struct struct = 1;
+    string json = 2;
+  }
+}
+
+enum ContentType {
+  CONTENT_TYPE_UNSPECIFIED = 0;
+  CONTENT_TYPE_PROTOBUF_STRUCT = 1;
+  CONTENT_TYPE_JSON = 2;
+}
+
+message ExecutionMetadata {}
+
+message ExecutionStreamMetadata {}
+
+message ExecuteRequest {
+  oneof source {
+    ScriptSource script = 1;
+  }
+  repeated Argument arguments = 2;
+  repeated ContentType return_content_type = 3;
+  google.protobuf.Duration timeout = 4;
+}
+
+message InitialExecuteRequest {
+  oneof source {
+    ScriptSource script = 1;
+  }
+  repeated Argument arguments = 2;
+  int32 stream_argument_index = 3;
+  repeated ContentType return_content_type = 4;
+  google.protobuf.Duration startup_timeout = 5;
+  google.protobuf.Duration timeout = 6;
+}
+
+message ExecuteServerStreamRequest {
+  oneof source {
+    ScriptSource script = 1;
+  }
+  repeated Argument arguments = 2;
+  repeated ContentType return_content_type = 3;
+  google.protobuf.Duration startup_timeout = 4;
+  google.protobuf.Duration timeout = 5;
+}
+
+message ExecuteClientStreamRequest {
+  oneof request_type {
+    InitialExecuteRequest initial_request = 1;
+    Argument stream_value = 2;
+  }
+}
+
+message ExecuteStreamRequest {
+  oneof request_type {
+    InitialExecuteRequest initial_request = 1;
+    Argument stream_value = 2;
+  }
+}
+
+message ExecuteResponse {
+  oneof return_type {
+    google.protobuf.Struct struct = 1;
+    string json = 2;
+  }
+  ExecutionMetadata metadata = 15;
+}
+
+message ExecuteClientStreamResponse {
+  oneof return_type {
+    google.protobuf.Struct struct = 1;
+    string json = 2;
+  }
+  ExecutionMetadata metadata = 15;
+}
+
+message ExecuteServerStreamResponse {
+  oneof return_type {
+    google.protobuf.Struct struct = 1;
+    string json = 2;
+    ExecutionStreamMetadata metadata = 15;
+  }
+}
+
+message ExecuteStreamResponse {
+  oneof return_type {
+    google.protobuf.Struct struct = 1;
+    string json = 2;
+    ExecutionStreamMetadata metadata = 15;
+  }
+}
+
+service ScriptService {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse) {}
+  rpc ExecuteClientStream(stream ExecuteClientStreamRequest) returns (ExecuteClientStreamResponse) {}
+  rpc ExecuteServerStream(ExecuteServerStreamRequest) returns (stream ExecuteServerStreamResponse) {}
+  rpc ExecuteStream(stream ExecuteStreamRequest) returns (stream ExecuteStreamResponse) {}
+}

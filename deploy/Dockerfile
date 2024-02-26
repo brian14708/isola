@@ -2,6 +2,7 @@
 
 # server
 FROM docker.io/library/rust:bookworm AS server-build
+RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY crates crates
 COPY wit wit

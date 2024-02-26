@@ -7,7 +7,6 @@ use axum::{
         IntoResponse, Response, Sse,
     },
 };
-use pin_project_lite::pin_project;
 use serde_json::json;
 use tokio_stream::Stream;
 
@@ -33,11 +32,10 @@ where
     }
 }
 
-pin_project! {
-    struct StreamUntilError<S> {
-        #[pin]
-        stream: Option<S>,
-    }
+#[pin_project::pin_project]
+struct StreamUntilError<S> {
+    #[pin]
+    stream: Option<S>,
 }
 
 impl<S, E> StreamUntilError<S>

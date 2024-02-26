@@ -6,17 +6,28 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0.76"
 axum = { version = "0.7.2", features = ["ws"] }
-axum-server = "0.6.0"
+bytes = "1.5.0"
 futures-util = "0.3.30"
+http = "1.0.0"
+http-body = "1.0.0"
+http_02 = { package = "http", version = "0.2" }
+http_body_04 = { package = "http-body", version = "0.4" }
 mimalloc = { version = "0.1.39", default-features = false }
-mime = "0.3.17"
-pin-project-lite = "0.2.13"
+pin-project = "1.1.4"
 prometheus-client = "0.22.0"
 promptkit_executor = { version = "0.1.0", path = "../promptkit_executor" }
+prost = "0.12.3"
+prost-types = "0.12.3"
 serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-stream = "0.1.14"
+tonic = "0.11.0"
+tonic-reflection = "0.11.0"
+tower = "0.4.13"
 tower-http = { version = "0.5.1", features = ["fs"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["parking_lot"] }
+
+[build-dependencies]
+tonic-build = "0.11.0"

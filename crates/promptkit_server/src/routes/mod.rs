@@ -165,10 +165,7 @@ async fn exec(
                 return Ok(match end {
                     Some(data) => Response::builder()
                         .status(StatusCode::OK)
-                        .header(
-                            CONTENT_TYPE,
-                            HeaderValue::from_static(mime::APPLICATION_JSON.as_ref()),
-                        )
+                        .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                         .body(data.into())?,
                     None => StatusCode::NO_CONTENT.into_response(),
                 });

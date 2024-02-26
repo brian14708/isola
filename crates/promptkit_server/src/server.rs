@@ -1,22 +1,19 @@
-use std::{
-    net::{Ipv4Addr, SocketAddr},
-    time::Duration,
-};
+use std::net::{Ipv4Addr, SocketAddr};
 
 use axum::Router;
-use axum_server::Handle;
-use tokio::{signal, time::sleep};
-use tracing::info;
+use tokio::{net::TcpListener, signal};
+use tonic::transport::server::Routes;
 
-pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
-    let handle = Handle::new();
-    tokio::spawn(graceful_shutdown(handle.clone()));
-
+pub async fn serve(app: Router, grpc: Routes, port: u16) -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-    Ok(axum_server::bind(addr)
-        .handle(handle)
-        .serve(app.into_make_service())
-        .await?)
+    let listener = TcpListener::bind(addr).await.unwrap();
+
+    Ok(axum::serve(
+        listener,
+        crate::hybrid::hybrid(app.into_make_service(), grpc),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?)
 }
 
 async fn shutdown_signal() {
@@ -40,16 +37,5 @@ async fn shutdown_signal() {
     tokio::select! {
         () = ctrl_c => {},
         () = terminate => {},
-    }
-}
-
-async fn graceful_shutdown(handle: Handle) {
-    shutdown_signal().await;
-
-    info!("Shutting down...");
-    handle.graceful_shutdown(Some(Duration::from_secs(30)));
-    loop {
-        sleep(Duration::from_secs(1)).await;
-        info!("Alive connections: {}", handle.connection_count());
     }
 }
