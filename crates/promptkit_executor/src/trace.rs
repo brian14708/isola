@@ -158,7 +158,7 @@ impl MemoryTracer {
         let (tx, rx) = mpsc::channel(1);
         (
             Box::new(Self {
-                id: Arc::new(AtomicI16::new(0)),
+                id: Arc::new(AtomicI16::new(1)),
                 events: tx,
                 epoch: Instant::now(),
             }),

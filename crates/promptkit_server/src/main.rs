@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
 
     let grpc = tonic::transport::Server::builder()
         .add_service(service)
-        .add_service(ScriptServiceServer::new(service::ScriptServer))
+        .add_service(ScriptServiceServer::new(service::ScriptServer::new(state)))
         .into_service();
 
     server::serve(app, grpc, 3000).await

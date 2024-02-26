@@ -134,7 +134,8 @@ async fn exec(
     let args = req.args.unwrap_or_default().into_iter().collect::<Vec<_>>();
     let mut stream = Box::pin(
         tokio_stream::StreamExt::timeout(
-            tokio::time::timeout(timeout, vm.exec(&req.script, req.method, args, tracer)).await??,
+            tokio::time::timeout(timeout, vm.exec(&req.script, &req.method, args, tracer))
+                .await??,
             timeout,
         )
         .map(|e| match e {

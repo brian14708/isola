@@ -5,6 +5,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tonic_build::configure()
         .file_descriptor_set_path(out_dir.join("promptkit_script_v1_descriptor.bin"))
-        .compile(&["proto/script.v1.proto"], &([] as [PathBuf; 0]))?;
+        .compile(&["proto/promptkit/script/v1/service.proto"], &(["proto"]))?;
     Ok(())
 }

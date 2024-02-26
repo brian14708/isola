@@ -3,58 +3,77 @@ package promptkit.script.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
+import "promptkit/script/v1/trace.proto";
 
-message ScriptSource {
+message ScriptInline {
   string code = 1;
   string method = 2;
   string runtime = 3;
 }
 
+message Source {
+  oneof source_type {
+    ScriptInline inline = 1;
+  }
+}
+
 message Argument {
+  enum Marker {
+    MARKER_UNSPECIFIED = 0;
+    MARKER_STREAM = 1;
+  }
+
   oneof argument_type {
-    google.protobuf.Struct struct = 1;
+    google.protobuf.Value value = 1;
     string json = 2;
+    Marker marker = 15;
   }
 }
 
 enum ContentType {
   CONTENT_TYPE_UNSPECIFIED = 0;
-  CONTENT_TYPE_PROTOBUF_STRUCT = 1;
+  CONTENT_TYPE_PROTOBUF_VALUE = 1;
   CONTENT_TYPE_JSON = 2;
 }
 
-message ExecutionMetadata {}
+message Result {
+  oneof result_type {
+    google.protobuf.Value value = 1;
+    string json = 2;
+  }
+}
 
-message ExecutionStreamMetadata {}
+message ExecutionSpec {
+  google.protobuf.Duration timeout = 1;
+  repeated Argument arguments = 2;
+
+  TraceLevel trace_level = 20;
+}
+
+message ExecutionMetadata {
+  repeated Trace traces = 20;
+}
+
+message ExecutionStreamMetadata {
+  repeated Trace traces = 20;
+}
 
 message ExecuteRequest {
-  oneof source {
-    ScriptSource script = 1;
-  }
-  repeated Argument arguments = 2;
-  repeated ContentType return_content_type = 3;
-  google.protobuf.Duration timeout = 4;
+  Source source = 1;
+  ExecutionSpec spec = 2;
+  repeated ContentType result_content_type = 3;
 }
 
 message InitialExecuteRequest {
-  oneof source {
-    ScriptSource script = 1;
-  }
-  repeated Argument arguments = 2;
-  int32 stream_argument_index = 3;
-  repeated ContentType return_content_type = 4;
-  google.protobuf.Duration startup_timeout = 5;
-  google.protobuf.Duration timeout = 6;
+  Source source = 1;
+  ExecutionSpec spec = 2;
+  repeated ContentType result_content_type = 3;
 }
 
 message ExecuteServerStreamRequest {
-  oneof source {
-    ScriptSource script = 1;
-  }
-  repeated Argument arguments = 2;
-  repeated ContentType return_content_type = 3;
-  google.protobuf.Duration startup_timeout = 4;
-  google.protobuf.Duration timeout = 5;
+  Source source = 1;
+  ExecutionSpec spec = 2;
+  repeated ContentType result_content_type = 3;
 }
 
 message ExecuteClientStreamRequest {
@@ -72,35 +91,23 @@ message ExecuteStreamRequest {
 }
 
 message ExecuteResponse {
-  oneof return_type {
-    google.protobuf.Struct struct = 1;
-    string json = 2;
-  }
+  Result result = 1;
   ExecutionMetadata metadata = 15;
 }
 
 message ExecuteClientStreamResponse {
-  oneof return_type {
-    google.protobuf.Struct struct = 1;
-    string json = 2;
-  }
+  Result result = 1;
   ExecutionMetadata metadata = 15;
 }
 
 message ExecuteServerStreamResponse {
-  oneof return_type {
-    google.protobuf.Struct struct = 1;
-    string json = 2;
-    ExecutionStreamMetadata metadata = 15;
-  }
+  Result result = 1;
+  ExecutionStreamMetadata metadata = 15;
 }
 
 message ExecuteStreamResponse {
-  oneof return_type {
-    google.protobuf.Struct struct = 1;
-    string json = 2;
-    ExecutionStreamMetadata metadata = 15;
-  }
+  Result result = 1;
+  ExecutionStreamMetadata metadata = 15;
 }
 
 service ScriptService {

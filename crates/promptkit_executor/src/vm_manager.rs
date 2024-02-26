@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     future::Future,
     path::Path,
     pin::Pin,
@@ -51,6 +52,12 @@ impl ExecArgument for Box<RawValue> {
     fn to_argument(self, _ctx: &mut Vm) -> wasmtime::Result<Argument> {
         let v: Box<str> = self.into();
         Ok(Argument::Json(v.into_string()))
+    }
+}
+
+impl<'s> ExecArgument for Cow<'s, str> {
+    fn to_argument(self, _ctx: &mut Vm) -> wasmtime::Result<Argument> {
+        Ok(Argument::Json(self.into_owned()))
     }
 }
 
@@ -142,7 +149,7 @@ impl VmManager {
 
     fn exec_impl(
         &self,
-        func: String,
+        func: &str,
         args: SmallVec<[Argument; 2]>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
@@ -151,6 +158,7 @@ impl VmManager {
         let cache = self.cache.clone();
 
         let mut run = vm.run(tracer, tx.clone());
+        let func = func.to_string();
         let exec = Some(Box::pin(async move {
             let ret = run
                 .exec(|vm, store| vm.call_call_func(store, &func, &args))
@@ -187,7 +195,7 @@ impl VmManager {
     pub async fn exec(
         &'_ self,
         script: &str,
-        func: String,
+        func: &str,
         args: impl IntoIterator<Item = impl ExecArgument>,
         tracer: Option<BoxedTracer>,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
