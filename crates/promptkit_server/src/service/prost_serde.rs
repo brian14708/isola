@@ -219,7 +219,14 @@ impl<'s> serde::Serialize for ProstValueSerializer<'s> {
         match &self.value.kind {
             Some(kind) => match kind {
                 prost_types::value::Kind::NullValue(_) => serializer.serialize_none(),
-                prost_types::value::Kind::NumberValue(n) => serializer.serialize_f64(*n),
+                prost_types::value::Kind::NumberValue(n) => {
+                    if n.fract() == 0.0 {
+                        #[allow(clippy::cast_possible_truncation)]
+                        serializer.serialize_i64(*n as i64)
+                    } else {
+                        serializer.serialize_f64(*n)
+                    }
+                }
                 prost_types::value::Kind::StringValue(s) => serializer.serialize_str(s),
                 prost_types::value::Kind::BoolValue(b) => serializer.serialize_bool(*b),
                 prost_types::value::Kind::StructValue(s) => {

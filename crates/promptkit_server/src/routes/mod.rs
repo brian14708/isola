@@ -14,7 +14,7 @@ pub use error::Result;
 use futures_util::StreamExt;
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer, TraceEvent, TraceEventKind},
-    ExecStreamItem, VmManager,
+    ExecArgument, ExecStreamItem, VmManager,
 };
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
@@ -131,7 +131,12 @@ async fn exec(
         .unwrap_or_default();
 
     let timeout = Duration::from_secs(req.timeout.unwrap_or(5));
-    let args = req.args.unwrap_or_default().into_iter().collect::<Vec<_>>();
+    let args = req
+        .args
+        .unwrap_or_default()
+        .into_iter()
+        .map(|v| ExecArgument::Json(v.to_string()))
+        .collect::<Vec<_>>();
     let mut stream = Box::pin(
         tokio_stream::StreamExt::timeout(
             tokio::time::timeout(timeout, vm.exec(&req.script, &req.method, args, tracer))

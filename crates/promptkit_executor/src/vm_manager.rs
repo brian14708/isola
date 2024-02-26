@@ -1,5 +1,4 @@
 use std::{
-    borrow::Cow,
     future::Future,
     path::Path,
     pin::Pin,
@@ -10,14 +9,13 @@ use std::{
 
 use anyhow::anyhow;
 use pin_project_lite::pin_project;
-use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
-    component::{Component, InstancePre},
+    component::{Component, InstancePre, ResourceTableError},
     Config, Engine,
 };
 
@@ -44,32 +42,9 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub trait ExecArgument {
-    fn to_argument(self, ctx: &mut Vm) -> wasmtime::Result<Argument>;
-}
-
-impl ExecArgument for Box<RawValue> {
-    fn to_argument(self, _ctx: &mut Vm) -> wasmtime::Result<Argument> {
-        let v: Box<str> = self.into();
-        Ok(Argument::Json(v.into_string()))
-    }
-}
-
-impl<'s> ExecArgument for Cow<'s, str> {
-    fn to_argument(self, _ctx: &mut Vm) -> wasmtime::Result<Argument> {
-        Ok(Argument::Json(self.into_owned()))
-    }
-}
-
-impl ExecArgument for Pin<Box<dyn Stream<Item = Box<RawValue>> + Send>> {
-    fn to_argument(self, ctx: &mut Vm) -> wasmtime::Result<Argument> {
-        Ok(Argument::Iterator(ctx.new_iter(Box::pin(self.map(
-            |v| {
-                let v: Box<str> = v.into();
-                Argument::Json(v.into_string())
-            },
-        )))?))
-    }
+pub enum ExecArgument {
+    Json(String),
+    JsonStream(mpsc::Receiver<String>),
 }
 
 impl VmManager {
@@ -196,7 +171,7 @@ impl VmManager {
         &'_ self,
         script: &str,
         func: &str,
-        args: impl IntoIterator<Item = impl ExecArgument>,
+        args: impl IntoIterator<Item = ExecArgument>,
         tracer: Option<BoxedTracer>,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send + 'static> {
         let mut hasher = Sha256::new();
@@ -221,7 +196,12 @@ impl VmManager {
         Ok(self.exec_impl(
             func,
             args.into_iter()
-                .map(|a| a.to_argument(&mut vm))
+                .map::<Result<_, ResourceTableError>, _>(|a| match a {
+                    ExecArgument::Json(a) => Ok(Argument::Json(a)),
+                    ExecArgument::JsonStream(s) => Ok(Argument::Iterator(
+                        vm.new_iter(Box::pin(ReceiverStream::new(s).map(Argument::Json)))?,
+                    )),
+                })
                 .collect::<Result<_, _>>()?,
             tracer,
             vm,
