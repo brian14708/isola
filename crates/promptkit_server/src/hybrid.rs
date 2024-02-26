@@ -97,16 +97,20 @@ where
     }
 
     fn call(&mut self, req: axum::http::Request<WebBody>) -> Self::Future {
-        if req
-            .headers()
-            .get("content-type")
-            .map(http::HeaderValue::as_bytes)
-            == Some(b"application/grpc")
-        {
+        if req.headers().get("content-type").map_or(false, |b| {
+            http::HeaderValue::as_bytes(b).starts_with(b"application/grpc")
+        }) {
             let (parts, body) = req.into_parts();
             let mut req = http_02::Request::new(tonic::transport::Body::wrap_stream(
                 axum::body::Body::new(body).into_data_stream(),
             ));
+            *req.version_mut() = match parts.version {
+                axum::http::Version::HTTP_10 => http_02::Version::HTTP_10,
+                axum::http::Version::HTTP_11 => http_02::Version::HTTP_11,
+                axum::http::Version::HTTP_2 => http_02::Version::HTTP_2,
+                axum::http::Version::HTTP_3 => http_02::Version::HTTP_3,
+                _ => http_02::Version::HTTP_09,
+            };
             *req.method_mut() =
                 http_02::Method::from_bytes(parts.method.as_str().as_bytes()).unwrap();
             *req.uri_mut() = http_02::Uri::from_str(parts.uri.to_string().as_str()).unwrap();

@@ -26,8 +26,11 @@ async fn main() -> anyhow::Result<()> {
         .unwrap();
 
     let grpc = tonic::transport::Server::builder()
+        .accept_http1(true)
         .add_service(service)
-        .add_service(ScriptServiceServer::new(service::ScriptServer::new(state)))
+        .add_service(tonic_web::enable(ScriptServiceServer::new(
+            service::ScriptServer::new(state),
+        )))
         .into_service();
 
     server::serve(app, grpc, 3000).await
