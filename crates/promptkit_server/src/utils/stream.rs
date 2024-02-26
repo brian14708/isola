@@ -1,4 +1,4 @@
-use std::{task::Poll, time::Duration};
+use std::{future::Future, pin::Pin, task::Poll, time::Duration};
 
 use axum::{
     http::{header::CONTENT_TYPE, HeaderValue},
@@ -73,6 +73,114 @@ where
                 Poll::Ready(Some(Ok(e))) => Poll::Ready(Some(Ok(e))),
                 Poll::Ready(None) => Poll::Ready(None),
                 Poll::Pending => Poll::Pending,
+            }
+        } else {
+            Poll::Ready(None)
+        }
+    }
+}
+
+pub fn join_with<T, E>(
+    stream: impl Stream<Item = Result<T, E>>,
+    task: impl Future<Output = Result<(), E>>,
+) -> impl Stream<Item = Result<T, E>> {
+    StreamJoin {
+        stream: Some(stream),
+        task: Some(task),
+    }
+}
+
+#[pin_project::pin_project]
+pub struct StreamJoin<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> {
+    #[pin]
+    stream: Option<S>,
+    #[pin]
+    task: Option<F>,
+}
+
+impl<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> Stream
+    for StreamJoin<S, F, T, E>
+{
+    type Item = Result<T, E>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+        if let Some(stream) = this.stream.as_mut().as_pin_mut() {
+            match stream.poll_next(cx) {
+                Poll::Ready(None) => this.stream.set(None),
+                v @ Poll::Ready(Some(_)) => return v,
+                Poll::Pending => {}
+            }
+        }
+
+        if let Some(task) = this.task.as_mut().as_pin_mut() {
+            match task.poll(cx) {
+                Poll::Ready(Ok(())) => this.task.set(None),
+                Poll::Ready(Err(err)) => {
+                    this.stream.set(None);
+                    this.task.set(None);
+                    return Poll::Ready(Some(Err(err)));
+                }
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+
+        if this.stream.is_none() && this.task.is_none() {
+            Poll::Ready(None)
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
+pub fn stream_until<T, E>(
+    stream: impl Stream<Item = Result<T, E>>,
+    deadline: std::time::Instant,
+    error: E,
+) -> impl Stream<Item = Result<T, E>> {
+    StreamTimeout {
+        stream: Some(stream),
+        sleep: tokio::time::sleep_until(deadline.into()),
+        error: Some(error),
+    }
+}
+
+#[pin_project::pin_project]
+pub struct StreamTimeout<S: Stream<Item = Result<T, E>>, T, E> {
+    #[pin]
+    stream: Option<S>,
+    #[pin]
+    sleep: tokio::time::Sleep,
+    error: Option<E>,
+}
+
+impl<S: Stream<Item = Result<T, E>>, T, E> Stream for StreamTimeout<S, T, E> {
+    type Item = Result<T, E>;
+
+    fn poll_next(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        let mut this = self.project();
+
+        if let Some(stream) = this.stream.as_mut().as_pin_mut() {
+            match this.sleep.poll(cx) {
+                Poll::Ready(()) => {
+                    this.stream.set(None);
+                    return Poll::Ready(Some(Err(this.error.take().unwrap())));
+                }
+                Poll::Pending => {}
+            }
+
+            match stream.poll_next(cx) {
+                Poll::Ready(None) => {
+                    this.stream.set(None);
+                    Poll::Ready(None)
+                }
+                v => v,
             }
         } else {
             Poll::Ready(None)

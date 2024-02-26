@@ -1,14 +1,12 @@
 use std::{
-    future::Future,
     pin::Pin,
-    task::{Context, Poll},
-    time::UNIX_EPOCH,
+    time::{Duration, SystemTime, UNIX_EPOCH},
     usize,
 };
 
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{
-    trace::{BoxedTracer, MemoryTracer},
+    trace::{BoxedTracer, MemoryTracer, TraceEvent},
     ExecArgument, ExecStreamItem,
 };
 use tokio::{sync::mpsc, try_join};
@@ -24,11 +22,14 @@ use crate::{
         ExecutionStreamMetadata,
     },
     routes::AppState,
+    utils::stream::{join_with, stream_until},
 };
 
 use self::prost_serde::{argument, parse_source, trace_convert};
 
 mod prost_serde;
+
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ScriptServer {
     state: AppState,
@@ -49,61 +50,50 @@ impl ScriptService for ScriptServer {
 
     async fn execute(
         &self,
-        request: tonic::Request<ExecuteRequest>,
+        mut request: tonic::Request<ExecuteRequest>,
     ) -> Result<tonic::Response<ExecuteResponse>, Status> {
-        let (script, method) = parse_source(&request.get_ref().source)?;
-        let (tracer, mut trace_events) = request
-            .get_ref()
-            .spec
-            .as_ref()
-            .map(|spec| spec.trace_level == script::TraceLevel::All as i32)
-            .unwrap_or_default()
-            .then(MemoryTracer::new)
-            .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
-            .unwrap_or_default();
-        let args = request
-            .get_ref()
-            .spec
-            .as_ref()
-            .map_or(Ok(Vec::new()), |spec| {
-                spec.arguments
-                    .iter()
-                    .map(|a| match argument(a) {
-                        Ok(Ok(a)) => Ok(ExecArgument::Json(a.to_string())),
-                        Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })?;
-        let start = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let stream = self
-            .state
-            .vm
-            .exec(script, method, args, tracer)
-            .await
-            .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
-        let result = non_stream_result(
-            stream,
-            request.get_ref().result_content_type.iter().copied(),
-        );
-
-        let trace_async = async move {
-            let mut metadata = script::ExecutionMetadata::default();
-            if let Some(trace_events) = trace_events.as_mut() {
-                while let Some(event) = trace_events.recv().await {
-                    metadata.traces.push(trace_convert(event, &start));
-                }
-            }
-            Ok::<_, Status>(metadata)
+        let ParsedSpec {
+            args,
+            timeout,
+            stream_tx: None,
+            tracer,
+            mut trace_events,
+        } = parse_spec(request.get_mut().spec.as_mut())?
+        else {
+            return Err(Status::invalid_argument("unexpected stream marker"));
         };
+        let (script, method) = parse_source(&request.get_ref().source)?;
 
-        let (result, metadata) = try_join!(result, trace_async)?;
-        Ok(Response::new(script::ExecuteResponse {
-            metadata: Some(metadata),
-            result: Some(result),
-        }))
+        tokio::time::timeout(timeout, async {
+            let stream = self
+                .state
+                .vm
+                .exec(script, method, args, tracer)
+                .await
+                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+            let result = non_stream_result(
+                stream,
+                request.get_ref().result_content_type.iter().copied(),
+            );
+
+            let trace_async = async move {
+                let mut metadata = script::ExecutionMetadata::default();
+                if let Some((start, trace_events)) = trace_events.as_mut() {
+                    while let Some(event) = trace_events.recv().await {
+                        metadata.traces.push(trace_convert(event, start));
+                    }
+                }
+                Ok::<_, Status>(metadata)
+            };
+
+            let (result, metadata) = try_join!(result, trace_async)?;
+            Ok(Response::new(script::ExecuteResponse {
+                metadata: Some(metadata),
+                result: Some(result),
+            }))
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
     }
 
     async fn execute_client_stream(
@@ -111,125 +101,92 @@ impl ScriptService for ScriptServer {
         mut request: tonic::Request<tonic::Streaming<ExecuteClientStreamRequest>>,
     ) -> Result<tonic::Response<ExecuteClientStreamResponse>, Status> {
         let Some(ExecuteClientStreamRequest {
-            request_type: Some(execute_client_stream_request::RequestType::InitialRequest(initial)),
+            request_type:
+                Some(execute_client_stream_request::RequestType::InitialRequest(mut initial)),
         }) = request.get_mut().message().await?
         else {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
         let (script, method) = parse_source(&initial.source)?;
-        let (tracer, mut trace_events) = initial
-            .spec
-            .as_ref()
-            .map(|spec| spec.trace_level == script::TraceLevel::All as i32)
-            .unwrap_or_default()
-            .then(MemoryTracer::new)
-            .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
-            .unwrap_or_default();
+        let ParsedSpec {
+            args,
+            timeout,
+            stream_tx: mut tx,
+            tracer,
+            mut trace_events,
+        } = parse_spec(initial.spec.as_mut())?;
 
-        let (tx, rx) = mpsc::channel(4);
-        let mut rx = Some(rx);
-        let args = initial.spec.as_ref().map_or(Ok(Vec::new()), |spec| {
-            spec.arguments
-                .iter()
-                .map(|a| match argument(a) {
-                    Ok(Ok(a)) => Ok(ExecArgument::Json(a.to_string())),
-                    Ok(Err(Marker::Stream)) => {
-                        if let Some(rx) = rx.take() {
-                            Ok(ExecArgument::JsonStream(rx))
-                        } else {
-                            Err(Status::invalid_argument("invalid marker arguments"))
+        tokio::time::timeout(timeout, async {
+            let stream = self
+                .state
+                .vm
+                .exec(script, method, args, tracer)
+                .await
+                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+            let result = non_stream_result(stream, initial.result_content_type.iter().copied());
+            let trace_async = async move {
+                let mut metadata = script::ExecutionMetadata::default();
+                if let Some((start, trace_events)) = trace_events.as_mut() {
+                    while let Some(event) = trace_events.recv().await {
+                        metadata.traces.push(trace_convert(event, start));
+                    }
+                }
+                Ok::<_, Status>(metadata)
+            };
+            let mover = async move {
+                while let Some(msg) = request.get_mut().message().await? {
+                    if let Some(tx) = tx.as_mut() {
+                        if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
+                            msg.request_type
+                        {
+                            let _ = tx
+                                .send(
+                                    argument(v)
+                                        .map_err(|_e| {
+                                            Status::invalid_argument("invalid arguments")
+                                        })?
+                                        .map_err(|_| Status::invalid_argument("invalid marker"))?
+                                        .to_string(),
+                                )
+                                .await;
                         }
                     }
-                    Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                    Err(e) => Err(e),
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })?;
-        let start = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let stream = self
-            .state
-            .vm
-            .exec(script, method, args, tracer)
-            .await
-            .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
-        let result = non_stream_result(stream, initial.result_content_type.iter().copied());
-        let trace_async = async move {
-            let mut metadata = script::ExecutionMetadata::default();
-            if let Some(trace_events) = trace_events.as_mut() {
-                while let Some(event) = trace_events.recv().await {
-                    metadata.traces.push(trace_convert(event, &start));
                 }
-            }
-            Ok::<_, Status>(metadata)
-        };
-        let has_stream = rx.is_none();
-        let mover = async move {
-            while let Some(msg) = request.get_mut().message().await? {
-                if has_stream {
-                    if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
-                        msg.request_type
-                    {
-                        let _ = tx
-                            .send(
-                                argument(&v)
-                                    .map_err(|_e| Status::invalid_argument("invalid arguments"))?
-                                    .map_err(|_| Status::invalid_argument("invalid marker"))?
-                                    .to_string(),
-                            )
-                            .await;
-                    }
-                }
-            }
-            Ok::<_, Status>(())
-        };
+                Ok(())
+            };
 
-        let (result, metadata, ()) = try_join!(result, trace_async, mover)?;
-        Ok(Response::new(script::ExecuteClientStreamResponse {
-            metadata: Some(metadata),
-            result: Some(result),
-        }))
+            let (result, metadata, ()) = try_join!(result, trace_async, mover)?;
+            Ok(Response::new(script::ExecuteClientStreamResponse {
+                metadata: Some(metadata),
+                result: Some(result),
+            }))
+        })
+        .await
+        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
     }
 
     async fn execute_server_stream(
         &self,
-        request: tonic::Request<ExecuteServerStreamRequest>,
+        mut request: tonic::Request<ExecuteServerStreamRequest>,
     ) -> Result<tonic::Response<Self::ExecuteServerStreamStream>, Status> {
+        let ParsedSpec {
+            args,
+            timeout,
+            stream_tx: None,
+            tracer,
+            trace_events,
+        } = parse_spec(request.get_mut().spec.as_mut())?
+        else {
+            return Err(Status::invalid_argument("unexpected stream marker"));
+        };
         let (script, method) = parse_source(&request.get_ref().source)?;
-        let (tracer, trace_events) = request
-            .get_ref()
-            .spec
-            .as_ref()
-            .map(|spec| spec.trace_level == script::TraceLevel::All as i32)
-            .unwrap_or_default()
-            .then(MemoryTracer::new)
-            .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
-            .unwrap_or_default();
-        let args = request
-            .get_ref()
-            .spec
-            .as_ref()
-            .map_or(Ok(Vec::new()), |spec| {
-                spec.arguments
-                    .iter()
-                    .map(|a| match argument(a) {
-                        Ok(Ok(a)) => Ok(ExecArgument::Json(a.to_string())),
-                        Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                        Err(e) => Err(e),
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })?;
-        let start = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let stream = self
-            .state
-            .vm
-            .exec(script, method, args, tracer)
-            .await
-            .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+        let deadline = std::time::Instant::now() + timeout;
+        let stream =
+            tokio::time::timeout(timeout, self.state.vm.exec(script, method, args, tracer))
+                .await
+                .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
 
         let content_type = request.get_ref().result_content_type.clone();
         let m = stream.map::<Result<ExecuteServerStreamResponse, Status>, _>(move |s| match s {
@@ -248,7 +205,7 @@ impl ScriptService for ScriptServer {
             }),
             ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
-        if let Some(tracer_events) = trace_events {
+        if let Some((start, tracer_events)) = trace_events {
             let trace_async =
                 ReceiverStream::new(tracer_events).chunks(4).map::<Result<
                     ExecuteServerStreamResponse,
@@ -261,12 +218,17 @@ impl ScriptService for ScriptServer {
                         }),
                     })
                 });
-            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
-                m,
-                trace_async,
+            Ok(Response::new(Box::pin(stream_until(
+                tokio_stream::StreamExt::merge(m, trace_async),
+                deadline,
+                Status::deadline_exceeded("execution timed out"),
             ))))
         } else {
-            Ok(Response::new(Box::pin(m)))
+            Ok(Response::new(Box::pin(stream_until(
+                m,
+                deadline,
+                Status::deadline_exceeded("execution timed out"),
+            ))))
         }
     }
 
@@ -275,60 +237,35 @@ impl ScriptService for ScriptServer {
         mut request: tonic::Request<tonic::Streaming<ExecuteStreamRequest>>,
     ) -> Result<tonic::Response<Self::ExecuteStreamStream>, Status> {
         let Some(ExecuteStreamRequest {
-            request_type: Some(execute_stream_request::RequestType::InitialRequest(initial)),
+            request_type: Some(execute_stream_request::RequestType::InitialRequest(mut initial)),
         }) = request.get_mut().message().await?
         else {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
         let (script, method) = parse_source(&initial.source)?;
-        let (tracer, trace_events) = initial
-            .spec
-            .as_ref()
-            .map(|spec| spec.trace_level == script::TraceLevel::All as i32)
-            .unwrap_or_default()
-            .then(MemoryTracer::new)
-            .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
-            .unwrap_or_default();
-
-        let (tx, rx) = mpsc::channel(4);
-        let mut rx = Some(rx);
-        let args = initial.spec.as_ref().map_or(Ok(Vec::new()), |spec| {
-            spec.arguments
-                .iter()
-                .map(|a| match argument(a) {
-                    Ok(Ok(a)) => Ok(ExecArgument::Json(a.to_string())),
-                    Ok(Err(Marker::Stream)) => {
-                        if let Some(rx) = rx.take() {
-                            Ok(ExecArgument::JsonStream(rx))
-                        } else {
-                            Err(Status::invalid_argument("invalid marker arguments"))
-                        }
-                    }
-                    Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                    Err(e) => Err(e),
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })?;
-        let start = std::time::SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default();
-        let stream = self
-            .state
-            .vm
-            .exec(script, method, args, tracer)
-            .await
-            .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
-        let has_stream = rx.is_none();
+        let ParsedSpec {
+            args,
+            timeout,
+            stream_tx: mut tx,
+            tracer,
+            trace_events,
+        } = parse_spec(initial.spec.as_mut())?;
+        let deadline = std::time::Instant::now() + timeout;
+        let stream =
+            tokio::time::timeout(timeout, self.state.vm.exec(script, method, args, tracer))
+                .await
+                .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
         let mover = async move {
             while let Some(msg) = request.get_mut().message().await? {
-                if has_stream {
+                if let Some(tx) = tx.as_mut() {
                     if let Some(execute_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
                     {
                         let _ = tx
                             .send(
-                                argument(&v)
+                                argument(v)
                                     .map_err(|_e| Status::invalid_argument("invalid arguments"))?
                                     .map_err(|_| Status::invalid_argument("invalid marker"))?
                                     .to_string(),
@@ -355,7 +292,7 @@ impl ScriptService for ScriptServer {
             }),
             ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
-        if let Some(tracer_events) = trace_events {
+        if let Some((start, tracer_events)) = trace_events {
             let trace_async =
                 ReceiverStream::new(tracer_events)
                     .chunks(4)
@@ -367,12 +304,17 @@ impl ScriptService for ScriptServer {
                             }),
                         })
                     });
-            Ok(Response::new(Box::pin(join_with(
-                tokio_stream::StreamExt::merge(m, trace_async),
-                mover,
+            Ok(Response::new(Box::pin(stream_until(
+                join_with(tokio_stream::StreamExt::merge(m, trace_async), mover),
+                deadline,
+                Status::deadline_exceeded("execution timed out"),
             ))))
         } else {
-            Ok(Response::new(Box::pin(join_with(m, mover))))
+            Ok(Response::new(Box::pin(stream_until(
+                join_with(m, mover),
+                deadline,
+                Status::deadline_exceeded("execution timed out"),
+            ))))
         }
     }
 }
@@ -424,55 +366,65 @@ async fn non_stream_result(
     prost_serde::result_type(str.into(), content_type)
 }
 
-fn join_with<T, E>(
-    stream: impl Stream<Item = Result<T, E>>,
-    task: impl Future<Output = Result<(), E>>,
-) -> impl Stream<Item = Result<T, E>> {
-    StreamJoin {
-        stream: Some(stream),
-        task: Some(task),
-    }
+struct ParsedSpec {
+    args: Vec<ExecArgument>,
+    timeout: Duration,
+    stream_tx: Option<mpsc::Sender<String>>,
+    tracer: Option<BoxedTracer>,
+    trace_events: Option<(Duration, mpsc::Receiver<TraceEvent>)>,
 }
 
-#[pin_project::pin_project]
-pub struct StreamJoin<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> {
-    #[pin]
-    stream: Option<S>,
-    #[pin]
-    task: Option<F>,
-}
-
-impl<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> Stream
-    for StreamJoin<S, F, T, E>
-{
-    type Item = Result<T, E>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        if let Some(stream) = this.stream.as_mut().as_pin_mut() {
-            match stream.poll_next(cx) {
-                Poll::Ready(None) => this.stream.set(None),
-                v @ Poll::Ready(Some(_)) => return v,
-                Poll::Pending => {}
-            }
-        }
-
-        if let Some(task) = this.task.as_mut().as_pin_mut() {
-            match task.poll(cx) {
-                Poll::Ready(Ok(())) => this.task.set(None),
-                Poll::Ready(Err(err)) => {
-                    this.stream.set(None);
-                    this.task.set(None);
-                    return Poll::Ready(Some(Err(err)));
+fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, Status> {
+    if let Some(spec) = spec {
+        let (tx, rx) = mpsc::channel(4);
+        let mut rx = Some(rx);
+        let args = std::mem::take(&mut spec.arguments)
+            .into_iter()
+            .map(|a| match argument(a) {
+                Ok(Ok(a)) => Ok(ExecArgument::Json(a)),
+                Ok(Err(Marker::Stream)) => {
+                    if let Some(rx) = rx.take() {
+                        Ok(ExecArgument::JsonStream(rx))
+                    } else {
+                        Err(Status::invalid_argument("invalid marker arguments"))
+                    }
                 }
-                Poll::Pending => return Poll::Pending,
-            }
-        }
+                Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
+                Err(e) => Err(e),
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let (tracer, trace_events) = (spec.trace_level == script::TraceLevel::All as i32)
+            .then(MemoryTracer::new)
+            .map(|(a, b)| -> (Option<BoxedTracer>, _) {
+                (
+                    Some(a),
+                    Some((
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap_or_default(),
+                        b,
+                    )),
+                )
+            })
+            .unwrap_or_default();
 
-        if this.stream.is_none() && this.task.is_none() {
-            Poll::Ready(None)
-        } else {
-            Poll::Pending
-        }
+        Ok(ParsedSpec {
+            args,
+            timeout: spec.timeout.as_ref().map_or(DEFAULT_TIMEOUT, |t| {
+                #[allow(clippy::cast_precision_loss)]
+                std::time::Duration::from_secs_f64(t.seconds as f64 + f64::from(t.nanos) * 1e-9)
+            }),
+            stream_tx: if rx.is_none() { Some(tx) } else { None },
+            tracer,
+            trace_events,
+        })
+    } else {
+        Ok(ParsedSpec {
+            args: vec![],
+            timeout: DEFAULT_TIMEOUT,
+            stream_tx: None,
+            tracer: None,
+            trace_events: None,
+        })
     }
 }

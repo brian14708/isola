@@ -12,19 +12,20 @@ use crate::proto::script::{
     self, argument::Marker, result, source::SourceType, trace, ContentType, Source, Trace,
 };
 
-pub fn argument(s: &script::Argument) -> Result<Result<Cow<'_, str>, Marker>, Status> {
-    match s.argument_type.as_ref() {
+pub fn argument(s: script::Argument) -> Result<Result<String, Marker>, Status> {
+    match s.argument_type {
         None => Err(Status::invalid_argument("argument type is not specified")),
         Some(arg) => match arg {
             script::argument::ArgumentType::Value(s) => {
                 Ok(Ok(serde_json::to_string(&ProstValueSerializer {
-                    value: s,
+                    value: &s,
                 })
-                .map_err(|_| Status::internal("failed to serialize argument to json"))?
-                .into()))
+                .map_err(|_| {
+                    Status::internal("failed to serialize argument to json")
+                })?))
             }
-            script::argument::ArgumentType::Json(j) => Ok(Ok(j.into())),
-            script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(*m)
+            script::argument::ArgumentType::Json(j) => Ok(Ok(j)),
+            script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(m)
                 .map_err(|e| Status::invalid_argument(format!("invalid marker: {e}")))?)),
         },
     }
