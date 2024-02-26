@@ -15,7 +15,7 @@ http_body_04 = { package = "http-body", version = "0.4" }
 mimalloc = { version = "0.1.39", default-features = false }
 pin-project = "1.1.4"
 prometheus-client = "0.22.0"
-promptkit_executor = { version = "0.1.0", path = "../promptkit_executor" }
+promptkit_executor = { version = "0.1.0", path = "../executor" }
 prost = "0.12.3"
 prost-types = "0.12.3"
 serde = { version = "1.0.193", features = ["derive"] }

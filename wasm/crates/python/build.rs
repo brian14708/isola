@@ -45,7 +45,7 @@ fn main() {
         let wasi_deps_path = format!(
             "{}/{}",
             env!("CARGO_MANIFEST_DIR"),
-            "../target/wasm32-wasi/wasi-deps"
+            "../../target/wasm32-wasi/wasi-deps"
         );
         let libpython_binary = "python3.11";
 
