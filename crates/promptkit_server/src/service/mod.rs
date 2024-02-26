@@ -1,11 +1,12 @@
-use std::{time::UNIX_EPOCH, usize};
+use std::{pin::Pin, time::UNIX_EPOCH, usize};
 
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer},
     ExecStreamItem,
 };
 use tokio::join;
+use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
 
 use crate::{
@@ -13,6 +14,7 @@ use crate::{
         self, script_service_server::ScriptService, ExecuteClientStreamRequest,
         ExecuteClientStreamResponse, ExecuteRequest, ExecuteResponse, ExecuteServerStreamRequest,
         ExecuteServerStreamResponse, ExecuteStreamRequest, ExecuteStreamResponse,
+        ExecutionStreamMetadata,
     },
     routes::AppState,
 };
@@ -25,9 +27,6 @@ pub struct ScriptServer {
     state: AppState,
 }
 
-pub struct ExecuteServerStreamStream;
-pub struct ExecuteStreamStream;
-
 impl ScriptServer {
     pub fn new(state: AppState) -> Self {
         Self { state }
@@ -36,15 +35,16 @@ impl ScriptServer {
 
 #[tonic::async_trait]
 impl ScriptService for ScriptServer {
-    type ExecuteServerStreamStream = ExecuteServerStreamStream;
-    type ExecuteStreamStream = ExecuteStreamStream;
+    type ExecuteServerStreamStream =
+        Pin<Box<dyn Stream<Item = Result<ExecuteServerStreamResponse, Status>> + Send>>;
+    type ExecuteStreamStream =
+        Pin<Box<dyn Stream<Item = Result<ExecuteStreamResponse, Status>> + Send>>;
 
     async fn execute(
         &self,
         request: tonic::Request<ExecuteRequest>,
     ) -> Result<tonic::Response<ExecuteResponse>, Status> {
         let (script, method) = parse_source(&request.get_ref().source)?;
-
         let (tracer, mut trace_events) = request
             .get_ref()
             .spec
@@ -68,7 +68,6 @@ impl ScriptService for ScriptServer {
                     })
                     .collect::<Result<Vec<_>, _>>()
             })?;
-
         let start = std::time::SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -109,37 +108,85 @@ impl ScriptService for ScriptServer {
 
     async fn execute_server_stream(
         &self,
-        _request: tonic::Request<ExecuteServerStreamRequest>,
+        request: tonic::Request<ExecuteServerStreamRequest>,
     ) -> Result<tonic::Response<Self::ExecuteServerStreamStream>, Status> {
-        todo!()
+        let (script, method) = parse_source(&request.get_ref().source)?;
+        let (tracer, trace_events) = request
+            .get_ref()
+            .spec
+            .as_ref()
+            .map(|spec| spec.trace_level == script::TraceLevel::All as i32)
+            .unwrap_or_default()
+            .then(MemoryTracer::new)
+            .map(|(a, b)| -> (Option<BoxedTracer>, _) { (Some(a), Some(b)) })
+            .unwrap_or_default();
+        let args = request
+            .get_ref()
+            .spec
+            .as_ref()
+            .map_or(Ok(Vec::new()), |spec| {
+                spec.arguments
+                    .iter()
+                    .map(|a| match argument(a) {
+                        Ok(Ok(a)) => Ok(a),
+                        Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
+                        Err(e) => Err(e),
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+            })?;
+        let start = std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default();
+        let stream = self
+            .state
+            .vm
+            .exec(script, method, args, tracer)
+            .await
+            .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+
+        let content_type = request.get_ref().result_content_type.clone();
+        let m = stream.map::<Result<ExecuteServerStreamResponse, Status>, _>(move |s| match s {
+            ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => {
+                Ok(ExecuteServerStreamResponse {
+                    result: Some(prost_serde::result_type(
+                        d.into(),
+                        content_type.iter().copied(),
+                    )?),
+                    metadata: None,
+                })
+            }
+            ExecStreamItem::End(None) => Ok(ExecuteServerStreamResponse {
+                result: None,
+                metadata: None,
+            }),
+            ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
+        });
+        if let Some(tracer_events) = trace_events {
+            let trace_async =
+                ReceiverStream::new(tracer_events).chunks(4).map::<Result<
+                    ExecuteServerStreamResponse,
+                    Status,
+                >, _>(move |e| {
+                    Ok(ExecuteServerStreamResponse {
+                        result: None,
+                        metadata: Some(ExecutionStreamMetadata {
+                            traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
+                        }),
+                    })
+                });
+            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
+                m,
+                trace_async,
+            ))))
+        } else {
+            Ok(Response::new(Box::pin(m)))
+        }
     }
 
     async fn execute_stream(
         &self,
         _request: tonic::Request<tonic::Streaming<ExecuteStreamRequest>>,
     ) -> Result<tonic::Response<Self::ExecuteStreamStream>, Status> {
-        todo!()
-    }
-}
-
-impl Stream for ExecuteServerStreamStream {
-    type Item = Result<ExecuteServerStreamResponse, Status>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context,
-    ) -> std::task::Poll<Option<Self::Item>> {
-        todo!()
-    }
-}
-
-impl Stream for ExecuteStreamStream {
-    type Item = Result<ExecuteStreamResponse, Status>;
-
-    fn poll_next(
-        self: std::pin::Pin<&mut Self>,
-        _cx: &mut std::task::Context,
-    ) -> std::task::Poll<Option<Self::Item>> {
         todo!()
     }
 }

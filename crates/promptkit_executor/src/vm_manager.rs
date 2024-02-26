@@ -153,7 +153,7 @@ impl VmManager {
         args: SmallVec<[Argument; 2]>,
         tracer: Option<BoxedTracer>,
         vm: Vm,
-    ) -> impl Stream<Item = ExecStreamItem> + Send {
+    ) -> impl Stream<Item = ExecStreamItem> + Send + 'static {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -198,7 +198,7 @@ impl VmManager {
         func: &str,
         args: impl IntoIterator<Item = impl ExecArgument>,
         tracer: Option<BoxedTracer>,
-    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
+    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send + 'static> {
         let mut hasher = Sha256::new();
         hasher.update(script);
         let hash: [u8; 32] = hasher.finalize().into();
