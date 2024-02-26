@@ -16,10 +16,7 @@ use tonic::{Response, Status};
 use crate::{
     proto::script::{
         self, argument::Marker, execute_client_stream_request, execute_stream_request,
-        script_service_server::ScriptService, ExecuteClientStreamRequest,
-        ExecuteClientStreamResponse, ExecuteRequest, ExecuteResponse, ExecuteServerStreamRequest,
-        ExecuteServerStreamResponse, ExecuteStreamRequest, ExecuteStreamResponse,
-        ExecutionStreamMetadata,
+        script_service_server::ScriptService,
     },
     routes::AppState,
     utils::stream::{join_with, stream_until},
@@ -44,14 +41,25 @@ impl ScriptServer {
 #[tonic::async_trait]
 impl ScriptService for ScriptServer {
     type ExecuteServerStreamStream =
-        Pin<Box<dyn Stream<Item = Result<ExecuteServerStreamResponse, Status>> + Send>>;
+        Pin<Box<dyn Stream<Item = Result<script::ExecuteServerStreamResponse, Status>> + Send>>;
     type ExecuteStreamStream =
-        Pin<Box<dyn Stream<Item = Result<ExecuteStreamResponse, Status>> + Send>>;
+        Pin<Box<dyn Stream<Item = Result<script::ExecuteStreamResponse, Status>> + Send>>;
+
+    async fn list_runtime(
+        &self,
+        _request: tonic::Request<script::ListRuntimeRequest>,
+    ) -> Result<tonic::Response<script::ListRuntimeResponse>, Status> {
+        Ok(Response::new(script::ListRuntimeResponse {
+            runtimes: vec![script::Runtime {
+                name: "python3".into(),
+            }],
+        }))
+    }
 
     async fn execute(
         &self,
-        mut request: tonic::Request<ExecuteRequest>,
-    ) -> Result<tonic::Response<ExecuteResponse>, Status> {
+        mut request: tonic::Request<script::ExecuteRequest>,
+    ) -> Result<tonic::Response<script::ExecuteResponse>, Status> {
         let ParsedSpec {
             args,
             timeout,
@@ -98,9 +106,9 @@ impl ScriptService for ScriptServer {
 
     async fn execute_client_stream(
         &self,
-        mut request: tonic::Request<tonic::Streaming<ExecuteClientStreamRequest>>,
-    ) -> Result<tonic::Response<ExecuteClientStreamResponse>, Status> {
-        let Some(ExecuteClientStreamRequest {
+        mut request: tonic::Request<tonic::Streaming<script::ExecuteClientStreamRequest>>,
+    ) -> Result<tonic::Response<script::ExecuteClientStreamResponse>, Status> {
+        let Some(script::ExecuteClientStreamRequest {
             request_type:
                 Some(execute_client_stream_request::RequestType::InitialRequest(mut initial)),
         }) = request.get_mut().message().await?
@@ -168,7 +176,7 @@ impl ScriptService for ScriptServer {
 
     async fn execute_server_stream(
         &self,
-        mut request: tonic::Request<ExecuteServerStreamRequest>,
+        mut request: tonic::Request<script::ExecuteServerStreamRequest>,
     ) -> Result<tonic::Response<Self::ExecuteServerStreamStream>, Status> {
         let ParsedSpec {
             args,
@@ -189,9 +197,9 @@ impl ScriptService for ScriptServer {
                 .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
 
         let content_type = request.get_ref().result_content_type.clone();
-        let m = stream.map::<Result<ExecuteServerStreamResponse, Status>, _>(move |s| match s {
+        let m = stream.map(move |s| match s {
             ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => {
-                Ok(ExecuteServerStreamResponse {
+                Ok(script::ExecuteServerStreamResponse {
                     result: Some(prost_serde::result_type(
                         d.into(),
                         content_type.iter().copied(),
@@ -199,25 +207,21 @@ impl ScriptService for ScriptServer {
                     metadata: None,
                 })
             }
-            ExecStreamItem::End(None) => Ok(ExecuteServerStreamResponse {
+            ExecStreamItem::End(None) => Ok(script::ExecuteServerStreamResponse {
                 result: None,
                 metadata: None,
             }),
             ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
         if let Some((start, tracer_events)) = trace_events {
-            let trace_async =
-                ReceiverStream::new(tracer_events).chunks(4).map::<Result<
-                    ExecuteServerStreamResponse,
-                    Status,
-                >, _>(move |e| {
-                    Ok(ExecuteServerStreamResponse {
-                        result: None,
-                        metadata: Some(ExecutionStreamMetadata {
-                            traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
-                        }),
-                    })
-                });
+            let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
+                Ok(script::ExecuteServerStreamResponse {
+                    result: None,
+                    metadata: Some(script::ExecutionStreamMetadata {
+                        traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
+                    }),
+                })
+            });
             Ok(Response::new(Box::pin(stream_until(
                 tokio_stream::StreamExt::merge(m, trace_async),
                 deadline,
@@ -234,9 +238,9 @@ impl ScriptService for ScriptServer {
 
     async fn execute_stream(
         &self,
-        mut request: tonic::Request<tonic::Streaming<ExecuteStreamRequest>>,
+        mut request: tonic::Request<tonic::Streaming<script::ExecuteStreamRequest>>,
     ) -> Result<tonic::Response<Self::ExecuteStreamStream>, Status> {
-        let Some(ExecuteStreamRequest {
+        let Some(script::ExecuteStreamRequest {
             request_type: Some(execute_stream_request::RequestType::InitialRequest(mut initial)),
         }) = request.get_mut().message().await?
         else {
@@ -278,32 +282,31 @@ impl ScriptService for ScriptServer {
         };
 
         let content_type = initial.result_content_type.clone();
-        let m = stream.map::<Result<ExecuteStreamResponse, Status>, _>(move |s| match s {
-            ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => Ok(ExecuteStreamResponse {
-                result: Some(prost_serde::result_type(
-                    d.into(),
-                    content_type.iter().copied(),
-                )?),
-                metadata: None,
-            }),
-            ExecStreamItem::End(None) => Ok(ExecuteStreamResponse {
+        let m = stream.map(move |s| match s {
+            ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => {
+                Ok(script::ExecuteStreamResponse {
+                    result: Some(prost_serde::result_type(
+                        d.into(),
+                        content_type.iter().copied(),
+                    )?),
+                    metadata: None,
+                })
+            }
+            ExecStreamItem::End(None) => Ok(script::ExecuteStreamResponse {
                 result: None,
                 metadata: None,
             }),
             ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
         if let Some((start, tracer_events)) = trace_events {
-            let trace_async =
-                ReceiverStream::new(tracer_events)
-                    .chunks(4)
-                    .map::<Result<ExecuteStreamResponse, Status>, _>(move |e| {
-                        Ok(ExecuteStreamResponse {
-                            result: None,
-                            metadata: Some(ExecutionStreamMetadata {
-                                traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
-                            }),
-                        })
-                    });
+            let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
+                Ok(script::ExecuteStreamResponse {
+                    result: None,
+                    metadata: Some(script::ExecutionStreamMetadata {
+                        traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
+                    }),
+                })
+            });
             Ok(Response::new(Box::pin(stream_until(
                 join_with(tokio_stream::StreamExt::merge(m, trace_async), mover),
                 deadline,

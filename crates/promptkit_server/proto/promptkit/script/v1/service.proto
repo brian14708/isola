@@ -110,7 +110,18 @@ message ExecuteStreamResponse {
   ExecutionStreamMetadata metadata = 15;
 }
 
+message ListRuntimeRequest {}
+
+message ListRuntimeResponse {
+  repeated Runtime runtimes = 1;
+}
+
+message Runtime {
+  string name = 1;
+}
+
 service ScriptService {
+  rpc ListRuntime(ListRuntimeRequest) returns (ListRuntimeResponse) {}
   rpc Execute(ExecuteRequest) returns (ExecuteResponse) {}
   rpc ExecuteClientStream(stream ExecuteClientStreamRequest) returns (ExecuteClientStreamResponse) {}
   rpc ExecuteServerStream(ExecuteServerStreamRequest) returns (stream ExecuteServerStreamResponse) {}

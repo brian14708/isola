@@ -135,7 +135,7 @@ async fn exec(
         .args
         .unwrap_or_default()
         .into_iter()
-        .map(|v| ExecArgument::Json(v.to_string()))
+        .map(|v| ExecArgument::Json(Into::<Box<str>>::into(v).into_string()))
         .collect::<Vec<_>>();
     let mut stream = Box::pin(
         tokio_stream::StreamExt::timeout(

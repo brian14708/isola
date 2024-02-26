@@ -49,7 +49,7 @@ impl exports::vm::Guest for Global {
                             Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         }),
                         [],
-                        |s| host::emit(s),
+                        host::emit,
                     )
                     .map_err(Into::<exports::vm::Error>::into)?;
                 vm.flush();
