@@ -99,22 +99,30 @@ impl Scope {
             let obj = if f.is_callable() {
                 let args = PyTuple::new(
                     py,
-                    positional.into_iter().map(|v| match v {
-                        InputValue::Json(v) => {
-                            PyObjectDeserializer::new(py).deserialize(v).unwrap()
-                        }
-                        InputValue::JsonStr(v) => PyObjectDeserializer::new(py)
-                            .deserialize(&mut serde_json::Deserializer::from_str(&v))
-                            .unwrap(),
-                        InputValue::Iter(it) => it.into_py(py),
-                    }),
+                    positional
+                        .into_iter()
+                        .map(|v| match v {
+                            InputValue::Json(v) => Ok(PyObjectDeserializer::new(py)
+                                .deserialize(v)
+                                .map_err(|_| Error::UnexpectedError("serde error"))?),
+                            InputValue::JsonStr(v) => Ok(PyObjectDeserializer::new(py)
+                                .deserialize(&mut serde_json::Deserializer::from_str(&v))
+                                .map_err(|_| Error::UnexpectedError("serde error"))?),
+                            InputValue::Iter(it) => Ok(it.into_py(py)),
+                        })
+                        .collect::<Result<Vec<_>>>()?,
                 );
                 let kwargs = PyDict::new(py);
                 for (k, v) in named {
                     match v {
                         InputValue::Json(v) => {
                             kwargs
-                                .set_item(k, PyObjectDeserializer::new(py).deserialize(v).unwrap())
+                                .set_item(
+                                    k,
+                                    PyObjectDeserializer::new(py)
+                                        .deserialize(v)
+                                        .map_err(|_| Error::UnexpectedError("serde error"))?,
+                                )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
                         InputValue::JsonStr(v) => {
@@ -123,7 +131,7 @@ impl Scope {
                                     k,
                                     PyObjectDeserializer::new(py)
                                         .deserialize(&mut serde_json::Deserializer::from_str(&v))
-                                        .unwrap(),
+                                        .map_err(|_| Error::UnexpectedError("serde error"))?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
@@ -145,7 +153,11 @@ impl Scope {
             if let Ok(iter) = obj.iter() {
                 for el in iter {
                     callback(
-                        &serde_json::to_string(&PyObjectSerializer::new(py, el.unwrap())).unwrap(),
+                        &serde_json::to_string(&PyObjectSerializer::new(
+                            py,
+                            el.map_err(|e| Error::from_pyerr(py, e))?,
+                        ))
+                        .map_err(|_| Error::UnexpectedError("serde error"))?,
                     );
                 }
                 return Ok(None);
