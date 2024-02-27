@@ -2,7 +2,7 @@ package promptkit:python;
 
 interface types {
     variant argument {
-        json(string),
+        cbor(list<u8>),
         iterator(argument-iterator),
     }
     resource argument-iterator {
@@ -14,7 +14,7 @@ world python-vm {
     import http-client;
 
     import host: interface {
-        emit: func(%data: string);
+        emit: func(%data: list<u8>);
     }
     export vm : interface {
         use types.{argument};
@@ -23,6 +23,6 @@ world python-vm {
             unknown(string),
         }
         eval-script: func(%script: string) -> result<_, error>;
-        call-func: func(%func: string, %args: list<argument>) -> result<option<string>, error>;
+        call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
     }
 }

@@ -21,7 +21,7 @@ use super::http_client;
 use super::PythonVm;
 
 pub struct VmRunState {
-    pub(crate) output: mpsc::Sender<anyhow::Result<(String, bool)>>,
+    pub(crate) output: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
 }
 
 pub struct VmState {
@@ -87,7 +87,7 @@ impl WasiView for VmState {
 
 #[async_trait::async_trait]
 impl bindgen::host::Host for VmState {
-    async fn emit(&mut self, data: String) -> wasmtime::Result<()> {
+    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
             run.output.send(Ok((data, false))).await?;
             Ok(())

@@ -26,6 +26,7 @@ message Argument {
   oneof argument_type {
     google.protobuf.Value value = 1;
     string json = 2;
+    bytes cbor = 3;
     Marker marker = 15;
   }
 }
@@ -34,12 +35,14 @@ enum ContentType {
   CONTENT_TYPE_UNSPECIFIED = 0;
   CONTENT_TYPE_PROTOBUF_VALUE = 1;
   CONTENT_TYPE_JSON = 2;
+  CONTENT_TYPE_CBOR = 3;
 }
 
 message Result {
   oneof result_type {
     google.protobuf.Value value = 1;
     string json = 2;
+    bytes cbor = 3;
   }
 }
 

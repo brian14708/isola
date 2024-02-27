@@ -1,9 +1,9 @@
 use std::{
     pin::Pin,
     time::{Duration, SystemTime, UNIX_EPOCH},
-    usize,
 };
 
+use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer, TraceEvent},
@@ -154,8 +154,7 @@ impl ScriptService for ScriptServer {
                                         .map_err(|_e| {
                                             Status::invalid_argument("invalid arguments")
                                         })?
-                                        .map_err(|_| Status::invalid_argument("invalid marker"))?
-                                        .to_string(),
+                                        .map_err(|_| Status::invalid_argument("invalid marker"))?,
                                 )
                                 .await;
                         }
@@ -271,8 +270,7 @@ impl ScriptService for ScriptServer {
                             .send(
                                 argument(v)
                                     .map_err(|_e| Status::invalid_argument("invalid arguments"))?
-                                    .map_err(|_| Status::invalid_argument("invalid marker"))?
-                                    .to_string(),
+                                    .map_err(|_| Status::invalid_argument("invalid marker"))?,
                             )
                             .await;
                     }
@@ -323,37 +321,36 @@ impl ScriptService for ScriptServer {
 }
 
 async fn non_stream_result(
-    stream: impl Stream<Item = ExecStreamItem>,
+    mut stream: impl Stream<Item = ExecStreamItem> + Unpin,
     content_type: impl IntoIterator<Item = i32>,
 ) -> Result<script::Result, Status> {
-    let stream = tokio_stream::StreamExt::collect::<Vec<_>>(stream).await;
+    let mut b = match stream.next().await {
+        Some(ExecStreamItem::End(Some(value))) => {
+            return prost_serde::result_type(value.into(), content_type);
+        }
+        Some(ExecStreamItem::End(None)) => {
+            return prost_serde::result_type(
+                // empty array
+                std::borrow::Cow::Borrowed(b"\x80"),
+                content_type,
+            );
+        }
+        Some(ExecStreamItem::Data(d)) => {
+            let mut b = BufWriter::new(Vec::with_capacity(d.len() + 2));
+            Array::unbounded(&mut b).map_err(|_| Status::internal("failed to encode array"))?;
+            b.push(&d)
+                .map_err(|_| Status::internal("failed to write data"))?;
+            b
+        }
+        Some(ExecStreamItem::Error(err)) => return Err(Status::internal(err.to_string())),
+        None => return Err(Status::internal("empty stream")),
+    };
 
-    if stream.len() == 1 {
-        return match stream.into_iter().next().unwrap() {
-            ExecStreamItem::End(Some(value)) => {
-                Ok(prost_serde::result_type(value.into(), content_type)?)
-            }
-            ExecStreamItem::End(None) => Ok(prost_serde::result_type("[]".into(), content_type)?),
-            ExecStreamItem::Data(_) => return Err(Status::internal("unexpected data")),
-            ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
-        };
-    }
-
-    let mut str = String::with_capacity(
-        stream
-            .iter()
-            .map(|item| match item {
-                ExecStreamItem::Data(data) => data.len() + 1,
-                _ => 0,
-            })
-            .sum::<usize>()
-            + 1,
-    );
-    for (i, item) in stream.into_iter().enumerate() {
+    while let Some(item) = stream.next().await {
         match item {
             ExecStreamItem::Data(data) => {
-                str.push(if i > 0 { ',' } else { '[' });
-                str.push_str(&data);
+                b.push(&data)
+                    .map_err(|_| Status::internal("failed to write data"))?;
             }
             ExecStreamItem::End(None) => break,
             ExecStreamItem::End(Some(_)) => {
@@ -364,15 +361,14 @@ async fn non_stream_result(
             }
         }
     }
-    str.push(']');
-
-    prost_serde::result_type(str.into(), content_type)
+    Array::end(&mut b).map_err(|_| Status::internal("failed to end array"))?;
+    prost_serde::result_type(b.into_inner().into(), content_type)
 }
 
 struct ParsedSpec {
     args: Vec<ExecArgument>,
     timeout: Duration,
-    stream_tx: Option<mpsc::Sender<String>>,
+    stream_tx: Option<mpsc::Sender<Vec<u8>>>,
     tracer: Option<BoxedTracer>,
     trace_events: Option<(Duration, mpsc::Receiver<TraceEvent>)>,
 }
@@ -384,10 +380,10 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
         let args = std::mem::take(&mut spec.arguments)
             .into_iter()
             .map(|a| match argument(a) {
-                Ok(Ok(a)) => Ok(ExecArgument::Json(a)),
+                Ok(Ok(a)) => Ok(ExecArgument::Cbor(a)),
                 Ok(Err(Marker::Stream)) => {
                     if let Some(rx) = rx.take() {
-                        Ok(ExecArgument::JsonStream(rx))
+                        Ok(ExecArgument::CborStream(rx))
                     } else {
                         Err(Status::invalid_argument("invalid marker arguments"))
                     }

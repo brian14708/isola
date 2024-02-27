@@ -31,7 +31,7 @@ impl Vm {
     pub fn run(
         self,
         tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
+        sender: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
     ) -> VmRun {
         VmRun::new(self, tracer, sender)
     }

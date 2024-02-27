@@ -19,7 +19,7 @@ impl VmRun {
     pub fn new(
         mut vm: Vm,
         tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<anyhow::Result<(String, bool)>>,
+        sender: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
     ) -> Self {
         let o: &mut VmState = vm.store.data_mut();
         if let Some(tracer) = tracer {

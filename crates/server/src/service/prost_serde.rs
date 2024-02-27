@@ -1,10 +1,11 @@
 use std::{borrow::Cow, collections::HashMap, ops::Add};
 
+use cbor4ii::core::utils::{BufWriter, SliceReader};
 use promptkit_executor::trace::TraceEvent;
 use serde::{
     de::Visitor,
     ser::{SerializeMap, SerializeSeq},
-    Deserialize,
+    Deserialize, Serialize,
 };
 use tonic::Status;
 
@@ -12,19 +13,24 @@ use crate::proto::script::{
     self, argument::Marker, result, source::SourceType, trace, ContentType, Source, Trace,
 };
 
-pub fn argument(s: script::Argument) -> Result<Result<String, Marker>, Status> {
+pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> {
     match s.argument_type {
         None => Err(Status::invalid_argument("argument type is not specified")),
         Some(arg) => match arg {
-            script::argument::ArgumentType::Value(s) => {
-                Ok(Ok(serde_json::to_string(&ProstValueSerializer {
-                    value: &s,
-                })
-                .map_err(|_| {
-                    Status::internal("failed to serialize argument to json")
-                })?))
+            script::argument::ArgumentType::Value(s) => Ok(Ok(cbor4ii::serde::to_vec(
+                vec![],
+                &ProstValueSerializer { value: &s },
+            )
+            .map_err(|_| Status::internal("failed to serialize argument to json"))?)),
+            script::argument::ArgumentType::Json(j) => {
+                let mut o = BufWriter::new(vec![]);
+                let mut s = cbor4ii::serde::Serializer::new(&mut o);
+                serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(&j))
+                    .serialize(&mut s)
+                    .unwrap();
+                Ok(Ok(o.into_inner()))
             }
-            script::argument::ArgumentType::Json(j) => Ok(Ok(j)),
+            script::argument::ArgumentType::Cbor(c) => Ok(Ok(c)),
             script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(m)
                 .map_err(|e| Status::invalid_argument(format!("invalid marker: {e}")))?)),
         },
@@ -43,7 +49,7 @@ pub fn parse_source(source: &Option<Source>) -> Result<(&str, &str), Status> {
 }
 
 pub fn result_type(
-    s: Cow<'_, str>,
+    s: Cow<'_, [u8]>,
     content_type: impl IntoIterator<Item = i32>,
 ) -> Result<script::Result, Status> {
     for c in content_type
@@ -54,24 +60,32 @@ pub fn result_type(
         match c {
             ContentType::Unspecified => {}
             ContentType::Json => {
+                let mut s = SliceReader::new(s.as_ref());
+                let mut o = vec![];
+                serde_transcode::Transcoder::new(&mut cbor4ii::serde::Deserializer::new(&mut s))
+                    .serialize(&mut serde_json::Serializer::new(&mut o))
+                    .map_err(|_| Status::internal("failed to serialize result to json"))?;
                 return Ok(script::Result {
-                    result_type: Some(result::ResultType::Json(s.into())),
+                    result_type: Some(result::ResultType::Json(String::from_utf8(o).unwrap())),
+                });
+            }
+            ContentType::ProtobufValue => {
+                return match ProstValueDeserializer::deserialize(
+                    &mut cbor4ii::serde::Deserializer::new(&mut SliceReader::new(s.as_ref())),
+                ) {
+                    Ok(ProstValueDeserializer(v)) => Ok(script::Result {
+                        result_type: Some(result::ResultType::Value(v)),
+                    }),
+                    Err(_) => Err(Status::invalid_argument(
+                        "failed to serialize result to struct",
+                    )),
+                }
+            }
+            ContentType::Cbor => {
+                return Ok(script::Result {
+                    result_type: Some(result::ResultType::Cbor(s.into())),
                 })
             }
-            ContentType::ProtobufValue => match ProstValueDeserializer::deserialize(
-                &mut serde_json::Deserializer::from_str(&s),
-            ) {
-                Ok(ProstValueDeserializer(v)) => {
-                    return Ok(script::Result {
-                        result_type: Some(result::ResultType::Value(v)),
-                    })
-                }
-                _ => {
-                    return Err(Status::invalid_argument(
-                        "failed to serialize result to struct",
-                    ))
-                }
-            },
         }
     }
     unreachable!()

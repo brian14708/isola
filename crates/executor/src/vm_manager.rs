@@ -37,14 +37,14 @@ pub struct VmManager {
 
 #[derive(Debug)]
 pub enum ExecStreamItem {
-    Data(String),
-    End(Option<String>),
+    Data(Vec<u8>),
+    End(Option<Vec<u8>>),
     Error(anyhow::Error),
 }
 
 pub enum ExecArgument {
-    Json(String),
-    JsonStream(mpsc::Receiver<String>),
+    Cbor(Vec<u8>),
+    CborStream(mpsc::Receiver<Vec<u8>>),
 }
 
 impl VmManager {
@@ -209,9 +209,9 @@ impl VmManager {
             func,
             args.into_iter()
                 .map::<Result<_, ResourceTableError>, _>(|a| match a {
-                    ExecArgument::Json(a) => Ok(Argument::Json(a)),
-                    ExecArgument::JsonStream(s) => Ok(Argument::Iterator(
-                        vm.new_iter(Box::pin(ReceiverStream::new(s).map(Argument::Json)))?,
+                    ExecArgument::Cbor(a) => Ok(Argument::Cbor(a)),
+                    ExecArgument::CborStream(s) => Ok(Argument::Iterator(
+                        vm.new_iter(Box::pin(ReceiverStream::new(s).map(Argument::Cbor)))?,
                     )),
                 })
                 .collect::<Result<_, _>>()?,

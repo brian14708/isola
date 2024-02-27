@@ -1,4 +1,3 @@
-
 interface http-client {
     enum method {
         get,

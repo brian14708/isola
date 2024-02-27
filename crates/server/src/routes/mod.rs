@@ -10,12 +10,14 @@ use axum::{
     routing::{get, post},
     Json,
 };
+use cbor4ii::core::utils::{BufWriter, SliceReader};
 pub use error::Result;
 use futures_util::StreamExt;
 use promptkit_executor::{
     trace::{BoxedTracer, MemoryTracer, TraceEvent, TraceEventKind},
     ExecArgument, ExecStreamItem, VmManager,
 };
+use serde::Serialize;
 use serde_json::{json, value::RawValue};
 pub use state::{AppState, Metrics};
 use tokio_stream::wrappers::ReceiverStream;
@@ -135,7 +137,15 @@ async fn exec(
         .args
         .unwrap_or_default()
         .into_iter()
-        .map(|v| ExecArgument::Json(Into::<Box<str>>::into(v).into_string()))
+        .map(|v| {
+            let v: Box<str> = v.into();
+            let mut o = BufWriter::new(vec![]);
+            let mut s = cbor4ii::serde::Serializer::new(&mut o);
+            serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(&v))
+                .serialize(&mut s)
+                .unwrap();
+            ExecArgument::Cbor(o.into_inner())
+        })
         .collect::<Vec<_>>();
     let mut stream = Box::pin(
         tokio_stream::StreamExt::timeout(
@@ -165,7 +175,7 @@ async fn exec(
                     Some(data) => Response::builder()
                         .status(StatusCode::OK)
                         .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-                        .body(data.into())?,
+                        .body(cbor_to_json(&data)?.into())?,
                     None => StatusCode::NO_CONTENT.into_response(),
                 });
             }
@@ -195,9 +205,17 @@ async fn exec(
 fn exec_to_event(e: ExecStreamItem) -> anyhow::Result<Event> {
     match e {
         ExecStreamItem::Data(data) | ExecStreamItem::End(Some(data)) => {
-            Ok(Event::default().data(data))
+            Ok(Event::default().data(cbor_to_json(&data)?))
         }
         ExecStreamItem::End(None) => Ok(Event::default().data("[DONE]")),
         ExecStreamItem::Error(err) => Err(err),
     }
+}
+
+fn cbor_to_json(s: &[u8]) -> anyhow::Result<String> {
+    let mut o = vec![];
+    let mut s = SliceReader::new(s);
+    serde_transcode::Transcoder::new(&mut cbor4ii::serde::Deserializer::new(&mut s))
+        .serialize(&mut serde_json::Serializer::new(&mut o))?;
+    Ok(String::from_utf8(o)?)
 }

@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 
+use cbor4ii::core::utils::SliceReader;
 use pyo3::append_to_inittab;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -38,14 +39,14 @@ impl exports::vm::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<Argument>) -> Result<Option<String>, exports::vm::Error> {
+    fn call_func(func: String, args: Vec<Argument>) -> Result<Option<Vec<u8>>, exports::vm::Error> {
         GLOBAL_SCOPE.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
                     .run(
                         &func,
                         args.into_iter().map(|f| match f {
-                            Argument::Json(s) => InputValue::JsonStr(s.into()),
+                            Argument::Cbor(s) => InputValue::Cbor(s.into()),
                             Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         }),
                         [],
@@ -346,13 +347,16 @@ impl ArgIter {
     fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
         match slf.iter.read() {
             Some(a) => match a {
-                types::Argument::Json(j) => Ok(Some(
-                    PyObjectDeserializer::new(slf.py())
-                        .deserialize(&mut serde_json::Deserializer::from_str(&j))
-                        .map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                        })?,
-                )),
+                types::Argument::Cbor(c) => {
+                    let c = SliceReader::new(&c);
+                    Ok(Some(
+                        PyObjectDeserializer::new(slf.py())
+                            .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
+                            })?,
+                    ))
+                }
                 types::Argument::Iterator(_) => todo!(),
             },
             None => Ok(None),
