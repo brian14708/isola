@@ -22,7 +22,7 @@ serde = { version = "1.0.193", features = ["derive"] }
 serde_json = "1.0.108"
 tokio = { version = "1.35.1", features = ["full"] }
 tokio-stream = "0.1.14"
-tonic = "0.11.0"
+tonic = { version = "0.11.0", features = ["gzip"] }
 tonic-reflection = "0.11.0"
 tonic-web = "0.11.0"
 tower = "0.4.13"

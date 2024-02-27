@@ -60,7 +60,7 @@ impl VmState {
             Self {
                 tracer,
                 limiter,
-                client: reqwest::Client::new(),
+                client: reqwest::Client::builder().gzip(true).build().unwrap(),
                 wasi: Mutex::new(wasi),
                 table: Mutex::new(ResourceTable::new()),
                 run: None,

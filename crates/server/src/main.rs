@@ -6,6 +6,7 @@ use std::{env::args, path::PathBuf};
 use anyhow::anyhow;
 use promptkit_executor::VmManager;
 use proto::script::script_service_server::ScriptServiceServer;
+use tonic::codec::CompressionEncoding;
 
 mod hybrid;
 mod proto;
@@ -39,9 +40,11 @@ async fn main() -> anyhow::Result<()> {
             let grpc = tonic::transport::Server::builder()
                 .accept_http1(true)
                 .add_service(service)
-                .add_service(tonic_web::enable(ScriptServiceServer::new(
-                    service::ScriptServer::new(state),
-                )))
+                .add_service(tonic_web::enable(
+                    ScriptServiceServer::new(service::ScriptServer::new(state))
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .accept_compressed(CompressionEncoding::Gzip),
+                ))
                 .into_service();
 
             server::serve(app, grpc, 3000).await
