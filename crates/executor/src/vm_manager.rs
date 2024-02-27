@@ -16,7 +16,7 @@ use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
     component::{Component, InstancePre, ResourceTableError},
-    Config, Engine,
+    Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig,
 };
 
 use crate::{
@@ -55,6 +55,10 @@ impl VmManager {
             .async_support(true)
             .epoch_interruption(true)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
+
+        let pooling_config = PoolingAllocationConfig::default();
+        config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling_config));
+
         config
     }
 
