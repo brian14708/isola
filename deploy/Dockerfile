@@ -1,8 +1,8 @@
 # syntax=docker/dockerfile:1
 
 # server
-FROM docker.io/library/rust:bookworm AS server-build
-RUN apt-get update && apt-get install -y protobuf-compiler && rm -rf /var/lib/apt/lists/*
+FROM docker.io/library/rust:alpine AS server-build
+RUN apk add --no-cache protobuf-dev musl-dev
 WORKDIR /src
 COPY crates crates
 COPY wit wit
@@ -44,13 +44,13 @@ RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
     cargo make wasm
 
 # final
-FROM gcr.io/distroless/cc-debian12
+FROM cgr.dev/chainguard/static:latest
 WORKDIR /app
 USER nonroot
-COPY --from=server-build --chown=nonroot:nonroot /src/target/promptkit_server .
-COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
-COPY --from=wasm-build --chown=nonroot:nonroot /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
-COPY --from=wasm-build --chown=nonroot:nonroot /src/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
+COPY --from=server-build /src/target/promptkit_server .
+COPY --from=ui-build /src/dist ui/dist
+COPY --from=wasm-build /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
+COPY --from=wasm-build /src/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
 
 EXPOSE 3000
 CMD ["./promptkit_server"]
