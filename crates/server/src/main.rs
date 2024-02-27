@@ -1,6 +1,10 @@
 #![warn(clippy::pedantic)]
 #![allow(clippy::module_name_repetitions)]
 
+use std::{env::args, path::PathBuf};
+
+use anyhow::anyhow;
+use promptkit_executor::VmManager;
 use proto::script::script_service_server::ScriptServiceServer;
 
 mod hybrid;
@@ -17,21 +21,31 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let state = routes::AppState::new("wasm/target/promptkit_python.wasm")?;
-    let app = routes::router(&state);
+    let task = args().nth(1);
+    match task.as_deref() {
+        Some("build") => {
+            VmManager::compile(&PathBuf::from("wasm/target/promptkit_python.wasm"))?;
+            Ok(())
+        }
+        None | Some("serve") => {
+            let state = routes::AppState::new("wasm/target/promptkit_python.wasm")?;
+            let app = routes::router(&state);
 
-    let service = tonic_reflection::server::Builder::configure()
-        .register_encoded_file_descriptor_set(proto::script::FILE_DESCRIPTOR_SET)
-        .build()
-        .unwrap();
+            let service = tonic_reflection::server::Builder::configure()
+                .register_encoded_file_descriptor_set(proto::script::FILE_DESCRIPTOR_SET)
+                .build()
+                .unwrap();
 
-    let grpc = tonic::transport::Server::builder()
-        .accept_http1(true)
-        .add_service(service)
-        .add_service(tonic_web::enable(ScriptServiceServer::new(
-            service::ScriptServer::new(state),
-        )))
-        .into_service();
+            let grpc = tonic::transport::Server::builder()
+                .accept_http1(true)
+                .add_service(service)
+                .add_service(tonic_web::enable(ScriptServiceServer::new(
+                    service::ScriptServer::new(state),
+                )))
+                .into_service();
 
-    server::serve(app, grpc, 3000).await
+            server::serve(app, grpc, 3000).await
+        }
+        _ => Err(anyhow!("unknown task")),
+    }
 }

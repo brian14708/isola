@@ -49,8 +49,9 @@ WORKDIR /app
 USER nonroot
 COPY --from=server-build /src/target/promptkit_server .
 COPY --from=ui-build /src/dist ui/dist
-COPY --from=wasm-build /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
+COPY --from=wasm-build --chown=nonroot:nonroot /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
 COPY --from=wasm-build /src/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
+RUN ["./promptkit_server", "build"]
 
 EXPOSE 3000
 CMD ["./promptkit_server"]

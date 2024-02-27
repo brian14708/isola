@@ -58,12 +58,20 @@ impl VmManager {
         config
     }
 
+    pub fn compile(path: &Path) -> anyhow::Result<()> {
+        let config = Self::cfg();
+        let engine = Engine::new(&config)?;
+        let component = Component::from_file(&engine, path)?;
+        let data = component.serialize()?;
+        std::fs::write(path.with_extension("wasm.cache"), data)?;
+        Ok(())
+    }
+
     pub fn new(path: &Path) -> anyhow::Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
         info!("Loading module...");
-        #[cfg(debug_assertions)]
         let component = {
             let cache_path = path.with_extension("wasm.cache");
 
@@ -82,14 +90,14 @@ impl VmManager {
                 c
             } else {
                 let component = Component::from_file(&engine, path)?;
-                let data = component.serialize()?;
-                std::fs::write(cache_path, data)?;
+                #[cfg(debug_assertions)]
+                {
+                    let data = component.serialize()?;
+                    std::fs::write(cache_path, data)?;
+                }
                 component
             }
         };
-
-        #[cfg(not(debug_assertions))]
-        let component = Component::from_file(&engine, path)?;
 
         let linker = VmState::new_linker(&engine)?;
         let instance_pre = linker.instantiate_pre(&component)?;
