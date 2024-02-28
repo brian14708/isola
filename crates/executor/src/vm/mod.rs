@@ -6,8 +6,8 @@ mod state;
 
 use std::pin::Pin;
 
-pub use bindgen::exports::vm as exports;
-pub use bindgen::PythonVm;
+pub use bindgen::exports::guest as exports;
+pub use bindgen::Sandbox;
 use host_types::ArgumentIterator;
 pub use state::VmState;
 
@@ -17,14 +17,14 @@ use wasmtime::Store;
 
 use crate::trace::BoxedTracer;
 
-use self::bindgen::promptkit::python::types;
+use self::bindgen::promptkit::script::types;
 use self::host_types::HostTypesCtx;
 use self::run::VmRun;
 
 pub struct Vm {
     pub(crate) hash: [u8; 32],
     pub(crate) store: Store<VmState>,
-    pub(crate) python: PythonVm,
+    pub(crate) python: Sandbox,
 }
 
 impl Vm {

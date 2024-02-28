@@ -3,7 +3,7 @@ use std::pin::Pin;
 use tokio_stream::{Stream, StreamExt};
 use wasmtime::component::ResourceTable;
 
-use super::bindgen::promptkit::python::types::{self, Argument};
+use super::bindgen::promptkit::script::types::{self, Argument};
 
 pub trait HostTypesCtx: Send {
     fn table(&mut self) -> &mut ResourceTable;

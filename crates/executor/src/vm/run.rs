@@ -38,7 +38,7 @@ impl VmRun {
         F: Future<Output = Output> + Send,
     {
         let vm = self.vm.as_mut().unwrap();
-        f(vm.python.vm(), &mut vm.store).await
+        f(vm.python.guest(), &mut vm.store).await
     }
 
     fn cleanup(&mut self) {

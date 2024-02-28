@@ -27,17 +27,17 @@ impl Error {
     }
 }
 
-impl From<Error> for exports::vm::Error {
+impl From<Error> for exports::guest::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::PythonError { cause, traceback } => {
-                exports::vm::Error::Python(if let Some(traceback) = traceback {
+                exports::guest::Error::Code(if let Some(traceback) = traceback {
                     format!("{cause}\n\n{traceback}")
                 } else {
                     cause
                 })
             }
-            Error::UnexpectedError(e) => exports::vm::Error::Unknown(e.to_string()),
+            Error::UnexpectedError(e) => exports::guest::Error::Unknown(e.to_string()),
         }
     }
 }

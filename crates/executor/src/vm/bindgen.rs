@@ -1,13 +1,13 @@
 wasmtime::component::bindgen!({
-    world: "python-vm",
+    world: "sandbox",
     async: true,
 
     with: {
-        "promptkit:python/http-client/request": super::http_client::Request,
-        "promptkit:python/http-client/response": super::http_client::Response,
-        "promptkit:python/http-client/response-sse-body": super::http_client::ResponseSseBody,
-        "promptkit:python/types/argument-iterator": super::host_types::ArgumentIterator,
+        "promptkit:script/http-client/request": super::http_client::Request,
+        "promptkit:script/http-client/response": super::http_client::Response,
+        "promptkit:script/http-client/response-sse-body": super::http_client::ResponseSseBody,
+        "promptkit:script/types/argument-iterator": super::host_types::ArgumentIterator,
     },
 });
 
-pub use promptkit::python::http_client;
+pub use promptkit::script::http_client;

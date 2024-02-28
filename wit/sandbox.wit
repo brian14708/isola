@@ -1,4 +1,4 @@
-package promptkit:python;
+package promptkit:script;
 
 interface types {
     variant argument {
@@ -10,16 +10,16 @@ interface types {
     }
 }
 
-world python-vm {
+world sandbox {
     import http-client;
 
     import host: interface {
         emit: func(%data: list<u8>);
     }
-    export vm : interface {
+    export guest: interface {
         use types.{argument};
         variant error {
-            python(string),
+            code(string),
             unknown(string),
         }
         eval-script: func(%script: string) -> result<_, error>;

@@ -21,7 +21,7 @@ use wasmtime::{
 
 use crate::{
     trace::BoxedTracer,
-    vm::{exports::Argument, PythonVm, Vm, VmState},
+    vm::{exports::Argument, Sandbox, Vm, VmState},
     vm_cache::VmCache,
 };
 
@@ -126,7 +126,7 @@ impl VmManager {
         let mut store = VmState::new(&self.engine, MAX_MEMORY);
         store.epoch_deadline_async_yield_and_update(1);
 
-        let (bindings, _) = PythonVm::instantiate_pre(&mut store, &self.instance_pre).await?;
+        let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
         Ok(Vm {
             hash,
             store,
@@ -152,7 +152,7 @@ impl VmManager {
                 .await
                 .and_then(|v| {
                     v.map_err(|e| match e {
-                        crate::vm::exports::Error::Python(err) => anyhow!("[Python] {0}", err),
+                        crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
                         crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
                     })
                 });
@@ -196,11 +196,11 @@ impl VmManager {
         } else {
             let mut vm = self.create(hash).await?;
             vm.python
-                .vm()
+                .guest()
                 .call_eval_script(&mut vm.store, script)
                 .await?
                 .map_err(|e| match e {
-                    crate::vm::exports::Error::Python(err) => anyhow!("[Python] {0}", err),
+                    crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
                     crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
                 })?;
             vm

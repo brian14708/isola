@@ -9,37 +9,40 @@ use pyo3::types::PyString;
 use serde::de::DeserializeSeed;
 use url::Url;
 
-use self::exports::vm::Argument;
-use self::promptkit::python::http_client::Request;
-use self::promptkit::python::types;
+use self::exports::guest::Argument;
+use self::promptkit::script::http_client::Request;
+use self::promptkit::script::types;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
-use crate::wasm::promptkit::python::http_client::{self, Method};
+use crate::wasm::promptkit::script::http_client::{self, Method};
 
 wit_bindgen::generate!({
-    world: "python-vm",
+    world: "sandbox",
     exports: {
-        "vm": Global,
+        "guest": Global,
     },
 });
 
 pub struct Global;
 
-impl exports::vm::Guest for Global {
-    fn eval_script(script: String) -> Result<(), exports::vm::Error> {
+impl exports::guest::Guest for Global {
+    fn eval_script(script: String) -> Result<(), exports::guest::Error> {
         GLOBAL_SCOPE.with(|vm| {
             return if let Some(vm) = vm.borrow().as_ref() {
                 vm.load_script(&script)
-                    .map_err(Into::<exports::vm::Error>::into)
+                    .map_err(Into::<exports::guest::Error>::into)
             } else {
-                Err(exports::vm::Error::Unknown(
+                Err(exports::guest::Error::Unknown(
                     "VM not initialized".to_string(),
                 ))
             };
         })
     }
 
-    fn call_func(func: String, args: Vec<Argument>) -> Result<Option<Vec<u8>>, exports::vm::Error> {
+    fn call_func(
+        func: String,
+        args: Vec<Argument>,
+    ) -> Result<Option<Vec<u8>>, exports::guest::Error> {
         GLOBAL_SCOPE.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
@@ -52,11 +55,11 @@ impl exports::vm::Guest for Global {
                         [],
                         host::emit,
                     )
-                    .map_err(Into::<exports::vm::Error>::into)?;
+                    .map_err(Into::<exports::guest::Error>::into)?;
                 vm.flush();
                 Ok(ret)
             } else {
-                Err(exports::vm::Error::Unknown(
+                Err(exports::guest::Error::Unknown(
                     "VM not initialized".to_string(),
                 ))
             }
