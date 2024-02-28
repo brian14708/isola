@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef } from "react";
+import { GrpcWebFetchTransport } from "@protobuf-ts/grpcweb-transport";
 import { createLazyFileRoute } from "@tanstack/react-router";
 import JSON5 from "json5";
 import type { editor } from "monaco-editor";
 import pako from "pako";
 
+import * as scriptv1 from "@promptkit/api/promptkit/script/v1/service";
+import { ScriptServiceClient } from "@promptkit/api/promptkit/script/v1/service.client";
 import { Editor } from "@/components/editor";
 import { EditorMenu } from "@/components/editor-menu";
 import { useToast } from "@/components/ui/use-toast";
@@ -35,6 +38,11 @@ const REQUEST_TEMPLATE = `\
     }
   ]
 }`;
+
+const transport = new GrpcWebFetchTransport({
+  baseUrl: window.location.origin,
+});
+const client = new ScriptServiceClient(transport);
 
 function Index() {
   const editorRef = useRef<editor.IStandaloneCodeEditor>(null);
@@ -71,31 +79,90 @@ function Index() {
     previewRef.current.setValue("/* Loading... */");
 
     try {
-      const m = JSON5.parse(requestRef.current.getValue()) as object;
-      const res = await fetch("/v1/code/exec", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...m,
-          script: editorRef.current.getValue(),
-        }),
-      });
+      const m = JSON5.parse(requestRef.current.getValue()) as {
+        args?: object[];
+        method: string;
+        stream?: boolean;
+      };
+      if (m.stream) {
+        const res = client.executeServerStream({
+          source: {
+            sourceType: {
+              oneofKind: "inline",
+              inline: {
+                code: editorRef.current.getValue(),
+                method: m.method,
+                runtime: "python3",
+              },
+            },
+          },
+          resultContentType: [scriptv1.ContentType.JSON],
+          spec: {
+            traceLevel: 2,
+            arguments:
+              m.args?.map((v) => {
+                return {
+                  argumentType: {
+                    oneofKind: "json",
+                    json: JSON.stringify(v),
+                  },
+                };
+              }) || [],
+          },
+        });
+        let s = "";
+        for await (const response of res.responses) {
+          if (response.result?.resultType.oneofKind === "json") {
+            s +=
+              JSON.stringify(
+                JSON.parse(response.result.resultType.json),
+                null,
+                2,
+              ) + "\n";
+          }
+          if (response.metadata) {
+            s +=
+              "// " +
+              JSON.stringify(response.metadata, (_key, value) =>
+                typeof value === "bigint" ? value.toString() : value,
+              ) +
+              "\n";
+          }
+          previewRef?.current?.setValue(s);
 
-      if (res.headers.get("content-type")?.includes("application/json")) {
-        const data = await res.json();
-        previewRef.current.setValue(JSON.stringify(data, null, 2));
+          console.log("got response message: ", response);
+        }
+        await res;
       } else {
-        const body = res.body?.getReader();
-        if (!body) throw new Error("No body");
-
-        let result = "";
-        for (;;) {
-          const { done, value } = await body.read();
-          if (done) break;
-          result += new TextDecoder().decode(value);
-          previewRef.current.setValue(result);
+        const res = await client.execute({
+          source: {
+            sourceType: {
+              oneofKind: "inline",
+              inline: {
+                code: editorRef.current.getValue(),
+                method: m.method,
+                runtime: "python3",
+              },
+            },
+          },
+          resultContentType: [scriptv1.ContentType.JSON],
+          spec: {
+            traceLevel: 0,
+            arguments:
+              m.args?.map((v) => {
+                return {
+                  argumentType: {
+                    oneofKind: "json",
+                    json: JSON.stringify(v),
+                  },
+                };
+              }) || [],
+          },
+        });
+        const resp = res.response;
+        if (resp.result?.resultType.oneofKind === "json") {
+          const v = resp.result.resultType.json;
+          previewRef.current.setValue(JSON.stringify(JSON.parse(v), null, 2));
         }
       }
     } catch (err) {

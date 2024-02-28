@@ -1,0 +1,20 @@
+{
+  "name": "@promptkit/api",
+  "private": true,
+  "version": "0.0.0",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "type": "module",
+  "scripts": {
+    "generate": "buf generate ../../../apis/proto && node post-generate.js"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "^1.29.0",
+    "@protobuf-ts/plugin": "^2.9.3"
+  },
+  "dependencies": {
+    "@protobuf-ts/runtime": "^2.9.3",
+    "@protobuf-ts/runtime-rpc": "^2.9.3"
+  }
+}

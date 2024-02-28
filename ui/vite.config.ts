@@ -9,12 +9,16 @@ export default defineConfig({
   plugins: [react(), TanStackRouterVite()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@/lib": path.resolve(__dirname, "./src/lib"),
+      "@/components": path.resolve(__dirname, "./src/components"),
     },
   },
   server: {
     proxy: {
       "/v1/": {
+        target: "http://localhost:3000",
+      },
+      "/promptkit.": {
         target: "http://localhost:3000",
       },
     },
