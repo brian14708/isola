@@ -287,7 +287,7 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
                     }
                     seq.end()
                 }
-                PyType::None(_) => serializer.serialize_unit(),
+                PyType::None(_) => serializer.serialize_none(),
                 PyType::String(s) => serializer.serialize_str(s),
                 PyType::Bool(b) => serializer.serialize_bool(b),
                 PyType::Int(i) => serializer.serialize_i64(i),
