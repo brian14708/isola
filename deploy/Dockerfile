@@ -5,7 +5,7 @@ FROM docker.io/library/rust:alpine AS server-build
 RUN apk add --no-cache protobuf-dev musl-dev
 WORKDIR /src
 COPY crates crates
-COPY wit wit
+COPY apis apis
 COPY Cargo.toml .
 COPY Cargo.lock .
 RUN --mount=type=cache,target=/src/target/release \
@@ -36,7 +36,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo install wasm-tools --locked
 WORKDIR /src
 COPY wasm .
-COPY wit ../wit
+COPY apis ../apis
 RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
     --mount=type=cache,target=/src/target/wasm32-wasi/wasi-deps/downloads \
     --mount=type=cache,target=/src/target/release \
