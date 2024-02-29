@@ -1,6 +1,7 @@
 [tasks.build-wasm]
 command = "cargo"
 args = ["rustc", "--crate-type", "cdylib", "--profile", "release", "--target", "wasm32-wasi", "-p", "promptkit_python"]
+env = { PYO3_CROSS_PYTHON_VERSION = "3.12" }
 
 [tasks.wizer]
 install_crate = "wizer"

@@ -50,7 +50,7 @@ fn main() {
             env!("CARGO_MANIFEST_DIR"),
             "../../target/wasm32-wasi/wasi-deps"
         );
-        let libpython_binary = "python3.11";
+        let libpython_binary = "python3.12";
 
         if std::fs::File::open("../../lib/libpython.tar.gz").is_ok() {
             unarchive("../../lib/libpython.tar.gz", &wasi_deps_path);
@@ -58,7 +58,7 @@ fn main() {
             // https://github.com/vmware-labs/webassembly-language-runtimes/blob/main/python/tools/wlr-libpy/src/bld_cfg.rs
             let wasi_sdk_sysroot_url= "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sysroot-20.0.tar.gz";
             let wasi_sdk_clang_builtins_url = "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/libclang_rt.builtins-wasm32-wasi-20.0.tar.gz";
-            let libpython_url= "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.11.4%2B20230714-11be424/libpython-3.11.4-wasi-sdk-20.0.tar.gz";
+            let libpython_url= "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/libpython-3.12.0-wasi-sdk-20.0.tar.gz";
 
             download_and_unarchive(wasi_sdk_sysroot_url, &wasi_deps_path);
             download_and_unarchive(wasi_sdk_clang_builtins_url, &wasi_deps_path);

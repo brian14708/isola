@@ -1,4 +1,4 @@
-FROM docker.io/library/fedora:38
+FROM docker.io/library/fedora:39
 
 ENV CC=clang
 ENV WASI_SDK_PATH=/opt/wasi-sdk
@@ -29,7 +29,7 @@ RUN cd zlib-${ZLIB_VERSION} && \
     mkdir -p ${WASI_SDK_PATH}/share/wasi-sysroot/lib/pkgconfig && \
     mv ${WASI_SDK_PATH}/share/wasi-sysroot/lib/wasm32-wasi/pkgconfig/* ${WASI_SDK_PATH}/share/wasi-sysroot/lib/pkgconfig
 
-ARG PYTHON_VERSION=3.11.8
+ARG PYTHON_VERSION=3.12.2
 RUN curl https://www.python.org/ftp/python/${PYTHON_VERSION}/Python-${PYTHON_VERSION}.tar.xz | tar -xJ
 COPY libpython.patch .
 RUN cd Python-${PYTHON_VERSION} && git apply --allow-empty ../libpython.patch
