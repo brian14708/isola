@@ -1,0 +1,37 @@
+diff --git a/Tools/wasm/config.site-wasm32-wasi b/Tools/wasm/config.site-wasm32-wasi
+index fe6c90e59d..c74d0b3b72 100644
+--- a/Tools/wasm/config.site-wasm32-wasi
++++ b/Tools/wasm/config.site-wasm32-wasi
+@@ -43,3 +43,5 @@ ac_cv_header_netpacket_packet_h=no
+ 
+ # Disable int-conversion for wask-sdk as it triggers an error from version 17.
+ ac_cv_disable_int_conversion=yes
++
++ac_cv_lib_dl_dlopen=no
+diff --git a/Tools/wasm/wasi-env b/Tools/wasm/wasi-env
+index e6c6fb2d8e..86a97a6406 100755
+--- a/Tools/wasm/wasi-env
++++ b/Tools/wasm/wasi-env
+@@ -66,7 +66,7 @@ PKG_CONFIG_SYSROOT_DIR="${WASI_SYSROOT}"
+ PATH="${WASI_SDK_PATH}/bin:${PATH}"
+ 
+ export WASI_SDK_PATH WASI_SYSROOT
+-export CC CPP CXX LDSHARED AR RANLIB
++export CC CPP CXX AR RANLIB
+ export CFLAGS LDFLAGS
+ export PKG_CONFIG_PATH PKG_CONFIG_LIBDIR PKG_CONFIG_SYSROOT_DIR
+ export PATH
+diff --git a/Tools/wasm/wasm_build.py b/Tools/wasm/wasm_build.py
+index 63812c6f31..d1783e80ef 100755
+--- a/Tools/wasm/wasm_build.py
++++ b/Tools/wasm/wasm_build.py
+@@ -484,6 +484,9 @@ def configure_cmd(self) -> List[str]:
+             opt = "enable" if self.pthreads else "disable"
+             cmd.append(f"--{opt}-wasm-pthreads")
+ 
++        cmd.append(f"--with-pymalloc")
++        cmd.append(f"--with-computed-gotos")
++
+         if self.host != Host.build:
+             cmd.append(f"--with-build-python={BUILD.python_cmd}")
+ 
