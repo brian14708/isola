@@ -29,22 +29,23 @@ RUN pnpm run build
 # wasm
 FROM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasi
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo install cargo-make --locked
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo install wizer --all-features --locked
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo install wasm-opt --locked
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo install wasm-tools --locked
-WORKDIR /src
-COPY wasm .
+RUN curl --location https://github.com/bytecodealliance/wizer/releases/download/v4.0.0/wizer-v4.0.0-x86_64-linux.tar.xz | \
+    tar --strip-components 1 --directory /usr/local/bin --extract --xz
+RUN curl --location https://github.com/WebAssembly/binaryen/releases/download/version_117/binaryen-version_117-x86_64-linux.tar.gz | \
+    tar --strip-components 1 --directory /usr/local --extract --gunzip
+RUN curl --location https://github.com/bytecodealliance/wasm-tools/releases/download/v1.201.0/wasm-tools-1.201.0-x86_64-linux.tar.gz | \
+    tar --strip-components 1 --directory /usr/local/bin --extract --gunzip
+RUN curl --location https://github.com/sagiegurari/cargo-make/releases/download/0.37.10/cargo-make-v0.37.10-x86_64-unknown-linux-gnu.zip -o cargo-make.zip && \
+    unzip -o -X -j cargo-make.zip -d /usr/local/bin && \
+    rm cargo-make.zip
+WORKDIR /src/wasm
 COPY apis ../apis
-RUN --mount=type=cache,target=/src/target/wasm32-wasi/release \
-    --mount=type=cache,target=/src/target/wasm32-wasi/wasi-deps/downloads \
-    --mount=type=cache,target=/src/target/release \
+COPY wasm .
+RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasi/release \
+    --mount=type=cache,target=/src/wasm/target/wasm32-wasi/wasi-deps/downloads \
+    --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo make wasm
+    cargo fetch && cargo make wasm
 
 # final
 FROM cgr.dev/chainguard/static:latest
@@ -52,8 +53,8 @@ WORKDIR /app
 USER nonroot
 COPY --from=server-build /src/target/promptkit_server .
 COPY --from=ui-build /src/dist ui/dist
-COPY --from=wasm-build --chown=nonroot:nonroot /src/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
-COPY --from=wasm-build /src/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
+COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
+COPY --from=wasm-build /src/wasm/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
 
 EXPOSE 3000

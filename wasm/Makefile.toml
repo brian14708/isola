@@ -4,8 +4,6 @@ args = ["rustc", "--crate-type", "cdylib", "--profile", "release", "--target", "
 env = { PYO3_CROSS_PYTHON_VERSION = "3.12" }
 
 [tasks.wizer]
-install_crate = "wizer"
-install_crate_args = ["--all-features"]
 command = "wizer"
 args = [
     "--allow-wasi",
@@ -22,7 +20,6 @@ condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.
 dependencies = ["build-wasm"]
 
 [tasks.opt-wasm]
-install_crate = "wasm-opt"
 command = "wasm-opt"
 args = [
     "-O3",
@@ -36,7 +33,6 @@ condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.
 dependencies = ["wizer"]
 
 [tasks.wasm-component]
-install_crate = "wasm-tools"
 command = "wasm-tools"
 args = [
     "component",
