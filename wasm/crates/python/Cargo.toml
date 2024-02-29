@@ -10,7 +10,7 @@ serde = "1.0.196"
 serde_json = "1.0.113"
 thiserror = "1.0.57"
 url = "2.5.0"
-wit-bindgen = "0.18.0"
+wit-bindgen = "0.19.0"
 
 [build-dependencies]
 flate2 = "1.0.28"
