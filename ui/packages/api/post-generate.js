@@ -1,4 +1,3 @@
-// walk ./src and prepend `//@ts-nocheck` to all files
 import * as fs from "fs";
 import * as path from "path";
 
@@ -18,7 +17,7 @@ function walk(dir, callback) {
   });
 }
 
-walk("./src", (e) => {
+walk("./generated", (e) => {
   if (e.endsWith(".ts")) {
     fs.readFile(e, "utf8", function (err, data) {
       if (err) {

@@ -1,4 +1,5 @@
 /target
 /result
 /wasm/target
+generated/
 .DS_Store
