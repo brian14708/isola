@@ -56,7 +56,8 @@ impl VmManager {
             .epoch_interruption(true)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
 
-        let pooling_config = PoolingAllocationConfig::default();
+        let mut pooling_config = PoolingAllocationConfig::default();
+        pooling_config.memory_pages(64 * 1024 * 1024 / (64 * 1024));
         config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling_config));
 
         config
