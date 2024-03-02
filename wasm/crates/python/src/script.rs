@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use cbor4ii::core::utils::SliceReader;
 use pyo3::{
+    exceptions::PyNameError,
     intern,
     prelude::*,
     prepare_freethreaded_python,
@@ -96,7 +97,10 @@ impl Scope {
                 .downcast(py)
                 .map_err(|e| Error::from_pyerr(py, e))?;
             let Some(f) = dict.get_item(name).map_err(|e| Error::from_pyerr(py, e))? else {
-                return Ok(None);
+                return Err(Error::from_pyerr(
+                    py,
+                    PyNameError::new_err(format!("name '{name}' is not defined")),
+                ));
             };
 
             let obj = if f.is_callable() {
