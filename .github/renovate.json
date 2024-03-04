@@ -1,0 +1,22 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits"],
+  "packageRules": [
+    {
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest",
+        "devDependencies",
+        "lockFileMaintenance"
+      ],
+      "groupName": "minor updates",
+      "automerge": true
+    }
+  ],
+  "automergeType": "branch",
+  "lockFileMaintenance": {
+    "enabled": true
+  }
+}
