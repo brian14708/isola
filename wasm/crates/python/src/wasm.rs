@@ -18,24 +18,23 @@ use crate::wasm::promptkit::script::http_client::{self, Method};
 
 wit_bindgen::generate!({
     world: "sandbox",
-    exports: {
-        "guest": Global,
-    },
 });
+
+export!(Global);
 
 pub struct Global;
 
 impl exports::guest::Guest for Global {
     fn eval_script(script: String) -> Result<(), exports::guest::Error> {
         GLOBAL_SCOPE.with(|vm| {
-            return if let Some(vm) = vm.borrow().as_ref() {
+            if let Some(vm) = vm.borrow().as_ref() {
                 vm.load_script(&script)
                     .map_err(Into::<exports::guest::Error>::into)
             } else {
                 Err(exports::guest::Error::Unknown(
                     "VM not initialized".to_string(),
                 ))
-            };
+            }
         })
     }
 
@@ -214,15 +213,13 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
             );
         }
         match http_client::fetch(request) {
-            Ok(response) => {
-                return PyObjectDeserializer::new(py)
-                    .deserialize(&mut serde_json::Deserializer::from_slice(
-                        &(http_client::Response::body(response).map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                        })?),
-                    ))
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
-            }
+            Ok(response) => PyObjectDeserializer::new(py)
+                .deserialize(&mut serde_json::Deserializer::from_slice(
+                    &(http_client::Response::body(response).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                    })?),
+                ))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 e.to_string(),
             )),
