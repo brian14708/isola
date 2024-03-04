@@ -1,4 +1,4 @@
-FROM docker.io/library/fedora:39
+FROM docker.io/library/fedora:41
 
 ENV CC=clang
 ENV WASI_SDK_PATH=/opt/wasi-sdk
