@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = "1.0.76"
-axum = "0.7.2"
+anyhow = "1.0.80"
+axum = "0.7.4"
 bytes = "1.5.0"
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
 futures-util = "0.3.30"
@@ -15,20 +15,20 @@ http_02 = { package = "http", version = "0.2" }
 http_body_04 = { package = "http-body", version = "0.4" }
 mimalloc = { version = "0.1.39", default-features = false }
 pin-project = "1.1.4"
-prometheus-client = "0.22.0"
+prometheus-client = "0.22.1"
 promptkit_executor = { version = "0.1.0", path = "../executor" }
 prost = "0.12.3"
 prost-types = "0.12.3"
-serde = { version = "1.0.193", features = ["derive"] }
+serde = { version = "1.0.197", features = ["derive"] }
 serde-transcode = "1.1.1"
-serde_json = "1.0.108"
-tokio = { version = "1.35.1", features = ["full"] }
+serde_json = "1.0.114"
+tokio = { version = "1.36.0", features = ["full"] }
 tokio-stream = "0.1.14"
 tonic = { version = "0.11.0", features = ["gzip"] }
 tonic-reflection = "0.11.0"
 tonic-web = "0.11.0"
 tower = "0.4.13"
-tower-http = { version = "0.5.1", features = ["fs"] }
+tower-http = { version = "0.5.2", features = ["fs"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["parking_lot"] }
 
