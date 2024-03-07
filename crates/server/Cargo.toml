@@ -9,13 +9,13 @@ axum = "0.7.4"
 bytes = "1.5.0"
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
 futures-util = "0.3.30"
-http = "1.0.0"
+http = "1.1.0"
 http-body = "1.0.0"
 http_02 = { package = "http", version = "0.2" }
 http_body_04 = { package = "http-body", version = "0.4" }
 mimalloc = { version = "0.1.39", default-features = false }
-pin-project = "1.1.4"
-prometheus-client = "0.22.1"
+pin-project = "1.1.5"
+prometheus-client = "0.22.2"
 promptkit_executor = { version = "0.1.0", path = "../executor" }
 prost = "0.12.3"
 prost-types = "0.12.3"
