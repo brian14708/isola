@@ -1,3 +1,5 @@
+#![allow(clippy::missing_safety_doc)]
+
 use std::borrow::Cow;
 use std::cell::RefCell;
 
@@ -9,9 +11,9 @@ use pyo3::types::PyString;
 use serde::de::DeserializeSeed;
 use url::Url;
 
-use self::exports::guest::Argument;
+use self::exports::promptkit::script::guest_api;
+use self::promptkit::script::host_api;
 use self::promptkit::script::http_client::Request;
-use self::promptkit::script::types;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::script::http_client::{self, Method};
@@ -24,43 +26,41 @@ export!(Global);
 
 pub struct Global;
 
-impl exports::guest::Guest for Global {
-    fn eval_script(script: String) -> Result<(), exports::guest::Error> {
+impl guest_api::Guest for Global {
+    fn eval_script(script: String) -> Result<(), guest_api::Error> {
         GLOBAL_SCOPE.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 vm.load_script(&script)
-                    .map_err(Into::<exports::guest::Error>::into)
+                    .map_err(Into::<guest_api::Error>::into)
             } else {
-                Err(exports::guest::Error::Unknown(
-                    "VM not initialized".to_string(),
-                ))
+                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
             }
         })
     }
 
     fn call_func(
         func: String,
-        args: Vec<Argument>,
-    ) -> Result<Option<Vec<u8>>, exports::guest::Error> {
+        args: Vec<host_api::Argument>,
+    ) -> Result<Option<Vec<u8>>, guest_api::Error> {
         GLOBAL_SCOPE.with(|vm| {
             if let Some(vm) = vm.borrow().as_ref() {
                 let ret = vm
                     .run(
                         &func,
                         args.into_iter().map(|f| match f {
-                            Argument::Cbor(s) => InputValue::Cbor(s.into()),
-                            Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
+                            host_api::Argument::Cbor(s) => InputValue::Cbor(s.into()),
+                            host_api::Argument::Iterator(e) => {
+                                InputValue::Iter(ArgIter { iter: e })
+                            }
                         }),
                         [],
-                        host::emit,
+                        host_api::emit,
                     )
-                    .map_err(Into::<exports::guest::Error>::into)?;
+                    .map_err(Into::<guest_api::Error>::into)?;
                 vm.flush();
                 Ok(ret)
             } else {
-                Err(exports::guest::Error::Unknown(
-                    "VM not initialized".to_string(),
-                ))
+                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
             }
         })
     }
@@ -334,7 +334,7 @@ struct AsyncRequest {
 
 #[pyclass]
 pub struct ArgIter {
-    iter: types::ArgumentIterator,
+    iter: host_api::ArgumentIterator,
 }
 
 #[pymethods]
@@ -347,7 +347,7 @@ impl ArgIter {
     fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
         match slf.iter.read() {
             Some(a) => match a {
-                types::Argument::Cbor(c) => {
+                host_api::Argument::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
                         PyObjectDeserializer::new(slf.py())
@@ -357,7 +357,7 @@ impl ArgIter {
                             })?,
                     ))
                 }
-                types::Argument::Iterator(_) => todo!(),
+                host_api::Argument::Iterator(_) => todo!(),
             },
             None => Ok(None),
         }

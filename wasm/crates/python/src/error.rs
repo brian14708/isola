@@ -27,17 +27,21 @@ impl Error {
     }
 }
 
-impl From<Error> for exports::guest::Error {
+impl From<Error> for exports::promptkit::script::guest_api::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::PythonError { cause, traceback } => {
-                exports::guest::Error::Code(if let Some(traceback) = traceback {
-                    format!("{cause}\n\n{traceback}")
-                } else {
-                    cause
-                })
+                exports::promptkit::script::guest_api::Error::Code(
+                    if let Some(traceback) = traceback {
+                        format!("{cause}\n\n{traceback}")
+                    } else {
+                        cause
+                    },
+                )
             }
-            Error::UnexpectedError(e) => exports::guest::Error::Unknown(e.to_string()),
+            Error::UnexpectedError(e) => {
+                exports::promptkit::script::guest_api::Error::Unknown(e.to_string())
+            }
         }
     }
 }

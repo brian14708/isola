@@ -131,7 +131,7 @@ impl VmManager {
         Ok(Vm {
             hash,
             store,
-            python: bindings,
+            sandbox: bindings,
         })
     }
 
@@ -196,8 +196,8 @@ impl VmManager {
             vm
         } else {
             let mut vm = self.create(hash).await?;
-            vm.python
-                .guest()
+            vm.sandbox
+                .promptkit_script_guest_api()
                 .call_eval_script(&mut vm.store, script)
                 .await?
                 .map_err(|e| match e {

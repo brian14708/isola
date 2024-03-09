@@ -86,7 +86,7 @@ impl WasiView for VmState {
 }
 
 #[async_trait::async_trait]
-impl bindgen::host::Host for VmState {
+impl bindgen::host_api::Host for VmState {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
             run.output.send(Ok((data, false))).await?;

@@ -1,6 +1,6 @@
 package promptkit:script;
 
-interface types {
+interface host-api {
     variant argument {
         cbor(list<u8>),
         iterator(argument-iterator),
@@ -8,21 +8,21 @@ interface types {
     resource argument-iterator {
         read: func() -> option<argument>;
     }
+    emit: func(%cbor: list<u8>);
+}
+
+interface guest-api {
+    use host-api.{argument};
+    variant error {
+        code(string),
+        unknown(string),
+    }
+    eval-script: func(%script: string) -> result<_, error>;
+    call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
 }
 
 world sandbox {
     import http-client;
-
-    import host: interface {
-        emit: func(%data: list<u8>);
-    }
-    export guest: interface {
-        use types.{argument};
-        variant error {
-            code(string),
-            unknown(string),
-        }
-        eval-script: func(%script: string) -> result<_, error>;
-        call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
-    }
+    import host-api;
+    export guest-api;
 }

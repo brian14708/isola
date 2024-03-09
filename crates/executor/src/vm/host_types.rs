@@ -3,13 +3,11 @@ use std::pin::Pin;
 use tokio_stream::{Stream, StreamExt};
 use wasmtime::component::ResourceTable;
 
-use super::bindgen::promptkit::script::types::{self, Argument};
+use super::bindgen::host_api::{Argument, HostArgumentIterator};
 
 pub trait HostTypesCtx: Send {
     fn table(&mut self) -> &mut ResourceTable;
 }
-
-impl<I> types::Host for I where I: HostTypesCtx + Sync {}
 
 pub struct ArgumentIterator {
     stream: Pin<Box<dyn Stream<Item = Argument> + Send>>,
@@ -22,7 +20,7 @@ impl ArgumentIterator {
 }
 
 #[async_trait::async_trait]
-impl<I> types::HostArgumentIterator for I
+impl<I> HostArgumentIterator for I
 where
     I: HostTypesCtx + Sync,
 {
