@@ -88,9 +88,9 @@ function Index() {
         const res = client.executeServerStream({
           source: {
             sourceType: {
-              oneofKind: "inline",
-              inline: {
-                code: editorRef.current.getValue(),
+              oneofKind: "scriptInline",
+              scriptInline: {
+                script: editorRef.current.getValue(),
                 method: m.method,
                 runtime: "python3",
               },
@@ -98,6 +98,7 @@ function Index() {
           },
           resultContentType: [scriptv1.ContentType.JSON],
           spec: {
+            method: m.method,
             traceLevel: 2,
             arguments:
               m.args?.map((v) => {
@@ -137,9 +138,9 @@ function Index() {
         const res = await client.execute({
           source: {
             sourceType: {
-              oneofKind: "inline",
-              inline: {
-                code: editorRef.current.getValue(),
+              oneofKind: "scriptInline",
+              scriptInline: {
+                script: editorRef.current.getValue(),
                 method: m.method,
                 runtime: "python3",
               },
@@ -147,6 +148,7 @@ function Index() {
           },
           resultContentType: [scriptv1.ContentType.JSON],
           spec: {
+            method: m.method,
             traceLevel: 0,
             arguments:
               m.args?.map((v) => {
