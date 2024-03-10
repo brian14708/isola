@@ -6,7 +6,7 @@ use pyo3::{
     intern,
     prelude::*,
     prepare_freethreaded_python,
-    types::{PyDict, PyTuple},
+    types::{PyDict, PyList, PyString, PyTuple},
 };
 use serde::de::DeserializeSeed;
 
@@ -63,6 +63,25 @@ impl Scope {
             }
             Ok::<_, PyErr>(())
         });
+    }
+
+    pub fn load_zip(&mut self, p: &str, entrypoint: &str) -> crate::error::Result<()> {
+        Python::with_gil(|py| {
+            let sys =
+                PyModule::import(py, intern!(py, "sys")).map_err(|e| Error::from_pyerr(py, e))?;
+            let path = sys
+                .getattr(intern!(py, "path"))
+                .map_err(|e| Error::from_pyerr(py, e))?
+                .downcast_exact::<PyList>()
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            path.insert(0, p).map_err(|e| Error::from_pyerr(py, e))?;
+            let module = entrypoint.trim_end_matches(".py").replace('/', ".");
+            let module = py
+                .import(PyString::new(py, &module))
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            self.locals = module.dict().to_object(py);
+            Ok(())
+        })
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {

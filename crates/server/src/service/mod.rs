@@ -61,6 +61,7 @@ impl ScriptService for ScriptServer {
         mut request: tonic::Request<script::ExecuteRequest>,
     ) -> Result<tonic::Response<script::ExecuteResponse>, Status> {
         let ParsedSpec {
+            method,
             args,
             timeout,
             stream_tx: None,
@@ -70,13 +71,13 @@ impl ScriptService for ScriptServer {
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
-        let (script, method) = parse_source(&request.get_ref().source)?;
+        let (script, old_method) = parse_source(&request.get_ref().source)?;
 
         tokio::time::timeout(timeout, async {
             let stream = self
                 .state
                 .vm
-                .exec(script, method, args, tracer)
+                .exec(script, old_method.unwrap_or(&method), args, tracer)
                 .await
                 .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
             let result = non_stream_result(
@@ -116,8 +117,9 @@ impl ScriptService for ScriptServer {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
-        let (script, method) = parse_source(&initial.source)?;
+        let (script, old_method) = parse_source(&initial.source)?;
         let ParsedSpec {
+            method,
             args,
             timeout,
             stream_tx: mut tx,
@@ -129,7 +131,7 @@ impl ScriptService for ScriptServer {
             let stream = self
                 .state
                 .vm
-                .exec(script, method, args, tracer)
+                .exec(script, old_method.unwrap_or(&method), args, tracer)
                 .await
                 .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
             let result = non_stream_result(stream, initial.result_content_type.iter().copied());
@@ -178,6 +180,7 @@ impl ScriptService for ScriptServer {
         mut request: tonic::Request<script::ExecuteServerStreamRequest>,
     ) -> Result<tonic::Response<Self::ExecuteServerStreamStream>, Status> {
         let ParsedSpec {
+            method,
             args,
             timeout,
             stream_tx: None,
@@ -187,13 +190,17 @@ impl ScriptService for ScriptServer {
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
-        let (script, method) = parse_source(&request.get_ref().source)?;
+        let (script, old_method) = parse_source(&request.get_ref().source)?;
         let deadline = std::time::Instant::now() + timeout;
-        let stream =
-            tokio::time::timeout(timeout, self.state.vm.exec(script, method, args, tracer))
-                .await
-                .map_err(|_| Status::deadline_exceeded("execution timed out"))?
-                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+        let stream = tokio::time::timeout(
+            timeout,
+            self.state
+                .vm
+                .exec(script, old_method.unwrap_or(&method), args, tracer),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+        .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
 
         let content_type = request.get_ref().result_content_type.clone();
         let m = stream.map(move |s| match s {
@@ -246,8 +253,9 @@ impl ScriptService for ScriptServer {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
-        let (script, method) = parse_source(&initial.source)?;
+        let (script, old_method) = parse_source(&initial.source)?;
         let ParsedSpec {
+            method,
             args,
             timeout,
             stream_tx: mut tx,
@@ -255,11 +263,15 @@ impl ScriptService for ScriptServer {
             trace_events,
         } = parse_spec(initial.spec.as_mut())?;
         let deadline = std::time::Instant::now() + timeout;
-        let stream =
-            tokio::time::timeout(timeout, self.state.vm.exec(script, method, args, tracer))
-                .await
-                .map_err(|_| Status::deadline_exceeded("execution timed out"))?
-                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+        let stream = tokio::time::timeout(
+            timeout,
+            self.state
+                .vm
+                .exec(script, old_method.unwrap_or(&method), args, tracer),
+        )
+        .await
+        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+        .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
         let mover = async move {
             while let Some(msg) = request.get_mut().message().await? {
                 if let Some(tx) = tx.as_mut() {
@@ -366,6 +378,7 @@ async fn non_stream_result(
 }
 
 struct ParsedSpec {
+    method: String,
     args: Vec<ExecArgument>,
     timeout: Duration,
     stream_tx: Option<mpsc::Sender<Vec<u8>>>,
@@ -408,6 +421,7 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
             .unwrap_or_default();
 
         Ok(ParsedSpec {
+            method: std::mem::take(&mut spec.method),
             args,
             timeout: spec.timeout.as_ref().map_or(DEFAULT_TIMEOUT, |t| {
                 #[allow(clippy::cast_precision_loss)]
@@ -419,6 +433,7 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
         })
     } else {
         Ok(ParsedSpec {
+            method: String::new(),
             args: vec![],
             timeout: DEFAULT_TIMEOUT,
             stream_tx: None,

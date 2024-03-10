@@ -12,6 +12,8 @@ args = [
     "target/wasm32-wasi/release/promptkit_python.wasm",
     "--mapdir",
     "/usr::target/wasm32-wasi/wasi-deps/usr",
+    "--mapdir",
+    "/workdir::/tmp",
     "-o",
     "target/wasm32-wasi/release/promptkit_python.init.wasm"
 ]

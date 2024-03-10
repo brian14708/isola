@@ -1,5 +1,6 @@
 use std::{
     future::Future,
+    io::Cursor,
     path::Path,
     pin::Pin,
     sync::Arc,
@@ -11,7 +12,7 @@ use anyhow::anyhow;
 use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::info;
 use wasmtime::{
@@ -45,6 +46,27 @@ pub enum ExecStreamItem {
 pub enum ExecArgument {
     Cbor(Vec<u8>),
     CborStream(mpsc::Receiver<Vec<u8>>),
+}
+
+pub enum ExecSource<'a> {
+    Script(&'a str),
+    Bundle(&'a [u8]),
+}
+
+#[derive(serde::Deserialize)]
+struct Manifest {
+    entrypoint: String,
+}
+
+impl<'a> ExecSource<'a> {
+    fn hash(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        match self {
+            Self::Script(s) => hasher.update(s),
+            Self::Bundle(b) => hasher.update(b),
+        }
+        hasher.finalize().into()
+    }
 }
 
 impl VmManager {
@@ -124,7 +146,8 @@ impl VmManager {
     }
 
     pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
-        let mut store = VmState::new(&self.engine, MAX_MEMORY);
+        let workdir = tempdir::TempDir::new("vm").map_err(anyhow::Error::from)?;
+        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY);
         store.epoch_deadline_async_yield_and_update(1);
 
         let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
@@ -132,6 +155,7 @@ impl VmManager {
             hash,
             store,
             sandbox: bindings,
+            workdir,
         })
     }
 
@@ -182,28 +206,62 @@ impl VmManager {
 
     pub async fn exec(
         &'_ self,
-        script: &str,
+        script: ExecSource<'_>,
         func: &str,
         args: impl IntoIterator<Item = ExecArgument>,
         tracer: Option<BoxedTracer>,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send + 'static> {
-        let mut hasher = Sha256::new();
-        hasher.update(script);
-        let hash: [u8; 32] = hasher.finalize().into();
+        let hash = script.hash();
 
         let vm = self.cache.get(hash);
         let mut vm = if let Some(vm) = vm {
             vm
         } else {
             let mut vm = self.create(hash).await?;
-            vm.sandbox
-                .promptkit_script_guest_api()
-                .call_eval_script(&mut vm.store, script)
-                .await?
-                .map_err(|e| match e {
-                    crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
-                    crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
-                })?;
+            match script {
+                ExecSource::Script(script) => {
+                    vm.sandbox
+                        .promptkit_script_guest_api()
+                        .call_eval_script(&mut vm.store, script)
+                        .await?
+                        .map_err(|e| match e {
+                            crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
+                            crate::vm::exports::Error::Unknown(err) => {
+                                anyhow!("[Unknown] {0}", err)
+                            }
+                        })?;
+                }
+                ExecSource::Bundle(bundle) => {
+                    let mut zip = zip::ZipArchive::new(Cursor::new(bundle))?;
+                    let manifest: Manifest = serde_json::from_reader(
+                        zip.by_name("manifest.json").map_err(anyhow::Error::from)?,
+                    )?;
+
+                    let b = vm.workdir.path().join("bundle.zip");
+                    let mut file = tokio::fs::File::options()
+                        .create(true)
+                        .write(true)
+                        .open(&b)
+                        .await?;
+                    file.write_all(bundle).await?;
+                    drop(file);
+
+                    vm.sandbox
+                        .promptkit_script_guest_api()
+                        .call_eval_bundle(
+                            &mut vm.store,
+                            "/workdir/bundle.zip",
+                            &manifest.entrypoint,
+                        )
+                        .await?
+                        .map_err(|e| match e {
+                            crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
+                            crate::vm::exports::Error::Unknown(err) => {
+                                anyhow!("[Unknown] {0}", err)
+                            }
+                        })?;
+                }
+            }
             vm
         };
         Ok(self.exec_impl(

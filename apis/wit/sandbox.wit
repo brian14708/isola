@@ -17,6 +17,7 @@ interface guest-api {
         code(string),
         unknown(string),
     }
+    eval-bundle: func(%bundle-path: string, entrypoint: string) -> result<_, error>;
     eval-script: func(%script: string) -> result<_, error>;
     call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
 }

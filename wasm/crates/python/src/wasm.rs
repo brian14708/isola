@@ -27,9 +27,20 @@ export!(Global);
 pub struct Global;
 
 impl guest_api::Guest for Global {
+    fn eval_bundle(bundle_path: String, entrypoint: String) -> Result<(), guest_api::Error> {
+        GLOBAL_SCOPE.with_borrow_mut(|vm| {
+            if let Some(vm) = vm.as_mut() {
+                vm.load_zip(&bundle_path, &entrypoint)
+                    .map_err(Into::<guest_api::Error>::into)
+            } else {
+                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
+            }
+        })
+    }
+
     fn eval_script(script: String) -> Result<(), guest_api::Error> {
-        GLOBAL_SCOPE.with(|vm| {
-            if let Some(vm) = vm.borrow().as_ref() {
+        GLOBAL_SCOPE.with_borrow(|vm| {
+            if let Some(vm) = vm.as_ref() {
                 vm.load_script(&script)
                     .map_err(Into::<guest_api::Error>::into)
             } else {
@@ -42,8 +53,8 @@ impl guest_api::Guest for Global {
         func: String,
         args: Vec<host_api::Argument>,
     ) -> Result<Option<Vec<u8>>, guest_api::Error> {
-        GLOBAL_SCOPE.with(|vm| {
-            if let Some(vm) = vm.borrow().as_ref() {
+        GLOBAL_SCOPE.with_borrow(|vm| {
+            if let Some(vm) = vm.as_ref() {
                 let ret = vm
                     .run(
                         &func,

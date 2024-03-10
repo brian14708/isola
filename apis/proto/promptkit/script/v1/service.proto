@@ -6,14 +6,15 @@ import "google/protobuf/struct.proto";
 import "promptkit/script/v1/trace.proto";
 
 message ScriptInline {
-  string code = 1;
-  string method = 2;
+  string script = 1;
+  string method = 2 [deprecated = true];
   string runtime = 3;
 }
 
 message Source {
   oneof source_type {
-    ScriptInline inline = 1;
+    ScriptInline script_inline = 1;
+    bytes bundle_inline = 2;
   }
 }
 
@@ -49,6 +50,7 @@ message Result {
 message ExecutionSpec {
   google.protobuf.Duration timeout = 1;
   repeated Argument arguments = 2;
+  string method = 3;
 
   TraceLevel trace_level = 20;
 }

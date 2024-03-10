@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -41,7 +42,7 @@ impl VmState {
         Ok(linker)
     }
 
-    pub fn new(engine: &Engine, max_memory: usize) -> Store<Self> {
+    pub fn new(engine: &Engine, workdir: &Path, max_memory: usize) -> Store<Self> {
         let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
@@ -49,6 +50,12 @@ impl VmState {
                 DirPerms::READ,
                 FilePerms::READ,
                 "/usr",
+            )
+            .preopened_dir(
+                Dir::from_std_file(File::open(workdir).unwrap()),
+                DirPerms::READ,
+                FilePerms::READ,
+                "/workdir",
             )
             .stdout(TraceOutput::new(tracer.clone(), "stdout"))
             .stderr(TraceOutput::new(tracer.clone(), "stderr"))

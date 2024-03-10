@@ -11,6 +11,7 @@ pub use bindgen::Sandbox;
 use host_types::ArgumentIterator;
 pub use state::VmState;
 
+use tempdir::TempDir;
 use tokio::sync::mpsc;
 use wasmtime::component::ResourceTableError;
 use wasmtime::Store;
@@ -25,6 +26,7 @@ pub struct Vm {
     pub(crate) hash: [u8; 32],
     pub(crate) store: Store<VmState>,
     pub(crate) sandbox: Sandbox,
+    pub(crate) workdir: TempDir,
 }
 
 impl Vm {
