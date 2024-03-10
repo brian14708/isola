@@ -249,6 +249,7 @@ enum PyType<'a> {
     Bool(bool),
     Int(i64),
     Float(f64),
+    #[allow(dead_code)]
     None(&'a PyNone),
     String(&'a str),
     Dict(&'a PyDict),

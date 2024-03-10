@@ -238,11 +238,7 @@ impl VmManager {
                     )?;
 
                     let b = vm.workdir.path().join("bundle.zip");
-                    let mut file = tokio::fs::File::options()
-                        .create(true)
-                        .write(true)
-                        .open(&b)
-                        .await?;
+                    let mut file = tokio::fs::File::create(&b).await?;
                     file.write_all(bundle).await?;
                     drop(file);
 
