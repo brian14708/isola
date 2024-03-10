@@ -75,9 +75,8 @@ impl Scope {
                 .downcast_exact::<PyList>()
                 .map_err(|e| Error::from_pyerr(py, e))?;
             path.insert(0, p).map_err(|e| Error::from_pyerr(py, e))?;
-            let module = entrypoint.trim_end_matches(".py").replace('/', ".");
             let module = py
-                .import(PyString::new(py, &module))
+                .import(PyString::new(py, entrypoint))
                 .map_err(|e| Error::from_pyerr(py, e))?;
             self.locals = module.dict().to_object(py);
             Ok(())
