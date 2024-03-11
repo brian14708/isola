@@ -237,8 +237,8 @@ impl VmManager {
                         zip.by_name("manifest.json").map_err(anyhow::Error::from)?,
                     )?;
 
-                    let b = vm.workdir.path().join("bundle.zip");
-                    let mut file = tokio::fs::File::create(&b).await?;
+                    let name = hex::encode(hash) + ".zip";
+                    let mut file = tokio::fs::File::create(vm.workdir.path().join(&name)).await?;
                     file.write_all(bundle).await?;
                     drop(file);
 
@@ -246,7 +246,7 @@ impl VmManager {
                         .promptkit_script_guest_api()
                         .call_eval_bundle(
                             &mut vm.store,
-                            "/workdir/bundle.zip",
+                            &(String::from("/workdir/") + &name),
                             &manifest.entrypoint,
                         )
                         .await?
