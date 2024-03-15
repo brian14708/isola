@@ -41,8 +41,7 @@ RUN curl --location https://github.com/sagiegurari/cargo-make/releases/download/
 WORKDIR /src/wasm
 COPY apis ../apis
 COPY wasm .
-RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasi/release \
-    --mount=type=cache,target=/src/wasm/target/wasm32-wasi/wasi-deps/downloads \
+RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasi/wasi-deps/downloads \
     --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo fetch && cargo make wasm
