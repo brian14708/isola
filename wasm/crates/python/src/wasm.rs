@@ -67,9 +67,9 @@ impl guest_api::Guest for Global {
                         [],
                         host_api::emit,
                     )
-                    .map_err(Into::<guest_api::Error>::into)?;
+                    .map_err(Into::<guest_api::Error>::into);
                 vm.flush();
-                Ok(ret)
+                ret
             } else {
                 Err(guest_api::Error::Unknown("VM not initialized".to_string()))
             }
