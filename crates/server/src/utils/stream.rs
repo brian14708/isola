@@ -139,12 +139,12 @@ impl<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> St
 pub fn stream_until<T, E>(
     stream: impl Stream<Item = Result<T, E>>,
     deadline: std::time::Instant,
-    error: E,
+    timeout_response: Result<T, E>,
 ) -> impl Stream<Item = Result<T, E>> {
     StreamTimeout {
         stream: Some(stream),
         sleep: tokio::time::sleep_until(deadline.into()),
-        error: Some(error),
+        timeout_response: Some(timeout_response),
     }
 }
 
@@ -154,7 +154,7 @@ pub struct StreamTimeout<S: Stream<Item = Result<T, E>>, T, E> {
     stream: Option<S>,
     #[pin]
     sleep: tokio::time::Sleep,
-    error: Option<E>,
+    timeout_response: Option<Result<T, E>>,
 }
 
 impl<S: Stream<Item = Result<T, E>>, T, E> Stream for StreamTimeout<S, T, E> {
@@ -170,7 +170,7 @@ impl<S: Stream<Item = Result<T, E>>, T, E> Stream for StreamTimeout<S, T, E> {
             match this.sleep.poll(cx) {
                 Poll::Ready(()) => {
                     this.stream.set(None);
-                    return Poll::Ready(Some(Err(this.error.take().unwrap())));
+                    return Poll::Ready(Some(this.timeout_response.take().unwrap()));
                 }
                 Poll::Pending => {}
             }

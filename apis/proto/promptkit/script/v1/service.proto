@@ -39,11 +39,18 @@ enum ContentType {
   CONTENT_TYPE_CBOR = 3;
 }
 
+message Error {
+  int32 code = 1;
+  string message = 2;
+}
+
 message Result {
   oneof result_type {
     google.protobuf.Value value = 1;
     string json = 2;
     bytes cbor = 3;
+
+    Error error = 15;
   }
 }
 

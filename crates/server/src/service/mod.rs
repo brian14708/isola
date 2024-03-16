@@ -10,12 +10,12 @@ use promptkit_executor::{
     ExecArgument, ExecStreamItem,
 };
 use tokio::{sync::mpsc, try_join};
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::{once, wrappers::ReceiverStream};
 use tonic::{Response, Status};
 
 use crate::{
     proto::script::{
-        self, argument::Marker, execute_client_stream_request, execute_stream_request,
+        self, argument::Marker, execute_client_stream_request, execute_stream_request, result,
         script_service_server::ScriptService,
     },
     routes::AppState,
@@ -73,36 +73,44 @@ impl ScriptService for ScriptServer {
         };
         let (script, old_method) = parse_source(&request.get_ref().source)?;
 
-        tokio::time::timeout(timeout, async {
-            let stream = self
-                .state
-                .vm
-                .exec(script, old_method.unwrap_or(&method), args, tracer)
+        let result = async {
+            let run = async {
+                let stream = self
+                    .state
+                    .vm
+                    .exec(script, old_method.unwrap_or(&method), args, tracer)
+                    .await
+                    .map_err(|e| {
+                        Status::invalid_argument(format!("failed to start script: {e}"))
+                    })?;
+                non_stream_result(
+                    stream,
+                    request.get_ref().result_content_type.iter().copied(),
+                )
                 .await
-                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
-            let result = non_stream_result(
-                stream,
-                request.get_ref().result_content_type.iter().copied(),
-            );
-
-            let trace_async = async move {
-                let mut metadata = script::ExecutionMetadata::default();
-                if let Some((start, trace_events)) = trace_events.as_mut() {
-                    while let Some(event) = trace_events.recv().await {
-                        metadata.traces.push(trace_convert(event, start));
-                    }
-                }
-                Ok::<_, Status>(metadata)
             };
+            match tokio::time::timeout(timeout, run).await {
+                Ok(Ok(v)) => Ok(v),
+                Ok(Err(s)) => Err(s),
+                Err(_) => Ok(timeout_error()),
+            }
+        };
 
-            let (result, metadata) = try_join!(result, trace_async)?;
-            Ok(Response::new(script::ExecuteResponse {
-                metadata: Some(metadata),
-                result: Some(result),
-            }))
-        })
-        .await
-        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+        let trace_async = async move {
+            let mut metadata = script::ExecutionMetadata::default();
+            if let Some((start, trace_events)) = trace_events.as_mut() {
+                while let Some(event) = trace_events.recv().await {
+                    metadata.traces.push(trace_convert(event, start));
+                }
+            }
+            Ok::<_, Status>(metadata)
+        };
+
+        let (result, metadata) = try_join!(result, trace_async)?;
+        Ok(Response::new(script::ExecuteResponse {
+            metadata: Some(metadata),
+            result: Some(result),
+        }))
     }
 
     async fn execute_client_stream(
@@ -127,52 +135,58 @@ impl ScriptService for ScriptServer {
             mut trace_events,
         } = parse_spec(initial.spec.as_mut())?;
 
-        tokio::time::timeout(timeout, async {
-            let stream = self
-                .state
-                .vm
-                .exec(script, old_method.unwrap_or(&method), args, tracer)
-                .await
-                .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
-            let result = non_stream_result(stream, initial.result_content_type.iter().copied());
-            let trace_async = async move {
-                let mut metadata = script::ExecutionMetadata::default();
-                if let Some((start, trace_events)) = trace_events.as_mut() {
-                    while let Some(event) = trace_events.recv().await {
-                        metadata.traces.push(trace_convert(event, start));
-                    }
-                }
-                Ok::<_, Status>(metadata)
+        let result = async {
+            let run = async {
+                let stream = self
+                    .state
+                    .vm
+                    .exec(script, old_method.unwrap_or(&method), args, tracer)
+                    .await
+                    .map_err(|e| {
+                        Status::invalid_argument(format!("failed to start script: {e}"))
+                    })?;
+                non_stream_result(stream, initial.result_content_type.iter().copied()).await
             };
-            let mover = async move {
-                while let Some(msg) = request.get_mut().message().await? {
-                    if let Some(tx) = tx.as_mut() {
-                        if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
-                            msg.request_type
-                        {
-                            let _ = tx
-                                .send(
-                                    argument(v)
-                                        .map_err(|_e| {
-                                            Status::invalid_argument("invalid arguments")
-                                        })?
-                                        .map_err(|_| Status::invalid_argument("invalid marker"))?,
-                                )
-                                .await;
-                        }
-                    }
-                }
-                Ok(())
-            };
+            match tokio::time::timeout(timeout, run).await {
+                Ok(Ok(v)) => Ok(v),
+                Ok(Err(s)) => Err(s),
+                Err(_) => Ok(timeout_error()),
+            }
+        };
 
-            let (result, metadata, ()) = try_join!(result, trace_async, mover)?;
-            Ok(Response::new(script::ExecuteClientStreamResponse {
-                metadata: Some(metadata),
-                result: Some(result),
-            }))
-        })
-        .await
-        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
+        let trace_async = async move {
+            let mut metadata = script::ExecutionMetadata::default();
+            if let Some((start, trace_events)) = trace_events.as_mut() {
+                while let Some(event) = trace_events.recv().await {
+                    metadata.traces.push(trace_convert(event, start));
+                }
+            }
+            Ok::<_, Status>(metadata)
+        };
+        let mover = async move {
+            while let Some(msg) = request.get_mut().message().await? {
+                if let Some(tx) = tx.as_mut() {
+                    if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
+                        msg.request_type
+                    {
+                        let _ = tx
+                            .send(
+                                argument(v)
+                                    .map_err(|_e| Status::invalid_argument("invalid arguments"))?
+                                    .map_err(|_| Status::invalid_argument("invalid marker"))?,
+                            )
+                            .await;
+                    }
+                }
+            }
+            Ok(())
+        };
+
+        let (result, metadata, ()) = try_join!(result, trace_async, mover)?;
+        Ok(Response::new(script::ExecuteClientStreamResponse {
+            metadata: Some(metadata),
+            result: Some(result),
+        }))
     }
 
     async fn execute_server_stream(
@@ -192,15 +206,26 @@ impl ScriptService for ScriptServer {
         };
         let (script, old_method) = parse_source(&request.get_ref().source)?;
         let deadline = std::time::Instant::now() + timeout;
-        let stream = tokio::time::timeout(
+        let stream = match tokio::time::timeout(
             timeout,
             self.state
                 .vm
                 .exec(script, old_method.unwrap_or(&method), args, tracer),
         )
         .await
-        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
-        .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+        {
+            Ok(s) => {
+                s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
+            }
+            Err(_) => {
+                return Ok(Response::new(Box::pin(once(Ok(
+                    script::ExecuteServerStreamResponse {
+                        result: Some(timeout_error()),
+                        metadata: None,
+                    },
+                )))))
+            }
+        };
 
         let content_type = request.get_ref().result_content_type.clone();
         let m = stream.map(move |s| match s {
@@ -213,12 +238,26 @@ impl ScriptService for ScriptServer {
                     metadata: None,
                 })
             }
-            ExecStreamItem::End(None) => Ok(script::ExecuteServerStreamResponse {
-                result: None,
+            ExecStreamItem::End(None) => Ok(script::ExecuteServerStreamResponse::default()),
+            ExecStreamItem::Error(err) => Ok(script::ExecuteServerStreamResponse {
+                result: Some(script::Result {
+                    result_type: Some(result::ResultType::Error(script::Error {
+                        code: 0,
+                        message: err.to_string(),
+                    })),
+                }),
                 metadata: None,
             }),
-            ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
+
+        let stream = stream_until(
+            m,
+            deadline,
+            Ok(script::ExecuteServerStreamResponse {
+                result: Some(timeout_error()),
+                metadata: None,
+            }),
+        );
         if let Some((start, tracer_events)) = trace_events {
             let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
                 Ok(script::ExecuteServerStreamResponse {
@@ -228,17 +267,12 @@ impl ScriptService for ScriptServer {
                     }),
                 })
             });
-            Ok(Response::new(Box::pin(stream_until(
-                tokio_stream::StreamExt::merge(m, trace_async),
-                deadline,
-                Status::deadline_exceeded("execution timed out"),
+            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
+                stream,
+                trace_async,
             ))))
         } else {
-            Ok(Response::new(Box::pin(stream_until(
-                m,
-                deadline,
-                Status::deadline_exceeded("execution timed out"),
-            ))))
+            Ok(Response::new(Box::pin(stream)))
         }
     }
 
@@ -263,15 +297,27 @@ impl ScriptService for ScriptServer {
             trace_events,
         } = parse_spec(initial.spec.as_mut())?;
         let deadline = std::time::Instant::now() + timeout;
-        let stream = tokio::time::timeout(
+        let stream = match tokio::time::timeout(
             timeout,
             self.state
                 .vm
                 .exec(script, old_method.unwrap_or(&method), args, tracer),
         )
         .await
-        .map_err(|_| Status::deadline_exceeded("execution timed out"))?
-        .map_err(|e| Status::internal(format!("failed to execute script: {e}")))?;
+        {
+            Ok(s) => {
+                s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
+            }
+            Err(_) => {
+                return Ok(Response::new(Box::pin(once(Ok(
+                    script::ExecuteStreamResponse {
+                        result: Some(timeout_error()),
+                        metadata: None,
+                    },
+                )))))
+            }
+        };
+
         let mover = async move {
             while let Some(msg) = request.get_mut().message().await? {
                 if let Some(tx) = tx.as_mut() {
@@ -302,12 +348,25 @@ impl ScriptService for ScriptServer {
                     metadata: None,
                 })
             }
-            ExecStreamItem::End(None) => Ok(script::ExecuteStreamResponse {
-                result: None,
+            ExecStreamItem::End(None) => Ok(script::ExecuteStreamResponse::default()),
+            ExecStreamItem::Error(err) => Ok(script::ExecuteStreamResponse {
+                result: Some(script::Result {
+                    result_type: Some(result::ResultType::Error(script::Error {
+                        code: 0,
+                        message: err.to_string(),
+                    })),
+                }),
                 metadata: None,
             }),
-            ExecStreamItem::Error(err) => Err(Status::internal(err.to_string())),
         });
+        let stream = stream_until(
+            join_with(m, mover),
+            deadline,
+            Ok(script::ExecuteStreamResponse {
+                result: Some(timeout_error()),
+                metadata: None,
+            }),
+        );
         if let Some((start, tracer_events)) = trace_events {
             let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
                 Ok(script::ExecuteStreamResponse {
@@ -317,17 +376,12 @@ impl ScriptService for ScriptServer {
                     }),
                 })
             });
-            Ok(Response::new(Box::pin(stream_until(
-                join_with(tokio_stream::StreamExt::merge(m, trace_async), mover),
-                deadline,
-                Status::deadline_exceeded("execution timed out"),
+            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
+                stream,
+                trace_async,
             ))))
         } else {
-            Ok(Response::new(Box::pin(stream_until(
-                join_with(m, mover),
-                deadline,
-                Status::deadline_exceeded("execution timed out"),
-            ))))
+            Ok(Response::new(Box::pin(stream)))
         }
     }
 }
@@ -354,7 +408,14 @@ async fn non_stream_result(
                 .map_err(|_| Status::internal("failed to write data"))?;
             b
         }
-        Some(ExecStreamItem::Error(err)) => return Err(Status::internal(err.to_string())),
+        Some(ExecStreamItem::Error(err)) => {
+            return Ok(script::Result {
+                result_type: Some(result::ResultType::Error(script::Error {
+                    code: 0,
+                    message: err.to_string(),
+                })),
+            })
+        }
         None => return Err(Status::internal("empty stream")),
     };
 
@@ -440,5 +501,14 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
             tracer: None,
             trace_events: None,
         })
+    }
+}
+
+fn timeout_error() -> script::Result {
+    script::Result {
+        result_type: Some(result::ResultType::Error(script::Error {
+            code: 0,
+            message: "deadline execeeded".to_string(),
+        })),
     }
 }
