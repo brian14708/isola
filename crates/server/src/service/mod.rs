@@ -240,12 +240,7 @@ impl ScriptService for ScriptServer {
             }
             ExecStreamItem::End(None) => Ok(script::ExecuteServerStreamResponse::default()),
             ExecStreamItem::Error(err) => Ok(script::ExecuteServerStreamResponse {
-                result: Some(script::Result {
-                    result_type: Some(result::ResultType::Error(script::Error {
-                        code: 0,
-                        message: err.to_string(),
-                    })),
-                }),
+                result: Some(error_result(err)),
                 metadata: None,
             }),
         });
@@ -350,12 +345,7 @@ impl ScriptService for ScriptServer {
             }
             ExecStreamItem::End(None) => Ok(script::ExecuteStreamResponse::default()),
             ExecStreamItem::Error(err) => Ok(script::ExecuteStreamResponse {
-                result: Some(script::Result {
-                    result_type: Some(result::ResultType::Error(script::Error {
-                        code: 0,
-                        message: err.to_string(),
-                    })),
-                }),
+                result: Some(error_result(err)),
                 metadata: None,
             }),
         });
@@ -408,14 +398,7 @@ async fn non_stream_result(
                 .map_err(|_| Status::internal("failed to write data"))?;
             b
         }
-        Some(ExecStreamItem::Error(err)) => {
-            return Ok(script::Result {
-                result_type: Some(result::ResultType::Error(script::Error {
-                    code: 0,
-                    message: err.to_string(),
-                })),
-            })
-        }
+        Some(ExecStreamItem::Error(err)) => return Ok(error_result(err)),
         None => return Err(Status::internal("empty stream")),
     };
 
@@ -466,7 +449,7 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
                 Err(e) => Err(e),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let (tracer, trace_events) = (spec.trace_level == script::TraceLevel::All as i32)
+        let (tracer, trace_events) = (spec.trace_level == i32::from(script::TraceLevel::All))
             .then(MemoryTracer::new)
             .map(|(a, b)| -> (Option<BoxedTracer>, _) {
                 (
@@ -507,8 +490,27 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
 fn timeout_error() -> script::Result {
     script::Result {
         result_type: Some(result::ResultType::Error(script::Error {
-            code: 0,
+            code: i32::from(script::ErrorCode::DeadlineExceeded),
             message: "deadline execeeded".to_string(),
+        })),
+    }
+}
+
+fn error_result(err: anyhow::Error) -> script::Result {
+    script::Result {
+        result_type: Some(result::ResultType::Error(match err
+            .downcast::<promptkit_executor::error::Error>()
+        {
+            Ok(err) => match err {
+                promptkit_executor::error::Error::ExecutionError(c, cause) => script::Error {
+                    code: i32::from(c),
+                    message: cause,
+                },
+            },
+            Err(err) => script::Error {
+                code: i32::from(script::ErrorCode::Internal),
+                message: err.to_string(),
+            },
         })),
     }
 }

@@ -3,6 +3,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 mod atomic_cell;
+pub mod error;
 mod resource;
 pub mod trace;
 mod trace_output;

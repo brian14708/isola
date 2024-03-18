@@ -21,6 +21,7 @@ use wasmtime::{
 };
 
 use crate::{
+    error::Error,
     trace::BoxedTracer,
     vm::{exports::Argument, Sandbox, Vm, VmState},
     vm_cache::VmCache,
@@ -176,9 +177,8 @@ impl VmManager {
                 .exec(|vm, store| vm.call_call_func(store, &func, &args))
                 .await
                 .and_then(|v| {
-                    v.map_err(|e| match e {
-                        crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
-                        crate::vm::exports::Error::Unknown(err) => anyhow!("[Unknown] {0}", err),
+                    v.map_err(|(code, cause)| {
+                        anyhow::Error::from(Error::ExecutionError(code, cause))
                     })
                 });
             match ret {
@@ -224,11 +224,8 @@ impl VmManager {
                         .promptkit_script_guest_api()
                         .call_eval_script(&mut vm.store, script)
                         .await?
-                        .map_err(|e| match e {
-                            crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
-                            crate::vm::exports::Error::Unknown(err) => {
-                                anyhow!("[Unknown] {0}", err)
-                            }
+                        .map_err(|(code, cause)| {
+                            anyhow::Error::from(Error::ExecutionError(code, cause))
                         })?;
                 }
                 ExecSource::Bundle(bundle) => {
@@ -250,11 +247,8 @@ impl VmManager {
                             &manifest.entrypoint,
                         )
                         .await?
-                        .map_err(|e| match e {
-                            crate::vm::exports::Error::Code(err) => anyhow!("[Code] {0}", err),
-                            crate::vm::exports::Error::Unknown(err) => {
-                                anyhow!("[Unknown] {0}", err)
-                            }
+                        .map_err(|(code, cause)| {
+                            anyhow::Error::from(Error::ExecutionError(code, cause))
                         })?;
                 }
             }

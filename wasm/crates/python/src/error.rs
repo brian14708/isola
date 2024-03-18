@@ -30,18 +30,15 @@ impl Error {
 impl From<Error> for exports::promptkit::script::guest_api::Error {
     fn from(value: Error) -> Self {
         match value {
-            Error::PythonError { cause, traceback } => {
-                exports::promptkit::script::guest_api::Error::Code(
-                    if let Some(traceback) = traceback {
-                        format!("{cause}\n\n{traceback}")
-                    } else {
-                        cause
-                    },
-                )
-            }
-            Error::UnexpectedError(e) => {
-                exports::promptkit::script::guest_api::Error::Unknown(e.to_string())
-            }
+            Error::PythonError {
+                cause,
+                traceback: Some(traceback),
+            } => (4, format!("{cause}\n\n{traceback}")),
+            Error::PythonError {
+                cause,
+                traceback: None,
+            } => (4, cause),
+            Error::UnexpectedError(e) => (3, e.to_string()),
         }
     }
 }

@@ -14,6 +14,7 @@ use url::Url;
 use self::exports::promptkit::script::guest_api;
 use self::promptkit::script::host_api;
 use self::promptkit::script::http_client::Request;
+use crate::error::Error;
 use crate::script::{InputValue, Scope};
 use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::script::http_client::{self, Method};
@@ -33,7 +34,7 @@ impl guest_api::Guest for Global {
                 vm.load_zip(&bundle_path, &entrypoint)
                     .map_err(Into::<guest_api::Error>::into)
             } else {
-                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
+                Err(Error::UnexpectedError("VM not initialized").into())
             }
         })
     }
@@ -44,7 +45,7 @@ impl guest_api::Guest for Global {
                 vm.load_script(&script)
                     .map_err(Into::<guest_api::Error>::into)
             } else {
-                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
+                Err(Error::UnexpectedError("VM not initialized").into())
             }
         })
     }
@@ -71,7 +72,7 @@ impl guest_api::Guest for Global {
                 vm.flush();
                 ret
             } else {
-                Err(guest_api::Error::Unknown("VM not initialized".to_string()))
+                Err(Error::UnexpectedError("VM not initialized").into())
             }
         })
     }
