@@ -1,7 +1,7 @@
 use pyo3::{PyErr, Python};
 use thiserror::Error;
 
-use crate::wasm::exports;
+use crate::wasm::exports::{self, promptkit::script::guest_api};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -33,12 +33,21 @@ impl From<Error> for exports::promptkit::script::guest_api::Error {
             Error::PythonError {
                 cause,
                 traceback: Some(traceback),
-            } => (4, format!("{cause}\n\n{traceback}")),
+            } => guest_api::Error {
+                code: 4,
+                message: format!("{cause}\n\n{traceback}"),
+            },
             Error::PythonError {
                 cause,
                 traceback: None,
-            } => (4, cause),
-            Error::UnexpectedError(e) => (3, e.to_string()),
+            } => guest_api::Error {
+                code: 4,
+                message: cause,
+            },
+            Error::UnexpectedError(e) => guest_api::Error {
+                code: 3,
+                message: e.to_string(),
+            },
         }
     }
 }

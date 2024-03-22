@@ -13,7 +13,10 @@ interface host-api {
 
 interface guest-api {
     use host-api.{argument};
-    type error = tuple<u16, string>;
+    record error {
+        code: u16,
+        message: string,
+    }
 
     eval-bundle: func(%bundle-path: string, entrypoint: string) -> result<_, error>;
     eval-script: func(%script: string) -> result<_, error>;

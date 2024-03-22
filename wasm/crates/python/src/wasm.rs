@@ -390,14 +390,14 @@ impl SseIter {
     #[allow(clippy::needless_pass_by_value)]
     fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
         match slf.body.read() {
-            Some(Ok((_, _, data))) => {
-                if data == "[DONE]" {
+            Some(Ok(event)) => {
+                if event.data == "[DONE]" {
                     while slf.body.read().is_some() {}
                     Ok(None)
                 } else {
                     Ok(Some(
                         PyObjectDeserializer::new(slf.py())
-                            .deserialize(&mut serde_json::Deserializer::from_str(&data))
+                            .deserialize(&mut serde_json::Deserializer::from_str(&event.data))
                             .map_err(|e| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
                             })?,

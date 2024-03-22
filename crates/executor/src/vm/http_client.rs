@@ -8,7 +8,7 @@ use wasmtime::component::{Resource, ResourceTable};
 
 use crate::trace::TracerContext;
 
-use super::bindgen::http_client;
+use super::bindgen::http_client::{self, SseEvent};
 
 pub trait HttpClientCtx: Send {
     fn tracer(&self) -> &TracerContext;
@@ -34,7 +34,11 @@ where
     ) -> wasmtime::Result<Option<Result<http_client::SseEvent, http_client::Error>>> {
         let body = self.table().get_mut(&resource)?;
         Ok(match body.inner.next().await {
-            Some(Ok(d)) => Some(Ok((d.id, d.event, d.data))),
+            Some(Ok(d)) => Some(Ok(SseEvent {
+                id: d.id,
+                event: d.event,
+                data: d.data,
+            })),
             Some(Err(err)) => Some(Err(http_client::Error::Unknown(err.to_string()))),
             None => {
                 // end

@@ -177,9 +177,7 @@ impl VmManager {
                 .exec(|vm, store| vm.call_call_func(store, &func, &args))
                 .await
                 .and_then(|v| {
-                    v.map_err(|(code, cause)| {
-                        anyhow::Error::from(Error::ExecutionError(code, cause))
-                    })
+                    v.map_err(|e| anyhow::Error::from(Error::ExecutionError(e.code, e.message)))
                 });
             match ret {
                 Ok(e) => {
@@ -224,8 +222,8 @@ impl VmManager {
                         .promptkit_script_guest_api()
                         .call_eval_script(&mut vm.store, script)
                         .await?
-                        .map_err(|(code, cause)| {
-                            anyhow::Error::from(Error::ExecutionError(code, cause))
+                        .map_err(|e| {
+                            anyhow::Error::from(Error::ExecutionError(e.code, e.message))
                         })?;
                 }
                 ExecSource::Bundle(bundle) => {
@@ -247,8 +245,8 @@ impl VmManager {
                             &manifest.entrypoint,
                         )
                         .await?
-                        .map_err(|(code, cause)| {
-                            anyhow::Error::from(Error::ExecutionError(code, cause))
+                        .map_err(|e| {
+                            anyhow::Error::from(Error::ExecutionError(e.code, e.message))
                         })?;
                 }
             }

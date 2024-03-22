@@ -19,11 +19,11 @@ interface http-client {
         body: static func(%response: response) -> result<list<u8>, error>;
         body-sse: static func(%response: response) -> response-sse-body;
     }
-    type sse-event = tuple<
-        string, // id
-        string, // event
-        string, // data
-    >;
+    record sse-event {
+        id: string,
+        event: string,
+        data: string,
+    }
     resource response-sse-body {
         read: func() -> option<result<sse-event, error>>;
     }
