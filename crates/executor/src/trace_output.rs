@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use wasmtime_wasi::preview2::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
+use wasmtime_wasi::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
 
 use crate::trace::TracerContext;
 

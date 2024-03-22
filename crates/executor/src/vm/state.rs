@@ -3,15 +3,15 @@ use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use cap_std::fs::Dir;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use wasmtime::component::Linker;
 use wasmtime::component::ResourceTable;
 use wasmtime::{Engine, Store};
-use wasmtime_wasi::preview2::DirPerms;
-use wasmtime_wasi::preview2::FilePerms;
-use wasmtime_wasi::preview2::{WasiCtx, WasiCtxBuilder, WasiView};
-use wasmtime_wasi::Dir;
+use wasmtime_wasi::DirPerms;
+use wasmtime_wasi::FilePerms;
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::trace::TracerContext;
 use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::TraceOutput};
@@ -37,7 +37,7 @@ pub struct VmState {
 impl VmState {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
-        wasmtime_wasi::preview2::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi::command::add_to_linker(&mut linker)?;
         Sandbox::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Ok(linker)
     }
