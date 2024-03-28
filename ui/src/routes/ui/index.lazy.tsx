@@ -120,6 +120,9 @@ function Index() {
                 null,
                 2,
               ) + "\n";
+          } else if (response.result?.resultType.oneofKind === "error") {
+            const v = response.result.resultType.error;
+            throw JSON.stringify(v, null, 2);
           }
           if (response.metadata) {
             s +=
@@ -165,6 +168,9 @@ function Index() {
         if (resp.result?.resultType.oneofKind === "json") {
           const v = resp.result.resultType.json;
           previewRef.current.setValue(JSON.stringify(JSON.parse(v), null, 2));
+        } else if (resp.result?.resultType.oneofKind === "error") {
+          const v = resp.result.resultType.error;
+          throw JSON.stringify(v, null, 2);
         }
       }
     } catch (err) {
