@@ -1,4 +1,4 @@
-use pyo3::{PyErr, Python};
+use pyo3::{prelude::PyTracebackMethods, PyErr, Python};
 use thiserror::Error;
 
 use crate::wasm::exports::{self, promptkit::script::guest_api};
@@ -22,7 +22,7 @@ impl Error {
         let e = e.into();
         Error::PythonError {
             cause: e.to_string(),
-            traceback: e.traceback(py).and_then(|e| e.format().ok()),
+            traceback: e.traceback_bound(py).and_then(|e| e.format().ok()),
         }
     }
 }

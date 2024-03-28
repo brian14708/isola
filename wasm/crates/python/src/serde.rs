@@ -1,6 +1,6 @@
 use pyo3::{
-    types::{PyDict, PyList, PyNone, PyTuple},
-    FromPyObject, IntoPy, PyAny, PyObject, Python,
+    types::{PyAnyMethods, PyDict, PyList, PyTuple},
+    Bound, IntoPy, PyAny, PyObject, Python,
 };
 use serde::{
     de::{DeserializeSeed, Visitor},
@@ -197,7 +197,7 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let dict = PyDict::new(self.py);
+        let dict = PyDict::new_bound(self.py);
         while let Some((key, value)) = map.next_entry_seed(self, self)? {
             dict.set_item(key, value).unwrap();
         }
@@ -227,34 +227,13 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
 }
 
 pub struct PyObjectSerializer<'s> {
-    pyobject: &'s PyAny,
-    py: Python<'s>,
+    pyobject: Bound<'s, PyAny>,
 }
 
 impl<'s> PyObjectSerializer<'s> {
-    pub fn new(py: Python<'s>, pyobject: &'s PyAny) -> Self {
-        PyObjectSerializer { pyobject, py }
+    pub fn new(pyobject: Bound<'s, PyAny>) -> Self {
+        PyObjectSerializer { pyobject }
     }
-
-    fn clone_with_object(&self, pyobject: &'s PyAny) -> PyObjectSerializer {
-        PyObjectSerializer {
-            pyobject,
-            py: self.py,
-        }
-    }
-}
-
-#[derive(FromPyObject)]
-enum PyType<'a> {
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    #[allow(dead_code)]
-    None(&'a PyNone),
-    String(&'a str),
-    Dict(&'a PyDict),
-    List(&'a PyList),
-    Tuple(&'a PyTuple),
 }
 
 impl<'s> serde::Serialize for PyObjectSerializer<'s> {
@@ -262,38 +241,41 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
     where
         S: serde::Serializer,
     {
-        if let Ok(t) = self.pyobject.extract::<PyType>() {
-            match t {
-                PyType::Dict(dict) => {
-                    let mut map = serializer.serialize_map(Some(dict.len()))?;
-                    for (key, value) in dict {
-                        map.serialize_entry(
-                            &self.clone_with_object(key),
-                            &self.clone_with_object(value),
-                        )?;
-                    }
-                    map.end()
-                }
-                PyType::List(list) => {
-                    let mut seq = serializer.serialize_seq(Some(list.len()))?;
-                    for elem in list {
-                        seq.serialize_element(&self.clone_with_object(elem))?;
-                    }
-                    seq.end()
-                }
-                PyType::Tuple(tuple) => {
-                    let mut seq = serializer.serialize_seq(Some(tuple.len()))?;
-                    for elem in tuple {
-                        seq.serialize_element(&self.clone_with_object(elem))?;
-                    }
-                    seq.end()
-                }
-                PyType::None(_) => serializer.serialize_none(),
-                PyType::String(s) => serializer.serialize_str(s),
-                PyType::Bool(b) => serializer.serialize_bool(b),
-                PyType::Int(i) => serializer.serialize_i64(i),
-                PyType::Float(f) => serializer.serialize_f64(f),
+        if let Ok(dict) = self.pyobject.downcast::<PyDict>() {
+            let len = dict.len().ok();
+            let mut map = serializer.serialize_map(len)?;
+            for (key, value) in dict {
+                map.serialize_entry(&Self::new(key), &Self::new(value))?;
             }
+            map.end()
+        } else if let Ok(list) = self.pyobject.downcast::<PyList>() {
+            let len = list.len().ok();
+            let mut seq = serializer.serialize_seq(len)?;
+            for elem in list {
+                seq.serialize_element(&Self::new(elem))?;
+            }
+            seq.end()
+        } else if let Ok(tuple) = self.pyobject.downcast::<PyTuple>() {
+            let len = tuple.len().ok();
+            let mut seq = serializer.serialize_seq(len)?;
+            for elem in tuple {
+                seq.serialize_element(&Self::new(elem))?;
+            }
+            seq.end()
+        } else if let Ok(s) = self.pyobject.extract::<&str>() {
+            serializer.serialize_str(s)
+        } else if let Ok(b) = self.pyobject.extract::<bool>() {
+            serializer.serialize_bool(b)
+        } else if self.pyobject.is_none() {
+            serializer.serialize_none()
+        } else if let Ok(i) = self.pyobject.extract::<i32>() {
+            serializer.serialize_i32(i)
+        } else if let Ok(i) = self.pyobject.extract::<i64>() {
+            serializer.serialize_i64(i)
+        } else if let Ok(i) = self.pyobject.extract::<u64>() {
+            serializer.serialize_u64(i)
+        } else if let Ok(i) = self.pyobject.extract::<f64>() {
+            serializer.serialize_f64(i)
         } else {
             Err(serde::ser::Error::custom(format!(
                 "Object of type '{}' is not serializable",

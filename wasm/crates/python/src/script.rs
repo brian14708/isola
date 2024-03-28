@@ -33,8 +33,8 @@ impl Scope {
     pub fn new() -> Self {
         prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let locals = PyDict::new(py);
-            let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
+            let locals = PyDict::new_bound(py);
+            let stdio = if let Ok(sys) = PyModule::import_bound(py, intern!(py, "sys")) {
                 if let (Ok(stdout), Ok(stderr)) = (
                     sys.getattr(intern!(py, "stdout")),
                     sys.getattr(intern!(py, "stderr")),
@@ -67,16 +67,17 @@ impl Scope {
 
     pub fn load_zip(&mut self, p: &str, entrypoint: &str) -> crate::error::Result<()> {
         Python::with_gil(|py| {
-            let sys =
-                PyModule::import(py, intern!(py, "sys")).map_err(|e| Error::from_pyerr(py, e))?;
-            let path = sys
+            let sys = PyModule::import_bound(py, intern!(py, "sys"))
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            let binding = sys
                 .getattr(intern!(py, "path"))
-                .map_err(|e| Error::from_pyerr(py, e))?
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            let path = binding
                 .downcast_exact::<PyList>()
                 .map_err(|e| Error::from_pyerr(py, e))?;
             path.insert(0, p).map_err(|e| Error::from_pyerr(py, e))?;
             let module = py
-                .import(PyString::new(py, entrypoint))
+                .import_bound(PyString::new_bound(py, entrypoint))
                 .map_err(|e| Error::from_pyerr(py, e))?;
             self.locals = module.dict().to_object(py);
             Ok(())
@@ -85,11 +86,11 @@ impl Scope {
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
         Python::with_gil(|py| {
-            py.run(
+            py.run_bound(
                 code,
                 Some(
                     self.locals
-                        .downcast(py)
+                        .downcast_bound(py)
                         .map_err(|e| Error::from_pyerr(py, e))?,
                 ),
                 None,
@@ -110,9 +111,9 @@ impl Scope {
         U: ExactSizeIterator<Item = InputValue<'a>>,
     {
         Python::with_gil(|py| {
-            let dict: &PyDict = self
+            let dict: &Bound<'_, PyDict> = self
                 .locals
-                .downcast(py)
+                .downcast_bound(py)
                 .map_err(|e| Error::from_pyerr(py, e))?;
             let Some(f) = dict.get_item(name).map_err(|e| Error::from_pyerr(py, e))? else {
                 return Err(Error::from_pyerr(
@@ -122,7 +123,7 @@ impl Scope {
             };
 
             let obj = if f.is_callable() {
-                let args = PyTuple::new(
+                let args = PyTuple::new_bound(
                     py,
                     positional
                         .into_iter()
@@ -143,7 +144,7 @@ impl Scope {
                         })
                         .collect::<Result<Vec<_>>>()?,
                 );
-                let kwargs = PyDict::new(py);
+                let kwargs = PyDict::new_bound(py);
                 for (k, v) in named {
                     match v {
                         InputValue::Json(v) => {
@@ -182,13 +183,14 @@ impl Scope {
                             .map_err(|e| Error::from_pyerr(py, e))?,
                     }
                 }
-                f.call(args, Some(kwargs))
+                f.as_borrowed()
+                    .call(args, Some(&kwargs))
                     .map_err(|e| Error::from_pyerr(py, e))?
             } else {
                 f
             };
 
-            if let Ok(s) = cbor4ii::serde::to_vec(vec![], &PyObjectSerializer::new(py, obj)) {
+            if let Ok(s) = cbor4ii::serde::to_vec(vec![], &PyObjectSerializer::new(obj.clone())) {
                 return Ok(Some(s));
             }
 
@@ -197,7 +199,7 @@ impl Scope {
                 for el in iter {
                     let mut tmp = cbor4ii::serde::to_vec(
                         std::mem::take(&mut ret).unwrap_or_default(),
-                        &PyObjectSerializer::new(py, el.map_err(|e| Error::from_pyerr(py, e))?),
+                        &PyObjectSerializer::new(el.map_err(|e| Error::from_pyerr(py, e))?),
                     )
                     .map_err(|_| Error::UnexpectedError("serde error"))?;
                     callback(&tmp);

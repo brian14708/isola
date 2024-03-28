@@ -80,15 +80,15 @@ impl guest_api::Guest for Global {
 
 #[pymodule]
 #[pyo3(name = "promptkit")]
-fn promptkit_module(py: Python<'_>, module: &PyModule) -> PyResult<()> {
-    let http_module = PyModule::new(py, "http")?;
-    http(py, http_module)?;
+fn promptkit_module(py: Python<'_>, module: Bound<'_, PyModule>) -> PyResult<()> {
+    let http_module = PyModule::new_bound(py, "http")?;
+    http(py, &http_module)?;
 
-    module.add_submodule(http_module)?;
+    module.add_submodule(&http_module)?;
     Ok(())
 }
 
-fn set_headers(req: &Request, headers: Option<&PyDict>) -> PyResult<()> {
+fn set_headers(req: &Request, headers: Option<&Bound<'_, PyDict>>) -> PyResult<()> {
     if let Some(headers) = headers {
         for (k, v) in headers {
             match (k.extract::<&str>(), v.extract::<&str>()) {
@@ -108,7 +108,10 @@ fn set_headers(req: &Request, headers: Option<&PyDict>) -> PyResult<()> {
     Ok(())
 }
 
-fn url_with_params<'a>(url: &'a PyString, params: Option<&PyDict>) -> PyResult<Cow<'a, str>> {
+fn url_with_params<'a>(
+    url: &'a Bound<'a, PyString>,
+    params: Option<&'a Bound<'a, PyDict>>,
+) -> PyResult<Cow<'a, str>> {
     if let Some(params) = params {
         let mut u = Url::parse(url.to_str()?)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
@@ -129,14 +132,14 @@ fn set_timeout(request: &Request, timeout: Option<f32>) {
 }
 
 #[pymodule]
-fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
+fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
     #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
     fn get(
         py: Python<'_>,
-        url: &PyString,
-        params: Option<&PyDict>,
-        headers: Option<&PyDict>,
+        url: &Bound<'_, PyString>,
+        params: Option<&Bound<'_, PyDict>>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
@@ -162,9 +165,9 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
     fn get_async(
         py: Python<'_>,
-        url: &PyString,
-        params: Option<&PyDict>,
-        headers: Option<&PyDict>,
+        url: &Bound<'_, PyString>,
+        params: Option<&Bound<'_, PyDict>>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
@@ -182,9 +185,9 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
     fn get_sse(
         py: Python<'_>,
-        url: &PyString,
-        params: Option<&PyDict>,
-        headers: Option<&PyDict>,
+        url: &Bound<'_, PyString>,
+        params: Option<&Bound<'_, PyDict>>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
@@ -206,9 +209,9 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post(
         py: Python<'_>,
-        url: &PyString,
+        url: &Bound<'_, PyString>,
         data: Option<PyObject>,
-        headers: Option<&PyDict>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
@@ -221,7 +224,7 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
         set_timeout(&request, timeout);
         if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
             );
         }
         match http_client::fetch(request) {
@@ -242,9 +245,9 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post_async(
         py: Python<'_>,
-        url: &PyString,
+        url: &Bound<'_, PyString>,
         data: Option<PyObject>,
-        headers: Option<&PyDict>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
@@ -257,7 +260,7 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
         set_timeout(&request, timeout);
         if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
             );
         }
         Ok(AsyncRequest {
@@ -270,9 +273,9 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
     #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
     fn post_sse(
         py: Python<'_>,
-        url: &PyString,
+        url: &Bound<'_, PyString>,
         data: Option<PyObject>,
-        headers: Option<&PyDict>,
+        headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
@@ -284,7 +287,7 @@ fn http(_py: Python<'_>, module: &PyModule) -> PyResult<()> {
         set_timeout(&request, timeout);
         if let Some(data) = data {
             request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(py, data.as_ref(py))).unwrap(),
+                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
             );
         }
         match http_client::fetch(request) {
