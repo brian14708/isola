@@ -16,7 +16,7 @@ use tonic::{Response, Status};
 use crate::{
     proto::script::{
         self, argument::Marker, execute_client_stream_request, execute_stream_request, result,
-        script_service_server::ScriptService,
+        script_service_server::ScriptService, ErrorCode,
     },
     routes::AppState,
     utils::stream::{join_with, stream_until},
@@ -503,7 +503,12 @@ fn error_result(err: anyhow::Error) -> script::Result {
         {
             Ok(err) => match err {
                 promptkit_executor::error::Error::ExecutionError(c, cause) => script::Error {
-                    code: i32::from(c),
+                    code: match c {
+                        promptkit_executor::error::ErrorCode::Unknown => ErrorCode::Unknown,
+                        promptkit_executor::error::ErrorCode::Internal => ErrorCode::Internal,
+                        promptkit_executor::error::ErrorCode::Aborted => ErrorCode::GuestAborted,
+                    }
+                    .into(),
                     message: cause,
                 },
             },

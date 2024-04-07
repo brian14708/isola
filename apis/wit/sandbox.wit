@@ -13,8 +13,13 @@ interface host-api {
 
 interface guest-api {
     use host-api.{argument};
+    enum error-code {
+        unknown,
+        internal,
+        aborted,
+    }
     record error {
-        code: u16,
+        code: error-code,
         message: string,
     }
 
