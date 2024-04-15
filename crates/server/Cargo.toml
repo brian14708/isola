@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = "1.0.81"
+anyhow = "1.0.82"
 axum = { version = "0.7.5", features = ["http2"] }
 bytes = "1.6.0"
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
