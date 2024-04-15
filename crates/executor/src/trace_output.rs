@@ -47,9 +47,29 @@ impl Subscribe for TraceOutputStream {
             return;
         }
 
-        let s = String::from_utf8_lossy(&self.prev_write);
-        self.ctx.with_async(|t| t.log(self.group, s)).await;
-        self.prev_write.clear();
+        let s = String::from_utf8(std::mem::take(&mut self.prev_write));
+        match s {
+            Ok(s) => {
+                self.ctx.with_async(|t| t.log(self.group, s.into())).await;
+            }
+            Err(e) => {
+                let error = e.utf8_error();
+                let mut input = e.into_bytes();
+                if input.len() - error.valid_up_to() > 4 {
+                    // lossy
+                    let s = String::from_utf8_lossy(&input);
+                    self.ctx.with_async(|t| t.log(self.group, s.into())).await;
+                } else {
+                    self.prev_write.extend(input.drain(error.valid_up_to()..));
+                    if input.is_empty() {
+                        return;
+                    }
+
+                    let s = unsafe { String::from_utf8_unchecked(input) };
+                    self.ctx.with_async(|t| t.log(self.group, s.into())).await;
+                }
+            }
+        }
     }
 }
 
@@ -58,7 +78,7 @@ impl HostOutputStream for TraceOutputStream {
         if !self.ctx.is_null() {
             self.buffer.extend(bytes);
             if self.buffer.len() >= MAX_BUFFER {
-                self.prev_write = std::mem::take(&mut self.buffer);
+                self.prev_write.extend(std::mem::take(&mut self.buffer));
             }
         }
         Ok(())
@@ -68,14 +88,14 @@ impl HostOutputStream for TraceOutputStream {
         if self.ctx.is_null() {
             self.buffer.clear();
         } else {
-            self.prev_write = std::mem::take(&mut self.buffer);
+            self.prev_write.extend(std::mem::take(&mut self.buffer));
         }
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        if self.prev_write.is_empty() {
-            Ok(MAX_BUFFER - self.buffer.len())
+        if MAX_BUFFER > (self.buffer.len() + self.prev_write.len()) {
+            Ok(MAX_BUFFER - self.buffer.len() + self.prev_write.len())
         } else {
             Ok(0)
         }
