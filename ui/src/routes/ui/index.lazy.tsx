@@ -133,8 +133,6 @@ function Index() {
               "\n";
           }
           previewRef?.current?.setValue(s);
-
-          console.log("got response message: ", response);
         }
         await res;
       } else {

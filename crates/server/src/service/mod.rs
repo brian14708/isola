@@ -254,14 +254,15 @@ impl ScriptService for ScriptServer {
             }),
         );
         if let Some((start, tracer_events)) = trace_events {
-            let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
-                Ok(script::ExecuteServerStreamResponse {
-                    result: None,
-                    metadata: Some(script::ExecutionStreamMetadata {
-                        traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
-                    }),
-                })
-            });
+            let trace_async = ReceiverStream::new(tracer_events)
+                .map(move |e| trace_convert(e, &start))
+                .ready_chunks(4)
+                .map(|traces| {
+                    Ok(script::ExecuteServerStreamResponse {
+                        result: None,
+                        metadata: Some(script::ExecutionStreamMetadata { traces }),
+                    })
+                });
             Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
                 stream,
                 trace_async,
@@ -358,14 +359,15 @@ impl ScriptService for ScriptServer {
             }),
         );
         if let Some((start, tracer_events)) = trace_events {
-            let trace_async = ReceiverStream::new(tracer_events).chunks(4).map(move |e| {
-                Ok(script::ExecuteStreamResponse {
-                    result: None,
-                    metadata: Some(script::ExecutionStreamMetadata {
-                        traces: e.into_iter().map(|e| trace_convert(e, &start)).collect(),
-                    }),
-                })
-            });
+            let trace_async = ReceiverStream::new(tracer_events)
+                .map(move |e| trace_convert(e, &start))
+                .ready_chunks(4)
+                .map(|traces| {
+                    Ok(script::ExecuteStreamResponse {
+                        result: None,
+                        metadata: Some(script::ExecutionStreamMetadata { traces }),
+                    })
+                });
             Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
                 stream,
                 trace_async,
