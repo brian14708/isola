@@ -17,6 +17,7 @@ use crate::trace::TracerContext;
 use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::TraceOutput};
 
 use super::bindgen;
+use super::bindgen::host_api::LogLevel;
 use super::host_types;
 use super::http_client;
 use super::Sandbox;
@@ -101,6 +102,23 @@ impl bindgen::host_api::Host for VmState {
         } else {
             Err(anyhow!("output channel missing"))
         }
+    }
+
+    async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
+        self.tracer
+            .with_async(|t| {
+                t.log(
+                    match log_level {
+                        LogLevel::Debug => "debug",
+                        LogLevel::Info => "info",
+                        LogLevel::Warn => "warn",
+                        LogLevel::Error => "error",
+                    },
+                    data.into(),
+                )
+            })
+            .await;
+        Ok(())
     }
 }
 

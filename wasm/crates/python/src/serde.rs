@@ -284,3 +284,44 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
         }
     }
 }
+
+pub struct PyLogDict<'s> {
+    dict: Option<&'s Bound<'s, PyDict>>,
+    msg: Bound<'s, PyAny>,
+}
+
+impl PyLogDict<'_> {
+    pub fn new<'s>(dict: Option<&'s Bound<'s, PyDict>>, msg: Bound<'s, PyAny>) -> PyLogDict<'s> {
+        PyLogDict { dict, msg }
+    }
+}
+
+impl<'s> serde::Serialize for PyLogDict<'s> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = if let Some(dict) = self.dict {
+            let len = dict.len().ok().map(|i| i + 1);
+            let mut map = serializer.serialize_map(len)?;
+            for (key, value) in dict {
+                if value.is_callable() {
+                    map.serialize_entry(
+                        &PyObjectSerializer::new(key),
+                        &PyObjectSerializer::new(value.call0().map_err(serde::ser::Error::custom)?),
+                    )?;
+                } else {
+                    map.serialize_entry(
+                        &PyObjectSerializer::new(key),
+                        &PyObjectSerializer::new(value),
+                    )?;
+                }
+            }
+            map
+        } else {
+            serializer.serialize_map(Some(1))?
+        };
+        map.serialize_entry("message", &PyObjectSerializer::new(self.msg.clone()))?;
+        map.end()
+    }
+}

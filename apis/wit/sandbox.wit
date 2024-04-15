@@ -8,11 +8,18 @@ interface host-api {
     resource argument-iterator {
         read: func() -> option<argument>;
     }
+    enum log-level {
+        debug,
+        info,
+        warn,
+        error,
+    }
     emit: func(%cbor: list<u8>);
+    emit-log: func(%level: log-level, %log: string);
 }
 
 interface guest-api {
-    use host-api.{argument};
+    use host-api.{argument, log-level};
     enum error-code {
         unknown,
         internal,
@@ -23,6 +30,7 @@ interface guest-api {
         message: string,
     }
 
+    set-log-level: func(%level: option<log-level>) -> ();
     eval-bundle: func(%bundle-path: string, entrypoint: string) -> result<_, error>;
     eval-script: func(%script: string) -> result<_, error>;
     call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;

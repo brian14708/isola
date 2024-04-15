@@ -6,8 +6,7 @@ use std::cell::RefCell;
 use cbor4ii::core::utils::SliceReader;
 use pyo3::append_to_inittab;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
-use pyo3::types::PyString;
+use pyo3::types::{PyDict, PyString, PyTuple};
 use serde::de::DeserializeSeed;
 use url::Url;
 
@@ -16,7 +15,7 @@ use self::promptkit::script::host_api;
 use self::promptkit::script::http_client::Request;
 use crate::error::Error;
 use crate::script::{InputValue, Scope};
-use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
+use crate::serde::{PyLogDict, PyObjectDeserializer, PyObjectSerializer};
 use crate::wasm::promptkit::script::http_client::{self, Method};
 
 wit_bindgen::generate!({
@@ -28,6 +27,13 @@ export!(Global);
 pub struct Global;
 
 impl guest_api::Guest for Global {
+    fn set_log_level(level: Option<host_api::LogLevel>) {
+        GLOBAL_LOGGING.with_borrow_mut(|l| match level {
+            Some(level) => *l = loglevel_to_i32(level),
+            None => *l = 0,
+        });
+    }
+
     fn eval_bundle(bundle_path: String, entrypoint: String) -> Result<(), guest_api::Error> {
         GLOBAL_SCOPE.with_borrow_mut(|vm| {
             if let Some(vm) = vm.as_mut() {
@@ -79,12 +85,112 @@ impl guest_api::Guest for Global {
 }
 
 #[pymodule]
+fn logging(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[pyfn(module)]
+    #[pyo3(signature = (msg, *args, **kwds))]
+    fn debug(
+        _py: Python<'_>,
+        msg: &Bound<'_, PyString>,
+        args: &Bound<'_, PyTuple>,
+        kwds: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        GLOBAL_LOGGING.with_borrow(|l| {
+            if *l <= loglevel_to_i32(host_api::LogLevel::Debug) {
+                let msg = if args.len() > 0 {
+                    msg.call_method("format", args, None)?
+                } else {
+                    msg.clone().into_any()
+                };
+                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                host_api::emit_log(host_api::LogLevel::Debug, &m);
+            }
+            Ok(())
+        })
+    }
+
+    #[pyfn(module)]
+    #[pyo3(signature = (msg, *args, **kwds))]
+    fn info(
+        _py: Python<'_>,
+        msg: &Bound<'_, PyString>,
+        args: &Bound<'_, PyTuple>,
+        kwds: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        GLOBAL_LOGGING.with_borrow(|l| {
+            if *l <= loglevel_to_i32(host_api::LogLevel::Info) {
+                let msg = if args.len() > 0 {
+                    msg.call_method("format", args, None)?
+                } else {
+                    msg.clone().into_any()
+                };
+                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                host_api::emit_log(host_api::LogLevel::Info, &m);
+            }
+            Ok(())
+        })
+    }
+
+    #[pyfn(module)]
+    #[pyo3(signature = (msg, *args, **kwds))]
+    fn warning(
+        _py: Python<'_>,
+        msg: &Bound<'_, PyString>,
+        args: &Bound<'_, PyTuple>,
+        kwds: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        GLOBAL_LOGGING.with_borrow(|l| {
+            if *l <= loglevel_to_i32(host_api::LogLevel::Warn) {
+                let msg = if args.len() > 0 {
+                    msg.call_method("format", args, None)?
+                } else {
+                    msg.clone().into_any()
+                };
+                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                host_api::emit_log(host_api::LogLevel::Warn, &m);
+            }
+            Ok(())
+        })
+    }
+
+    #[pyfn(module)]
+    #[pyo3(signature = (msg, *args, **kwds))]
+    fn error(
+        _py: Python<'_>,
+        msg: &Bound<'_, PyString>,
+        args: &Bound<'_, PyTuple>,
+        kwds: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        GLOBAL_LOGGING.with_borrow(|l| {
+            if *l <= loglevel_to_i32(host_api::LogLevel::Error) {
+                let msg = if args.len() > 0 {
+                    msg.call_method("format", args, None)?
+                } else {
+                    msg.clone().into_any()
+                };
+                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                host_api::emit_log(host_api::LogLevel::Error, &m);
+            }
+            Ok(())
+        })
+    }
+
+    Ok(())
+}
+
+#[pymodule]
 #[pyo3(name = "promptkit")]
 fn promptkit_module(py: Python<'_>, module: Bound<'_, PyModule>) -> PyResult<()> {
     let http_module = PyModule::new_bound(py, "http")?;
     http(py, &http_module)?;
+    let logging_module = PyModule::new_bound(py, "logging")?;
+    logging(py, &logging_module)?;
 
     module.add_submodule(&http_module)?;
+    module.add_submodule(&logging_module)?;
     Ok(())
 }
 
@@ -417,6 +523,7 @@ impl SseIter {
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
+    static GLOBAL_LOGGING: RefCell<i32> = const { RefCell::new(0) };
 }
 
 #[export_name = "wizer.initialize"]
@@ -434,4 +541,13 @@ pub extern "C" fn _initialize() {
         v.flush();
         scope.borrow_mut().replace(v);
     });
+}
+
+pub const fn loglevel_to_i32(level: host_api::LogLevel) -> i32 {
+    match level {
+        host_api::LogLevel::Debug => -4,
+        host_api::LogLevel::Info => -3,
+        host_api::LogLevel::Warn => -2,
+        host_api::LogLevel::Error => -1,
+    }
 }

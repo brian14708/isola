@@ -23,7 +23,10 @@ use wasmtime::{
 use crate::{
     error::Error,
     trace::BoxedTracer,
-    vm::{exports::Argument, Sandbox, Vm, VmState},
+    vm::{
+        exports::{Argument, LogLevel},
+        Sandbox, Vm, VmState,
+    },
     vm_cache::VmCache,
 };
 
@@ -170,11 +173,23 @@ impl VmManager {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
+        let has_tracer = tracer.is_some();
         let mut run = vm.run(tracer, tx.clone());
         let func = func.to_string();
         let exec = Some(Box::pin(async move {
             let ret = run
-                .exec(|vm, store| vm.call_call_func(store, &func, &args))
+                .exec(|vm, mut store| async move {
+                    if has_tracer {
+                        let _ = vm
+                            .call_set_log_level(&mut store, Some(LogLevel::Debug))
+                            .await;
+                    }
+                    let o = vm.call_call_func(&mut store, &func, &args).await;
+                    if has_tracer {
+                        let _ = vm.call_set_log_level(&mut store, None).await;
+                    }
+                    o
+                })
                 .await
                 .and_then(|v| {
                     v.map_err(|e| anyhow::Error::from(Error::ExecutionError(e.code, e.message)))
