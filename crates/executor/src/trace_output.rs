@@ -22,7 +22,7 @@ impl StdoutStream for TraceOutput {
             ctx: self.ctx.clone(),
             group: self.group,
             buffer: vec![],
-            prev_write: vec![],
+            flush_buffer: vec![],
         })
     }
 
@@ -35,7 +35,7 @@ pub struct TraceOutputStream {
     ctx: Arc<TracerContext>,
     group: &'static str,
     buffer: Vec<u8>,
-    prev_write: Vec<u8>,
+    flush_buffer: Vec<u8>,
 }
 
 const MAX_BUFFER: usize = 1024;
@@ -43,31 +43,32 @@ const MAX_BUFFER: usize = 1024;
 #[async_trait::async_trait]
 impl Subscribe for TraceOutputStream {
     async fn ready(&mut self) {
-        if self.prev_write.is_empty() {
+        if self.flush_buffer.is_empty() {
             return;
         }
 
-        let s = String::from_utf8(std::mem::take(&mut self.prev_write));
-        match s {
+        match String::from_utf8(std::mem::take(&mut self.flush_buffer)) {
             Ok(s) => {
                 self.ctx.with_async(|t| t.log(self.group, s.into())).await;
             }
             Err(e) => {
                 let error = e.utf8_error();
-                let mut input = e.into_bytes();
-                if input.len() - error.valid_up_to() > 4 {
-                    // lossy
-                    let s = String::from_utf8_lossy(&input);
-                    self.ctx.with_async(|t| t.log(self.group, s.into())).await;
+                let input = e.into_bytes();
+                let s = if input.len() - error.valid_up_to() > 4 {
+                    // not a valid utf-8 sequence
+                    String::from_utf8_lossy(&input)
                 } else {
-                    self.prev_write.extend(input.drain(error.valid_up_to()..));
-                    if input.is_empty() {
+                    let (valid, rest) = input.split_at(error.valid_up_to());
+                    self.flush_buffer.extend_from_slice(rest);
+                    if valid.is_empty() {
                         return;
                     }
 
-                    let s = unsafe { String::from_utf8_unchecked(input) };
-                    self.ctx.with_async(|t| t.log(self.group, s.into())).await;
-                }
+                    // SAFETY: input is valid utf-8
+                    unsafe { std::str::from_utf8_unchecked(valid) }.into()
+                };
+
+                self.ctx.with_async(|t| t.log(self.group, s)).await;
             }
         }
     }
@@ -78,7 +79,7 @@ impl HostOutputStream for TraceOutputStream {
         if !self.ctx.is_null() {
             self.buffer.extend(bytes);
             if self.buffer.len() >= MAX_BUFFER {
-                self.prev_write.extend(std::mem::take(&mut self.buffer));
+                self.flush_buffer.append(&mut self.buffer);
             }
         }
         Ok(())
@@ -88,14 +89,14 @@ impl HostOutputStream for TraceOutputStream {
         if self.ctx.is_null() {
             self.buffer.clear();
         } else {
-            self.prev_write.extend(std::mem::take(&mut self.buffer));
+            self.flush_buffer.append(&mut self.buffer);
         }
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        if MAX_BUFFER > (self.buffer.len() + self.prev_write.len()) {
-            Ok(MAX_BUFFER - self.buffer.len() + self.prev_write.len())
+        if MAX_BUFFER > (self.buffer.len() + self.flush_buffer.len()) {
+            Ok(MAX_BUFFER - self.buffer.len() + self.flush_buffer.len())
         } else {
             Ok(0)
         }

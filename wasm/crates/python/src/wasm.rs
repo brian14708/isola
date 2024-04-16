@@ -101,7 +101,7 @@ fn logging(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 host_api::emit_log(host_api::LogLevel::Debug, &m);
             }
@@ -124,7 +124,7 @@ fn logging(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 host_api::emit_log(host_api::LogLevel::Info, &m);
             }
@@ -147,7 +147,7 @@ fn logging(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 host_api::emit_log(host_api::LogLevel::Warn, &m);
             }
@@ -170,7 +170,7 @@ fn logging(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = serde_json::to_string(&PyLogDict::new(kwds, msg))
+                let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 host_api::emit_log(host_api::LogLevel::Error, &m);
             }
@@ -329,9 +329,7 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
-            request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
-            );
+            request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         match http_client::fetch(request) {
             Ok(response) => PyObjectDeserializer::new(py)
@@ -365,9 +363,7 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
-            request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
-            );
+            request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         Ok(AsyncRequest {
             request: Some(request),
@@ -392,9 +388,7 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
-            request.set_body(
-                &serde_json::to_vec(&PyObjectSerializer::new(data.into_bound(py))).unwrap(),
-            );
+            request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         match http_client::fetch(request) {
             Ok(response) => Ok(SseIter {

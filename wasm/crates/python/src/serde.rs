@@ -231,8 +231,19 @@ pub struct PyObjectSerializer<'s> {
 }
 
 impl<'s> PyObjectSerializer<'s> {
-    pub fn new(pyobject: Bound<'s, PyAny>) -> Self {
-        PyObjectSerializer { pyobject }
+    fn new(pyobject: Bound<'s, PyAny>) -> Self {
+        Self { pyobject }
+    }
+
+    pub fn to_json(object: Bound<'s, PyAny>) -> Result<Vec<u8>, serde_json::Error> {
+        serde_json::to_vec(&Self::new(object))
+    }
+
+    pub fn to_cbor(
+        v: Vec<u8>,
+        object: Bound<'s, PyAny>,
+    ) -> Result<Vec<u8>, cbor4ii::serde::EncodeError<std::collections::TryReserveError>> {
+        cbor4ii::serde::to_vec(v, &Self::new(object))
     }
 }
 
@@ -291,8 +302,15 @@ pub struct PyLogDict<'s> {
 }
 
 impl PyLogDict<'_> {
-    pub fn new<'s>(dict: Option<&'s Bound<'s, PyDict>>, msg: Bound<'s, PyAny>) -> PyLogDict<'s> {
+    fn new<'s>(dict: Option<&'s Bound<'s, PyDict>>, msg: Bound<'s, PyAny>) -> PyLogDict<'s> {
         PyLogDict { dict, msg }
+    }
+
+    pub fn to_json<'s>(
+        dict: Option<&'s Bound<'s, PyDict>>,
+        msg: Bound<'s, PyAny>,
+    ) -> Result<String, serde_json::Error> {
+        serde_json::to_string(&Self::new(dict, msg))
     }
 }
 

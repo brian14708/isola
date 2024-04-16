@@ -190,16 +190,16 @@ impl Scope {
                 f
             };
 
-            if let Ok(s) = cbor4ii::serde::to_vec(vec![], &PyObjectSerializer::new(obj.clone())) {
+            if let Ok(s) = PyObjectSerializer::to_cbor(vec![], obj.clone()) {
                 return Ok(Some(s));
             }
 
             let mut ret: Option<Vec<u8>> = None;
             if let Ok(iter) = obj.iter() {
                 for el in iter {
-                    let mut tmp = cbor4ii::serde::to_vec(
+                    let mut tmp = PyObjectSerializer::to_cbor(
                         std::mem::take(&mut ret).unwrap_or_default(),
-                        &PyObjectSerializer::new(el.map_err(|e| Error::from_pyerr(py, e))?),
+                        el.map_err(|e| Error::from_pyerr(py, e))?,
                     )
                     .map_err(|_| Error::UnexpectedError("serde error"))?;
                     callback(&tmp);
