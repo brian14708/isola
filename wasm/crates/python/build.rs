@@ -43,12 +43,12 @@ fn unarchive(file: &str, dest: &str) {
 }
 
 fn main() {
-    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasi";
+    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasip1";
     if is_wasm {
         let wasi_deps_path = format!(
             "{}/{}",
             env!("CARGO_MANIFEST_DIR"),
-            "../../target/wasm32-wasi/wasi-deps"
+            "../../target/wasm32-wasip1/wasi-deps"
         );
         let libpython_binary = "python3.12";
 

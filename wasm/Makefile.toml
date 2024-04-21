@@ -1,6 +1,6 @@
 [tasks.build-wasm]
 command = "cargo"
-args = ["rustc", "--crate-type", "cdylib", "--profile", "release", "--target", "wasm32-wasi", "-p", "promptkit_python"]
+args = ["rustc", "--crate-type", "cdylib", "--profile", "release", "--target", "wasm32-wasip1", "-p", "promptkit_python"]
 env = { PYO3_CROSS_PYTHON_VERSION = "3.12" }
 
 [tasks.wizer]
@@ -9,16 +9,16 @@ args = [
     "--allow-wasi",
     "--wasm-bulk-memory",
     "true",
-    "target/wasm32-wasi/release/promptkit_python.wasm",
+    "target/wasm32-wasip1/release/promptkit_python.wasm",
     "--mapdir",
-    "/usr::target/wasm32-wasi/wasi-deps/usr",
+    "/usr::target/wasm32-wasip1/wasi-deps/usr",
     "--mapdir",
     "/workdir::/tmp",
     "-o",
-    "target/wasm32-wasi/release/promptkit_python.init.wasm"
+    "target/wasm32-wasip1/release/promptkit_python.init.wasm"
 ]
-condition.files_modified.input = ["target/wasm32-wasi/release/promptkit_python.wasm"]
-condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.init.wasm"]
+condition.files_modified.input = ["target/wasm32-wasip1/release/promptkit_python.wasm"]
+condition.files_modified.output = ["target/wasm32-wasip1/release/promptkit_python.init.wasm"]
 dependencies = ["build-wasm"]
 
 [tasks.opt-wasm]
@@ -26,12 +26,12 @@ command = "wasm-opt"
 args = [
     "-O3", "--gufa", "-O3",
     "--strip-debug",
-    "target/wasm32-wasi/release/promptkit_python.init.wasm",
+    "target/wasm32-wasip1/release/promptkit_python.init.wasm",
     "-o",
-    "target/wasm32-wasi/release/promptkit_python.opt.wasm"
+    "target/wasm32-wasip1/release/promptkit_python.opt.wasm"
 ]
-condition.files_modified.input = ["target/wasm32-wasi/release/promptkit_python.init.wasm"]
-condition.files_modified.output = ["target/wasm32-wasi/release/promptkit_python.opt.wasm"]
+condition.files_modified.input = ["target/wasm32-wasip1/release/promptkit_python.init.wasm"]
+condition.files_modified.output = ["target/wasm32-wasip1/release/promptkit_python.opt.wasm"]
 dependencies = ["wizer"]
 
 [tasks.wasm-component]
@@ -39,7 +39,7 @@ command = "wasm-tools"
 args = [
     "component",
     "new",
-    "target/wasm32-wasi/release/promptkit_python.opt.wasm",
+    "target/wasm32-wasip1/release/promptkit_python.opt.wasm",
     "-o",
     "target/promptkit_python.wasm",
     "--adapt",

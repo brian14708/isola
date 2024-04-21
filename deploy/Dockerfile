@@ -28,7 +28,7 @@ RUN pnpm run build
 
 # wasm
 FROM docker.io/library/rust:bookworm AS wasm-build
-RUN rustup target add wasm32-wasi
+RUN rustup target add wasm32-wasip1
 RUN curl --location https://github.com/bytecodealliance/wizer/releases/download/v5.0.0/wizer-v5.0.0-x86_64-linux.tar.xz | \
     tar --strip-components 1 --directory /usr/local/bin --extract --xz
 RUN curl --location https://github.com/WebAssembly/binaryen/releases/download/version_117/binaryen-version_117-x86_64-linux.tar.gz | \
@@ -41,7 +41,7 @@ RUN curl --location https://github.com/sagiegurari/cargo-make/releases/download/
 WORKDIR /src/wasm
 COPY apis ../apis
 COPY wasm .
-RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasi/wasi-deps/downloads \
+RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/wasi-deps/downloads \
     --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo fetch && cargo make wasm
@@ -53,7 +53,7 @@ USER nonroot
 COPY --from=server-build /src/target/promptkit_server .
 COPY --from=ui-build /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
-COPY --from=wasm-build /src/wasm/target/wasm32-wasi/wasi-deps/usr ./wasm/target/wasm32-wasi/wasi-deps/usr
+COPY --from=wasm-build /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
 
 EXPOSE 3000
