@@ -52,8 +52,11 @@ fn main() {
         );
         let libpython_binary = "python3.12";
 
+        let mut lib_paths = vec!["lib/wasi", "lib/wasm32-wasi"];
+
         if std::fs::File::open("../../lib/libpython.tar.gz").is_ok() {
             unarchive("../../lib/libpython.tar.gz", &wasi_deps_path);
+            lib_paths.insert(0, "wasi-sysroot/lib/wasm32-wasip1");
         } else {
             // https://github.com/vmware-labs/webassembly-language-runtimes/blob/main/python/tools/wlr-libpy/src/bld_cfg.rs
             let wasi_sdk_sysroot_url= "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-20/wasi-sysroot-20.0.tar.gz";
@@ -63,13 +66,8 @@ fn main() {
             download_and_unarchive(wasi_sdk_sysroot_url, &wasi_deps_path);
             download_and_unarchive(wasi_sdk_clang_builtins_url, &wasi_deps_path);
             download_and_unarchive(libpython_url, &wasi_deps_path);
+            lib_paths.insert(0, "wasi-sysroot/lib/wasm32-wasi");
         }
-
-        let lib_paths = vec![
-            "wasi-sysroot/lib/wasm32-wasi",
-            "lib/wasi",
-            "lib/wasm32-wasi",
-        ];
 
         let libs = vec![
             "wasi-emulated-signal",
