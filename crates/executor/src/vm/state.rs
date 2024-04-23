@@ -1,9 +1,7 @@
-use std::fs::File;
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use cap_std::fs::Dir;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use wasmtime::component::Linker;
@@ -38,7 +36,7 @@ pub struct VmState {
 impl VmState {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
-        wasmtime_wasi::command::add_to_linker(&mut linker)?;
+        wasmtime_wasi::add_to_linker_async(&mut linker)?;
         Sandbox::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Ok(linker)
     }
@@ -47,17 +45,14 @@ impl VmState {
         let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
-                Dir::from_std_file(File::open("./wasm/target/wasm32-wasi/wasi-deps/usr").unwrap()),
-                DirPerms::READ,
-                FilePerms::READ,
+                "./wasm/target/wasm32-wasi/wasi-deps/usr",
                 "/usr",
-            )
-            .preopened_dir(
-                Dir::from_std_file(File::open(workdir).unwrap()),
                 DirPerms::READ,
                 FilePerms::READ,
-                "/workdir",
             )
+            .unwrap()
+            .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
+            .unwrap()
             .stdout(TraceOutput::new(tracer.clone(), "stdout"))
             .stderr(TraceOutput::new(tracer.clone(), "stderr"))
             .build();
