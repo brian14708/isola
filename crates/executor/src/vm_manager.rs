@@ -40,7 +40,6 @@ pub struct VmManager {
     epoch_ticker: JoinHandle<()>,
 }
 
-#[derive(Debug)]
 pub enum ExecStreamItem {
     Data(Vec<u8>),
     End(Option<Vec<u8>>),
@@ -176,7 +175,7 @@ impl VmManager {
         let has_tracer = tracer.is_some();
         let mut run = vm.run(tracer, tx.clone());
         let func = func.to_string();
-        let exec = Some(Box::pin(async move {
+        let exec = Box::pin(async move {
             let ret = run
                 .exec(|vm, mut store| async move {
                     if has_tracer {
@@ -190,31 +189,22 @@ impl VmManager {
                     }
                     o
                 })
-                .await
-                .and_then(|v| {
-                    v.map_err(|e| anyhow::Error::from(Error::ExecutionError(e.code, e.message)))
-                });
+                .await;
             match ret {
-                Ok(e) => {
-                    let _ = tx.send(Ok((e.unwrap_or_default(), true))).await;
+                Ok(Ok(e)) => {
+                    let _ = tx.send(ExecStreamItem::End(e)).await;
                     cache.put(run.reuse());
                 }
+                Ok(Err(err)) => {
+                    _ = tx.send(ExecStreamItem::Error(err.into())).await;
+                }
                 Err(err) => {
-                    _ = tx.send(Err(err)).await;
+                    _ = tx.send(ExecStreamItem::Error(err)).await;
                 }
             };
-        }));
+        });
 
-        join_with(
-            ReceiverStream::new(rx).map(|v| match v {
-                Ok((data, true)) => {
-                    ExecStreamItem::End(if data.is_empty() { None } else { Some(data) })
-                }
-                Ok((data, false)) => ExecStreamItem::Data(data),
-                Err(err) => ExecStreamItem::Error(err),
-            }),
-            exec,
-        )
+        join_with(ReceiverStream::new(rx), exec)
     }
 
     pub async fn exec(
@@ -293,11 +283,11 @@ impl Drop for VmManager {
 
 fn join_with<T>(
     stream: impl Stream<Item = T>,
-    task: Option<impl Future<Output = ()>>,
+    task: impl Future<Output = ()>,
 ) -> impl Stream<Item = T> {
     StreamJoin {
         stream: Some(stream),
-        task,
+        task: Some(task),
     }
 }
 

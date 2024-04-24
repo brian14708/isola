@@ -19,10 +19,9 @@ use crate::{
         script_service_server::ScriptService, ErrorCode,
     },
     routes::AppState,
+    service::prost_serde::{argument, parse_source, trace_convert},
     utils::stream::{join_with, stream_until},
 };
-
-use self::prost_serde::{argument, parse_source, trace_convert};
 
 mod prost_serde;
 
@@ -223,7 +222,7 @@ impl ScriptService for ScriptServer {
                         result: Some(timeout_error()),
                         metadata: None,
                     },
-                )))))
+                )))));
             }
         };
 
@@ -310,7 +309,7 @@ impl ScriptService for ScriptServer {
                         result: Some(timeout_error()),
                         metadata: None,
                     },
-                )))))
+                )))));
             }
         };
 
@@ -412,7 +411,7 @@ async fn non_stream_result(
             }
             ExecStreamItem::End(None) => break,
             ExecStreamItem::End(Some(_)) => {
-                return Err(Status::internal("unexpected end with data"))
+                return Err(Status::internal("unexpected end with data"));
             }
             ExecStreamItem::Error(err) => {
                 return Err(Status::internal(err.to_string()));

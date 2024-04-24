@@ -90,12 +90,12 @@ pub fn result_type(
                     Err(_) => Err(Status::invalid_argument(
                         "failed to serialize result to struct",
                     )),
-                }
+                };
             }
             ContentType::Cbor => {
                 return Ok(script::Result {
                     result_type: Some(result::ResultType::Cbor(s.into())),
-                })
+                });
             }
         }
     }

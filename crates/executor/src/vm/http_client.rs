@@ -6,9 +6,8 @@ use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
 use wasmtime::component::{Resource, ResourceTable};
 
-use crate::trace::TracerContext;
-
 use super::bindgen::http_client::{self, SseEvent};
+use crate::trace::TracerContext;
 
 pub trait HttpClientCtx: Send {
     fn tracer(&self) -> &TracerContext;
@@ -125,7 +124,7 @@ where
                         Err(err) => {
                             return Ok(Err(http_client::Error::Unknown(format!(
                                 "failed to read response body: {err}"
-                            ))))
+                            ))));
                         }
                     };
                     Response {
@@ -411,7 +410,7 @@ where
 
         let body = match response.kind {
             ResponseKind::Eager { .. } => {
-                return Err(anyhow::anyhow!("SSE is not supported for eager responses"))
+                return Err(anyhow::anyhow!("SSE is not supported for eager responses"));
             }
             ResponseKind::Lazy(response) => response.bytes_stream().eventsource(),
         };

@@ -10,5 +10,4 @@ wasmtime::component::bindgen!({
     },
 });
 
-pub use promptkit::script::host_api;
-pub use promptkit::script::http_client;
+pub use promptkit::script::{host_api, http_client};

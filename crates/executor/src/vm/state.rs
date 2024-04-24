@@ -1,27 +1,25 @@
-use std::path::Path;
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
-use wasmtime::component::Linker;
-use wasmtime::component::ResourceTable;
-use wasmtime::{Engine, Store};
-use wasmtime_wasi::DirPerms;
-use wasmtime_wasi::FilePerms;
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime::{
+    component::{Linker, ResourceTable},
+    Engine, Store,
+};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
 
-use crate::trace::TracerContext;
-use crate::{atomic_cell::AtomicCell, resource::MemoryLimiter, trace_output::TraceOutput};
-
-use super::bindgen;
-use super::bindgen::host_api::LogLevel;
-use super::host_types;
-use super::http_client;
-use super::Sandbox;
+use crate::{
+    atomic_cell::AtomicCell,
+    resource::MemoryLimiter,
+    trace::TracerContext,
+    trace_output::TraceOutput,
+    vm::{bindgen, bindgen::host_api::LogLevel, host_types, http_client, Sandbox},
+    ExecStreamItem,
+};
 
 pub struct VmRunState {
-    pub(crate) output: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
+    pub(crate) output: mpsc::Sender<ExecStreamItem>,
 }
 
 pub struct VmState {
@@ -92,7 +90,7 @@ impl WasiView for VmState {
 impl bindgen::host_api::Host for VmState {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
-            run.output.send(Ok((data, false))).await?;
+            run.output.send(ExecStreamItem::Data(data)).await?;
             Ok(())
         } else {
             Err(anyhow!("output channel missing"))

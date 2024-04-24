@@ -202,7 +202,7 @@ where
         if !*this.body_finished {
             match this.body.as_mut().poll_data(cx) {
                 Poll::Ready(Some(Ok(data))) => {
-                    return Poll::Ready(Some(Ok(http_body::Frame::data(data))))
+                    return Poll::Ready(Some(Ok(http_body::Frame::data(data))));
                 }
                 Poll::Ready(None) => {
                     *this.body_finished = true;

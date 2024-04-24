@@ -6,21 +6,18 @@ mod state;
 
 use std::pin::Pin;
 
-pub use bindgen::exports::promptkit::script::guest_api as exports;
-pub use bindgen::Sandbox;
+pub use bindgen::{exports::promptkit::script::guest_api as exports, Sandbox};
 use host_types::ArgumentIterator;
 pub use state::VmState;
-
 use tempdir::TempDir;
 use tokio::sync::mpsc;
-use wasmtime::component::ResourceTableError;
-use wasmtime::Store;
+use wasmtime::{component::ResourceTableError, Store};
 
-use crate::trace::BoxedTracer;
-
-use self::bindgen::host_api;
-use self::host_types::HostTypesCtx;
-use self::run::VmRun;
+use crate::{
+    trace::BoxedTracer,
+    vm::{bindgen::host_api, host_types::HostTypesCtx, run::VmRun},
+    ExecStreamItem,
+};
 
 pub struct Vm {
     pub(crate) hash: [u8; 32],
@@ -30,11 +27,7 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn run(
-        self,
-        tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
-    ) -> VmRun {
+    pub fn run(self, tracer: Option<BoxedTracer>, sender: mpsc::Sender<ExecStreamItem>) -> VmRun {
         VmRun::new(self, tracer, sender)
     }
 

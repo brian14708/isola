@@ -1,22 +1,28 @@
 #![allow(clippy::missing_safety_doc)]
 
-use std::borrow::Cow;
-use std::cell::RefCell;
+use std::{borrow::Cow, cell::RefCell};
 
 use cbor4ii::core::utils::SliceReader;
-use pyo3::append_to_inittab;
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyString, PyTuple};
+use pyo3::{
+    append_to_inittab,
+    prelude::*,
+    types::{PyDict, PyString, PyTuple},
+};
 use serde::de::DeserializeSeed;
 use url::Url;
 
-use self::exports::promptkit::script::guest_api;
-use self::promptkit::script::host_api;
-use self::promptkit::script::http_client::Request;
-use crate::error::Error;
-use crate::script::{InputValue, Scope};
-use crate::serde::{PyLogDict, PyObjectDeserializer, PyObjectSerializer};
-use crate::wasm::promptkit::script::http_client::{self, Method};
+use crate::{
+    error::Error,
+    script::{InputValue, Scope},
+    serde::{PyLogDict, PyObjectDeserializer, PyObjectSerializer},
+    wasm::{
+        exports::promptkit::script::guest_api,
+        promptkit::script::{
+            host_api,
+            http_client::{self, Method, Request},
+        },
+    },
+};
 
 wit_bindgen::generate!({
     world: "sandbox",

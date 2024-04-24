@@ -3,13 +3,12 @@ use std::future::Future;
 use tokio::sync::mpsc;
 use wasmtime::Store;
 
-use crate::trace::BoxedTracer;
-
 use super::{
     exports,
     state::{VmRunState, VmState},
     Vm,
 };
+use crate::{trace::BoxedTracer, ExecStreamItem};
 
 pub struct VmRun {
     vm: Option<Vm>,
@@ -19,7 +18,7 @@ impl VmRun {
     pub fn new(
         mut vm: Vm,
         tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<anyhow::Result<(Vec<u8>, bool)>>,
+        sender: mpsc::Sender<ExecStreamItem>,
     ) -> Self {
         let o: &mut VmState = vm.store.data_mut();
         if let Some(tracer) = tracer {

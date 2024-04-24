@@ -10,9 +10,9 @@ use pyo3::{
 };
 use serde::de::DeserializeSeed;
 
-use crate::serde::{PyObjectDeserializer, PyObjectSerializer};
 use crate::{
     error::{Error, Result},
+    serde::{PyObjectDeserializer, PyObjectSerializer},
     wasm::ArgIter,
 };
 

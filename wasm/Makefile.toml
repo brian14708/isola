@@ -24,7 +24,7 @@ dependencies = ["build-wasm"]
 [tasks.opt-wasm]
 command = "wasm-opt"
 args = [
-    "-O3",
+    "-O3", "--gufa", "-O3",
     "--strip-debug",
     "target/wasm32-wasi/release/promptkit_python.init.wasm",
     "-o",
@@ -43,7 +43,7 @@ args = [
     "-o",
     "target/promptkit_python.wasm",
     "--adapt",
-    "lib/wasi_snapshot_preview1.reactor.wasm",
+    "wasi_snapshot_preview1=lib/wasi_snapshot_preview1.reactor.wasm",
 ]
 dependencies = [
     "opt-wasm",
