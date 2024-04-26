@@ -13,7 +13,7 @@ RUN --mount=type=cache,target=/src/target/release \
     cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
 # ui
-FROM docker.io/library/node:21-bookworm AS ui-build
+FROM docker.io/library/node:22-bookworm AS ui-build
 WORKDIR /src
 COPY ui/pnpm-workspace.yaml .
 COPY ui/package.json .
