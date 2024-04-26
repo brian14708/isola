@@ -3,6 +3,7 @@ use std::{path::Path, sync::Arc};
 use anyhow::anyhow;
 use parking_lot::Mutex;
 use tokio::sync::mpsc;
+use tracing::event;
 use wasmtime::{
     component::{Linker, ResourceTable},
     Engine, Store,
@@ -98,6 +99,33 @@ impl bindgen::host_api::Host for VmState {
     }
 
     async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
+        match log_level {
+            LogLevel::Debug => event!(
+                tracing::Level::DEBUG,
+                promptkit.kind = "log",
+                promptkit.log.output = &data,
+                promptkit.user = true,
+            ),
+            LogLevel::Info => event!(
+                tracing::Level::INFO,
+                promptkit.kind = "log",
+                promptkit.log.output = &data,
+                promptkit.user = true,
+            ),
+            LogLevel::Warn => event!(
+                tracing::Level::WARN,
+                promptkit.kind = "log",
+                promptkit.log.output = &data,
+                promptkit.user = true,
+            ),
+            LogLevel::Error => event!(
+                tracing::Level::ERROR,
+                promptkit.kind = "log",
+                promptkit.log.output = &data,
+                promptkit.user = true,
+            ),
+        };
+
         self.tracer
             .with_async(|t| {
                 t.log(

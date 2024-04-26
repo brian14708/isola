@@ -2,8 +2,10 @@ use std::{str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
+use reqwest::header::{HeaderName, HeaderValue};
 use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
+use tracing::{field::Empty, span, Instrument, Span};
 use wasmtime::component::{Resource, ResourceTable};
 
 use super::bindgen::http_client::{self, SseEvent};
@@ -20,6 +22,7 @@ pub struct ResponseSseBody {
         dyn Stream<Item = Result<Event, EventStreamError<reqwest::Error>>> + Send + Sync + Unpin,
     >,
     span_id: Option<i16>,
+    span: Span,
 }
 
 #[async_trait::async_trait]
@@ -32,13 +35,17 @@ where
         resource: Resource<http_client::ResponseSseBody>,
     ) -> wasmtime::Result<Option<Result<http_client::SseEvent, http_client::Error>>> {
         let body = self.table().get_mut(&resource)?;
-        Ok(match body.inner.next().await {
+        let result = body.inner.next().instrument(body.span.clone()).await;
+        Ok(match result {
             Some(Ok(d)) => Some(Ok(SseEvent {
                 id: d.id,
                 event: d.event,
                 data: d.data,
             })),
-            Some(Err(err)) => Some(Err(http_client::Error::Unknown(err.to_string()))),
+            Some(Err(err)) => {
+                body.span.record("otel.status_code", "error");
+                Some(Err(http_client::Error::Unknown(err.to_string())))
+            }
             None => {
                 // end
                 if let Some(span_id) = body.span_id {
@@ -62,6 +69,53 @@ pub struct Request {
     eager: bool,
 }
 
+impl Request {
+    fn inject_opentracing(&mut self, span: &Span) {
+        opentelemetry::global::get_text_map_propagator(|injector| {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            struct RequestCarrier<'a> {
+                request: &'a mut reqwest::Request,
+            }
+            impl<'a> opentelemetry::propagation::Injector for RequestCarrier<'a> {
+                fn set(&mut self, key: &str, value: String) {
+                    let header_name = HeaderName::from_str(key).expect("Must be header name");
+                    let header_value =
+                        HeaderValue::from_str(&value).expect("Must be a header value");
+                    self.request.headers_mut().insert(header_name, header_value);
+                }
+            }
+
+            let context = span.context();
+            injector.inject_context(
+                &context,
+                &mut RequestCarrier {
+                    request: &mut self.inner,
+                },
+            );
+        });
+    }
+
+    fn start_span(&mut self) -> Span {
+        let r = &self.inner;
+        let s = span!(
+            tracing::Level::INFO,
+            "http_client::fetch",
+            promptkit.kind = "http",
+            promptkit.user = true,
+            http.request.method = r.method().as_str(),
+            server.address = r.url().host_str().unwrap_or_default(),
+            server.port = r.url().port_or_known_default().unwrap_or_default(),
+            url.full = r.url().to_string(),
+            http.response.status_code = Empty,
+            http.response.body_size = Empty,
+            otel.kind = "client",
+            otel.status_code = Empty,
+        );
+        self.inject_opentracing(&s);
+        s
+    }
+}
+
 #[async_trait::async_trait]
 impl<I> http_client::Host for I
 where
@@ -71,7 +125,8 @@ where
         &mut self,
         request: wasmtime::component::Resource<Request>,
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
-        let request = self.table().delete(request)?;
+        let mut request: Request = self.table().delete(request)?;
+        let span = request.start_span();
         let inner = request.inner;
 
         let span_id = self
@@ -90,7 +145,7 @@ where
             })
             .await;
 
-        let exec = self.client().execute(inner).await;
+        let exec = self.client().execute(inner).instrument(span.clone()).await;
 
         self.tracer()
             .with_async(|f| async {
@@ -116,11 +171,22 @@ where
 
         match exec {
             Ok(response) => {
+                let status = response.status();
+                span.record("http.response.status_code", status.as_u16());
+                if status.is_server_error() || status.is_client_error() {
+                    span.record("otel.status_code", "error");
+                } else {
+                    span.record("otel.status_code", "ok");
+                }
+
                 let r = if request.eager {
                     let headers = response.headers().clone();
                     let status = response.status();
-                    let body = match response.bytes().await {
-                        Ok(body) => body,
+                    let body = match response.bytes().instrument(span.clone()).await {
+                        Ok(body) => {
+                            span.record("http.response.body_size", body.len() as u64);
+                            body
+                        }
                         Err(err) => {
                             return Ok(Err(http_client::Error::Unknown(format!(
                                 "failed to read response body: {err}"
@@ -137,7 +203,7 @@ where
                     }
                 } else {
                     Response {
-                        kind: ResponseKind::Lazy(response),
+                        kind: ResponseKind::Lazy { response, span },
                         span_id,
                     }
                 };
@@ -147,11 +213,18 @@ where
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn fetch_all(
         &mut self,
         requests: Vec<wasmtime::component::Resource<Request>>,
     ) -> wasmtime::Result<Vec<Result<wasmtime::component::Resource<Response>, http_client::Error>>>
     {
+        let span = span!(
+            tracing::Level::INFO,
+            "http_client::fetch_all",
+            promptkit.kind = "http",
+            promptkit.user = true,
+        );
         let requests = requests
             .into_iter()
             .map(|r| self.table().delete(r))
@@ -187,18 +260,28 @@ where
         let client = self.client();
         let tracer = self.tracer();
         let ret = futures_util::future::join_all(requests.into_iter().enumerate().map(
-            |(idx, r)| async move {
+            |(idx, mut r)| async move {
+                let span = r.start_span();
                 let inner = r.inner;
                 let r = client
                     .execute(inner)
+                    .instrument(span.clone())
                     .await
                     .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
                 let headers = r.headers().clone();
                 let status = r.status();
+                span.record("http.response.status_code", status.as_u16());
+                if status.is_server_error() || status.is_client_error() {
+                    span.record("otel.status_code", "error");
+                } else {
+                    span.record("otel.status_code", "ok");
+                }
                 let body = r
                     .bytes()
+                    .instrument(span.clone())
                     .await
                     .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
+                span.record("http.response.body_size", body.len() as u64);
                 if let Some(span_id) = span_id {
                     tracer
                         .with_async(|f| {
@@ -228,6 +311,7 @@ where
                 ))
             },
         ))
+        .instrument(span.clone())
         .await;
 
         if let Some(span_id) = span_id {
@@ -335,7 +419,10 @@ enum ResponseKind {
         status: reqwest::StatusCode,
         body: Bytes,
     },
-    Lazy(reqwest::Response),
+    Lazy {
+        response: reqwest::Response,
+        span: Span,
+    },
 }
 
 #[async_trait::async_trait]
@@ -351,7 +438,7 @@ where
         let response = self.table().get(&resource)?;
         Ok(match &response.kind {
             ResponseKind::Eager { headers, .. } => headers,
-            ResponseKind::Lazy(response) => response.headers(),
+            ResponseKind::Lazy { response, .. } => response.headers(),
         }
         .get(&key)
         .and_then(|v| v.to_str().ok())
@@ -365,7 +452,7 @@ where
         let response = self.table().get(&resource)?;
         Ok(match &response.kind {
             ResponseKind::Eager { status, .. } => *status,
-            ResponseKind::Lazy(response) => response.status(),
+            ResponseKind::Lazy { response, .. } => response.status(),
         }
         .as_u16())
     }
@@ -378,7 +465,14 @@ where
 
         let body = match response.kind {
             ResponseKind::Eager { body, .. } => Ok(body),
-            ResponseKind::Lazy(response) => response.bytes().await,
+            ResponseKind::Lazy { response, span } => {
+                let body = response.bytes().instrument(span.clone()).await;
+                span.record(
+                    "http.response.body_size",
+                    body.as_ref().map(Bytes::len).unwrap_or_default() as u64,
+                );
+                body
+            }
         };
 
         if let Some(span_id) = response.span_id {
@@ -408,16 +502,17 @@ where
     ) -> wasmtime::Result<wasmtime::component::Resource<ResponseSseBody>> {
         let response = self.table().delete(resource)?;
 
-        let body = match response.kind {
+        let (body, span) = match response.kind {
             ResponseKind::Eager { .. } => {
                 return Err(anyhow::anyhow!("SSE is not supported for eager responses"));
             }
-            ResponseKind::Lazy(response) => response.bytes_stream().eventsource(),
+            ResponseKind::Lazy { response, span } => (response.bytes_stream().eventsource(), span),
         };
 
         Ok(self.table().push(ResponseSseBody {
             inner: Box::new(body),
             span_id: response.span_id,
+            span,
         })?)
     }
 

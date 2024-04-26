@@ -4,11 +4,22 @@
 use std::{env::args, path::PathBuf};
 
 use anyhow::anyhow;
+use opentelemetry::{global, KeyValue};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::{
+    propagation::TraceContextPropagator,
+    trace::{self, RandomIdGenerator, Sampler},
+    Resource,
+};
+use otel::grpc_server_tracing_layer;
 use promptkit_executor::VmManager;
 use proto::script::script_service_server::ScriptServiceServer;
 use tonic::codec::CompressionEncoding;
+use tracing::Level;
+use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 mod hybrid;
+mod otel;
 mod proto;
 mod routes;
 mod server;
@@ -20,7 +31,48 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    let envfilter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(Level::INFO.into())
+        .from_env()
+        .expect("failed to read env filter")
+        .add_directive("[{promptkit.user}]=off".parse().unwrap());
+
+    if let Ok(e) = std::env::var("OTEL_COLLECTOR_URL") {
+        let tracer = opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(opentelemetry_otlp::new_exporter().http().with_endpoint(e))
+            .with_trace_config(
+                trace::config()
+                    .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
+                    .with_id_generator(RandomIdGenerator::default())
+                    .with_resource(Resource::new(vec![KeyValue::new(
+                        "service.name",
+                        "promptkit",
+                    )])),
+            )
+            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        let opentelemetry = tracing_opentelemetry::layer()
+            .with_location(false)
+            .with_tracked_inactivity(false)
+            .with_threads(false)
+            .with_tracer(tracer)
+            .with_filter(FilterFn::new(|metadata| {
+                metadata
+                    .fields()
+                    .iter()
+                    .any(|field| field.name() == "promptkit.user")
+            }));
+
+        tracing_subscriber::registry()
+            .with(opentelemetry)
+            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
+            .init();
+    } else {
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
+            .init();
+    }
 
     let task = args().nth(1);
     match task.as_deref() {
@@ -39,6 +91,7 @@ async fn main() -> anyhow::Result<()> {
 
             let grpc = tonic::transport::Server::builder()
                 .accept_http1(true)
+                .layer(grpc_server_tracing_layer())
                 .add_service(service)
                 .add_service(tonic_web::enable(
                     ScriptServiceServer::new(service::ScriptServer::new(state))

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use tracing::event;
 use wasmtime_wasi::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
 
 use crate::trace::TracerContext;
@@ -49,6 +50,13 @@ impl Subscribe for TraceOutputStream {
 
         match String::from_utf8(std::mem::take(&mut self.flush_buffer)) {
             Ok(s) => {
+                event!(
+                    tracing::Level::INFO,
+                    promptkit.kind = "log",
+                    promptkit.log.group = self.group,
+                    promptkit.log.output = &s,
+                    promptkit.user = true,
+                );
                 self.ctx.with_async(|t| t.log(self.group, s.into())).await;
             }
             Err(e) => {
@@ -67,7 +75,13 @@ impl Subscribe for TraceOutputStream {
                     // SAFETY: input is valid utf-8
                     unsafe { std::str::from_utf8_unchecked(valid) }.into()
                 };
-
+                event!(
+                    tracing::Level::INFO,
+                    promptkit.kind = "log",
+                    promptkit.log.group = self.group,
+                    promptkit.log.output = s.as_ref(),
+                    promptkit.user = true,
+                );
                 self.ctx.with_async(|t| t.log(self.group, s)).await;
             }
         }
@@ -76,21 +90,15 @@ impl Subscribe for TraceOutputStream {
 
 impl HostOutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
-        if !self.ctx.is_null() {
-            self.buffer.extend(bytes);
-            if self.buffer.len() >= MAX_BUFFER {
-                self.flush_buffer.append(&mut self.buffer);
-            }
+        self.buffer.extend(bytes);
+        if self.buffer.len() >= MAX_BUFFER {
+            self.flush_buffer.append(&mut self.buffer);
         }
         Ok(())
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        if self.ctx.is_null() {
-            self.buffer.clear();
-        } else {
-            self.flush_buffer.append(&mut self.buffer);
-        }
+        self.flush_buffer.append(&mut self.buffer);
         Ok(())
     }
 

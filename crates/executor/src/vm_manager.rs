@@ -178,16 +178,17 @@ impl VmManager {
         let exec = Box::pin(async move {
             let ret = run
                 .exec(|vm, mut store| async move {
-                    if has_tracer {
-                        let _ = vm
-                            .call_set_log_level(&mut store, Some(LogLevel::Debug))
-                            .await;
-                    }
-                    let o = vm.call_call_func(&mut store, &func, &args).await;
-                    if has_tracer {
-                        let _ = vm.call_set_log_level(&mut store, None).await;
-                    }
-                    o
+                    let _ = vm
+                        .call_set_log_level(
+                            &mut store,
+                            if has_tracer {
+                                Some(LogLevel::Debug)
+                            } else {
+                                Some(LogLevel::Info)
+                            },
+                        )
+                        .await;
+                    vm.call_call_func(&mut store, &func, &args).await
                 })
                 .await;
             match ret {
