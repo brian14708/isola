@@ -7,7 +7,11 @@ use axum::{
     response::IntoResponse,
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
-use promptkit_executor::VmManager;
+use promptkit_executor::{Env, VmManager};
+use reqwest::Client;
+use reqwest_middleware::ClientBuilder;
+
+use crate::otel::OtelMiddleware;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -18,7 +22,14 @@ pub struct AppState {
 impl AppState {
     pub fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         Ok(Self {
-            vm: Arc::new(VmManager::new(vm_path.as_ref())?),
+            vm: Arc::new(VmManager::new(
+                vm_path.as_ref(),
+                Env {
+                    http: ClientBuilder::new(Client::builder().gzip(true).build()?)
+                        .with(OtelMiddleware())
+                        .build(),
+                },
+            )?),
             metrics: Arc::new(Metrics::default()),
         })
     }

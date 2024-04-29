@@ -4,13 +4,14 @@
 use std::{env::args, path::PathBuf};
 
 use anyhow::anyhow;
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{global, propagation::TextMapCompositePropagator, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
-    propagation::TraceContextPropagator,
+    propagation::{BaggagePropagator, TraceContextPropagator},
     trace::{self, RandomIdGenerator, Sampler},
     Resource,
 };
+use opentelemetry_semantic_conventions::resource;
 use otel::grpc_server_tracing_layer;
 use promptkit_executor::VmManager;
 use proto::script::script_service_server::ScriptServiceServer;
@@ -46,12 +47,15 @@ async fn main() -> anyhow::Result<()> {
                     .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
                     .with_id_generator(RandomIdGenerator::default())
                     .with_resource(Resource::new(vec![KeyValue::new(
-                        "service.name",
+                        resource::SERVICE_NAME,
                         "promptkit",
                     )])),
             )
             .install_batch(opentelemetry_sdk::runtime::Tokio)?;
-        global::set_text_map_propagator(TraceContextPropagator::new());
+        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+            Box::new(TraceContextPropagator::new()),
+            Box::new(BaggagePropagator::new()),
+        ]));
         let opentelemetry = tracing_opentelemetry::layer()
             .with_location(false)
             .with_tracked_inactivity(false)

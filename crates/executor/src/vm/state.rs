@@ -2,6 +2,7 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
+use reqwest_middleware::ClientWithMiddleware;
 use tokio::sync::mpsc;
 use tracing::event;
 use wasmtime::{
@@ -25,7 +26,7 @@ pub struct VmRunState {
 
 pub struct VmState {
     limiter: MemoryLimiter,
-    client: reqwest::Client,
+    client: ClientWithMiddleware,
     wasi: Mutex<WasiCtx>,
     table: Mutex<ResourceTable>,
     pub(crate) tracer: Arc<TracerContext>,
@@ -40,7 +41,12 @@ impl VmState {
         Ok(linker)
     }
 
-    pub fn new(engine: &Engine, workdir: &Path, max_memory: usize) -> Store<Self> {
+    pub fn new(
+        engine: &Engine,
+        workdir: &Path,
+        max_memory: usize,
+        client: ClientWithMiddleware,
+    ) -> Store<Self> {
         let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
@@ -62,7 +68,7 @@ impl VmState {
             Self {
                 tracer,
                 limiter,
-                client: reqwest::Client::builder().gzip(true).build().unwrap(),
+                client,
                 wasi: Mutex::new(wasi),
                 table: Mutex::new(ResourceTable::new()),
                 run: None,
@@ -148,7 +154,7 @@ impl http_client::HttpClientCtx for VmState {
         self.table.get_mut()
     }
 
-    fn client(&self) -> &reqwest::Client {
+    fn client(&self) -> &ClientWithMiddleware {
         &self.client
     }
 

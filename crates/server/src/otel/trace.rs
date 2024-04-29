@@ -3,6 +3,7 @@ use std::time::Duration;
 use http_02::{Response, Uri};
 use opentelemetry::trace::{TraceContextExt, TraceId};
 use opentelemetry_sdk::trace::RandomIdGenerator;
+use opentelemetry_semantic_conventions::trace;
 use tower_http_04::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
     trace::{DefaultOnBodyChunk, DefaultOnEos, DefaultOnRequest, OnFailure, OnResponse},
@@ -54,14 +55,14 @@ impl<B> tower_http_04::trace::MakeSpan<B> for MakeSpan {
             .unwrap_or("");
         let span = tracing::info_span!(
             "gRPC request",
-            rpc.system = "grpc",
-            rpc.service = service,
-            rpc.method = method,
-            server.address = server_addr,
-            server.port = request.uri().port_u16().unwrap_or(0),
-            rpc.grpc.status_code = Empty,
-            otel.status_code = Empty,
-            otel.status_message = Empty,
+            { trace::RPC_SYSTEM } = "grpc",
+            { trace::RPC_SERVICE } = service,
+            { trace::RPC_METHOD } = method,
+            { trace::SERVER_ADDRESS } = server_addr,
+            { trace::SERVER_PORT } = request.uri().port_u16(),
+            { trace::RPC_GRPC_STATUS_CODE } = Empty,
+            { trace::OTEL_STATUS_CODE } = Empty,
+            { trace::OTEL_STATUS_DESCRIPTION } = Empty,
             otel.kind = "server",
             promptkit.user = true,
         );
@@ -110,7 +111,7 @@ pub struct OtelOnResponse;
 
 impl<B> OnResponse<B> for OtelOnResponse {
     fn on_response(self, _response: &Response<B>, _latency: Duration, span: &Span) {
-        span.record("otel.status_code", "ok");
+        span.record(trace::OTEL_STATUS_CODE, "OK");
     }
 }
 
@@ -119,14 +120,14 @@ pub struct OtelOnGrpcFailure;
 
 impl OnFailure<GrpcFailureClass> for OtelOnGrpcFailure {
     fn on_failure(&mut self, failure: GrpcFailureClass, _latency: Duration, span: &Span) {
-        span.record("otel.status_code", "error");
+        span.record(trace::OTEL_STATUS_CODE, "ERROR");
         match failure {
             GrpcFailureClass::Code(code) => {
-                span.record("rpc.grpc.status_code", code);
+                span.record(trace::RPC_GRPC_STATUS_CODE, code);
             }
             GrpcFailureClass::Error(msg) => {
-                span.record("rpc.grpc.status_code", 2);
-                span.record("otel.status_message", msg);
+                span.record(trace::RPC_GRPC_STATUS_CODE, 2);
+                span.record(trace::OTEL_STATUS_DESCRIPTION, msg);
             }
         }
     }

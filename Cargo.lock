@@ -1739,11 +1739,11 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "hex",
- "opentelemetry",
  "parking_lot",
  "pin-project-lite",
  "rand 0.8.5",
  "reqwest 0.12.4",
+ "reqwest-middleware",
  "serde",
  "serde_json",
  "sha2",
@@ -1753,7 +1753,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-opentelemetry",
  "wasmtime",
  "wasmtime-wasi",
  "zip",
@@ -1775,12 +1774,15 @@ dependencies = [
  "mimalloc",
  "opentelemetry",
  "opentelemetry-otlp",
+ "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project",
  "prometheus-client",
  "promptkit_executor",
  "prost",
  "prost-types",
+ "reqwest 0.12.4",
+ "reqwest-middleware",
  "serde",
  "serde-transcode",
  "serde_json",
@@ -2125,6 +2127,21 @@ dependencies = [
  "web-sys",
  "webpki-roots",
  "winreg 0.52.0",
+]
+
+[[package]]
+name = "reqwest-middleware"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0209efb52486ad88136190094ee214759ef7507068b27992256ed6610eb71a01"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "http 1.1.0",
+ "reqwest 0.12.4",
+ "serde",
+ "thiserror",
+ "tower-service",
 ]
 
 [[package]]

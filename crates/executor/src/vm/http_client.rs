@@ -2,7 +2,7 @@ use std::{str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
-use reqwest::header::{HeaderName, HeaderValue};
+use reqwest_middleware::ClientWithMiddleware;
 use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
 use tracing::{field::Empty, span, Instrument, Span};
@@ -13,7 +13,7 @@ use crate::trace::TracerContext;
 
 pub trait HttpClientCtx: Send {
     fn tracer(&self) -> &TracerContext;
-    fn client(&self) -> &reqwest::Client;
+    fn client(&self) -> &ClientWithMiddleware;
     fn table(&mut self) -> &mut ResourceTable;
 }
 
@@ -69,53 +69,6 @@ pub struct Request {
     eager: bool,
 }
 
-impl Request {
-    fn inject_opentracing(&mut self, span: &Span) {
-        opentelemetry::global::get_text_map_propagator(|injector| {
-            use tracing_opentelemetry::OpenTelemetrySpanExt;
-            struct RequestCarrier<'a> {
-                request: &'a mut reqwest::Request,
-            }
-            impl<'a> opentelemetry::propagation::Injector for RequestCarrier<'a> {
-                fn set(&mut self, key: &str, value: String) {
-                    let header_name = HeaderName::from_str(key).expect("Must be header name");
-                    let header_value =
-                        HeaderValue::from_str(&value).expect("Must be a header value");
-                    self.request.headers_mut().insert(header_name, header_value);
-                }
-            }
-
-            let context = span.context();
-            injector.inject_context(
-                &context,
-                &mut RequestCarrier {
-                    request: &mut self.inner,
-                },
-            );
-        });
-    }
-
-    fn start_span(&mut self) -> Span {
-        let r = &self.inner;
-        let s = span!(
-            tracing::Level::INFO,
-            "http_client::fetch",
-            promptkit.kind = "http",
-            promptkit.user = true,
-            http.request.method = r.method().as_str(),
-            server.address = r.url().host_str().unwrap_or_default(),
-            server.port = r.url().port_or_known_default().unwrap_or_default(),
-            url.full = r.url().to_string(),
-            http.response.status_code = Empty,
-            http.response.body_size = Empty,
-            otel.kind = "client",
-            otel.status_code = Empty,
-        );
-        self.inject_opentracing(&s);
-        s
-    }
-}
-
 #[async_trait::async_trait]
 impl<I> http_client::Host for I
 where
@@ -125,8 +78,16 @@ where
         &mut self,
         request: wasmtime::component::Resource<Request>,
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
-        let mut request: Request = self.table().delete(request)?;
-        let span = request.start_span();
+        let request: Request = self.table().delete(request)?;
+        let span = span!(
+            tracing::Level::INFO,
+            "http_client::fetch",
+            promptkit.kind = "http",
+            promptkit.user = true,
+            http.response.status_code = Empty,
+            http.response.body_size = Empty,
+        );
+
         let inner = request.inner;
 
         let span_id = self
@@ -171,14 +132,6 @@ where
 
         match exec {
             Ok(response) => {
-                let status = response.status();
-                span.record("http.response.status_code", status.as_u16());
-                if status.is_server_error() || status.is_client_error() {
-                    span.record("otel.status_code", "error");
-                } else {
-                    span.record("otel.status_code", "ok");
-                }
-
                 let r = if request.eager {
                     let headers = response.headers().clone();
                     let status = response.status();
@@ -260,8 +213,15 @@ where
         let client = self.client();
         let tracer = self.tracer();
         let ret = futures_util::future::join_all(requests.into_iter().enumerate().map(
-            |(idx, mut r)| async move {
-                let span = r.start_span();
+            |(idx, r)| async move {
+                let span = span!(
+                    tracing::Level::INFO,
+                    "http_client::fetch",
+                    promptkit.kind = "http",
+                    promptkit.user = true,
+                    http.response.status_code = Empty,
+                    http.response.body_size = Empty,
+                );
                 let inner = r.inner;
                 let r = client
                     .execute(inner)
@@ -270,12 +230,6 @@ where
                     .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
                 let headers = r.headers().clone();
                 let status = r.status();
-                span.record("http.response.status_code", status.as_u16());
-                if status.is_server_error() || status.is_client_error() {
-                    span.record("otel.status_code", "error");
-                } else {
-                    span.record("otel.status_code", "ok");
-                }
                 let body = r
                     .bytes()
                     .instrument(span.clone())

@@ -28,6 +28,7 @@ use crate::{
         Sandbox, Vm, VmState,
     },
     vm_cache::VmCache,
+    Env,
 };
 
 const MAX_MEMORY: usize = 64 * 1024 * 1024;
@@ -38,6 +39,7 @@ pub struct VmManager {
     instance_pre: InstancePre<VmState>,
     cache: Arc<VmCache>,
     epoch_ticker: JoinHandle<()>,
+    env: Env,
 }
 
 pub enum ExecStreamItem {
@@ -97,7 +99,7 @@ impl VmManager {
         Ok(())
     }
 
-    pub fn new(path: &Path) -> anyhow::Result<Self> {
+    pub fn new(path: &Path, env: Env) -> anyhow::Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
@@ -145,12 +147,18 @@ impl VmManager {
                     engine.increment_epoch();
                 }
             }),
+            env,
         })
     }
 
     pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
         let workdir = tempdir::TempDir::new("vm").map_err(anyhow::Error::from)?;
-        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY);
+        let mut store = VmState::new(
+            &self.engine,
+            workdir.path(),
+            MAX_MEMORY,
+            self.env.http.clone(),
+        );
         store.epoch_deadline_async_yield_and_update(1);
 
         let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
