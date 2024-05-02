@@ -50,7 +50,7 @@ impl VmState {
         let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
-                "./wasm/target/wasm32-wasi/wasi-deps/usr",
+                "./wasm/target/wasm32-wasip1/wasi-deps/usr",
                 "/usr",
                 DirPerms::READ,
                 FilePerms::READ,
