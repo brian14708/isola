@@ -3,25 +3,28 @@ use std::collections::HashMap;
 use parking_lot::Mutex;
 use rand::Rng;
 
-use crate::vm::Vm;
+use crate::{vm::Vm, Env};
 
-pub struct VmCache {
-    caches: Mutex<HashMap<[u8; 32], Vec<Vm>>>,
+pub struct VmCache<E> {
+    caches: Mutex<HashMap<[u8; 32], Vec<Vm<E>>>>,
 }
 
-impl VmCache {
+impl<E> VmCache<E>
+where
+    E: Env + Send + Sync,
+{
     pub fn new() -> Self {
         Self {
             caches: Mutex::new(HashMap::new()),
         }
     }
 
-    pub fn get(&self, hash: [u8; 32]) -> Option<Vm> {
+    pub fn get(&self, hash: [u8; 32]) -> Option<Vm<E>> {
         let mut caches = self.caches.lock();
         caches.get_mut(&hash)?.pop()
     }
 
-    pub fn put(&self, vm: Vm) {
+    pub fn put(&self, vm: Vm<E>) {
         if !vm.store.data().reuse() {
             return;
         }

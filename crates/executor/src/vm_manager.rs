@@ -34,12 +34,12 @@ use crate::{
 const MAX_MEMORY: usize = 64 * 1024 * 1024;
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
-pub struct VmManager {
+pub struct VmManager<E> {
     engine: Engine,
-    instance_pre: InstancePre<VmState>,
-    cache: Arc<VmCache>,
+    instance_pre: InstancePre<VmState<E>>,
+    cache: Arc<VmCache<E>>,
     epoch_ticker: JoinHandle<()>,
-    env: Env,
+    env: E,
 }
 
 pub enum ExecStreamItem {
@@ -74,7 +74,7 @@ impl<'a> ExecSource<'a> {
     }
 }
 
-impl VmManager {
+impl<E> VmManager<E> {
     fn cfg() -> Config {
         let mut config = Config::new();
         config
@@ -98,8 +98,13 @@ impl VmManager {
         std::fs::write(path.with_extension("wasm.cache"), data)?;
         Ok(())
     }
+}
 
-    pub fn new(path: &Path, env: Env) -> anyhow::Result<Self> {
+impl<E> VmManager<E>
+where
+    E: Env + Send + Sync + Clone,
+{
+    pub fn new(path: &Path, env: E) -> anyhow::Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
@@ -151,14 +156,9 @@ impl VmManager {
         })
     }
 
-    pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm> {
+    pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm<E>> {
         let workdir = tempdir::TempDir::new("vm").map_err(anyhow::Error::from)?;
-        let mut store = VmState::new(
-            &self.engine,
-            workdir.path(),
-            MAX_MEMORY,
-            self.env.http.clone(),
-        );
+        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, self.env.clone());
         store.epoch_deadline_async_yield_and_update(1);
 
         let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
@@ -175,8 +175,8 @@ impl VmManager {
         func: &str,
         args: SmallVec<[Argument; 2]>,
         tracer: Option<BoxedTracer>,
-        vm: Vm,
-    ) -> impl Stream<Item = ExecStreamItem> + Send + 'static {
+        vm: Vm<E>,
+    ) -> impl Stream<Item = ExecStreamItem> + Send {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -222,7 +222,7 @@ impl VmManager {
         func: &str,
         args: impl IntoIterator<Item = ExecArgument>,
         tracer: Option<BoxedTracer>,
-    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send + 'static> {
+    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
         let hash = script.hash();
 
         let vm = self.cache.get(hash);
@@ -282,7 +282,7 @@ impl VmManager {
     }
 }
 
-impl Drop for VmManager {
+impl<E> Drop for VmManager<E> {
     fn drop(&mut self) {
         self.epoch_ticker.abort();
         // yield one last time

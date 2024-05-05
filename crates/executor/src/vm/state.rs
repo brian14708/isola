@@ -2,7 +2,6 @@ use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
-use reqwest_middleware::ClientWithMiddleware;
 use tokio::sync::mpsc;
 use tracing::event;
 use wasmtime::{
@@ -16,24 +15,30 @@ use crate::{
     resource::MemoryLimiter,
     trace::TracerContext,
     trace_output::TraceOutput,
-    vm::{bindgen, bindgen::host_api::LogLevel, host_types, http_client, Sandbox},
-    ExecStreamItem,
+    vm::{
+        bindgen::{self, host_api::LogLevel},
+        host_types, Sandbox,
+    },
+    Env, ExecStreamItem,
 };
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
 }
 
-pub struct VmState {
+pub struct VmState<E> {
     limiter: MemoryLimiter,
-    client: ClientWithMiddleware,
+    env: E,
     wasi: Mutex<WasiCtx>,
     table: Mutex<ResourceTable>,
     pub(crate) tracer: Arc<TracerContext>,
     pub(crate) run: Option<VmRunState>,
 }
 
-impl VmState {
+impl<E> VmState<E>
+where
+    E: Env + Sync + Send,
+{
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
@@ -41,12 +46,7 @@ impl VmState {
         Ok(linker)
     }
 
-    pub fn new(
-        engine: &Engine,
-        workdir: &Path,
-        max_memory: usize,
-        client: ClientWithMiddleware,
-    ) -> Store<Self> {
+    pub fn new(engine: &Engine, workdir: &Path, max_memory: usize, env: E) -> Store<Self> {
         let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
@@ -68,7 +68,7 @@ impl VmState {
             Self {
                 tracer,
                 limiter,
-                client,
+                env,
                 wasi: Mutex::new(wasi),
                 table: Mutex::new(ResourceTable::new()),
                 run: None,
@@ -83,7 +83,10 @@ impl VmState {
     }
 }
 
-impl WasiView for VmState {
+impl<E> WasiView for VmState<E>
+where
+    E: Send,
+{
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
     }
@@ -94,7 +97,10 @@ impl WasiView for VmState {
 }
 
 #[async_trait::async_trait]
-impl bindgen::host_api::Host for VmState {
+impl<E> bindgen::host_api::Host for VmState<E>
+where
+    E: Env + Sync + Send,
+{
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
             run.output.send(ExecStreamItem::Data(data)).await?;
@@ -149,13 +155,27 @@ impl bindgen::host_api::Host for VmState {
     }
 }
 
-impl http_client::HttpClientCtx for VmState {
+impl<E> host_types::HostTypesCtx for VmState<E>
+where
+    E: Send,
+{
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
     }
+}
 
-    fn client(&self) -> &ClientWithMiddleware {
-        &self.client
+#[async_trait::async_trait]
+pub trait EnvCtx: Send + Env {
+    fn tracer(&self) -> &TracerContext;
+    fn table(&mut self) -> &mut ResourceTable;
+}
+
+impl<E> EnvCtx for VmState<E>
+where
+    E: Env + Send + Sync,
+{
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
     }
 
     fn tracer(&self) -> &TracerContext {
@@ -163,8 +183,12 @@ impl http_client::HttpClientCtx for VmState {
     }
 }
 
-impl host_types::HostTypesCtx for VmState {
-    fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
+#[async_trait::async_trait]
+impl<E> Env for VmState<E>
+where
+    E: Env + Sync + Send,
+{
+    async fn send_request(&self, req: reqwest::Request) -> reqwest::Result<reqwest::Response> {
+        self.env.send_request(req).await
     }
 }

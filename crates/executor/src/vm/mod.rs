@@ -16,18 +16,25 @@ use wasmtime::{component::ResourceTableError, Store};
 use crate::{
     trace::BoxedTracer,
     vm::{bindgen::host_api, host_types::HostTypesCtx, run::VmRun},
-    ExecStreamItem,
+    Env, ExecStreamItem,
 };
 
-pub struct Vm {
+pub struct Vm<E> {
     pub(crate) hash: [u8; 32],
-    pub(crate) store: Store<VmState>,
+    pub(crate) store: Store<VmState<E>>,
     pub(crate) sandbox: Sandbox,
     pub(crate) workdir: TempDir,
 }
 
-impl Vm {
-    pub fn run(self, tracer: Option<BoxedTracer>, sender: mpsc::Sender<ExecStreamItem>) -> VmRun {
+impl<E> Vm<E>
+where
+    E: Env + Send,
+{
+    pub fn run(
+        self,
+        tracer: Option<BoxedTracer>,
+        sender: mpsc::Sender<ExecStreamItem>,
+    ) -> VmRun<E> {
         VmRun::new(self, tracer, sender)
     }
 

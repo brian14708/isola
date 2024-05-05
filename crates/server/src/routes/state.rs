@@ -7,15 +7,14 @@ use axum::{
     response::IntoResponse,
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
-use promptkit_executor::{Env, VmManager};
+use promptkit_executor::VmManager;
 use reqwest::Client;
-use reqwest_middleware::ClientBuilder;
 
-use crate::otel::OtelMiddleware;
+use super::env::VmEnv;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub vm: Arc<VmManager>,
+    pub vm: Arc<VmManager<VmEnv>>,
     pub metrics: Arc<Metrics>,
 }
 
@@ -24,10 +23,8 @@ impl AppState {
         Ok(Self {
             vm: Arc::new(VmManager::new(
                 vm_path.as_ref(),
-                Env {
-                    http: ClientBuilder::new(Client::builder().gzip(true).build()?)
-                        .with(OtelMiddleware())
-                        .build(),
+                VmEnv {
+                    http: Client::builder().gzip(true).build()?,
                 },
             )?),
             metrics: Arc::new(Metrics::default()),
@@ -35,7 +32,7 @@ impl AppState {
     }
 }
 
-impl FromRef<AppState> for Arc<VmManager> {
+impl FromRef<AppState> for Arc<VmManager<VmEnv>> {
     fn from_ref(state: &AppState) -> Self {
         state.vm.clone()
     }

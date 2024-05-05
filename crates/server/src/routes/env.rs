@@ -1,22 +1,20 @@
 use std::str::FromStr;
 
 use axum::async_trait;
-use http::{Extensions, HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue};
 use opentelemetry_semantic_conventions::trace;
-use reqwest::{Request, Response};
-use reqwest_middleware::{Middleware, Next, Result};
 use tracing::{field::Empty, Instrument};
 
-pub struct OtelMiddleware();
+use promptkit_executor::Env;
+
+#[derive(Clone)]
+pub struct VmEnv {
+    pub http: reqwest::Client,
+}
 
 #[async_trait]
-impl Middleware for OtelMiddleware {
-    async fn handle(
-        &self,
-        mut req: Request,
-        extensions: &mut Extensions,
-        next: Next<'_>,
-    ) -> Result<Response> {
+impl Env for VmEnv {
+    async fn send_request(&self, mut req: reqwest::Request) -> reqwest::Result<reqwest::Response> {
         let span = tracing::span!(
             tracing::Level::INFO,
             "http_client::fetch_reqwest",
@@ -48,7 +46,7 @@ impl Middleware for OtelMiddleware {
             injector.inject_context(&context, &mut RequestCarrier { request: &mut req });
         });
 
-        let resp = match next.run(req, extensions).instrument(span.clone()).await {
+        let resp = match self.http.execute(req).instrument(span.clone()).await {
             Ok(resp) => resp,
             Err(err) => {
                 span.record(trace::OTEL_STATUS_CODE, "ERROR");

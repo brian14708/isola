@@ -2,20 +2,15 @@ use std::{str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
-use reqwest_middleware::ClientWithMiddleware;
 use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
 use tracing::{field::Empty, span, Instrument, Span};
-use wasmtime::component::{Resource, ResourceTable};
+use wasmtime::component::Resource;
 
-use super::bindgen::http_client::{self, SseEvent};
-use crate::trace::TracerContext;
-
-pub trait HttpClientCtx: Send {
-    fn tracer(&self) -> &TracerContext;
-    fn client(&self) -> &ClientWithMiddleware;
-    fn table(&mut self) -> &mut ResourceTable;
-}
+use super::{
+    bindgen::http_client::{self, SseEvent},
+    state::EnvCtx,
+};
 
 pub struct ResponseSseBody {
     inner: Box<
@@ -28,7 +23,7 @@ pub struct ResponseSseBody {
 #[async_trait::async_trait]
 impl<I> http_client::HostResponseSseBody for I
 where
-    I: HttpClientCtx,
+    I: EnvCtx,
 {
     async fn read(
         &mut self,
@@ -72,7 +67,7 @@ pub struct Request {
 #[async_trait::async_trait]
 impl<I> http_client::Host for I
 where
-    I: HttpClientCtx + Sync,
+    I: EnvCtx + Sync,
 {
     async fn fetch(
         &mut self,
@@ -106,7 +101,7 @@ where
             })
             .await;
 
-        let exec = self.client().execute(inner).instrument(span.clone()).await;
+        let exec = self.send_request(inner).instrument(span.clone()).await;
 
         self.tracer()
             .with_async(|f| async {
@@ -210,7 +205,7 @@ where
             })
             .await;
 
-        let client = self.client();
+        let client = &self;
         let tracer = self.tracer();
         let ret = futures_util::future::join_all(requests.into_iter().enumerate().map(
             |(idx, r)| async move {
@@ -224,7 +219,7 @@ where
                 );
                 let inner = r.inner;
                 let r = client
-                    .execute(inner)
+                    .send_request(inner)
                     .instrument(span.clone())
                     .await
                     .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
@@ -288,7 +283,7 @@ where
 #[async_trait::async_trait]
 impl<I> http_client::HostRequest for I
 where
-    I: HttpClientCtx,
+    I: EnvCtx,
 {
     async fn new(
         &mut self,
@@ -382,7 +377,7 @@ enum ResponseKind {
 #[async_trait::async_trait]
 impl<I> http_client::HostResponse for I
 where
-    I: HttpClientCtx,
+    I: EnvCtx,
 {
     async fn header(
         &mut self,
