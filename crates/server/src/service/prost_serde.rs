@@ -1,7 +1,7 @@
-use std::{borrow::Cow, collections::HashMap, ops::Add};
+use std::borrow::Cow;
 
 use cbor4ii::core::utils::{BufWriter, SliceReader};
-use promptkit_executor::{trace::TraceEvent, ExecSource};
+use promptkit_executor::ExecSource;
 use serde::{
     de::Visitor,
     ser::{SerializeMap, SerializeSeq},
@@ -10,7 +10,7 @@ use serde::{
 use tonic::Status;
 
 use crate::proto::script::{
-    self, argument::Marker, result, source::SourceType, trace, ContentType, Source, Trace,
+    self, argument::Marker, result, source::SourceType, ContentType, Source,
 };
 
 pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> {
@@ -272,68 +272,5 @@ impl<'s> serde::Serialize for ProstValueSerializer<'s> {
             },
             None => serializer.serialize_unit(),
         }
-    }
-}
-
-pub fn trace_convert(event: TraceEvent, start: &std::time::Duration) -> Trace {
-    let timestamp = start.add(std::time::Duration::from_micros(
-        event.timestamp.as_micros(),
-    ));
-    Trace {
-        id: i32::from(event.id),
-        group: event.group.into(),
-        timestamp: Some(prost_types::Timestamp {
-            #[allow(clippy::cast_possible_wrap)]
-            seconds: timestamp.as_secs() as i64,
-            #[allow(clippy::cast_possible_wrap)]
-            nanos: timestamp.subsec_nanos() as i32,
-        }),
-        trace_type: match event.kind {
-            promptkit_executor::trace::TraceEventKind::Log { content } => {
-                Some(trace::TraceType::Log(trace::Log { content }))
-            }
-            promptkit_executor::trace::TraceEventKind::Event {
-                parent_id,
-                kind,
-                data,
-            } => Some(trace::TraceType::Event(trace::Event {
-                parent_id: i32::from(parent_id.unwrap_or_default()),
-                kind: kind.into(),
-                data: {
-                    let mut map = HashMap::new();
-                    if let Some(data) = data {
-                        map.insert("attr".into(), data.to_string());
-                    }
-                    map
-                },
-            })),
-            promptkit_executor::trace::TraceEventKind::SpanBegin {
-                parent_id,
-                kind,
-                data,
-            } => Some(trace::TraceType::SpanBegin(trace::SpanBegin {
-                parent_id: i32::from(parent_id.unwrap_or_default()),
-                kind: kind.into(),
-                data: {
-                    let mut map = HashMap::new();
-                    if let Some(data) = data {
-                        map.insert("attr".into(), data.to_string());
-                    }
-                    map
-                },
-            })),
-            promptkit_executor::trace::TraceEventKind::SpanEnd { parent_id, data } => {
-                Some(trace::TraceType::SpanEnd(trace::SpanEnd {
-                    parent_id: i32::from(parent_id),
-                    data: {
-                        let mut map = HashMap::new();
-                        if let Some(data) = data {
-                            map.insert("attr".into(), data.to_string());
-                        }
-                        map
-                    },
-                }))
-            }
-        },
     }
 }

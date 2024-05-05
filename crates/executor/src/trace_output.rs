@@ -1,29 +1,23 @@
-use std::sync::Arc;
-
 use bytes::Bytes;
+use smallvec::SmallVec;
 use tracing::event;
 use wasmtime_wasi::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
 
-use crate::trace::TracerContext;
-
 pub struct TraceOutput {
-    ctx: Arc<TracerContext>,
     group: &'static str,
 }
 
 impl TraceOutput {
-    pub fn new(ctx: Arc<TracerContext>, group: &'static str) -> Self {
-        Self { ctx, group }
+    pub const fn new(group: &'static str) -> Self {
+        Self { group }
     }
 }
 
 impl StdoutStream for TraceOutput {
     fn stream(&self) -> Box<dyn HostOutputStream> {
         Box::new(TraceOutputStream {
-            ctx: self.ctx.clone(),
             group: self.group,
-            buffer: vec![],
-            flush_buffer: vec![],
+            buffer: Vec::with_capacity(MAX_BUFFER + MAX_UTF8_BYTES),
         })
     }
 
@@ -33,78 +27,108 @@ impl StdoutStream for TraceOutput {
 }
 
 pub struct TraceOutputStream {
-    ctx: Arc<TracerContext>,
     group: &'static str,
     buffer: Vec<u8>,
-    flush_buffer: Vec<u8>,
 }
 
+const MIN_BUFFER: usize = 64;
 const MAX_BUFFER: usize = 1024;
+const MAX_UTF8_BYTES: usize = 4;
 
-#[async_trait::async_trait]
-impl Subscribe for TraceOutputStream {
-    async fn ready(&mut self) {
-        if self.flush_buffer.is_empty() {
-            return;
-        }
-
-        match String::from_utf8(std::mem::take(&mut self.flush_buffer)) {
-            Ok(s) => {
+impl TraceOutputStream {
+    fn record(&self, s: &str) {
+        match self.group {
+            "stderr" => {
                 event!(
-                    tracing::Level::INFO,
-                    promptkit.kind = "log",
-                    promptkit.log.group = self.group,
-                    promptkit.log.output = &s,
+                    target: "stderr",
+                    tracing::Level::DEBUG,
+                    promptkit.log.output = s,
                     promptkit.user = true,
                 );
-                self.ctx.with_async(|t| t.log(self.group, s.into())).await;
             }
-            Err(e) => {
-                let error = e.utf8_error();
-                let input = e.into_bytes();
-                let s = if input.len() - error.valid_up_to() > 4 {
-                    // not a valid utf-8 sequence
-                    String::from_utf8_lossy(&input)
-                } else {
-                    let (valid, rest) = input.split_at(error.valid_up_to());
-                    self.flush_buffer.extend_from_slice(rest);
-                    if valid.is_empty() {
-                        return;
-                    }
-
-                    // SAFETY: input is valid utf-8
-                    unsafe { std::str::from_utf8_unchecked(valid) }.into()
-                };
+            "stdout" => {
                 event!(
-                    tracing::Level::INFO,
-                    promptkit.kind = "log",
-                    promptkit.log.group = self.group,
-                    promptkit.log.output = s.as_ref(),
+                    target: "stdout",
+                    tracing::Level::DEBUG,
+                    promptkit.log.output = s,
                     promptkit.user = true,
                 );
-                self.ctx.with_async(|t| t.log(self.group, s)).await;
+            }
+            v => {
+                event!(
+                    target: "log",
+                    tracing::Level::DEBUG,
+                    promptkit.log.group = v,
+                    promptkit.log.output = s,
+                    promptkit.user = true,
+                );
             }
         }
     }
 }
 
+#[async_trait::async_trait]
+impl Subscribe for TraceOutputStream {
+    async fn ready(&mut self) {}
+}
+
 impl HostOutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
-        self.buffer.extend(bytes);
-        if self.buffer.len() >= MAX_BUFFER {
-            self.flush_buffer.append(&mut self.buffer);
+        if bytes.len() + self.buffer.len() < MIN_BUFFER {
+            self.buffer.extend_from_slice(&bytes);
+            return Ok(());
+        }
+
+        let (s, v) = {
+            let buf: &[u8] = if self.buffer.is_empty() {
+                &bytes
+            } else {
+                self.buffer.extend(bytes);
+                &self.buffer
+            };
+            match std::str::from_utf8(buf) {
+                Ok(s) => (s.into(), SmallVec::new_const()),
+                Err(error) => {
+                    if buf.len() - error.valid_up_to() > MAX_UTF8_BYTES {
+                        // not a valid utf-8 sequence
+                        (String::from_utf8_lossy(buf), SmallVec::new_const())
+                    } else {
+                        let (valid, rest) = buf.split_at(error.valid_up_to());
+                        if valid.is_empty() {
+                            return Ok(());
+                        }
+
+                        (
+                            // SAFETY: input is valid utf-8
+                            unsafe { std::str::from_utf8_unchecked(valid) }.into(),
+                            (SmallVec::<[u8; MAX_UTF8_BYTES]>::from_slice(rest)),
+                        )
+                    }
+                }
+            }
+        };
+        self.record(&s);
+        self.buffer.clear();
+        if !v.is_empty() {
+            self.buffer.extend_from_slice(&v);
         }
         Ok(())
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        self.flush_buffer.append(&mut self.buffer);
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+
+        let s = String::from_utf8_lossy(&self.buffer);
+        self.record(&s);
+        self.buffer.clear();
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        if MAX_BUFFER > (self.buffer.len() + self.flush_buffer.len()) {
-            Ok(MAX_BUFFER - self.buffer.len() + self.flush_buffer.len())
+        if MAX_BUFFER > self.buffer.len() {
+            Ok(MAX_BUFFER - self.buffer.len())
         } else {
             Ok(0)
         }

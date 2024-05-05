@@ -12,11 +12,11 @@ use opentelemetry_sdk::{
     Resource,
 };
 use opentelemetry_semantic_conventions::resource;
-use otel::grpc_server_tracing_layer;
+use otel::{grpc_server_tracing_layer, request_tracing_layer};
 use promptkit_executor::VmManager;
 use proto::script::script_service_server::ScriptServiceServer;
 use tonic::codec::CompressionEncoding;
-use tracing::Level;
+use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 mod hybrid;
@@ -62,18 +62,21 @@ async fn main() -> anyhow::Result<()> {
             .with_threads(false)
             .with_tracer(tracer)
             .with_filter(FilterFn::new(|metadata| {
-                metadata
-                    .fields()
-                    .iter()
-                    .any(|field| field.name() == "promptkit.user")
+                *metadata.level() <= LevelFilter::INFO
+                    && metadata
+                        .fields()
+                        .iter()
+                        .any(|field| field.name() == "promptkit.user")
             }));
 
         tracing_subscriber::registry()
             .with(opentelemetry)
+            .with(request_tracing_layer())
             .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
             .init();
     } else {
         tracing_subscriber::registry()
+            .with(request_tracing_layer())
             .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
             .init();
     }

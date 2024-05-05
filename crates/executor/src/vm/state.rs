@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
@@ -11,9 +11,7 @@ use wasmtime::{
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::{
-    atomic_cell::AtomicCell,
     resource::MemoryLimiter,
-    trace::TracerContext,
     trace_output::TraceOutput,
     vm::{
         bindgen::{self, host_api::LogLevel},
@@ -31,7 +29,6 @@ pub struct VmState<E> {
     env: E,
     wasi: Mutex<WasiCtx>,
     table: Mutex<ResourceTable>,
-    pub(crate) tracer: Arc<TracerContext>,
     pub(crate) run: Option<VmRunState>,
 }
 
@@ -47,7 +44,6 @@ where
     }
 
     pub fn new(engine: &Engine, workdir: &Path, max_memory: usize, env: E) -> Store<Self> {
-        let tracer = Arc::new(AtomicCell::empty());
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(
                 "./wasm/target/wasm32-wasip1/wasi-deps/usr",
@@ -58,15 +54,14 @@ where
             .unwrap()
             .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
             .unwrap()
-            .stdout(TraceOutput::new(tracer.clone(), "stdout"))
-            .stderr(TraceOutput::new(tracer.clone(), "stderr"))
+            .stdout(TraceOutput::new("stdout"))
+            .stderr(TraceOutput::new("stderr"))
             .build();
         let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
 
         let mut s = Store::new(
             engine,
             Self {
-                tracer,
                 limiter,
                 env,
                 wasi: Mutex::new(wasi),
@@ -113,44 +108,30 @@ where
     async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
         match log_level {
             LogLevel::Debug => event!(
+                target: "debug",
                 tracing::Level::DEBUG,
-                promptkit.kind = "log",
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Info => event!(
+                target: "info",
                 tracing::Level::INFO,
-                promptkit.kind = "log",
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Warn => event!(
+                target: "warn",
                 tracing::Level::WARN,
-                promptkit.kind = "log",
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Error => event!(
+                target: "error",
                 tracing::Level::ERROR,
-                promptkit.kind = "log",
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
         };
-
-        self.tracer
-            .with_async(|t| {
-                t.log(
-                    match log_level {
-                        LogLevel::Debug => "debug",
-                        LogLevel::Info => "info",
-                        LogLevel::Warn => "warn",
-                        LogLevel::Error => "error",
-                    },
-                    data.into(),
-                )
-            })
-            .await;
         Ok(())
     }
 }
@@ -165,8 +146,7 @@ where
 }
 
 #[async_trait::async_trait]
-pub trait EnvCtx: Send + Env {
-    fn tracer(&self) -> &TracerContext;
+pub trait EnvCtx: Env + Send {
     fn table(&mut self) -> &mut ResourceTable;
 }
 
@@ -177,16 +157,12 @@ where
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
     }
-
-    fn tracer(&self) -> &TracerContext {
-        &self.tracer
-    }
 }
 
 #[async_trait::async_trait]
 impl<E> Env for VmState<E>
 where
-    E: Env + Sync + Send,
+    E: Env + Sync,
 {
     async fn send_request(&self, req: reqwest::Request) -> reqwest::Result<reqwest::Response> {
         self.env.send_request(req).await

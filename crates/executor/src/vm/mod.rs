@@ -14,7 +14,6 @@ use tokio::sync::mpsc;
 use wasmtime::{component::ResourceTableError, Store};
 
 use crate::{
-    trace::BoxedTracer,
     vm::{bindgen::host_api, host_types::HostTypesCtx, run::VmRun},
     Env, ExecStreamItem,
 };
@@ -30,12 +29,8 @@ impl<E> Vm<E>
 where
     E: Env + Send,
 {
-    pub fn run(
-        self,
-        tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<ExecStreamItem>,
-    ) -> VmRun<E> {
-        VmRun::new(self, tracer, sender)
+    pub fn run(self, sender: mpsc::Sender<ExecStreamItem>) -> VmRun<E> {
+        VmRun::new(self, sender)
     }
 
     pub fn new_iter(

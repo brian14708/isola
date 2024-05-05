@@ -1,25 +1,21 @@
-use std::{
-    pin::Pin,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{pin::Pin, time::Duration};
 
 use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
-use promptkit_executor::{
-    trace::{BoxedTracer, MemoryTracer, TraceEvent},
-    ExecArgument, ExecStreamItem,
-};
+use promptkit_executor::{ExecArgument, ExecStreamItem};
 use tokio::{sync::mpsc, try_join};
-use tokio_stream::{once, wrappers::ReceiverStream};
+use tokio_stream::{once, wrappers::UnboundedReceiverStream};
 use tonic::{Response, Status};
+use tracing::{level_filters::LevelFilter, span, Instrument, Span};
 
 use crate::{
+    otel::RequestSpanExt,
     proto::script::{
         self, argument::Marker, execute_client_stream_request, execute_stream_request, result,
-        script_service_server::ScriptService, ErrorCode,
+        script_service_server::ScriptService, ErrorCode, Trace,
     },
     routes::AppState,
-    service::prost_serde::{argument, parse_source, trace_convert},
+    service::prost_serde::{argument, parse_source},
     utils::stream::{join_with, stream_until},
 };
 
@@ -64,7 +60,8 @@ impl ScriptService for ScriptServer {
             args,
             timeout,
             stream_tx: None,
-            tracer,
+            span,
+            log_level,
             mut trace_events,
         } = parse_spec(request.get_mut().spec.as_mut())?
         else {
@@ -77,7 +74,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, old_method.unwrap_or(&method), args, tracer)
+                    .exec(script, old_method.unwrap_or(&method), args, log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -93,13 +90,14 @@ impl ScriptService for ScriptServer {
                 Ok(Err(s)) => Err(s),
                 Err(_) => Ok(timeout_error()),
             }
-        };
+        }
+        .instrument(span);
 
         let trace_async = async move {
             let mut metadata = script::ExecutionMetadata::default();
-            if let Some((start, trace_events)) = trace_events.as_mut() {
+            if let Some(trace_events) = trace_events.as_mut() {
                 while let Some(event) = trace_events.recv().await {
-                    metadata.traces.push(trace_convert(event, start));
+                    metadata.traces.push(event);
                 }
             }
             Ok::<_, Status>(metadata)
@@ -130,7 +128,8 @@ impl ScriptService for ScriptServer {
             args,
             timeout,
             stream_tx: mut tx,
-            tracer,
+            span,
+            log_level,
             mut trace_events,
         } = parse_spec(initial.spec.as_mut())?;
 
@@ -139,7 +138,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, old_method.unwrap_or(&method), args, tracer)
+                    .exec(script, old_method.unwrap_or(&method), args, log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -151,13 +150,14 @@ impl ScriptService for ScriptServer {
                 Ok(Err(s)) => Err(s),
                 Err(_) => Ok(timeout_error()),
             }
-        };
+        }
+        .instrument(span);
 
         let trace_async = async move {
             let mut metadata = script::ExecutionMetadata::default();
-            if let Some((start, trace_events)) = trace_events.as_mut() {
+            if let Some(trace_events) = trace_events.as_mut() {
                 while let Some(event) = trace_events.recv().await {
-                    metadata.traces.push(trace_convert(event, start));
+                    metadata.traces.push(event);
                 }
             }
             Ok::<_, Status>(metadata)
@@ -197,7 +197,8 @@ impl ScriptService for ScriptServer {
             args,
             timeout,
             stream_tx: None,
-            tracer,
+            span,
+            log_level,
             trace_events,
         } = parse_spec(request.get_mut().spec.as_mut())?
         else {
@@ -209,8 +210,9 @@ impl ScriptService for ScriptServer {
             timeout,
             self.state
                 .vm
-                .exec(script, old_method.unwrap_or(&method), args, tracer),
+                .exec(script, old_method.unwrap_or(&method), args, log_level),
         )
+        .instrument(span.clone())
         .await
         {
             Ok(s) => {
@@ -247,14 +249,14 @@ impl ScriptService for ScriptServer {
         let stream = stream_until(
             m,
             deadline,
+            span,
             Ok(script::ExecuteServerStreamResponse {
                 result: Some(timeout_error()),
                 metadata: None,
             }),
         );
-        if let Some((start, tracer_events)) = trace_events {
-            let trace_async = ReceiverStream::new(tracer_events)
-                .map(move |e| trace_convert(e, &start))
+        if let Some(tracer_events) = trace_events {
+            let trace_async = UnboundedReceiverStream::new(tracer_events)
                 .ready_chunks(4)
                 .map(|traces| {
                     Ok(script::ExecuteServerStreamResponse {
@@ -288,16 +290,19 @@ impl ScriptService for ScriptServer {
             args,
             timeout,
             stream_tx: mut tx,
-            tracer,
+            span,
             trace_events,
+            log_level,
         } = parse_spec(initial.spec.as_mut())?;
+
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
             self.state
                 .vm
-                .exec(script, old_method.unwrap_or(&method), args, tracer),
+                .exec(script, old_method.unwrap_or(&method), args, log_level),
         )
+        .instrument(span.clone())
         .await
         {
             Ok(s) => {
@@ -352,14 +357,14 @@ impl ScriptService for ScriptServer {
         let stream = stream_until(
             join_with(m, mover),
             deadline,
+            span,
             Ok(script::ExecuteStreamResponse {
                 result: Some(timeout_error()),
                 metadata: None,
             }),
         );
-        if let Some((start, tracer_events)) = trace_events {
-            let trace_async = ReceiverStream::new(tracer_events)
-                .map(move |e| trace_convert(e, &start))
+        if let Some(tracer_events) = trace_events {
+            let trace_async = UnboundedReceiverStream::new(tracer_events)
                 .ready_chunks(4)
                 .map(|traces| {
                     Ok(script::ExecuteStreamResponse {
@@ -427,8 +432,9 @@ struct ParsedSpec {
     args: Vec<ExecArgument>,
     timeout: Duration,
     stream_tx: Option<mpsc::Sender<Vec<u8>>>,
-    tracer: Option<BoxedTracer>,
-    trace_events: Option<(Duration, mpsc::Receiver<TraceEvent>)>,
+    log_level: LevelFilter,
+    span: tracing::Span,
+    trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
 }
 
 fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, Status> {
@@ -450,21 +456,19 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
                 Err(e) => Err(e),
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let (tracer, trace_events) = (spec.trace_level == i32::from(script::TraceLevel::All))
-            .then(MemoryTracer::new)
-            .map(|(a, b)| -> (Option<BoxedTracer>, _) {
-                (
-                    Some(a),
-                    Some((
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap_or_default(),
-                        b,
-                    )),
-                )
-            })
-            .unwrap_or_default();
 
+        let (span, trace, log_level) = match script::TraceLevel::try_from(spec.trace_level) {
+            Ok(script::TraceLevel::All) => {
+                let s = span!(tracing::Level::TRACE, "trace span", promptkit.user = true);
+                if let Some(t) = s.enable_tracing(LevelFilter::DEBUG) {
+                    (s, Some(t), LevelFilter::DEBUG)
+                } else {
+                    (Span::none(), None, LevelFilter::DEBUG)
+                }
+            }
+            Ok(script::TraceLevel::None) => (Span::none(), None, LevelFilter::OFF),
+            _ => (Span::none(), None, LevelFilter::INFO),
+        };
         Ok(ParsedSpec {
             method: std::mem::take(&mut spec.method),
             args,
@@ -473,8 +477,9 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
                 std::time::Duration::from_secs_f64(t.seconds as f64 + f64::from(t.nanos) * 1e-9)
             }),
             stream_tx: if rx.is_none() { Some(tx) } else { None },
-            tracer,
-            trace_events,
+            span,
+            log_level,
+            trace_events: trace,
         })
     } else {
         Ok(ParsedSpec {
@@ -482,7 +487,8 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
             args: vec![],
             timeout: DEFAULT_TIMEOUT,
             stream_tx: None,
-            tracer: None,
+            span: Span::none(),
+            log_level: LevelFilter::OFF,
             trace_events: None,
         })
     }

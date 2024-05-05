@@ -8,7 +8,7 @@ use super::{
     state::{VmRunState, VmState},
     Vm,
 };
-use crate::{trace::BoxedTracer, Env, ExecStreamItem};
+use crate::{Env, ExecStreamItem};
 
 pub struct VmRun<E: Env> {
     vm: Option<Vm<E>>,
@@ -18,16 +18,8 @@ impl<E> VmRun<E>
 where
     E: Env,
 {
-    pub fn new(
-        mut vm: Vm<E>,
-        tracer: Option<BoxedTracer>,
-        sender: mpsc::Sender<ExecStreamItem>,
-    ) -> Self {
+    pub fn new(mut vm: Vm<E>, sender: mpsc::Sender<ExecStreamItem>) -> Self {
         let o: &mut VmState<_> = vm.store.data_mut();
-        if let Some(tracer) = tracer {
-            // SAFETY: vm is not running yet
-            unsafe { o.tracer.set_unguarded(Some(tracer)) };
-        }
         o.run = Some(VmRunState { output: sender });
         Self { vm: Some(vm) }
     }
@@ -47,8 +39,6 @@ where
         if let Some(vm) = self.vm.as_mut() {
             let o: &mut VmState<_> = vm.store.data_mut();
             o.run = None;
-            // SAFETY: vm is not running anymore
-            unsafe { o.tracer.set_unguarded(None) };
         }
     }
 

@@ -2,7 +2,6 @@ use std::{str::FromStr, time::Duration};
 
 use bytes::Bytes;
 use eventsource_stream::{Event, EventStreamError, Eventsource};
-use serde_json::{json, value::to_raw_value};
 use tokio_stream::{Stream, StreamExt};
 use tracing::{field::Empty, span, Instrument, Span};
 use wasmtime::component::Resource;
@@ -16,7 +15,6 @@ pub struct ResponseSseBody {
     inner: Box<
         dyn Stream<Item = Result<Event, EventStreamError<reqwest::Error>>> + Send + Sync + Unpin,
     >,
-    span_id: Option<i16>,
     span: Span,
 }
 
@@ -42,12 +40,7 @@ where
                 Some(Err(http_client::Error::Unknown(err.to_string())))
             }
             None => {
-                // end
-                if let Some(span_id) = body.span_id {
-                    self.tracer()
-                        .with_async(|t| t.span_end("http", span_id, None))
-                        .await;
-                }
+                let _ = std::mem::replace(&mut body.span, Span::none());
                 None
             }
         })
@@ -75,9 +68,9 @@ where
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
         let request: Request = self.table().delete(request)?;
         let span = span!(
+            target: "http",
             tracing::Level::INFO,
             "http_client::fetch",
-            promptkit.kind = "http",
             promptkit.user = true,
             http.response.status_code = Empty,
             http.response.body_size = Empty,
@@ -85,45 +78,7 @@ where
 
         let inner = request.inner;
 
-        let span_id = self
-            .tracer()
-            .with_async(|f| {
-                f.span_begin(
-                    "http",
-                    None,
-                    "request".into(),
-                    to_raw_value(&json!({
-                        "url": inner.url().to_string(),
-                        "method": inner.method().to_string(),
-                    }))
-                    .ok(),
-                )
-            })
-            .await;
-
         let exec = self.send_request(inner).instrument(span.clone()).await;
-
-        self.tracer()
-            .with_async(|f| async {
-                f.event(
-                    "http",
-                    span_id,
-                    "response_start".into(),
-                    to_raw_value(&json!({
-                        "status": exec
-                            .as_ref()
-                            .map(|r| r.status().as_u16())
-                            .unwrap_or_default(),
-                    }))
-                    .ok(),
-                )
-                .await;
-
-                if let (true, Some(span_id)) = (request.eager, span_id) {
-                    f.span_end("http", span_id, None).await;
-                }
-            })
-            .await;
 
         match exec {
             Ok(response) => {
@@ -147,12 +102,10 @@ where
                             status,
                             body,
                         },
-                        span_id: None,
                     }
                 } else {
                     Response {
                         kind: ResponseKind::Lazy { response, span },
-                        span_id,
                     }
                 };
                 Ok(Ok(self.table().push(r)?))
@@ -168,9 +121,9 @@ where
     ) -> wasmtime::Result<Vec<Result<wasmtime::component::Resource<Response>, http_client::Error>>>
     {
         let span = span!(
+            target: "http",
             tracing::Level::INFO,
             "http_client::fetch_all",
-            promptkit.kind = "http",
             promptkit.user = true,
         );
         let requests = requests
@@ -182,92 +135,43 @@ where
             return Err(anyhow::anyhow!("fetch_all only supports eager requests"));
         }
 
-        let span_id = self
-            .tracer()
-            .with_async(|f| {
-                f.span_begin(
-                    "http",
-                    None,
-                    "request-multi".into(),
-                    to_raw_value(
-                        &requests
-                            .iter()
-                            .map(|r| {
-                                json!({
-                                    "url": r.inner.url().to_string(),
-                                    "method": r.inner.method().to_string(),
-                                })
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                    .ok(),
-                )
-            })
-            .await;
-
         let client = &self;
-        let tracer = self.tracer();
-        let ret = futures_util::future::join_all(requests.into_iter().enumerate().map(
-            |(idx, r)| async move {
-                let span = span!(
-                    tracing::Level::INFO,
-                    "http_client::fetch",
-                    promptkit.kind = "http",
-                    promptkit.user = true,
-                    http.response.status_code = Empty,
-                    http.response.body_size = Empty,
-                );
-                let inner = r.inner;
-                let r = client
-                    .send_request(inner)
-                    .instrument(span.clone())
-                    .await
-                    .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
-                let headers = r.headers().clone();
-                let status = r.status();
-                let body = r
-                    .bytes()
-                    .instrument(span.clone())
-                    .await
-                    .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
-                span.record("http.response.body_size", body.len() as u64);
-                if let Some(span_id) = span_id {
-                    tracer
-                        .with_async(|f| {
-                            f.event(
-                                "http",
-                                Some(span_id),
-                                "response-finished".into(),
-                                to_raw_value(&json!({
-                                    "status": status.as_u16(),
-                                    "index": idx,
-                                }))
-                                .ok(),
-                            )
-                        })
-                        .await;
-                }
-                Ok((
-                    Response {
-                        kind: ResponseKind::Eager {
-                            headers,
-                            status,
-                            body,
-                        },
-                        span_id: None,
+        let ret = futures_util::future::join_all(requests.into_iter().map(|r| async move {
+            let span = span!(
+                target: "http",
+                tracing::Level::INFO,
+                "http_client::fetch",
+                promptkit.user = true,
+                http.response.status_code = Empty,
+                http.response.body_size = Empty,
+            );
+            let inner = r.inner;
+            let r = client
+                .send_request(inner)
+                .instrument(span.clone())
+                .await
+                .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
+            let headers = r.headers().clone();
+            let status = r.status();
+            let body = r
+                .bytes()
+                .instrument(span.clone())
+                .await
+                .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
+            span.record("http.response.body_size", body.len() as u64);
+            Ok((
+                Response {
+                    kind: ResponseKind::Eager {
+                        headers,
+                        status,
+                        body,
                     },
-                    status,
-                ))
-            },
-        ))
+                },
+                status,
+            ))
+        }))
         .instrument(span.clone())
         .await;
-
-        if let Some(span_id) = span_id {
-            self.tracer()
-                .with_async(|f| f.span_end("http", span_id, None))
-                .await;
-        }
 
         let mut result = vec![];
         for r in ret {
@@ -359,7 +263,6 @@ where
 
 pub struct Response {
     kind: ResponseKind,
-    span_id: Option<i16>,
 }
 
 enum ResponseKind {
@@ -424,21 +327,6 @@ where
             }
         };
 
-        if let Some(span_id) = response.span_id {
-            self.tracer()
-                .with_async(|t| {
-                    t.span_end(
-                        "http",
-                        span_id,
-                        to_raw_value(&json!({
-                            "content_length": body.as_ref().map(Bytes::len).unwrap_or_default()
-                        }))
-                        .ok(),
-                    )
-                })
-                .await;
-        }
-
         Ok(match body {
             Ok(data) => Ok(data.into()),
             Err(err) => Err(http_client::Error::Unknown(err.to_string())),
@@ -460,7 +348,6 @@ where
 
         Ok(self.table().push(ResponseSseBody {
             inner: Box::new(body),
-            span_id: response.span_id,
             span,
         })?)
     }

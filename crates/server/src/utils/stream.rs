@@ -139,11 +139,13 @@ impl<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> St
 pub fn stream_until<T, E>(
     stream: impl Stream<Item = Result<T, E>>,
     deadline: std::time::Instant,
+    span: tracing::Span,
     timeout_response: Result<T, E>,
 ) -> impl Stream<Item = Result<T, E>> {
     StreamTimeout {
         stream: Some(stream),
         sleep: tokio::time::sleep_until(deadline.into()),
+        span,
         timeout_response: Some(timeout_response),
     }
 }
@@ -154,6 +156,7 @@ pub struct StreamTimeout<S: Stream<Item = Result<T, E>>, T, E> {
     stream: Option<S>,
     #[pin]
     sleep: tokio::time::Sleep,
+    span: tracing::Span,
     timeout_response: Option<Result<T, E>>,
 }
 
@@ -165,6 +168,7 @@ impl<S: Stream<Item = Result<T, E>>, T, E> Stream for StreamTimeout<S, T, E> {
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
+        let _enter = this.span.enter();
 
         if let Some(stream) = this.stream.as_mut().as_pin_mut() {
             match this.sleep.poll(cx) {

@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
-use tracing::info;
+use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
     component::{Component, InstancePre, ResourceTableError},
     Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig,
@@ -22,7 +22,6 @@ use wasmtime::{
 
 use crate::{
     error::Error,
-    trace::BoxedTracer,
     vm::{
         exports::{Argument, LogLevel},
         Sandbox, Vm, VmState,
@@ -174,14 +173,13 @@ where
         &self,
         func: &str,
         args: SmallVec<[Argument; 2]>,
-        tracer: Option<BoxedTracer>,
         vm: Vm<E>,
+        level: LevelFilter,
     ) -> impl Stream<Item = ExecStreamItem> + Send {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
-        let has_tracer = tracer.is_some();
-        let mut run = vm.run(tracer, tx.clone());
+        let mut run = vm.run(tx.clone());
         let func = func.to_string();
         let exec = Box::pin(async move {
             let ret = run
@@ -189,10 +187,12 @@ where
                     let _ = vm
                         .call_set_log_level(
                             &mut store,
-                            if has_tracer {
-                                Some(LogLevel::Debug)
-                            } else {
-                                Some(LogLevel::Info)
+                            match level {
+                                LevelFilter::OFF => None,
+                                LevelFilter::ERROR => Some(LogLevel::Error),
+                                LevelFilter::WARN => Some(LogLevel::Warn),
+                                LevelFilter::INFO => Some(LogLevel::Info),
+                                LevelFilter::DEBUG | LevelFilter::TRACE => Some(LogLevel::Debug),
                             },
                         )
                         .await;
@@ -221,7 +221,7 @@ where
         script: ExecSource<'_>,
         func: &str,
         args: impl IntoIterator<Item = ExecArgument>,
-        tracer: Option<BoxedTracer>,
+        level: LevelFilter,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
         let hash = script.hash();
 
@@ -266,6 +266,7 @@ where
             }
             vm
         };
+
         Ok(self.exec_impl(
             func,
             args.into_iter()
@@ -276,8 +277,8 @@ where
                     )),
                 })
                 .collect::<Result<_, _>>()?,
-            tracer,
             vm,
+            level,
         ))
     }
 }
