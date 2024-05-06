@@ -68,9 +68,9 @@ where
     ) -> wasmtime::Result<Result<wasmtime::component::Resource<Response>, http_client::Error>> {
         let request: Request = self.table().delete(request)?;
         let span = span!(
-            target: "http",
+            target: "promptkit::http",
             tracing::Level::INFO,
-            "http_client::fetch",
+            "http::fetch",
             promptkit.user = true,
             http.response.status_code = Empty,
             http.response.body_size = Empty,
@@ -121,9 +121,9 @@ where
     ) -> wasmtime::Result<Vec<Result<wasmtime::component::Resource<Response>, http_client::Error>>>
     {
         let span = span!(
-            target: "http",
+            target: "promptkit::http",
             tracing::Level::INFO,
-            "http_client::fetch_all",
+            "http::fetch_all",
             promptkit.user = true,
         );
         let requests = requests
@@ -138,9 +138,9 @@ where
         let client = &self;
         let ret = futures_util::future::join_all(requests.into_iter().map(|r| async move {
             let span = span!(
-                target: "http",
+                target: "promptkit::http",
                 tracing::Level::INFO,
-                "http_client::fetch",
+                "http::fetch",
                 promptkit.user = true,
                 http.response.status_code = Empty,
                 http.response.body_size = Empty,

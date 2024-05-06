@@ -108,25 +108,25 @@ where
     async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
         match log_level {
             LogLevel::Debug => event!(
-                target: "debug",
+                target: "promptkit::debug",
                 tracing::Level::DEBUG,
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Info => event!(
-                target: "info",
+                target: "promptkit::info",
                 tracing::Level::INFO,
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Warn => event!(
-                target: "warn",
+                target: "promptkit::warn",
                 tracing::Level::WARN,
                 promptkit.log.output = &data,
                 promptkit.user = true,
             ),
             LogLevel::Error => event!(
-                target: "error",
+                target: "promptkit::error",
                 tracing::Level::ERROR,
                 promptkit.log.output = &data,
                 promptkit.user = true,

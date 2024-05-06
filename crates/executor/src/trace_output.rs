@@ -17,7 +17,7 @@ impl StdoutStream for TraceOutput {
     fn stream(&self) -> Box<dyn HostOutputStream> {
         Box::new(TraceOutputStream {
             group: self.group,
-            buffer: Vec::with_capacity(MAX_BUFFER + MAX_UTF8_BYTES),
+            buffer: SmallVec::new(),
         })
     }
 
@@ -28,7 +28,7 @@ impl StdoutStream for TraceOutput {
 
 pub struct TraceOutputStream {
     group: &'static str,
-    buffer: Vec<u8>,
+    buffer: SmallVec<[u8; MAX_BUFFER + MAX_UTF8_BYTES]>,
 }
 
 const MIN_BUFFER: usize = 64;
@@ -40,27 +40,29 @@ impl TraceOutputStream {
         match self.group {
             "stderr" => {
                 event!(
-                    target: "stderr",
+                    target: "promptkit::stderr",
                     tracing::Level::DEBUG,
-                    promptkit.log.output = s,
                     promptkit.user = true,
+                    promptkit.log.group = "stderr",
+                    promptkit.log.output = s,
                 );
             }
             "stdout" => {
                 event!(
-                    target: "stdout",
+                    target: "promptkit::stdout",
                     tracing::Level::DEBUG,
-                    promptkit.log.output = s,
                     promptkit.user = true,
+                    promptkit.log.group = "stderr",
+                    promptkit.log.output = s,
                 );
             }
             v => {
                 event!(
-                    target: "log",
+                    target: "promptkit::log",
                     tracing::Level::DEBUG,
+                    promptkit.user = true,
                     promptkit.log.group = v,
                     promptkit.log.output = s,
-                    promptkit.user = true,
                 );
             }
         }

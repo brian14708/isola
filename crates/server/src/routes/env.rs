@@ -16,9 +16,9 @@ pub struct VmEnv {
 impl Env for VmEnv {
     async fn send_request(&self, mut req: reqwest::Request) -> reqwest::Result<reqwest::Response> {
         let span = tracing::span!(
-            target: "http",
+            target: "promptkit::http",
             tracing::Level::INFO,
-            "http_client::fetch_reqwest",
+            "http::request_send",
             promptkit.user = true,
             otel.kind = "client",
             { trace::HTTP_REQUEST_METHOD } = req.method().as_str(),

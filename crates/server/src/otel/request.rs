@@ -258,9 +258,14 @@ impl MemoryTracer {
             self.request.epoch.elapsed().as_micros(),
         ));
 
+        let target = metadata.target();
+        let group = match target.strip_prefix("promptkit::") {
+            Some(s) => s.to_string(),
+            None => target.to_string(),
+        };
         Trace {
             id: self.request.idgen.fetch_add(1, Ordering::Relaxed),
-            group: metadata.target().to_string(),
+            group,
             timestamp: Some(prost_types::Timestamp {
                 #[allow(clippy::cast_possible_wrap)]
                 seconds: ts.as_secs() as i64,
