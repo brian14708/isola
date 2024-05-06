@@ -120,9 +120,33 @@ impl HostOutputStream for TraceOutputStream {
             return Ok(());
         }
 
-        let s = String::from_utf8_lossy(&self.buffer);
+        let buf = &self.buffer;
+        let (s, v) = match std::str::from_utf8(buf) {
+            Ok(s) => (s.into(), SmallVec::new_const()),
+            Err(error) => {
+                if buf.len() - error.valid_up_to() > MAX_UTF8_BYTES {
+                    // not a valid utf-8 sequence
+                    (String::from_utf8_lossy(buf), SmallVec::new_const())
+                } else {
+                    let (valid, rest) = buf.split_at(error.valid_up_to());
+                    if valid.is_empty() {
+                        return Ok(());
+                    }
+
+                    (
+                        // SAFETY: input is valid utf-8
+                        unsafe { std::str::from_utf8_unchecked(valid) }.into(),
+                        (SmallVec::<[u8; MAX_UTF8_BYTES]>::from_slice(rest)),
+                    )
+                }
+            }
+        };
         self.record(&s);
         self.buffer.clear();
+        if !v.is_empty() {
+            self.buffer.extend_from_slice(&v);
+        }
+
         Ok(())
     }
 
