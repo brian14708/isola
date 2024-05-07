@@ -6,7 +6,7 @@ use cbor4ii::core::utils::SliceReader;
 use pyo3::{
     append_to_inittab,
     prelude::*,
-    types::{PyDict, PyString, PyTuple},
+    types::{PyBytes, PyDict, PyString, PyTuple},
 };
 use serde::de::DeserializeSeed;
 use url::Url;
@@ -243,30 +243,75 @@ fn set_timeout(request: &Request, timeout: Option<f32>) {
     }
 }
 
+enum ResponseFormat {
+    Json,
+    Text,
+    Binary,
+}
+
+impl ResponseFormat {
+    fn from_str(format: &str) -> PyResult<Self> {
+        match format {
+            "text" => Ok(Self::Text),
+            "json" => Ok(Self::Json),
+            "binary" => Ok(Self::Binary),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                "invalid response format".to_string(),
+            )),
+        }
+    }
+
+    fn set_accept_header(&self, request: &Request) {
+        request
+            .set_header(
+                "accept",
+                match self {
+                    Self::Text => "text/*",
+                    Self::Json => "application/json",
+                    Self::Binary => "application/octet-stream",
+                },
+            )
+            .unwrap();
+    }
+
+    fn response(&self, py: Python<'_>, response: http_client::Response) -> PyResult<PyObject> {
+        let body = http_client::Response::body(response)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        match self {
+            Self::Text => Ok(PyString::new_bound(
+                py,
+                std::str::from_utf8(&body)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?,
+            )
+            .into()),
+            Self::Binary => Ok(PyBytes::new_bound(py, &body).into()),
+            Self::Json => PyObjectDeserializer::new(py)
+                .deserialize(&mut serde_json::Deserializer::from_slice(&body))
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
+        }
+    }
+}
+
 #[pymodule]
 fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None, response="json"))]
     fn get(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
         params: Option<&Bound<'_, PyDict>>,
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
+        response: &str,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
-        request.set_header("accept", "application/json").unwrap();
+        let format = ResponseFormat::from_str(response)?;
+        format.set_accept_header(&request);
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         match http_client::fetch(request) {
-            Ok(response) => PyObjectDeserializer::new(py)
-                .deserialize(&mut serde_json::Deserializer::from_slice(
-                    &(http_client::Response::body(response).map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                    })?),
-                ))
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
+            Ok(response) => format.response(py, response),
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 e.to_string(),
             )),
@@ -274,21 +319,24 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None, response="json"))]
     fn get_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
         params: Option<&Bound<'_, PyDict>>,
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
+        response: &str,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
-        request.set_header("accept", "application/json").unwrap();
+        let format = ResponseFormat::from_str(response)?;
+        format.set_accept_header(&request);
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         Ok(AsyncRequest {
             request: Some(request),
+            format,
         }
         .into_py(py))
     }
@@ -318,33 +366,26 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None, response="json"))]
     fn post(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
         data: Option<PyObject>,
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
+        response: &str,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
-        request
-            .set_header("content-type", "application/json")
-            .unwrap();
-        request.set_header("accept", "application/json").unwrap();
+        let format = ResponseFormat::from_str(response)?;
+        format.set_accept_header(&request);
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
             request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         match http_client::fetch(request) {
-            Ok(response) => PyObjectDeserializer::new(py)
-                .deserialize(&mut serde_json::Deserializer::from_slice(
-                    &(http_client::Response::body(response).map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                    })?),
-                ))
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
+            Ok(response) => format.response(py, response),
             Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 e.to_string(),
             )),
@@ -352,20 +393,19 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None, response="json"))]
     fn post_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
         data: Option<PyObject>,
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
+        response: &str,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
-        request
-            .set_header("content-type", "application/json")
-            .unwrap();
-        request.set_header("accept", "application/json").unwrap();
+        let format = ResponseFormat::from_str(response)?;
+        format.set_accept_header(&request);
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
@@ -373,6 +413,7 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
         }
         Ok(AsyncRequest {
             request: Some(request),
+            format,
         }
         .into_py(py))
     }
@@ -408,31 +449,35 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
+    #[pyo3(signature = (requests, /, allow_errors=false))]
     fn fetch_all(
         py: Python<'_>,
         mut requests: Vec<PyRefMut<AsyncRequest>>,
+        allow_errors: bool,
     ) -> PyResult<Vec<PyObject>> {
         let mut results = vec![];
 
-        for e in http_client::fetch_all(
+        for (e, request) in http_client::fetch_all(
             requests
                 .iter_mut()
                 .map(|r| r.request.take().unwrap())
                 .collect::<Vec<_>>(),
-        ) {
+        )
+        .into_iter()
+        .zip(requests.iter())
+        {
             match e {
                 Ok(response) => {
-                    results.push(
-                        PyObjectDeserializer::new(py)
-                            .deserialize(&mut serde_json::Deserializer::from_slice(
-                                &(http_client::Response::body(response).map_err(|e| {
-                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                                })?),
-                            ))
-                            .map_err(|e| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                            })?,
-                    );
+                    results.push(match request.format.response(py, response) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            if allow_errors {
+                                e.into_py(py)
+                            } else {
+                                return Err(e);
+                            }
+                        }
+                    });
                 }
                 Err(e) => {
                     return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -451,6 +496,7 @@ fn http(_py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
 #[pyclass]
 struct AsyncRequest {
     request: Option<Request>,
+    format: ResponseFormat,
 }
 
 #[pyclass]
