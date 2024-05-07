@@ -82,8 +82,23 @@ function Index() {
       const m = JSON5.parse(requestRef.current.getValue()) as {
         args?: object[];
         method: string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        options?: any;
         stream?: boolean;
       };
+      const spec = scriptv1.ExecutionSpec.create({
+        ...(m.options || {}),
+        traceLevel: 2,
+        arguments:
+          m.args?.map((v) => {
+            return {
+              argumentType: {
+                oneofKind: "json",
+                json: JSON.stringify(v),
+              },
+            };
+          }) || [],
+      });
       if (m.stream) {
         const res = client.executeServerStream({
           source: {
@@ -97,19 +112,7 @@ function Index() {
             },
           },
           resultContentType: [scriptv1.ContentType.JSON],
-          spec: {
-            method: m.method,
-            traceLevel: 2,
-            arguments:
-              m.args?.map((v) => {
-                return {
-                  argumentType: {
-                    oneofKind: "json",
-                    json: JSON.stringify(v),
-                  },
-                };
-              }) || [],
-          },
+          spec: spec,
         });
         let s = "";
         for await (const response of res.responses) {
@@ -148,19 +151,7 @@ function Index() {
             },
           },
           resultContentType: [scriptv1.ContentType.JSON],
-          spec: {
-            method: m.method,
-            traceLevel: 0,
-            arguments:
-              m.args?.map((v) => {
-                return {
-                  argumentType: {
-                    oneofKind: "json",
-                    json: JSON.stringify(v),
-                  },
-                };
-              }) || [],
-          },
+          spec: spec,
         });
         const resp = res.response;
         if (resp.result?.resultType.oneofKind === "json") {
@@ -172,7 +163,7 @@ function Index() {
         }
       }
     } catch (err) {
-      previewRef.current.setValue(`/* ERROR: ${err} */`);
+      previewRef.current.setValue(`/* ERROR: ${decodeURI(`${err}`)} */`);
     }
   }, []);
 

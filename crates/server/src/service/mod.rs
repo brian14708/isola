@@ -1,8 +1,9 @@
-use std::{pin::Pin, time::Duration};
+use std::{borrow::Cow, pin::Pin, time::Duration};
 
 use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecStreamItem};
+use reqwest::Client;
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{once, wrappers::UnboundedReceiverStream};
 use tonic::{Response, Status};
@@ -10,11 +11,11 @@ use tracing::{level_filters::LevelFilter, span, Instrument, Span};
 
 use crate::{
     otel::RequestSpanExt,
-    proto::script::{
-        self, argument::Marker, execute_client_stream_request, execute_stream_request, result,
-        script_service_server::ScriptService, ErrorCode, Trace,
+    proto::script::v1::{
+        self as script, argument::Marker, execute_client_stream_request, execute_stream_request,
+        result, script_service_server::ScriptService, ErrorCode, Trace,
     },
-    routes::AppState,
+    routes::{AppState, VmEnv},
     service::prost_serde::{argument, parse_source},
     utils::stream::{join_with, stream_until},
 };
@@ -25,11 +26,17 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ScriptServer {
     state: AppState,
+    base_env: VmEnv,
 }
 
 impl ScriptServer {
     pub fn new(state: AppState) -> Self {
-        Self { state }
+        let base_env = VmEnv {
+            http: Client::builder().gzip(true).build().unwrap(),
+            cache: moka::future::Cache::new(16),
+            llm_config: None,
+        };
+        Self { state, base_env }
     }
 }
 
@@ -63,7 +70,8 @@ impl ScriptService for ScriptServer {
             span,
             log_level,
             mut trace_events,
-        } = parse_spec(request.get_mut().spec.as_mut())?
+            env,
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
@@ -74,7 +82,13 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, old_method.unwrap_or(&method), args, log_level)
+                    .exec(
+                        script,
+                        old_method.unwrap_or(&method),
+                        args,
+                        env.as_ref(),
+                        log_level,
+                    )
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -131,14 +145,21 @@ impl ScriptService for ScriptServer {
             span,
             log_level,
             mut trace_events,
-        } = parse_spec(initial.spec.as_mut())?;
+            env,
+        } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
         let result = async {
             let run = async {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, old_method.unwrap_or(&method), args, log_level)
+                    .exec(
+                        script,
+                        old_method.unwrap_or(&method),
+                        args,
+                        env.as_ref(),
+                        log_level,
+                    )
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -200,7 +221,8 @@ impl ScriptService for ScriptServer {
             span,
             log_level,
             trace_events,
-        } = parse_spec(request.get_mut().spec.as_mut())?
+            env,
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
@@ -208,9 +230,13 @@ impl ScriptService for ScriptServer {
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(script, old_method.unwrap_or(&method), args, log_level),
+            self.state.vm.exec(
+                script,
+                old_method.unwrap_or(&method),
+                args,
+                env.as_ref(),
+                log_level,
+            ),
         )
         .instrument(span.clone())
         .await
@@ -273,6 +299,7 @@ impl ScriptService for ScriptServer {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn execute_stream(
         &self,
         mut request: tonic::Request<tonic::Streaming<script::ExecuteStreamRequest>>,
@@ -293,14 +320,19 @@ impl ScriptService for ScriptServer {
             span,
             trace_events,
             log_level,
-        } = parse_spec(initial.spec.as_mut())?;
+            env,
+        } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(script, old_method.unwrap_or(&method), args, log_level),
+            self.state.vm.exec(
+                script,
+                old_method.unwrap_or(&method),
+                args,
+                env.as_ref(),
+                log_level,
+            ),
         )
         .instrument(span.clone())
         .await
@@ -427,7 +459,7 @@ async fn non_stream_result(
     prost_serde::result_type(b.into_inner().into(), content_type)
 }
 
-struct ParsedSpec {
+struct ParsedSpec<'a> {
     method: String,
     args: Vec<ExecArgument>,
     timeout: Duration,
@@ -435,9 +467,13 @@ struct ParsedSpec {
     log_level: LevelFilter,
     span: tracing::Span,
     trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
+    env: Cow<'a, VmEnv>,
 }
 
-fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, Status> {
+fn parse_spec<'a>(
+    spec: Option<&mut script::ExecutionSpec>,
+    base_env: &'a VmEnv,
+) -> Result<ParsedSpec<'a>, Status> {
     if let Some(spec) = spec {
         let (tx, rx) = mpsc::channel(4);
         let mut rx = Some(rx);
@@ -480,6 +516,7 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
             span,
             log_level,
             trace_events: trace,
+            env: base_env.update(spec.llm_config.as_ref()),
         })
     } else {
         Ok(ParsedSpec {
@@ -490,6 +527,7 @@ fn parse_spec(spec: Option<&mut script::ExecutionSpec>) -> Result<ParsedSpec, St
             span: Span::none(),
             log_level: LevelFilter::OFF,
             trace_events: None,
+            env: Cow::Borrowed(base_env),
         })
     }
 }

@@ -37,6 +37,7 @@ interface guest-api {
 }
 
 world sandbox {
+    import llm;
     import http-client;
     import host-api;
     export guest-api;

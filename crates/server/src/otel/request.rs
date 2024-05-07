@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use tracing::{level_filters::LevelFilter, span, Metadata, Subscriber};
 use tracing_subscriber::{filter::FilterFn, registry::LookupSpan, Layer, Registry};
 
-use crate::proto::script::{trace, Trace};
+use crate::proto::script::v1::{trace, Trace};
 
 use super::visit::{FieldVisitor, StringVisitor, VisitExt};
 

@@ -8,7 +8,6 @@ use axum::{
 };
 use prometheus_client::{encoding::text::encode, registry::Registry};
 use promptkit_executor::VmManager;
-use reqwest::Client;
 
 use super::env::VmEnv;
 
@@ -21,12 +20,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         Ok(Self {
-            vm: Arc::new(VmManager::new(
-                vm_path.as_ref(),
-                VmEnv {
-                    http: Client::builder().gzip(true).build()?,
-                },
-            )?),
+            vm: Arc::new(VmManager::<VmEnv>::new(vm_path.as_ref())?),
             metrics: Arc::new(Metrics::default()),
         })
     }

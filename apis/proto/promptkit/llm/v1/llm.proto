@@ -1,0 +1,21 @@
+syntax = "proto3";
+package promptkit.llm.v1;
+
+import "promptkit/common/v1/common.proto";
+
+message LLMConfig {
+  repeated Tokenizers tokenizers = 1;
+}
+
+message Tokenizers {
+  enum Type {
+    TYPE_UNSPECIFIED = 0;
+    TYPE_SENTENCEPIECE = 1;
+  }
+
+  string name = 1;
+  Type type = 2;
+  oneof source {
+    common.v1.RemoteFile remote_file = 3;
+  }
+}

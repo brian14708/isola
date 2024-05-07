@@ -1,7 +1,8 @@
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
+use promptkit_llm::tokenizers::Tokenizer;
 use tokio::sync::mpsc;
 use tracing::event;
 use wasmtime::{
@@ -11,6 +12,7 @@ use wasmtime::{
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::{
+    env::EnvError,
     resource::MemoryLimiter,
     trace_output::TraceOutput,
     vm::{
@@ -164,7 +166,18 @@ impl<E> Env for VmState<E>
 where
     E: Env + Sync,
 {
-    async fn send_request(&self, req: reqwest::Request) -> reqwest::Result<reqwest::Response> {
+    fn hash(&self, _update: impl FnMut(&[u8])) {
+        unreachable!("hashing not implemented")
+    }
+
+    async fn send_request(&self, req: reqwest::Request) -> Result<reqwest::Response, EnvError> {
         self.env.send_request(req).await
+    }
+
+    async fn get_tokenizer(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn Tokenizer + Send + Sync>, EnvError> {
+        self.env.get_tokenizer(name).await
     }
 }

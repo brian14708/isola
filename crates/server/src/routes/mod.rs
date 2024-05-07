@@ -1,9 +1,10 @@
-mod state;
 mod env;
+mod state;
 
 use std::{future::ready, sync::Arc};
 
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get};
+pub use env::VmEnv;
 pub use state::{AppState, Metrics};
 use tower_http::services::{ServeDir, ServeFile};
 

@@ -14,7 +14,7 @@ use opentelemetry_sdk::{
 use opentelemetry_semantic_conventions::resource;
 use otel::{grpc_server_tracing_layer, request_tracing_layer};
 use promptkit_executor::VmManager;
-use proto::script::script_service_server::ScriptServiceServer;
+use proto::script::v1::script_service_server::ScriptServiceServer;
 use tonic::codec::CompressionEncoding;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
             let app = routes::router(&state);
 
             let service = tonic_reflection::server::Builder::configure()
-                .register_encoded_file_descriptor_set(proto::script::FILE_DESCRIPTOR_SET)
+                .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
                 .build()
                 .unwrap();
 

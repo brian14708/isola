@@ -2,7 +2,7 @@
 
 # server
 FROM docker.io/library/rust:alpine AS server-build
-RUN apk add --no-cache protobuf-dev musl-dev
+RUN apk add --no-cache protobuf-dev musl-dev cmake build-base
 WORKDIR /src
 COPY crates crates
 COPY apis apis

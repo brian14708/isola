@@ -7,6 +7,8 @@ wasmtime::component::bindgen!({
         "promptkit:script/http-client/response": super::http_client::Response,
         "promptkit:script/http-client/response-sse-body": super::http_client::ResponseSseBody,
         "promptkit:script/host-api/argument-iterator": super::host_types::ArgumentIterator,
+
+        "promptkit:script/llm/tokenizer": super::llm::Tokenizer,
     },
 });
 

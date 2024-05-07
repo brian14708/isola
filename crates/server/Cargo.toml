@@ -15,6 +15,7 @@ http-body = "1.0.0"
 http_02 = { package = "http", version = "0.2" }
 http_body_04 = { package = "http-body", version = "0.4" }
 mimalloc = { version = "0.1.41", default-features = false }
+moka = { version = "0.12.7", features = ["future"] }
 opentelemetry = "0.22.0"
 opentelemetry-otlp = { version = "0.15.0", features = ["http-proto", "reqwest-client", "reqwest-rustls"] }
 opentelemetry-semantic-conventions = "0.14.0"
@@ -23,6 +24,7 @@ parking_lot = "0.12.2"
 pin-project = "1.1.5"
 prometheus-client = "0.22.2"
 promptkit_executor = { version = "0.1.0", path = "../executor" }
+promptkit_llm = { version = "0.1.0", path = "../llm" }
 prost = "0.12.4"
 prost-types = "0.12.4"
 reqwest = { version = "0.12.4", features = ["rustls-tls-webpki-roots", "gzip"], default-features = false }

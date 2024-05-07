@@ -10,5 +10,5 @@ mod vm;
 mod vm_cache;
 mod vm_manager;
 
-pub use env::Env;
+pub use env::{Env, EnvError};
 pub use vm_manager::{ExecArgument, ExecSource, ExecStreamItem, VmManager};

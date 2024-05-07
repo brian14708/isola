@@ -38,7 +38,7 @@ pub struct VmManager<E> {
     instance_pre: InstancePre<VmState<E>>,
     cache: Arc<VmCache<E>>,
     epoch_ticker: JoinHandle<()>,
-    env: E,
+    _env: std::marker::PhantomData<E>,
 }
 
 pub enum ExecStreamItem {
@@ -60,17 +60,6 @@ pub enum ExecSource<'a> {
 #[derive(serde::Deserialize)]
 struct Manifest {
     entrypoint: String,
-}
-
-impl<'a> ExecSource<'a> {
-    fn hash(&self) -> [u8; 32] {
-        let mut hasher = Sha256::new();
-        match self {
-            Self::Script(s) => hasher.update(s),
-            Self::Bundle(b) => hasher.update(b),
-        }
-        hasher.finalize().into()
-    }
 }
 
 impl<E> VmManager<E> {
@@ -103,7 +92,7 @@ impl<E> VmManager<E>
 where
     E: Env + Send + Sync + Clone,
 {
-    pub fn new(path: &Path, env: E) -> anyhow::Result<Self> {
+    pub fn new(path: &Path) -> anyhow::Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
@@ -151,13 +140,13 @@ where
                     engine.increment_epoch();
                 }
             }),
-            env,
+            _env: std::marker::PhantomData,
         })
     }
 
-    pub async fn create(&self, hash: [u8; 32]) -> anyhow::Result<Vm<E>> {
+    pub async fn create(&self, hash: [u8; 32], env: E) -> anyhow::Result<Vm<E>> {
         let workdir = tempdir::TempDir::new("vm").map_err(anyhow::Error::from)?;
-        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, self.env.clone());
+        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, env);
         store.epoch_deadline_async_yield_and_update(1);
 
         let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
@@ -221,15 +210,22 @@ where
         script: ExecSource<'_>,
         func: &str,
         args: impl IntoIterator<Item = ExecArgument>,
+        env: &E,
         level: LevelFilter,
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
-        let hash = script.hash();
+        let mut hasher = Sha256::new();
+        match script {
+            ExecSource::Script(s) => hasher.update(s),
+            ExecSource::Bundle(b) => hasher.update(b),
+        }
+        env.hash(|data| hasher.update(data));
+        let hash = hasher.finalize().into();
 
         let vm = self.cache.get(hash);
         let mut vm = if let Some(vm) = vm {
             vm
         } else {
-            let mut vm = self.create(hash).await?;
+            let mut vm = self.create(hash, env.clone()).await?;
             match script {
                 ExecSource::Script(script) => {
                     vm.sandbox

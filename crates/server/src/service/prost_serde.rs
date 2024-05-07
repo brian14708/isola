@@ -9,8 +9,8 @@ use serde::{
 };
 use tonic::Status;
 
-use crate::proto::script::{
-    self, argument::Marker, result, source::SourceType, ContentType, Source,
+use crate::proto::script::v1::{
+    self as script, argument::Marker, result, source::SourceType, ContentType, Source,
 };
 
 pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> {
