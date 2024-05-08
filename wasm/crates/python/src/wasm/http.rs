@@ -16,7 +16,7 @@ use crate::{
 #[pyo3(name = "http")]
 pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None, response="json"))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json"))]
     fn get(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -40,7 +40,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None, response="json"))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json"))]
     fn get_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -63,7 +63,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, params=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *))]
     fn get_sse(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -87,7 +87,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None, response="json"))]
+    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json"))]
     fn post(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -114,7 +114,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None, response="json"))]
+    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json"))]
     fn post_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -140,7 +140,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, /, data=None, headers=None, timeout=None))]
+    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *))]
     fn post_sse(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -170,7 +170,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (requests, /, allow_errors=false))]
+    #[pyo3(signature = (requests, *, allow_errors=false))]
     fn fetch_all(
         py: Python<'_>,
         mut requests: Vec<PyRefMut<AsyncRequest>>,
