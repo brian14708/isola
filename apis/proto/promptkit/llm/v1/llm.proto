@@ -4,10 +4,10 @@ package promptkit.llm.v1;
 import "promptkit/common/v1/common.proto";
 
 message LLMConfig {
-  repeated Tokenizers tokenizers = 1;
+  repeated Tokenizer tokenizers = 1;
 }
 
-message Tokenizers {
+message Tokenizer {
   enum Type {
     TYPE_UNSPECIFIED = 0;
     TYPE_SENTENCEPIECE = 1;

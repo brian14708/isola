@@ -8,7 +8,7 @@ use tracing::{field::Empty, span, Instrument};
 
 use promptkit_executor::{Env, EnvError};
 
-use crate::proto::{common::v1::RemoteFile, llm::v1::tokenizers};
+use crate::proto::{common::v1::RemoteFile, llm::v1::tokenizer};
 
 #[derive(Clone)]
 pub struct VmEnv {
@@ -42,7 +42,7 @@ impl Env for VmEnv {
                 update(t.name.as_bytes());
                 update(&t.r#type.to_be_bytes());
                 match &t.source {
-                    Some(tokenizers::Source::RemoteFile(RemoteFile { digest, .. })) => {
+                    Some(tokenizer::Source::RemoteFile(RemoteFile { digest, .. })) => {
                         update(digest.as_bytes());
                     }
                     None => unimplemented!(),
@@ -110,7 +110,7 @@ impl Env for VmEnv {
             for t in &llm_config.tokenizers {
                 if t.name == name {
                     match &t.source {
-                        Some(tokenizers::Source::RemoteFile(RemoteFile { digest, url })) => {
+                        Some(tokenizer::Source::RemoteFile(RemoteFile { digest, url })) => {
                             let tokenizer = self.cache.try_get_with::<_, EnvError>(
                                 digest.clone(),
                                 async move {
