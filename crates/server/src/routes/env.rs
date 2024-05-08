@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use http::{HeaderName, HeaderValue};
 use opentelemetry_semantic_conventions::trace;
 use promptkit_llm::tokenizers::Tokenizer;
-use tracing::{field::Empty, Instrument};
+use tracing::{field::Empty, span, Instrument};
 
 use promptkit_executor::{Env, EnvError};
 
@@ -114,14 +114,22 @@ impl Env for VmEnv {
                             let tokenizer = self.cache.try_get_with::<_, EnvError>(
                                 digest.clone(),
                                 async move {
+                                    let span = span!(
+                                        target: "promptkit::llm",
+                                        tracing::Level::INFO,
+                                        "llm::tokenizer::initialize",
+                                        promptkit.user = true,
+                                    );
                                     let resp = self
                                         .send_request(reqwest::Request::new(
                                             reqwest::Method::GET,
                                             reqwest::Url::parse(url)
                                                 .map_err(|e| EnvError::Internal(e.into()))?,
                                         ))
+                                        .instrument(span.clone())
                                         .await?;
-                                    let bytes = resp.bytes().await?;
+                                    let bytes = resp.bytes().instrument(span.clone()).await?;
+                                    let _guard = span.enter();
                                     let tokenizer = promptkit_llm::tokenizers::load_spm(&bytes)
                                         .map_err(|e| EnvError::Internal(e.into()))?;
                                     Ok(Arc::new(tokenizer) as Arc<dyn Tokenizer + Send + Sync>)
