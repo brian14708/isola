@@ -147,7 +147,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 pub trait EnvCtx: Env + Send {
     fn table(&mut self) -> &mut ResourceTable;
 }
@@ -161,7 +160,6 @@ where
     }
 }
 
-#[async_trait::async_trait]
 impl<E> Env for VmState<E>
 where
     E: Env + Sync,

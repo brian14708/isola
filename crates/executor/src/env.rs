@@ -1,20 +1,21 @@
+use std::future::Future;
 use std::sync::Arc;
 
 use promptkit_llm::tokenizers::Tokenizer;
 use thiserror::Error;
 
-#[async_trait::async_trait]
 pub trait Env {
     fn hash(&self, update: impl FnMut(&[u8]));
 
-    async fn send_request(&self, request: reqwest::Request) -> Result<reqwest::Response, EnvError>;
+    fn send_request(
+        &self,
+        request: reqwest::Request,
+    ) -> impl Future<Output = Result<reqwest::Response, EnvError>> + Send;
 
-    async fn get_tokenizer(
+    fn get_tokenizer(
         &self,
         _name: &str,
-    ) -> Result<Arc<dyn Tokenizer + Send + Sync>, EnvError> {
-        Err(EnvError::Unimplemented)
-    }
+    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send;
 }
 
 #[derive(Error, Debug)]

@@ -1,7 +1,6 @@
 use std::{borrow::Cow, str::FromStr, sync::Arc};
 
 use anyhow::anyhow;
-use axum::async_trait;
 use http::{HeaderName, HeaderValue};
 use opentelemetry_semantic_conventions::trace;
 use promptkit_llm::tokenizers::Tokenizer;
@@ -36,7 +35,6 @@ impl VmEnv {
     }
 }
 
-#[async_trait]
 impl Env for VmEnv {
     fn hash(&self, mut update: impl FnMut(&[u8])) {
         if let Some(llm_config) = &self.llm_config {
