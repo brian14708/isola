@@ -23,8 +23,8 @@ opentelemetry_sdk = { version = "0.22.1", features = ["rt-tokio"] }
 parking_lot = "0.12.2"
 pin-project = "1.1.5"
 prometheus-client = "0.22.2"
-promptkit_executor = { version = "0.1.0", path = "../executor" }
-promptkit_llm = { version = "0.1.0", path = "../llm" }
+promptkit_executor = { path = "../executor" }
+promptkit_llm = { path = "../llm" }
 prost = "0.12.4"
 prost-types = "0.12.4"
 reqwest = { version = "0.12.4", features = ["rustls-tls-webpki-roots", "gzip"], default-features = false }
