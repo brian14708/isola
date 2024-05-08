@@ -37,22 +37,14 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
     }
 }
 
-pub fn parse_source(source: &Option<Source>) -> Result<(ExecSource<'_>, Option<&str>), Status> {
+pub fn parse_source(source: &Option<Source>) -> Result<ExecSource<'_>, Status> {
     match source {
         Some(Source {
             source_type: Some(SourceType::ScriptInline(i)),
-        }) => Ok((
-            ExecSource::Script(&i.script),
-            #[allow(deprecated)]
-            if i.method.is_empty() {
-                None
-            } else {
-                Some(&i.method)
-            },
-        )),
+        }) => Ok(ExecSource::Script(&i.script)),
         Some(Source {
             source_type: Some(SourceType::BundleInline(i)),
-        }) => Ok((ExecSource::Bundle(i), None)),
+        }) => Ok(ExecSource::Bundle(i)),
         Some(Source { source_type: None }) | None => {
             Err(Status::invalid_argument("source type is not specified"))
         }

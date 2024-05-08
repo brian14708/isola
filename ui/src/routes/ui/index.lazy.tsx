@@ -88,6 +88,7 @@ function Index() {
       };
       const spec = scriptv1.ExecutionSpec.create({
         ...(m.options || {}),
+        method: m.method,
         traceLevel: 2,
         arguments:
           m.args?.map((v) => {
@@ -106,7 +107,6 @@ function Index() {
               oneofKind: "scriptInline",
               scriptInline: {
                 script: editorRef.current.getValue(),
-                method: m.method,
                 runtime: "python3",
               },
             },
@@ -145,7 +145,6 @@ function Index() {
               oneofKind: "scriptInline",
               scriptInline: {
                 script: editorRef.current.getValue(),
-                method: m.method,
                 runtime: "python3",
               },
             },

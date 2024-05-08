@@ -7,8 +7,9 @@ import "promptkit/llm/v1/llm.proto";
 import "promptkit/script/v1/trace.proto";
 
 message ScriptInline {
+  reserved 2;
+  
   string script = 1;
-  string method = 2 [deprecated = true];
   string runtime = 3;
 }
 
