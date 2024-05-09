@@ -1,0 +1,11 @@
+[package]
+name = "xtask"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = "1.0.83"
+wasm-opt = "0.116.1"
+wit-component = "0.207.0"
+wizer = "6.0.0"
+xshell = "0.2.6"

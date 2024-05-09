@@ -29,22 +29,13 @@ RUN pnpm run build
 # wasm
 FROM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasip1
-RUN curl --location https://github.com/bytecodealliance/wizer/releases/download/v5.0.0/wizer-v5.0.0-x86_64-linux.tar.xz | \
-    tar --strip-components 1 --directory /usr/local/bin --extract --xz
-RUN curl --location https://github.com/WebAssembly/binaryen/releases/download/version_117/binaryen-version_117-x86_64-linux.tar.gz | \
-    tar --strip-components 1 --directory /usr/local --extract --gunzip
-RUN curl --location https://github.com/bytecodealliance/wasm-tools/releases/download/v1.203.0/wasm-tools-1.203.0-x86_64-linux.tar.gz | \
-    tar --strip-components 1 --directory /usr/local/bin --extract --gunzip
-RUN curl --location https://github.com/sagiegurari/cargo-make/releases/download/0.37.10/cargo-make-v0.37.10-x86_64-unknown-linux-gnu.zip -o cargo-make.zip && \
-    unzip -o -X -j cargo-make.zip -d /usr/local/bin && \
-    rm cargo-make.zip
 WORKDIR /src/wasm
 COPY apis ../apis
 COPY wasm .
 RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/wasi-deps/downloads \
     --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo fetch && cargo make wasm
+    cargo xtask build-all
 
 # final
 FROM cgr.dev/chainguard/static:latest
