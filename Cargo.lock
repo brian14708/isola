@@ -1890,6 +1890,7 @@ dependencies = [
  "eventsource-stream",
  "futures-util",
  "hex",
+ "http 1.1.0",
  "parking_lot",
  "pin-project-lite",
  "promptkit_llm",

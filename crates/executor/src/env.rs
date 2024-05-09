@@ -9,13 +9,17 @@ pub trait Env {
 
     fn send_request(
         &self,
-        request: reqwest::Request,
-    ) -> impl Future<Output = Result<reqwest::Response, EnvError>> + Send;
+        _request: reqwest::Request,
+    ) -> impl Future<Output = Result<reqwest::Response, EnvError>> + Send {
+        async { Err(EnvError::Unimplemented) }
+    }
 
     fn get_tokenizer(
         &self,
         _name: &str,
-    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send;
+    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send {
+        async { Err(EnvError::Unimplemented) }
+    }
 }
 
 #[derive(Error, Debug)]

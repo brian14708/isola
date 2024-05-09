@@ -428,3 +428,187 @@ where
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+
+    use std::sync::Mutex;
+
+    use futures_util::Future;
+    use wasmtime::component::Resource;
+
+    use crate::{
+        vm::{http_client::http_client, state::EnvCtx},
+        Env, EnvError,
+    };
+
+    struct MockEnv {
+        table: Mutex<wasmtime_wasi::ResourceTable>,
+    }
+
+    impl Env for MockEnv {
+        fn send_request(
+            &self,
+            mut request: reqwest::Request,
+        ) -> impl Future<Output = Result<reqwest::Response, EnvError>> + Send {
+            async move {
+                match request.url().as_str() {
+                    "http://example.com/echo" => Ok(http::response::Builder::new()
+                        .status(http::StatusCode::OK)
+                        .body::<reqwest::Body>(request.body_mut().take().unwrap_or_default())
+                        .unwrap()
+                        .into()),
+                    "http://example.com/sleep" => {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        Ok(http::response::Builder::new()
+                            .status(http::StatusCode::OK)
+                            .body::<reqwest::Body>(request.body_mut().take().unwrap_or_default())
+                            .unwrap()
+                            .into())
+                    }
+                    "http://example.com/error" => Ok(http::response::Builder::new()
+                        .status(512)
+                        .body(reqwest::Body::default())
+                        .unwrap()
+                        .into()),
+                    _ => Err(EnvError::Unimplemented),
+                }
+            }
+        }
+
+        fn hash(&self, _update: impl FnMut(&[u8])) {}
+    }
+
+    impl EnvCtx for MockEnv {
+        fn table(&mut self) -> &mut wasmtime_wasi::ResourceTable {
+            self.table.get_mut().unwrap()
+        }
+    }
+
+    impl MockEnv {
+        fn new() -> Self {
+            Self {
+                table: Mutex::new(wasmtime_wasi::ResourceTable::default()),
+            }
+        }
+
+        async fn new_request(
+            &mut self,
+            url: &str,
+            validate_status: bool,
+        ) -> Resource<http_client::Request> {
+            let request = http_client::HostRequest::new(
+                self,
+                "http://example.com".to_string() + url,
+                http_client::Method::Get,
+            )
+            .await
+            .unwrap();
+
+            http_client::HostRequest::set_validate_status(
+                self,
+                Resource::new_borrow(request.rep()),
+                validate_status,
+            )
+            .await
+            .unwrap();
+
+            http_client::HostRequest::set_eager(self, Resource::new_borrow(request.rep()), true)
+                .await
+                .unwrap();
+
+            request
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch() {
+        let mut env = MockEnv::new();
+        let request = env.new_request("/echo", false).await;
+
+        http_client::HostRequest::set_body(
+            &mut env,
+            Resource::new_borrow(request.rep()),
+            b"test".to_vec(),
+        )
+        .await
+        .unwrap();
+
+        let response = http_client::Host::fetch(&mut env, request)
+            .await
+            .unwrap()
+            .unwrap();
+
+        let body = http_client::HostResponse::body(&mut env, response)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(body, b"test");
+    }
+
+    #[tokio::test]
+    async fn test_fetch_error() {
+        let mut env = MockEnv::new();
+        {
+            let request = env.new_request("/error", true).await;
+            http_client::HostRequest::set_validate_status(
+                &mut env,
+                Resource::new_borrow(request.rep()),
+                true,
+            )
+            .await
+            .unwrap();
+
+            let response = http_client::Host::fetch(&mut env, request).await.unwrap();
+            assert!(matches!(response, Err(http_client::Error::StatusCode(512))));
+        }
+        {
+            let request = env.new_request("/error", false).await;
+
+            let response = http_client::Host::fetch(&mut env, request)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                http_client::HostResponse::status(&mut env, Resource::new_borrow(response.rep()))
+                    .await
+                    .unwrap(),
+                512
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fetch_all_error() {
+        let mut env = MockEnv::new();
+        {
+            let r1 = env.new_request("/error", true).await;
+            let r2 = env.new_request("/echo", true).await;
+
+            let response = http_client::Host::fetch_all(&mut env, vec![r1, r2], true)
+                .await
+                .unwrap();
+            assert!(matches!(
+                response[0],
+                Err(http_client::Error::StatusCode(512))
+            ));
+            // continue even if one request fails
+            assert!(matches!(response[1], Ok(_)));
+        }
+
+        {
+            let r1 = env.new_request("/error", true).await;
+            let r2 = env.new_request("/sleep", true).await;
+
+            let response = http_client::Host::fetch_all(&mut env, vec![r1, r2], false)
+                .await
+                .unwrap();
+            assert!(matches!(
+                response[0],
+                Err(http_client::Error::StatusCode(512))
+            ));
+            assert!(matches!(response[1], Err(http_client::Error::Cancelled)));
+        }
+    }
+}
