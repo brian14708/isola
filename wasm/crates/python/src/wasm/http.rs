@@ -16,7 +16,7 @@ use crate::{
 #[pyo3(name = "http")]
 pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json"))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json", validate_status=true))]
     fn get(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -24,9 +24,11 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
         response: &str,
+        validate_status: bool,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
+        request.set_validate_status(validate_status);
         let format = ResponseFormat::from_str(response)?;
         format.set_accept_header(&request);
         set_headers(&request, headers)?;
@@ -40,7 +42,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json"))]
+    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json", validate_status=true))]
     fn get_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -48,9 +50,11 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
         response: &str,
+        validate_status: bool,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
         request.set_eager(true);
+        request.set_validate_status(validate_status);
         let format = ResponseFormat::from_str(response)?;
         format.set_accept_header(&request);
         set_headers(&request, headers)?;
@@ -72,6 +76,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(&url_with_params(url, params)?, Method::Get);
+        request.set_validate_status(true);
         request.set_header("accept", "text/event-stream").unwrap();
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
@@ -87,7 +92,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json"))]
+    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json", validate_status=true))]
     fn post(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -95,9 +100,11 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
         response: &str,
+        validate_status: bool,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
+        request.set_validate_status(validate_status);
         let format = ResponseFormat::from_str(response)?;
         format.set_accept_header(&request);
         set_headers(&request, headers)?;
@@ -114,7 +121,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json"))]
+    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json", validate_status=true))]
     fn post_async(
         py: Python<'_>,
         url: &Bound<'_, PyString>,
@@ -122,9 +129,11 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
         response: &str,
+        validate_status: bool,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
         request.set_eager(true);
+        request.set_validate_status(validate_status);
         let format = ResponseFormat::from_str(response)?;
         format.set_accept_header(&request);
         set_headers(&request, headers)?;
@@ -149,6 +158,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
         let request = http_client::Request::new(url.to_str()?, Method::Post);
+        request.set_validate_status(true);
         request
             .set_header("content-type", "application/json")
             .unwrap();
@@ -170,11 +180,11 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     #[pyfn(module)]
-    #[pyo3(signature = (requests, *, allow_errors=false))]
+    #[pyo3(signature = (requests, *, ignore_error=false))]
     fn fetch_all(
         py: Python<'_>,
         mut requests: Vec<PyRefMut<AsyncRequest>>,
-        allow_errors: bool,
+        ignore_error: bool,
     ) -> PyResult<Vec<PyObject>> {
         let mut results = vec![];
 
@@ -183,6 +193,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 .iter_mut()
                 .map(|r| r.request.take().unwrap())
                 .collect::<Vec<_>>(),
+            ignore_error,
         )
         .into_iter()
         .zip(requests.iter())
@@ -192,7 +203,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                     results.push(match request.format.response(py, response) {
                         Ok(r) => r,
                         Err(e) => {
-                            if allow_errors {
+                            if ignore_error {
                                 e.into_py(py)
                             } else {
                                 return Err(e);
@@ -201,9 +212,16 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                     });
                 }
                 Err(e) => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        e.to_string(),
-                    ));
+                    if ignore_error {
+                        results.push(
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                                .into_py(py),
+                        );
+                    } else {
+                        return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            e.to_string(),
+                        ));
+                    }
                 }
             }
         }

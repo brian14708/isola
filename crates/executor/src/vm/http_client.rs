@@ -36,10 +36,11 @@ where
                 data: d.data,
             })),
             Some(Err(err)) => {
-                body.span.record("otel.status_code", "error");
+                body.span.record("otel.status_code", "ERROR");
                 Some(Err(http_client::Error::Unknown(err.to_string())))
             }
             None => {
+                body.span.record("otel.status_code", "OK");
                 let _ = std::mem::replace(&mut body.span, Span::none());
                 None
             }
@@ -55,6 +56,7 @@ where
 pub struct Request {
     inner: reqwest::Request,
     eager: bool,
+    validate_status: bool,
 }
 
 #[async_trait::async_trait]
@@ -72,7 +74,7 @@ where
             tracing::Level::INFO,
             "http::fetch",
             promptkit.user = true,
-            http.response.status_code = Empty,
+            otel.status_code = Empty,
             http.response.body_size = Empty,
         );
 
@@ -82,15 +84,23 @@ where
 
         match exec {
             Ok(response) => {
+                if request.validate_status && !response.status().is_success() {
+                    span.record("otel.status_code", "ERROR");
+                    return Ok(Err(http_client::Error::StatusCode(
+                        response.status().as_u16(),
+                    )));
+                }
                 let r = if request.eager {
                     let headers = response.headers().clone();
                     let status = response.status();
                     let body = match response.bytes().instrument(span.clone()).await {
                         Ok(body) => {
                             span.record("http.response.body_size", body.len() as u64);
+                            span.record("otel.status_code", "OK");
                             body
                         }
                         Err(err) => {
+                            span.record("otel.status_code", "ERROR");
                             return Ok(Err(http_client::Error::Unknown(format!(
                                 "failed to read response body: {err}"
                             ))));
@@ -114,10 +124,10 @@ where
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     async fn fetch_all(
         &mut self,
         requests: Vec<wasmtime::component::Resource<Request>>,
+        ignore_error: bool,
     ) -> wasmtime::Result<Vec<Result<wasmtime::component::Resource<Response>, http_client::Error>>>
     {
         let span = span!(
@@ -125,7 +135,9 @@ where
             tracing::Level::INFO,
             "http::fetch_all",
             promptkit.user = true,
+            otel.status_code = Empty,
         );
+        let cnt = requests.len();
         let requests = requests
             .into_iter()
             .map(|r| self.table().delete(r))
@@ -136,29 +148,36 @@ where
         }
 
         let client = &self;
-        let ret = futures_util::future::join_all(requests.into_iter().map(|r| async move {
+        let tasks = requests.into_iter().map(|r| async move {
             let span = span!(
                 target: "promptkit::http",
                 tracing::Level::INFO,
                 "http::fetch",
                 promptkit.user = true,
-                http.response.status_code = Empty,
+                otel.status_code = Empty,
                 http.response.body_size = Empty,
             );
             let inner = r.inner;
-            let r = client
+            let resp = client
                 .send_request(inner)
                 .instrument(span.clone())
                 .await
                 .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
-            let headers = r.headers().clone();
-            let status = r.status();
-            let body = r
+
+            if r.validate_status && !resp.status().is_success() {
+                span.record("otel.status_code", "ERROR");
+                return Err(http_client::Error::StatusCode(resp.status().as_u16()));
+            }
+
+            let headers = resp.headers().clone();
+            let status = resp.status();
+            let body = resp
                 .bytes()
                 .instrument(span.clone())
                 .await
                 .map_err(|e| http_client::Error::Unknown(e.to_string()))?;
             span.record("http.response.body_size", body.len() as u64);
+            span.record("otel.status_code", "OK");
             Ok((
                 Response {
                     kind: ResponseKind::Eager {
@@ -169,18 +188,54 @@ where
                 },
                 status,
             ))
-        }))
-        .instrument(span.clone())
-        .await;
+        });
 
-        let mut result = vec![];
-        for r in ret {
-            match r {
-                Ok((r, _)) => result.push(Ok(self.table().push(r)?)),
-                Err(err) => result.push(Err(err)),
+        if ignore_error {
+            let ret = futures_util::future::join_all(tasks)
+                .instrument(span.clone())
+                .await;
+
+            let mut result = vec![];
+            for r in ret {
+                match r {
+                    Ok((r, _)) => result.push(Ok(self.table().push(r)?)),
+                    Err(err) => result.push(Err(err)),
+                }
+            }
+            span.record("otel.status_code", "OK");
+            Ok(result)
+        } else {
+            let ret = futures_util::future::try_join_all(tasks.enumerate().map(
+                |(idx, fut)| async move {
+                    match fut.await {
+                        Ok(response) => Ok(response),
+                        Err(err) => Err((idx, err)),
+                    }
+                },
+            ))
+            .instrument(span.clone())
+            .await;
+
+            match ret {
+                Ok(ret) => {
+                    span.record("otel.status_code", "OK");
+                    let mut result = vec![];
+                    for (r, _) in ret {
+                        result.push(Ok(self.table().push(r)?));
+                    }
+                    Ok(result)
+                }
+                Err((idx, err)) => {
+                    span.record("otel.status_code", "ERROR");
+                    let mut result = Vec::with_capacity(cnt);
+                    for _ in 0..cnt {
+                        result.push(Err(http_client::Error::Cancelled));
+                    }
+                    result[idx] = Err(err);
+                    Ok(result)
+                }
             }
         }
-        Ok(result)
     }
 }
 
@@ -203,6 +258,7 @@ where
                 reqwest::Url::parse(&url)?,
             ),
             eager: false,
+            validate_status: false,
         })?)
     }
 
@@ -252,6 +308,16 @@ where
     ) -> wasmtime::Result<()> {
         let request = self.table().get_mut(&resource)?;
         request.eager = eager;
+        Ok(())
+    }
+
+    async fn set_validate_status(
+        &mut self,
+        resource: wasmtime::component::Resource<Request>,
+        validate: bool,
+    ) -> wasmtime::Result<()> {
+        let request = self.table().get_mut(&resource)?;
+        request.validate_status = validate;
         Ok(())
     }
 
@@ -319,10 +385,15 @@ where
             ResponseKind::Eager { body, .. } => Ok(body),
             ResponseKind::Lazy { response, span } => {
                 let body = response.bytes().instrument(span.clone()).await;
-                span.record(
-                    "http.response.body_size",
-                    body.as_ref().map(Bytes::len).unwrap_or_default() as u64,
-                );
+                if body.is_ok() {
+                    span.record(
+                        "http.response.body_size",
+                        body.as_ref().map(Bytes::len).unwrap_or_default() as u64,
+                    );
+                    span.record("otel.status_code", "OK");
+                } else {
+                    span.record("otel.status_code", "ERROR");
+                }
                 body
             }
         };

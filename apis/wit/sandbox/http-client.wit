@@ -4,6 +4,8 @@ interface http-client {
         post,
     }
     variant error {
+        cancelled,
+        status-code(u16),
         unknown(string),
     }
     resource request {
@@ -12,6 +14,7 @@ interface http-client {
         set-header: func(%key: string, %value: string) -> result<_, error>;
         set-timeout: func(%timeout-ms: u64);
         set-eager: func(%eager: bool);
+        set-validate-status: func(%validate: bool);
     }
     resource response {
         header: func(%key: string) -> option<string>;
@@ -28,5 +31,5 @@ interface http-client {
         read: func() -> option<result<sse-event, error>>;
     }
     fetch: func(%request: request) -> result<response, error>;
-    fetch-all: func(%requests: list<request>) -> list<result<response, error>>;
+    fetch-all: func(%requests: list<request>, %ignore-error: bool) -> list<result<response, error>>;
 }
