@@ -110,6 +110,9 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
+            request
+                .set_header("content-type", "application/json")
+                .unwrap();
             request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         match http_client::fetch(request) {
@@ -139,6 +142,9 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
+            request
+                .set_header("content-type", "application/json")
+                .unwrap();
             request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         Ok(AsyncRequest {
@@ -166,6 +172,9 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         set_headers(&request, headers)?;
         set_timeout(&request, timeout);
         if let Some(data) = data {
+            request
+                .set_header("content-type", "application/json")
+                .unwrap();
             request.set_body(&PyObjectSerializer::to_json(data.into_bound(py)).unwrap());
         }
         match http_client::fetch(request) {
