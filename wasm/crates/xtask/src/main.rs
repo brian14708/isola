@@ -55,15 +55,27 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
-            let wasm = std::fs::read(&inp[0])?;
-            let wasm = wizer::Wizer::new()
-                .allow_wasi(true)?
-                .wasm_bulk_memory(true)
-                .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
-                .map_dir("/workdir", "/tmp")
-                .run(&wasm)?;
+            #[cfg(feature = "static")]
+            {
+                let wasm = std::fs::read(&inp[0])?;
+                let wasm = wizer::Wizer::new()
+                    .allow_wasi(true)?
+                    .wasm_bulk_memory(true)
+                    .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
+                    .map_dir("/workdir", "/tmp")
+                    .run(&wasm)?;
 
-            std::fs::write(out, wasm)?;
+                std::fs::write(out, wasm)?;
+            }
+
+            #[cfg(not(feature = "static"))]
+            {
+                let inp = &inp[0];
+                cmd!(
+                    sh,
+                    "wizer --allow-wasi --wasm-bulk-memory true {inp} --mapdir /usr::target/wasm32-wasip1/wasi-deps/usr --mapdir /workdir::/tmp -o {out}"
+                ).run()?;
+            }
             Ok(())
         },
     )?;
@@ -74,21 +86,27 @@ fn build_python(sh: &Shell) -> Result<()> {
         )],
         format!("target/{TARGET}/release/promptkit_python.opt.wasm"),
         |inp, out| -> Result<()> {
-            wasm_opt::OptimizationOptions::new_opt_level_4()
-                .add_pass(wasm_opt::Pass::Gufa)
-                .all_features()
-                .debug_info(false)
-                .add_pass(wasm_opt::Pass::StripDebug)
-                .run(
-                    &inp[0],
-                    format!("target/{TARGET}/release/promptkit_python.tmp.wasm"),
-                )?;
-            wasm_opt::OptimizationOptions::new_opt_level_4()
-                .all_features()
-                .run(
-                    format!("target/{TARGET}/release/promptkit_python.tmp.wasm"),
-                    out,
-                )?;
+            #[cfg(feature = "static")]
+            {
+                let tmp = sh.create_temp_dir()?;
+                let mut tmp = tmp.path().to_path_buf();
+                tmp.push("promptkit_python.tmp.wasm");
+
+                wasm_opt::OptimizationOptions::new_opt_level_4()
+                    .all_features()
+                    .add_pass(wasm_opt::Pass::Gufa)
+                    .run(&inp[0], &tmp)?;
+                wasm_opt::OptimizationOptions::new_opt_level_4()
+                    .all_features()
+                    .add_pass(wasm_opt::Pass::StripDebug)
+                    .run(tmp, out)?;
+            }
+
+            #[cfg(not(feature = "static"))]
+            {
+                let inp = &inp[0];
+                cmd!(sh, "wasm-opt -O4 --gufa -O4 --strip-debug {inp} -o {out}").run()?;
+            }
             Ok(())
         },
     )?;

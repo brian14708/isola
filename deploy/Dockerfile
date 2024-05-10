@@ -35,7 +35,7 @@ COPY wasm .
 RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/wasi-deps/downloads \
     --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
-    cargo xtask build-all
+    cargo xtask-release build-all
 
 # final
 FROM cgr.dev/chainguard/static:latest
