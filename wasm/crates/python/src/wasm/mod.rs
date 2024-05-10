@@ -19,6 +19,11 @@ use crate::{
 
 wit_bindgen::generate!({
     world: "sandbox",
+    with: {
+        "wasi:io/poll@0.2.0": wasi::io::poll,
+        "wasi:io/error@0.2.0": wasi::io::error,
+        "wasi:io/streams@0.2.0": wasi::io::streams,
+    },
 });
 
 export!(Global);

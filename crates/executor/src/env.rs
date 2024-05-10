@@ -10,9 +10,7 @@ pub trait Env {
     fn send_request(
         &self,
         _request: reqwest::Request,
-    ) -> impl Future<Output = Result<reqwest::Response, EnvError>> + Send {
-        async { Err(EnvError::Unimplemented) }
-    }
+    ) -> impl Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static;
 
     fn get_tokenizer(
         &self,

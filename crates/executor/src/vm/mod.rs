@@ -1,6 +1,6 @@
 mod bindgen;
 mod host_types;
-mod http_client;
+pub mod http;
 mod llm;
 mod run;
 mod state;

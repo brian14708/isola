@@ -12,7 +12,6 @@ use wasmtime::{
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::{
-    env::EnvError,
     resource::MemoryLimiter,
     trace_output::TraceOutput,
     vm::{
@@ -21,6 +20,8 @@ use crate::{
     },
     Env, ExecStreamItem,
 };
+
+use super::{http::HttpView, llm::LlmView};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -41,6 +42,7 @@ where
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        super::http::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Sandbox::add_to_linker(&mut linker, |v: &mut Self| v)?;
         Ok(linker)
     }
@@ -147,35 +149,32 @@ where
     }
 }
 
-pub trait EnvCtx: Env + Send {
-    fn table(&mut self) -> &mut ResourceTable;
-}
-
-impl<E> EnvCtx for VmState<E>
+impl<E> LlmView for VmState<E>
 where
     E: Env + Send + Sync,
 {
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
     }
+
+    async fn get_tokenizer(&self, name: &str) -> Option<Arc<dyn Tokenizer + Send + Sync>> {
+        self.env.get_tokenizer(name).await.ok()
+    }
 }
 
-impl<E> Env for VmState<E>
+impl<E> HttpView for VmState<E>
 where
-    E: Env + Sync,
+    E: Env + Sync + Send,
 {
-    fn hash(&self, _update: impl FnMut(&[u8])) {
-        unreachable!("hashing not implemented")
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
     }
 
-    async fn send_request(&self, req: reqwest::Request) -> Result<reqwest::Response, EnvError> {
-        self.env.send_request(req).await
-    }
-
-    async fn get_tokenizer(
+    fn send_request(
         &self,
-        name: &str,
-    ) -> Result<Arc<dyn Tokenizer + Send + Sync>, EnvError> {
-        self.env.get_tokenizer(name).await
+        req: reqwest::Request,
+    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
+    {
+        self.env.send_request(req)
     }
 }

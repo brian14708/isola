@@ -6,7 +6,11 @@ use pyo3::{
     intern,
     prelude::*,
     prepare_freethreaded_python,
-    types::{PyDict, PyList, PyString, PyTuple},
+    types::{
+        PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyMemoryView, PyString,
+        PyTuple,
+    },
+    PyTypeInfo,
 };
 use serde::de::DeserializeSeed;
 
@@ -100,6 +104,20 @@ impl Scope {
         })
     }
 
+    fn is_serializable(pyobject: &Bound<'_, PyAny>) -> bool {
+        pyobject.is_none()
+            || PyDict::is_exact_type_of_bound(pyobject)
+            || PyList::is_exact_type_of_bound(pyobject)
+            || PyTuple::is_exact_type_of_bound(pyobject)
+            || PyString::is_exact_type_of_bound(pyobject)
+            || PyBool::is_exact_type_of_bound(pyobject)
+            || PyInt::is_exact_type_of_bound(pyobject)
+            || PyFloat::is_exact_type_of_bound(pyobject)
+            || PyBytes::is_exact_type_of_bound(pyobject)
+            || PyByteArray::is_exact_type_of_bound(pyobject)
+            || PyMemoryView::is_exact_type_of_bound(pyobject)
+    }
+
     pub fn run<'a, U>(
         &self,
         name: &str,
@@ -190,7 +208,7 @@ impl Scope {
                 f
             };
 
-            if PyObjectSerializer::is_serializable(&obj) {
+            if Self::is_serializable(&obj) {
                 match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
                     Ok(s) => return Ok(Some(s)),
                     Err(cbor4ii::serde::EncodeError::Core(_)) => {

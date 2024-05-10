@@ -9,7 +9,6 @@ edition.workspace = true
 anyhow = "1.0.82"
 async-trait = "0.1.80"
 bytes = "1.6.0"
-eventsource-stream = "0.2.3"
 futures-util = "0.3.30"
 hex = "0.4.3"
 parking_lot = "0.12.2"

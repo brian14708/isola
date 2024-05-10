@@ -1,5 +1,5 @@
 use pyo3::{
-    types::{PyAnyMethods, PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple},
+    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple},
     Bound, IntoPy, PyAny, PyObject, PyTypeInfo, Python,
 };
 use serde::{
@@ -246,17 +246,6 @@ impl<'s> PyObjectSerializer<'s> {
     ) -> Result<Vec<u8>, cbor4ii::serde::EncodeError<std::collections::TryReserveError>> {
         cbor4ii::serde::to_vec(v, &Self::new(object, 0))
     }
-
-    pub fn is_serializable(pyobject: &Bound<'s, PyAny>) -> bool {
-        pyobject.is_none()
-            || PyDict::is_type_of_bound(pyobject)
-            || PyList::is_type_of_bound(pyobject)
-            || PyTuple::is_type_of_bound(pyobject)
-            || PyString::is_type_of_bound(pyobject)
-            || PyBool::is_type_of_bound(pyobject)
-            || PyInt::is_type_of_bound(pyobject)
-            || PyFloat::is_exact_type_of_bound(pyobject)
-    }
 }
 
 impl<'s> serde::Serialize for PyObjectSerializer<'s> {
@@ -273,21 +262,21 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
             ));
         }
 
-        if let Ok(dict) = self.pyobject.downcast::<PyDict>() {
+        if let Ok(dict) = self.pyobject.downcast_exact::<PyDict>() {
             let len = dict.len().ok();
             let mut map = serializer.serialize_map(len)?;
             for (key, value) in dict {
                 map.serialize_entry(&Self::new(key, depth), &Self::new(value, depth))?;
             }
             map.end()
-        } else if let Ok(list) = self.pyobject.downcast::<PyList>() {
+        } else if let Ok(list) = self.pyobject.downcast_exact::<PyList>() {
             let len = list.len().ok();
             let mut seq = serializer.serialize_seq(len)?;
             for elem in list {
                 seq.serialize_element(&Self::new(elem, depth))?;
             }
             seq.end()
-        } else if let Ok(tuple) = self.pyobject.downcast::<PyTuple>() {
+        } else if let Ok(tuple) = self.pyobject.downcast_exact::<PyTuple>() {
             let len = tuple.len().ok();
             let mut seq = serializer.serialize_seq(len)?;
             for elem in tuple {
@@ -400,9 +389,9 @@ mod tests {
                 .call_method_bound(py, "__add__", (1.to_object(py),), None)
                 .unwrap()
                 .into_bound(py);
-            assert!(matches!(PyObjectSerializer::to_json(p), Err(_)));
+            assert!(PyObjectSerializer::to_json(p).is_err());
             let p = PyFloat::new_bound(py, u64::MAX as f64 + 1.0);
-            assert!(matches!(PyObjectSerializer::to_json(p.into_any()), Ok(_)));
-        })
+            assert!(PyObjectSerializer::to_json(p.into_any()).is_ok());
+        });
     }
 }

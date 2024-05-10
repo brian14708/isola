@@ -51,7 +51,11 @@ impl Env for VmEnv {
         }
     }
 
-    async fn send_request(&self, mut req: reqwest::Request) -> Result<reqwest::Response, EnvError> {
+    fn send_request(
+        &self,
+        mut req: reqwest::Request,
+    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
+    {
         let span = tracing::span!(
             target: "promptkit::http",
             tracing::Level::INFO,
@@ -83,23 +87,26 @@ impl Env for VmEnv {
             injector.inject_context(&context, &mut RequestCarrier { request: &mut req });
         });
 
-        let resp = match self.http.execute(req).instrument(span.clone()).await {
-            Ok(resp) => resp,
-            Err(err) => {
+        let http = self.http.clone();
+        async move {
+            let resp = match http.execute(req).instrument(span.clone()).await {
+                Ok(resp) => resp,
+                Err(err) => {
+                    span.record(trace::OTEL_STATUS_CODE, "ERROR");
+                    return Err(err);
+                }
+            };
+
+            let status = resp.status();
+            span.record("http.response.status_code", status.as_u16());
+            if status.is_server_error() || status.is_client_error() {
                 span.record(trace::OTEL_STATUS_CODE, "ERROR");
-                return Err(err.into());
+            } else {
+                span.record(trace::OTEL_STATUS_CODE, "OK");
             }
-        };
 
-        let status = resp.status();
-        span.record("http.response.status_code", status.as_u16());
-        if status.is_server_error() || status.is_client_error() {
-            span.record(trace::OTEL_STATUS_CODE, "ERROR");
-        } else {
-            span.record(trace::OTEL_STATUS_CODE, "OK");
+            Ok(resp)
         }
-
-        Ok(resp)
     }
 
     async fn get_tokenizer(
@@ -120,14 +127,16 @@ impl Env for VmEnv {
                                         "llm::tokenizer::initialize",
                                         promptkit.user = true,
                                     );
-                                    let resp = self
-                                        .send_request(reqwest::Request::new(
+                                    let req = {
+                                        let _guard = span.enter();
+                                        self.send_request(reqwest::Request::new(
                                             reqwest::Method::GET,
                                             reqwest::Url::parse(url)
                                                 .map_err(|e| EnvError::Internal(e.into()))?,
                                         ))
-                                        .instrument(span.clone())
-                                        .await?;
+                                    };
+
+                                    let resp = req.instrument(span.clone()).await?;
                                     let bytes = resp.bytes().instrument(span.clone()).await?;
                                     let _guard = span.enter();
                                     let tokenizer = promptkit_llm::tokenizers::load_spm(&bytes)

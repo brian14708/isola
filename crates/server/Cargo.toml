@@ -20,7 +20,6 @@ opentelemetry = "0.22.0"
 opentelemetry-otlp = { version = "0.15.0", features = ["http-proto", "reqwest-client", "reqwest-rustls"] }
 opentelemetry-semantic-conventions = "0.14.0"
 opentelemetry_sdk = { version = "0.22.1", features = ["rt-tokio"] }
-parking_lot = "0.12.2"
 pin-project = "1.1.5"
 prometheus-client = "0.22.2"
 promptkit_executor = { path = "../executor" }

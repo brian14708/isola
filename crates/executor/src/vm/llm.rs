@@ -1,23 +1,34 @@
 use std::sync::Arc;
 
+use futures_util::Future;
 use promptkit_llm::tokenizers::{DecodeOption, EncodeOption, Tokenizer as LlmTokenizer};
 use tracing::{field::Empty, span};
+use wasmtime_wasi::ResourceTable;
 
-use super::{bindgen::promptkit::script::llm, state::EnvCtx};
+use super::bindgen::promptkit::script::llm;
+
+pub trait LlmView: Send {
+    fn table(&mut self) -> &mut ResourceTable;
+
+    fn get_tokenizer(
+        &self,
+        name: &str,
+    ) -> impl Future<Output = Option<Arc<dyn LlmTokenizer + Send + Sync>>> + Send;
+}
 
 #[async_trait::async_trait]
-impl<I> llm::Host for I where I: EnvCtx + Sync {}
+impl<I: LlmView> llm::Host for I {}
 
 #[async_trait::async_trait]
-impl<I> llm::HostTokenizer for I
-where
-    I: EnvCtx + Sync,
-{
+impl<I: LlmView> llm::HostTokenizer for I {
     async fn new(
         &mut self,
         name: String,
     ) -> wasmtime::Result<wasmtime::component::Resource<Tokenizer>> {
-        let tokenizer = self.get_tokenizer(&name).await?;
+        let tokenizer = self
+            .get_tokenizer(&name)
+            .await
+            .ok_or_else(|| anyhow::anyhow!("tokenizer not found"))?;
         Ok(self.table().push(Tokenizer { inner: tokenizer })?)
     }
 
