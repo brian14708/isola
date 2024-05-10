@@ -255,7 +255,7 @@ impl<'s> PyObjectSerializer<'s> {
             || PyString::is_type_of_bound(pyobject)
             || PyBool::is_type_of_bound(pyobject)
             || PyInt::is_type_of_bound(pyobject)
-            || PyFloat::is_type_of_bound(pyobject)
+            || PyFloat::is_exact_type_of_bound(pyobject)
     }
 }
 
@@ -300,14 +300,28 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
             serializer.serialize_bool(b)
         } else if self.pyobject.is_none() {
             serializer.serialize_none()
-        } else if let Ok(i) = self.pyobject.extract::<i32>() {
-            serializer.serialize_i32(i)
-        } else if let Ok(i) = self.pyobject.extract::<i64>() {
-            serializer.serialize_i64(i)
-        } else if let Ok(i) = self.pyobject.extract::<u64>() {
-            serializer.serialize_u64(i)
-        } else if let Ok(i) = self.pyobject.extract::<f64>() {
-            serializer.serialize_f64(i)
+        } else if PyFloat::is_exact_type_of_bound(&self.pyobject) {
+            if let Ok(i) = self.pyobject.extract::<f64>() {
+                serializer.serialize_f64(i)
+            } else {
+                Err(serde::ser::Error::custom(format!(
+                    "object of type '{}' does not fit into a float",
+                    self.pyobject.get_type()
+                )))
+            }
+        } else if PyInt::is_exact_type_of_bound(&self.pyobject) {
+            if let Ok(i) = self.pyobject.extract::<i32>() {
+                serializer.serialize_i32(i)
+            } else if let Ok(i) = self.pyobject.extract::<i64>() {
+                serializer.serialize_i64(i)
+            } else if let Ok(i) = self.pyobject.extract::<u64>() {
+                serializer.serialize_u64(i)
+            } else {
+                Err(serde::ser::Error::custom(format!(
+                    "object of type '{}' does not fit into an integer",
+                    self.pyobject.get_type()
+                )))
+            }
         } else {
             Err(serde::ser::Error::custom(format!(
                 "object of type '{}' is not serializable",
@@ -365,5 +379,30 @@ impl<'s> serde::Serialize for PyLogDict<'s> {
         };
         map.serialize_entry("message", &PyObjectSerializer::new(self.msg.clone(), 0))?;
         map.end()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::ToPyObject;
+    use serde_json::json;
+
+    #[test]
+    fn test_pyobject_serializer() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let b = PyObjectSerializer::to_json(PyList::new_bound(py, [1]).into_any()).unwrap();
+            assert_eq!(b, json!([1]).to_string().into_bytes());
+
+            let p = u64::MAX.to_object(py);
+            let p = p
+                .call_method_bound(py, "__add__", (1.to_object(py),), None)
+                .unwrap()
+                .into_bound(py);
+            assert!(matches!(PyObjectSerializer::to_json(p), Err(_)));
+            let p = PyFloat::new_bound(py, u64::MAX as f64 + 1.0);
+            assert!(matches!(PyObjectSerializer::to_json(p.into_any()), Ok(_)));
+        })
     }
 }
