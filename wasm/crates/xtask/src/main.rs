@@ -7,9 +7,16 @@ use anyhow::Result;
 use xshell::{cmd, Shell};
 
 fn main() -> Result<()> {
+    let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    std::env::set_current_dir(workspace_dir)?;
+
     let task = std::env::args().nth(1);
 
-    let sh = xshell::Shell::new()?;
+    let sh = Shell::new()?;
     if let Some(cmd) = task.as_deref() {
         let f = TASKS
             .iter()
@@ -55,6 +62,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
+            let workdir = sh.create_temp_dir()?;
             #[cfg(feature = "static")]
             {
                 let wasm = std::fs::read(&inp[0])?;
@@ -62,7 +70,7 @@ fn build_python(sh: &Shell) -> Result<()> {
                     .allow_wasi(true)?
                     .wasm_bulk_memory(true)
                     .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
-                    .map_dir("/workdir", "/tmp")
+                    .map_dir("/workdir", tmp.path())
                     .run(&wasm)?;
 
                 std::fs::write(out, wasm)?;
@@ -70,10 +78,11 @@ fn build_python(sh: &Shell) -> Result<()> {
 
             #[cfg(not(feature = "static"))]
             {
+                let workdir = workdir.path();
                 let inp = &inp[0];
                 cmd!(
                     sh,
-                    "wizer --allow-wasi --wasm-bulk-memory true {inp} --mapdir /usr::target/wasm32-wasip1/wasi-deps/usr --mapdir /workdir::/tmp -o {out}"
+                    "wizer --allow-wasi --wasm-bulk-memory true {inp} --mapdir /usr::target/wasm32-wasip1/wasi-deps/usr --mapdir /workdir::{workdir} -o {out}"
                 ).run()?;
             }
             Ok(())
