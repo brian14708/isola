@@ -70,7 +70,7 @@ fn build_python(sh: &Shell) -> Result<()> {
                     .allow_wasi(true)?
                     .wasm_bulk_memory(true)
                     .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
-                    .map_dir("/workdir", tmp.path())
+                    .map_dir("/workdir", workdir.path())
                     .run(&wasm)?;
 
                 std::fs::write(out, wasm)?;

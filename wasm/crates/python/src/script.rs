@@ -190,8 +190,19 @@ impl Scope {
                 f
             };
 
-            if let Ok(s) = PyObjectSerializer::to_cbor(vec![], obj.clone()) {
-                return Ok(Some(s));
+            if PyObjectSerializer::is_serializable(&obj) {
+                match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
+                    Ok(s) => return Ok(Some(s)),
+                    Err(cbor4ii::serde::EncodeError::Core(_)) => {
+                        return Err(Error::UnexpectedError("serde error"))
+                    }
+                    Err(cbor4ii::serde::EncodeError::Custom(s)) => {
+                        return Err(Error::PythonError {
+                            cause: s.to_string(),
+                            traceback: None,
+                        });
+                    }
+                };
             }
 
             let mut ret: Option<Vec<u8>> = None;

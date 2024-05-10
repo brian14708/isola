@@ -1,6 +1,6 @@
 use pyo3::{
-    types::{PyAnyMethods, PyDict, PyList, PyTuple},
-    Bound, IntoPy, PyAny, PyObject, Python,
+    types::{PyAnyMethods, PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple},
+    Bound, IntoPy, PyAny, PyObject, PyTypeInfo, Python,
 };
 use serde::{
     de::{DeserializeSeed, Visitor},
@@ -228,22 +228,34 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
 
 pub struct PyObjectSerializer<'s> {
     pyobject: Bound<'s, PyAny>,
+    depth: usize,
 }
 
 impl<'s> PyObjectSerializer<'s> {
-    fn new(pyobject: Bound<'s, PyAny>) -> Self {
-        Self { pyobject }
+    fn new(pyobject: Bound<'s, PyAny>, depth: usize) -> Self {
+        Self { pyobject, depth }
     }
 
     pub fn to_json(object: Bound<'s, PyAny>) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(&Self::new(object))
+        serde_json::to_vec(&Self::new(object, 0))
     }
 
     pub fn to_cbor(
         v: Vec<u8>,
         object: Bound<'s, PyAny>,
     ) -> Result<Vec<u8>, cbor4ii::serde::EncodeError<std::collections::TryReserveError>> {
-        cbor4ii::serde::to_vec(v, &Self::new(object))
+        cbor4ii::serde::to_vec(v, &Self::new(object, 0))
+    }
+
+    pub fn is_serializable(pyobject: &Bound<'s, PyAny>) -> bool {
+        pyobject.is_none()
+            || PyDict::is_type_of_bound(pyobject)
+            || PyList::is_type_of_bound(pyobject)
+            || PyTuple::is_type_of_bound(pyobject)
+            || PyString::is_type_of_bound(pyobject)
+            || PyBool::is_type_of_bound(pyobject)
+            || PyInt::is_type_of_bound(pyobject)
+            || PyFloat::is_type_of_bound(pyobject)
     }
 }
 
@@ -252,25 +264,34 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
     where
         S: serde::Serializer,
     {
+        const MAX_DEPTH: usize = 128;
+
+        let depth = self.depth + 1;
+        if self.depth > MAX_DEPTH {
+            return Err(serde::ser::Error::custom(
+                "maximum serialization depth exceeded, possible circular reference",
+            ));
+        }
+
         if let Ok(dict) = self.pyobject.downcast::<PyDict>() {
             let len = dict.len().ok();
             let mut map = serializer.serialize_map(len)?;
             for (key, value) in dict {
-                map.serialize_entry(&Self::new(key), &Self::new(value))?;
+                map.serialize_entry(&Self::new(key, depth), &Self::new(value, depth))?;
             }
             map.end()
         } else if let Ok(list) = self.pyobject.downcast::<PyList>() {
             let len = list.len().ok();
             let mut seq = serializer.serialize_seq(len)?;
             for elem in list {
-                seq.serialize_element(&Self::new(elem))?;
+                seq.serialize_element(&Self::new(elem, depth))?;
             }
             seq.end()
         } else if let Ok(tuple) = self.pyobject.downcast::<PyTuple>() {
             let len = tuple.len().ok();
             let mut seq = serializer.serialize_seq(len)?;
             for elem in tuple {
-                seq.serialize_element(&Self::new(elem))?;
+                seq.serialize_element(&Self::new(elem, depth))?;
             }
             seq.end()
         } else if let Ok(s) = self.pyobject.extract::<&str>() {
@@ -289,7 +310,7 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
             serializer.serialize_f64(i)
         } else {
             Err(serde::ser::Error::custom(format!(
-                "Object of type '{}' is not serializable",
+                "object of type '{}' is not serializable",
                 self.pyobject.get_type()
             )))
         }
@@ -325,13 +346,16 @@ impl<'s> serde::Serialize for PyLogDict<'s> {
             for (key, value) in dict {
                 if value.is_callable() {
                     map.serialize_entry(
-                        &PyObjectSerializer::new(key),
-                        &PyObjectSerializer::new(value.call0().map_err(serde::ser::Error::custom)?),
+                        &PyObjectSerializer::new(key, 0),
+                        &PyObjectSerializer::new(
+                            value.call0().map_err(serde::ser::Error::custom)?,
+                            0,
+                        ),
                     )?;
                 } else {
                     map.serialize_entry(
-                        &PyObjectSerializer::new(key),
-                        &PyObjectSerializer::new(value),
+                        &PyObjectSerializer::new(key, 0),
+                        &PyObjectSerializer::new(value, 0),
                     )?;
                 }
             }
@@ -339,7 +363,7 @@ impl<'s> serde::Serialize for PyLogDict<'s> {
         } else {
             serializer.serialize_map(Some(1))?
         };
-        map.serialize_entry("message", &PyObjectSerializer::new(self.msg.clone()))?;
+        map.serialize_entry("message", &PyObjectSerializer::new(self.msg.clone(), 0))?;
         map.end()
     }
 }
