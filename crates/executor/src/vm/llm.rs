@@ -5,7 +5,7 @@ use promptkit_llm::tokenizers::{DecodeOption, EncodeOption, Tokenizer as LlmToke
 use tracing::{field::Empty, span};
 use wasmtime_wasi::ResourceTable;
 
-use super::bindgen::promptkit::script::llm;
+use super::bindgen::promptkit::llm::tokenizer;
 
 pub trait LlmView: Send {
     fn table(&mut self) -> &mut ResourceTable;
@@ -17,10 +17,10 @@ pub trait LlmView: Send {
 }
 
 #[async_trait::async_trait]
-impl<I: LlmView> llm::Host for I {}
+impl<I: LlmView> tokenizer::Host for I {}
 
 #[async_trait::async_trait]
-impl<I: LlmView> llm::HostTokenizer for I {
+impl<I: LlmView> tokenizer::HostTokenizer for I {
     async fn new(
         &mut self,
         name: String,

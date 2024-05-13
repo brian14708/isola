@@ -6,7 +6,7 @@ use pyo3::{
     Bound, PyAny, PyObject, PyResult,
 };
 
-use super::promptkit::script::llm;
+use super::promptkit::llm::tokenizer;
 
 #[pymodule]
 #[pyo3(name = "llm")]
@@ -17,7 +17,7 @@ pub fn llm_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
 
 #[pyclass]
 struct Tokenizer {
-    inner: llm::Tokenizer,
+    inner: tokenizer::Tokenizer,
 }
 
 #[pymethods]
@@ -26,7 +26,7 @@ impl Tokenizer {
     #[pyo3(signature = (name, /))]
     fn py_new(name: &str) -> Self {
         Self {
-            inner: llm::Tokenizer::new(name),
+            inner: tokenizer::Tokenizer::new(name),
         }
     }
 

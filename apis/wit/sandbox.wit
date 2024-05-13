@@ -39,8 +39,8 @@ interface guest-api {
 world sandbox {
     include wasi:io/imports@0.2.0;
     import promptkit:http/client;
+    import promptkit:llm/tokenizer;
 
-    import llm;
     import host-api;
     export guest-api;
 }

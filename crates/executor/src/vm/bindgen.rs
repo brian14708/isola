@@ -5,8 +5,8 @@ wasmtime::component::bindgen!({
     with: {
         "wasi": wasmtime_wasi::bindings,
         "promptkit:http/client": super::http,
+        "promptkit:llm/tokenizer/tokenizer": super::llm::Tokenizer,
         "promptkit:script/host-api/argument-iterator": super::host_types::ArgumentIterator,
-        "promptkit:script/llm/tokenizer": super::llm::Tokenizer,
     },
 });
 

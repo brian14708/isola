@@ -1,4 +1,6 @@
-interface llm {
+package promptkit:llm;
+
+interface tokenizer {
     resource tokenizer {
         constructor(%name: string);
         encode: func(%str: string) -> list<u32>;
