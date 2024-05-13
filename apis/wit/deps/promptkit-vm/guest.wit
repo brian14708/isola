@@ -1,0 +1,19 @@
+package promptkit:vm;
+
+interface guest {
+    use host.{argument, log-level};
+    enum error-code {
+        unknown,
+        internal,
+        aborted,
+    }
+    record error {
+        code: error-code,
+        message: string,
+    }
+
+    set-log-level: func(%level: option<log-level>) -> ();
+    eval-bundle: func(%bundle-path: string, entrypoint: string) -> result<_, error>;
+    eval-script: func(%script: string) -> result<_, error>;
+    call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
+}

@@ -1,23 +1,18 @@
 mod bindgen;
-mod host_types;
-pub mod http;
-mod llm;
 mod run;
 mod state;
 
 use std::pin::Pin;
 
-pub use bindgen::{exports::promptkit::script::guest_api as exports, Sandbox};
-use host_types::ArgumentIterator;
+pub use bindgen::{exports::promptkit::vm::guest as exports, Sandbox};
 pub use state::VmState;
 use tempdir::TempDir;
 use tokio::sync::mpsc;
 use wasmtime::{component::ResourceTableError, Store};
 
-use crate::{
-    vm::{bindgen::host_api, host_types::HostTypesCtx, run::VmRun},
-    Env, ExecStreamItem,
-};
+use crate::{vm::run::VmRun, Env, ExecStreamItem};
+
+use crate::wasm::vm::{bindings::host::Argument, types::ArgumentIterator, VmView};
 
 pub struct Vm<E> {
     pub(crate) hash: [u8; 32],
@@ -36,7 +31,7 @@ where
 
     pub fn new_iter(
         &mut self,
-        stream: Pin<Box<dyn tokio_stream::Stream<Item = host_api::Argument> + Send>>,
+        stream: Pin<Box<dyn tokio_stream::Stream<Item = Argument> + Send>>,
     ) -> wasmtime::Result<wasmtime::component::Resource<ArgumentIterator>, ResourceTableError> {
         self.store
             .data_mut()

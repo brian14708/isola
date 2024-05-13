@@ -4,7 +4,6 @@ use anyhow::anyhow;
 use parking_lot::Mutex;
 use promptkit_llm::tokenizers::Tokenizer;
 use tokio::sync::mpsc;
-use tracing::event;
 use wasmtime::{
     component::{Linker, ResourceTable},
     Engine, Store,
@@ -12,16 +11,10 @@ use wasmtime::{
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::{
-    resource::MemoryLimiter,
-    trace_output::TraceOutput,
-    vm::{
-        bindgen::{self, host_api::LogLevel},
-        host_types, Sandbox,
-    },
-    Env, ExecStreamItem,
+    resource::MemoryLimiter, trace_output::TraceOutput, wasm::vm::VmView, Env, ExecStreamItem,
 };
 
-use super::{http::HttpView, llm::LlmView};
+use crate::wasm::{http::HttpView, llm::LlmView};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -35,15 +28,13 @@ pub struct VmState<E> {
     pub(crate) run: Option<VmRunState>,
 }
 
-impl<E> VmState<E>
-where
-    E: Env + Sync + Send,
-{
+impl<E: Env + Send> VmState<E> {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
-        super::http::add_to_linker(&mut linker, |v: &mut Self| v)?;
-        Sandbox::add_to_linker(&mut linker, |v: &mut Self| v)?;
+        crate::wasm::http::add_to_linker(&mut linker)?;
+        crate::wasm::llm::add_to_linker(&mut linker)?;
+        crate::wasm::vm::add_to_linker(&mut linker)?;
         Ok(linker)
     }
 
@@ -82,10 +73,7 @@ where
     }
 }
 
-impl<E> WasiView for VmState<E>
-where
-    E: Send,
-{
+impl<E: Send> WasiView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
     }
@@ -95,11 +83,35 @@ where
     }
 }
 
-#[async_trait::async_trait]
-impl<E> bindgen::host_api::Host for VmState<E>
-where
-    E: Env + Sync + Send,
-{
+impl<E: Env + Send> LlmView for VmState<E> {
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
+    }
+
+    async fn get_tokenizer(&mut self, name: &str) -> Option<Arc<dyn Tokenizer + Send + Sync>> {
+        self.env.get_tokenizer(name).await.ok()
+    }
+}
+
+impl<E: Env + Send> HttpView for VmState<E> {
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
+    }
+
+    fn send_request(
+        &mut self,
+        req: reqwest::Request,
+    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
+    {
+        self.env.send_request(req)
+    }
+}
+
+impl<E: Send> VmView for VmState<E> {
+    fn table(&mut self) -> &mut ResourceTable {
+        self.table.get_mut()
+    }
+
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
             run.output.send(ExecStreamItem::Data(data)).await?;
@@ -107,74 +119,5 @@ where
         } else {
             Err(anyhow!("output channel missing"))
         }
-    }
-
-    async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
-        match log_level {
-            LogLevel::Debug => event!(
-                target: "promptkit::debug",
-                tracing::Level::DEBUG,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Info => event!(
-                target: "promptkit::info",
-                tracing::Level::INFO,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Warn => event!(
-                target: "promptkit::warn",
-                tracing::Level::WARN,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Error => event!(
-                target: "promptkit::error",
-                tracing::Level::ERROR,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-        };
-        Ok(())
-    }
-}
-
-impl<E> host_types::HostTypesCtx for VmState<E>
-where
-    E: Send,
-{
-    fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
-    }
-}
-
-impl<E> LlmView for VmState<E>
-where
-    E: Env + Send + Sync,
-{
-    fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
-    }
-
-    async fn get_tokenizer(&self, name: &str) -> Option<Arc<dyn Tokenizer + Send + Sync>> {
-        self.env.get_tokenizer(name).await.ok()
-    }
-}
-
-impl<E> HttpView for VmState<E>
-where
-    E: Env + Sync + Send,
-{
-    fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
-    }
-
-    fn send_request(
-        &self,
-        req: reqwest::Request,
-    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
-    {
-        self.env.send_request(req)
     }
 }

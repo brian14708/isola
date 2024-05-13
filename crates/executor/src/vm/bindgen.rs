@@ -3,11 +3,6 @@ wasmtime::component::bindgen!({
     async: true,
 
     with: {
-        "wasi": wasmtime_wasi::bindings,
-        "promptkit:http/client": super::http,
-        "promptkit:llm/tokenizer/tokenizer": super::llm::Tokenizer,
-        "promptkit:script/host-api/argument-iterator": super::host_types::ArgumentIterator,
+        "promptkit:vm": crate::wasm::vm::bindings,
     },
 });
-
-pub use promptkit::script::host_api;

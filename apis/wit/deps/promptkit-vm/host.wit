@@ -1,0 +1,19 @@
+package promptkit:vm;
+
+interface host {
+    variant argument {
+        cbor(list<u8>),
+        iterator(argument-iterator),
+    }
+    resource argument-iterator {
+        read: func() -> option<argument>;
+    }
+    enum log-level {
+        debug,
+        info,
+        warn,
+        error,
+    }
+    emit: func(%cbor: list<u8>);
+    emit-log: func(%level: log-level, %log: string);
+}

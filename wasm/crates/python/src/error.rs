@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::wasm::exports::{
     self,
-    promptkit::script::guest_api::{self, ErrorCode},
+    promptkit::vm::guest::{self, ErrorCode},
 };
 
 #[derive(Error, Debug)]
@@ -30,24 +30,24 @@ impl Error {
     }
 }
 
-impl From<Error> for exports::promptkit::script::guest_api::Error {
+impl From<Error> for exports::promptkit::vm::guest::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::PythonError {
                 cause,
                 traceback: Some(traceback),
-            } => guest_api::Error {
+            } => guest::Error {
                 code: ErrorCode::Aborted,
                 message: format!("{cause}\n\n{traceback}"),
             },
             Error::PythonError {
                 cause,
                 traceback: None,
-            } => guest_api::Error {
+            } => guest::Error {
                 code: ErrorCode::Aborted,
                 message: cause,
             },
-            Error::UnexpectedError(e) => guest_api::Error {
+            Error::UnexpectedError(e) => guest::Error {
                 code: ErrorCode::Internal,
                 message: e.to_string(),
             },

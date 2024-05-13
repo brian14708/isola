@@ -9,6 +9,7 @@ mod trace_output;
 mod vm;
 mod vm_cache;
 mod vm_manager;
+mod wasm;
 
 pub use env::{Env, EnvError};
 pub use vm_manager::{ExecArgument, ExecSource, ExecStreamItem, VmManager};

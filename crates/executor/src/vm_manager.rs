@@ -229,7 +229,7 @@ where
             match script {
                 ExecSource::Script(script) => {
                     vm.sandbox
-                        .promptkit_script_guest_api()
+                        .promptkit_vm_guest()
                         .call_eval_script(&mut vm.store, script)
                         .await?
                         .map_err(|e| {
@@ -248,7 +248,7 @@ where
                     drop(file);
 
                     vm.sandbox
-                        .promptkit_script_guest_api()
+                        .promptkit_vm_guest()
                         .call_eval_bundle(
                             &mut vm.store,
                             &(String::from("/workdir/") + &name),

@@ -2,30 +2,28 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use tracing::Instrument;
+use wasmtime::component::Linker;
 use wasmtime_wasi::{Pollable, ResourceTable};
 
-pub use bindings::promptkit::http::client::add_to_linker;
-
-use self::bindings::promptkit::http::client::{
+use self::bindings::client::{
     Host, HostFutureResponse, HostRequest, HostResponse, HttpError, InputStream, Method,
     RequestError,
 };
 use self::types::{FutureResponse, Request, Response, ResponseBody};
 
-mod bindings {
-    wasmtime::component::bindgen!({
-        path: "wit",
-        interfaces: "import promptkit:http/client;",
-        async: true,
-        with: {
-            "wasi": wasmtime_wasi::bindings,
+wasmtime::component::bindgen!({
+    path: "wit",
+    interfaces: "import promptkit:http/client;",
+    async: true,
+    with: {
+        "wasi": wasmtime_wasi::bindings,
 
-            "promptkit:http/client/request": super::types::Request,
-            "promptkit:http/client/future-response": super::types::FutureResponse,
-            "promptkit:http/client/response": super::types::Response,
-        }
-    });
-}
+        "promptkit:http/client/request": types::Request,
+        "promptkit:http/client/response": types::Response,
+        "promptkit:http/client/future-response": types::FutureResponse,
+    }
+});
+pub use promptkit::http as bindings;
 
 mod types {
     use std::{pin::Pin, time::Duration};
@@ -35,7 +33,7 @@ mod types {
     use tracing::Instrument;
     use wasmtime_wasi::{runtime::AbortOnDropJoinHandle, HostInputStream, StreamResult, Subscribe};
 
-    use super::bindings::promptkit::http::client::HttpError;
+    use super::bindings::client::HttpError;
 
     pub struct Request {
         pub(crate) method: reqwest::Method,
@@ -131,9 +129,14 @@ pub trait HttpView: Send {
     fn table(&mut self) -> &mut ResourceTable;
 
     fn send_request(
-        &self,
+        &mut self,
         req: reqwest::Request,
     ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static;
+}
+
+pub fn add_to_linker<T: HttpView>(linker: &mut Linker<T>) -> anyhow::Result<()> {
+    bindings::client::add_to_linker(linker, |v| v)?;
+    Ok(())
 }
 
 #[async_trait::async_trait]

@@ -5,7 +5,7 @@ use pyo3::{
     types::{PyDict, PyString, PyTuple},
 };
 
-use crate::{serde::PyLogDict, wasm::promptkit::script::host_api};
+use crate::{serde::PyLogDict, wasm::promptkit::vm::host};
 
 thread_local! {
      static GLOBAL_LOGGING: RefCell<i32> = const { RefCell::new(0) };
@@ -22,7 +22,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host_api::LogLevel::Debug) {
+            if *l <= loglevel_to_i32(host::LogLevel::Debug) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -30,7 +30,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host_api::emit_log(host_api::LogLevel::Debug, &m);
+                host::emit_log(host::LogLevel::Debug, &m);
             }
             Ok(())
         })
@@ -44,7 +44,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host_api::LogLevel::Info) {
+            if *l <= loglevel_to_i32(host::LogLevel::Info) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -52,7 +52,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host_api::emit_log(host_api::LogLevel::Info, &m);
+                host::emit_log(host::LogLevel::Info, &m);
             }
             Ok(())
         })
@@ -66,7 +66,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host_api::LogLevel::Warn) {
+            if *l <= loglevel_to_i32(host::LogLevel::Warn) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -74,7 +74,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host_api::emit_log(host_api::LogLevel::Warn, &m);
+                host::emit_log(host::LogLevel::Warn, &m);
             }
             Ok(())
         })
@@ -88,7 +88,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host_api::LogLevel::Error) {
+            if *l <= loglevel_to_i32(host::LogLevel::Error) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -96,7 +96,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host_api::emit_log(host_api::LogLevel::Error, &m);
+                host::emit_log(host::LogLevel::Error, &m);
             }
             Ok(())
         })
@@ -105,16 +105,16 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     Ok(())
 }
 
-const fn loglevel_to_i32(level: host_api::LogLevel) -> i32 {
+const fn loglevel_to_i32(level: host::LogLevel) -> i32 {
     match level {
-        host_api::LogLevel::Debug => -4,
-        host_api::LogLevel::Info => -3,
-        host_api::LogLevel::Warn => -2,
-        host_api::LogLevel::Error => -1,
+        host::LogLevel::Debug => -4,
+        host::LogLevel::Info => -3,
+        host::LogLevel::Warn => -2,
+        host::LogLevel::Error => -1,
     }
 }
 
-pub fn set_log_level(level: Option<host_api::LogLevel>) {
+pub fn set_log_level(level: Option<host::LogLevel>) {
     GLOBAL_LOGGING.with_borrow_mut(|l| match level {
         Some(level) => *l = loglevel_to_i32(level),
         None => *l = 0,

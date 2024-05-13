@@ -3,15 +3,42 @@ use std::sync::Arc;
 use futures_util::Future;
 use promptkit_llm::tokenizers::{DecodeOption, EncodeOption, Tokenizer as LlmTokenizer};
 use tracing::{field::Empty, span};
+use wasmtime::component::Linker;
 use wasmtime_wasi::ResourceTable;
 
-use super::bindgen::promptkit::llm::tokenizer;
+use self::bindings::tokenizer;
+use self::types::Tokenizer;
+
+wasmtime::component::bindgen!({
+    path: "wit",
+    interfaces: "import promptkit:llm/tokenizer;",
+    async: true,
+    with: {
+        "promptkit:llm/tokenizer/tokenizer": types::Tokenizer,
+    }
+});
+pub use promptkit::llm as bindings;
+
+mod types {
+    use std::sync::Arc;
+
+    use promptkit_llm::tokenizers::Tokenizer as LlmTokenizer;
+
+    pub struct Tokenizer {
+        pub(crate) inner: Arc<dyn LlmTokenizer + Send + Sync>,
+    }
+}
+
+pub fn add_to_linker<T: LlmView>(linker: &mut Linker<T>) -> anyhow::Result<()> {
+    bindings::tokenizer::add_to_linker(linker, |v| v)?;
+    Ok(())
+}
 
 pub trait LlmView: Send {
     fn table(&mut self) -> &mut ResourceTable;
 
     fn get_tokenizer(
-        &self,
+        &mut self,
         name: &str,
     ) -> impl Future<Output = Option<Arc<dyn LlmTokenizer + Send + Sync>>> + Send;
 }
@@ -88,8 +115,4 @@ impl<I: LlmView> tokenizer::HostTokenizer for I {
         self.table().delete(tokenizer)?;
         Ok(())
     }
-}
-
-pub struct Tokenizer {
-    inner: Arc<dyn LlmTokenizer + Send + Sync>,
 }

@@ -15,9 +15,7 @@ pub trait Env {
     fn get_tokenizer(
         &self,
         _name: &str,
-    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send {
-        async { Err(EnvError::Unimplemented) }
-    }
+    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send;
 }
 
 #[derive(Error, Debug)]

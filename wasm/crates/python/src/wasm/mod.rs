@@ -14,8 +14,9 @@ use crate::{
     error::Error,
     script::{InputValue, Scope},
     serde::PyObjectDeserializer,
-    wasm::{exports::promptkit::script::guest_api, promptkit::script::host_api},
 };
+
+use self::{exports::promptkit::vm::guest, promptkit::vm::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
@@ -30,52 +31,46 @@ export!(Global);
 
 pub struct Global;
 
-impl guest_api::Guest for Global {
-    fn set_log_level(level: Option<host_api::LogLevel>) {
+impl guest::Guest for Global {
+    fn set_log_level(level: Option<host::LogLevel>) {
         logging::set_log_level(level);
     }
 
-    fn eval_bundle(bundle_path: String, entrypoint: String) -> Result<(), guest_api::Error> {
+    fn eval_bundle(bundle_path: String, entrypoint: String) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow_mut(|vm| {
             if let Some(vm) = vm.as_mut() {
                 vm.load_zip(&bundle_path, &entrypoint)
-                    .map_err(Into::<guest_api::Error>::into)
+                    .map_err(Into::<guest::Error>::into)
             } else {
                 Err(Error::UnexpectedError("VM not initialized").into())
             }
         })
     }
 
-    fn eval_script(script: String) -> Result<(), guest_api::Error> {
+    fn eval_script(script: String) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {
-                vm.load_script(&script)
-                    .map_err(Into::<guest_api::Error>::into)
+                vm.load_script(&script).map_err(Into::<guest::Error>::into)
             } else {
                 Err(Error::UnexpectedError("VM not initialized").into())
             }
         })
     }
 
-    fn call_func(
-        func: String,
-        args: Vec<host_api::Argument>,
-    ) -> Result<Option<Vec<u8>>, guest_api::Error> {
+    fn call_func(func: String, args: Vec<host::Argument>) -> Result<Option<Vec<u8>>, guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {
                 let ret = vm
                     .run(
                         &func,
                         args.into_iter().map(|f| match f {
-                            host_api::Argument::Cbor(s) => InputValue::Cbor(s.into()),
-                            host_api::Argument::Iterator(e) => {
-                                InputValue::Iter(ArgIter { iter: e })
-                            }
+                            host::Argument::Cbor(s) => InputValue::Cbor(s.into()),
+                            host::Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         }),
                         [],
-                        host_api::emit,
+                        host::emit,
                     )
-                    .map_err(Into::<guest_api::Error>::into);
+                    .map_err(Into::<guest::Error>::into);
                 vm.flush();
                 ret
             } else {
@@ -103,7 +98,7 @@ fn promptkit_module(module: Bound<'_, PyModule>) -> PyResult<()> {
 
 #[pyclass]
 pub struct ArgIter {
-    iter: host_api::ArgumentIterator,
+    iter: host::ArgumentIterator,
 }
 
 #[pymethods]
@@ -116,7 +111,7 @@ impl ArgIter {
     fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
         match slf.iter.read() {
             Some(a) => match a {
-                host_api::Argument::Cbor(c) => {
+                host::Argument::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
                         PyObjectDeserializer::new(slf.py())
@@ -126,7 +121,7 @@ impl ArgIter {
                             })?,
                     ))
                 }
-                host_api::Argument::Iterator(_) => todo!(),
+                host::Argument::Iterator(_) => todo!(),
             },
             None => Ok(None),
         }
