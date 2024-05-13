@@ -1,4 +1,4 @@
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 
 use eventsource::event::{parse_event_line, Event};
 use futures::AsyncReadExt;
@@ -232,7 +232,7 @@ fn build_request(
     body: Option<PyObject>,
 ) -> PyResult<(client::Request, ResponseExtractor)> {
     let extract = ResponseExtractor::from_str(response)?;
-    let request = client::Request::new(method);
+    let mut request = client::Request::new(method);
     extract.set_accept_header(&request);
 
     if let Some(params) = params {
@@ -264,14 +264,26 @@ fn build_request(
         request
             .set_header("content-type", "application/json")
             .unwrap();
-        let json = PyObjectSerializer::to_json(body.into_bound(py))
+        PyObjectSerializer::to_json_writer(RequestWriter(&mut request), body.into_bound(py))
             .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?;
-        request
-            .write_body(&json)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
     }
 
     Ok((request, extract))
+}
+
+struct RequestWriter<'a>(&'a mut Request);
+
+impl Write for RequestWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .write_body(buf)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone)]

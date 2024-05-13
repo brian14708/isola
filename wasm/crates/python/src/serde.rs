@@ -1,3 +1,5 @@
+use std::io::Write;
+
 use pyo3::{
     types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple},
     Bound, IntoPy, PyAny, PyObject, PyTypeInfo, Python,
@@ -236,8 +238,11 @@ impl<'s> PyObjectSerializer<'s> {
         Self { pyobject, depth }
     }
 
-    pub fn to_json(object: Bound<'s, PyAny>) -> Result<Vec<u8>, serde_json::Error> {
-        serde_json::to_vec(&Self::new(object, 0))
+    pub fn to_json_writer(
+        writer: impl Write,
+        object: Bound<'s, PyAny>,
+    ) -> Result<(), serde_json::Error> {
+        serde_json::to_writer(writer, &Self::new(object, 0))
     }
 
     pub fn to_cbor(
@@ -381,17 +386,21 @@ mod tests {
     fn test_pyobject_serializer() {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let b = PyObjectSerializer::to_json(PyList::new_bound(py, [1]).into_any()).unwrap();
-            assert_eq!(b, json!([1]).to_string().into_bytes());
+            let mut v = vec![];
+            PyObjectSerializer::to_json_writer(&mut v, PyList::new_bound(py, [1]).into_any())
+                .unwrap();
+            assert_eq!(v, json!([1]).to_string().into_bytes());
 
             let p = u64::MAX.to_object(py);
             let p = p
                 .call_method_bound(py, "__add__", (1.to_object(py),), None)
                 .unwrap()
                 .into_bound(py);
-            assert!(PyObjectSerializer::to_json(p).is_err());
+            v.clear();
+            assert!(PyObjectSerializer::to_json_writer(&mut v, p).is_err());
             let p = PyFloat::new_bound(py, u64::MAX as f64 + 1.0);
-            assert!(PyObjectSerializer::to_json(p.into_any()).is_ok());
+            v.clear();
+            assert!(PyObjectSerializer::to_json_writer(&mut v, p.into_any()).is_ok());
         });
     }
 }
