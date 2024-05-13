@@ -20,6 +20,7 @@ use self::{exports::promptkit::vm::guest, promptkit::vm::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
+    path: "../../../apis/wit",
     with: {
         "wasi:io/poll@0.2.0": wasi::io::poll,
         "wasi:io/error@0.2.0": wasi::io::error,

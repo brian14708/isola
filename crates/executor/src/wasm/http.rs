@@ -12,7 +12,7 @@ use self::bindings::client::{
 use self::types::{FutureResponse, Request, Response, ResponseBody};
 
 wasmtime::component::bindgen!({
-    path: "wit",
+    path: "../../apis/wit",
     interfaces: "import promptkit:http/client;",
     async: true,
     with: {

@@ -6,7 +6,7 @@ use self::bindings::host::HostArgumentIterator;
 use bindings::host::{Argument, LogLevel};
 
 wasmtime::component::bindgen!({
-    path: "wit",
+    path: "../../apis/wit",
     interfaces: "import promptkit:vm/host;",
     async: true,
 
