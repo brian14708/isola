@@ -31,7 +31,9 @@ mod types {
     use bytes::Bytes;
     use futures_util::StreamExt;
     use tracing::Instrument;
-    use wasmtime_wasi::{runtime::AbortOnDropJoinHandle, HostInputStream, StreamResult, Subscribe};
+    use wasmtime_wasi::{
+        runtime::AbortOnDropJoinHandle, HostInputStream, StreamError, StreamResult, Subscribe,
+    };
 
     use super::bindings::client::HttpError;
 
@@ -104,20 +106,21 @@ mod types {
 
     impl HostInputStream for ResponseBody {
         fn read(&mut self, size: usize) -> StreamResult<Bytes> {
-            if let Some(Ok((b, offset))) = self.buffer.as_mut() {
-                if size + *offset < b.len() {
-                    let out = Vec::from(&b[*offset..*offset + size]).into();
-                    *offset += size;
-                    return Ok(out);
+            match self.buffer.as_mut() {
+                Some(Ok((b, offset))) => {
+                    if size + *offset < b.len() {
+                        let out = b.slice(*offset..(*offset + size));
+                        *offset += size;
+                        return Ok(out);
+                    }
                 }
+                Some(Err(StreamError::Closed)) => return Err(StreamError::Closed),
+                None => return Ok(Bytes::new()),
+                _ => {}
             }
 
             match self.buffer.take() {
-                Some(Ok((b, offset))) => Ok(if offset == 0 {
-                    b
-                } else {
-                    b[offset..].to_vec().into()
-                }),
+                Some(Ok((b, offset))) => Ok(b.slice(offset..)),
                 Some(Err(e)) => Err(e),
                 None => Ok(Bytes::new()),
             }

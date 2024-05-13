@@ -1865,7 +1865,6 @@ dependencies = [
 name = "wasi-runtime"
 version = "0.1.0"
 dependencies = [
- "futures",
  "slab",
  "wasi 0.13.0+wasi-0.2.0",
 ]

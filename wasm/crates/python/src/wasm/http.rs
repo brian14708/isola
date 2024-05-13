@@ -1,16 +1,16 @@
 use std::io::{BufRead, BufReader, Read, Write};
 
 use eventsource::event::{parse_event_line, Event};
-use futures::AsyncReadExt;
 use pyo3::{
     prelude::*,
     types::{PyBytes, PyDict, PyString},
 };
 use serde::de::DeserializeSeed;
 use url::Url;
+use wasi::io::streams::StreamError;
 use wasi_runtime::{
     futures::{block_on, Reactor},
-    streams::{AsyncStreamReader, BlockingStreamReader},
+    streams::BlockingStreamReader,
 };
 
 use crate::{
@@ -80,7 +80,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
-        get(py, url, params, headers, timeout, "sse", true)
+        get(py, url, params, headers, timeout, "sse+json", true)
     }
 
     #[pyfn(module)]
@@ -140,7 +140,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         headers: Option<&Bound<'_, PyDict>>,
         timeout: Option<f32>,
     ) -> PyResult<PyObject> {
-        post(py, url, data, headers, timeout, "sse", true)
+        post(py, url, data, headers, timeout, "sse+json", true)
     }
 
     #[pyfn(module)]
@@ -212,10 +212,19 @@ impl AsyncResponse {
 
         let body = resp.body().unwrap();
         let mut buf = Vec::new();
-        AsyncStreamReader::new(body, reactor)
-            .read_to_end(&mut buf)
-            .await
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+
+        loop {
+            reactor.wait_for(body.subscribe()).await;
+            match body.read(8192) {
+                Ok(v) => buf.extend_from_slice(&v),
+                Err(StreamError::Closed) => break,
+                Err(StreamError::LastOperationFailed(e)) => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        e.to_debug_string(),
+                    ))
+                }
+            }
+        }
         self.extract.extract_body(py, &buf)
     }
 }
@@ -291,7 +300,7 @@ enum ResponseExtractor {
     Json,
     Text,
     Binary,
-    Sse,
+    SseJson,
 }
 
 impl ResponseExtractor {
@@ -300,7 +309,7 @@ impl ResponseExtractor {
             "text" => Ok(Self::Text),
             "json" => Ok(Self::Json),
             "binary" => Ok(Self::Binary),
-            "sse" => Ok(Self::Sse),
+            "sse+json" => Ok(Self::SseJson),
             _ => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                 "invalid response format".to_string(),
             )),
@@ -315,7 +324,7 @@ impl ResponseExtractor {
                     Self::Text => "text/*",
                     Self::Json => "application/json",
                     Self::Binary => "application/octet-stream",
-                    Self::Sse => "text/event-stream",
+                    Self::SseJson => "text/event-stream",
                 },
             )
             .unwrap();
@@ -333,9 +342,42 @@ impl ResponseExtractor {
             Self::Json => PyObjectDeserializer::new(py)
                 .deserialize(&mut serde_json::Deserializer::from_slice(body))
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
-            Self::Sse => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "unexpected response format",
-            )),
+            Self::SseJson => {
+                let mut v = vec![];
+                let mut reader = BufReader::new(body);
+                let mut evt = Event::new();
+                let mut buf = String::new();
+                loop {
+                    buf.clear();
+                    let line = reader.read_line(&mut buf).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                    })?;
+                    if line == 0 {
+                        break;
+                    }
+
+                    match parse_event_line(&buf, &mut evt) {
+                        eventsource::event::ParseResult::Dispatch => {
+                            if evt.data.trim() == "[DONE]" {
+                                break;
+                            }
+                            v.push(
+                                PyObjectDeserializer::new(py)
+                                    .deserialize(&mut serde_json::Deserializer::from_str(&evt.data))
+                                    .map_err(|e| {
+                                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                                            e.to_string(),
+                                        )
+                                    })?,
+                            );
+                            evt = Event::new();
+                        }
+                        eventsource::event::ParseResult::Next
+                        | eventsource::event::ParseResult::SetRetry(_) => {}
+                    }
+                }
+                Ok(v.into_py(py))
+            }
         }
     }
 
@@ -351,7 +393,7 @@ impl ResponseExtractor {
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 self.extract_body(py, &buf)
             }
-            Self::Sse => Ok(SseIter {
+            Self::SseJson => Ok(SseIter {
                 response: BufReader::new(body),
             }
             .into_py(py)),

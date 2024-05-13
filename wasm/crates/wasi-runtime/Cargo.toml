@@ -6,4 +6,3 @@ edition.workspace = true
 [dependencies]
 wasi = "0.13.0"
 slab = { version = "0.4.9", default-features = false }
-futures = { version = "0.3.30", default-features = false, features = ["std"] }
