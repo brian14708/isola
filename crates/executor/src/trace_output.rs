@@ -52,7 +52,7 @@ impl TraceOutputStream {
                     target: "promptkit::stdout",
                     tracing::Level::DEBUG,
                     promptkit.user = true,
-                    promptkit.log.group = "stderr",
+                    promptkit.log.group = "stdout",
                     promptkit.log.output = s,
                 );
             }
