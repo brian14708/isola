@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 
-# server
 FROM docker.io/library/rust:alpine AS server-build
 RUN apk add --no-cache protobuf-dev musl-dev cmake build-base
 WORKDIR /src
@@ -12,7 +11,6 @@ RUN --mount=type=cache,target=/src/target/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
-# ui
 FROM docker.io/library/node:22-bookworm AS ui-build
 WORKDIR /src
 COPY ui/pnpm-workspace.yaml .
@@ -26,7 +24,6 @@ COPY ui .
 COPY apis ../apis
 RUN pnpm run build
 
-# wasm
 FROM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasip1
 WORKDIR /src/wasm
@@ -37,7 +34,6 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/wasi-deps/downloads
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask-release build-all
 
-# final
 FROM cgr.dev/chainguard/static:latest
 WORKDIR /app
 USER nonroot

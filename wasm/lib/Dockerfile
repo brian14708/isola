@@ -1,5 +1,6 @@
-FROM docker.io/library/fedora:39
+# syntax=docker/dockerfile:1
 
+FROM docker.io/library/fedora:39
 ENV CC=clang
 ENV WASI_SDK_PATH=/opt/wasi-sdk
 ENV WASMTIME_HOME=/opt/wasmtime
@@ -37,10 +38,10 @@ RUN cd Python-${PYTHON_VERSION} && python3 ./Tools/wasm/wasm_build.py wasi
 RUN cd Python-${PYTHON_VERSION}/builddir/wasi && _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi python3 ../../Tools/wasm/wasm_assets.py
 
 WORKDIR /out
-RUN mkdir -p lib/wasm32-wasi lib/wasi include/python$(echo ${PYTHON_VERSION} | awk -F. '{print $1 "." $2}') && \
-    cp -r /src/Python-${PYTHON_VERSION}/Include/* include/python$(echo ${PYTHON_VERSION} | awk -F. '{print $1 "." $2}') && \
+RUN mkdir -p lib/wasm32-wasi lib/wasi include/python${PYTHON_VERSION%.*} && \
+    cp -r /src/Python-${PYTHON_VERSION}/Include/* include/python${PYTHON_VERSION%.*} && \
     cp -r /src/Python-${PYTHON_VERSION}/builddir/wasi/usr . && \
-    echo "CREATE lib/wasm32-wasi/libpython$(echo ${PYTHON_VERSION} | awk -F. '{print $1 "." $2}').a" >> lib.def && \
+    echo "CREATE lib/wasm32-wasi/libpython${PYTHON_VERSION%.*}.a" >> lib.def && \
     echo "ADDLIB ${WASI_SDK_PATH}/share/wasi-sysroot/lib/wasm32-wasi/libz.a" >> lib.def && \
     find /src/Python-${PYTHON_VERSION}/builddir/wasi/ -name '*.a' -exec echo ADDLIB {} >> lib.def \; && \
     echo "SAVE" >> lib.def && \
