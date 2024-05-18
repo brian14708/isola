@@ -60,6 +60,31 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
+        format!("target/{TARGET}/release/promptkit_python.pass1.wasm"),
+        |inp, out| -> Result<()> {
+            #[cfg(feature = "static")]
+            {
+                wasm_opt::OptimizationOptions::new_opt_level_4()
+                    .all_features()
+                    .debug_info(true)
+                    .add_pass(wasm_opt::Pass::Gufa)
+                    .add_pass(wasm_opt::Pass::StripDebug)
+                    .run(&inp[0], out)?;
+            }
+
+            #[cfg(not(feature = "static"))]
+            {
+                let inp = &inp[0];
+                cmd!(sh, "wasm-opt -g -O4 --gufa --strip-debug {inp} -o {out}").run()?;
+            }
+            Ok(())
+        },
+    )?;
+
+    run_if_changed(
+        vec![format!(
+            "target/{TARGET}/release/promptkit_python.pass1.wasm"
+        )],
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
             let workdir = sh.create_temp_dir()?;
@@ -93,34 +118,28 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!(
             "target/{TARGET}/release/promptkit_python.init.wasm"
         )],
-        format!("target/{TARGET}/release/promptkit_python.opt.wasm"),
+        format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
         |inp, out| -> Result<()> {
             #[cfg(feature = "static")]
             {
-                let tmp = sh.create_temp_dir()?;
-                let mut tmp = tmp.path().to_path_buf();
-                tmp.push("promptkit_python.tmp.wasm");
-
                 wasm_opt::OptimizationOptions::new_opt_level_4()
                     .all_features()
-                    .add_pass(wasm_opt::Pass::Gufa)
-                    .run(&inp[0], &tmp)?;
-                wasm_opt::OptimizationOptions::new_opt_level_4()
-                    .all_features()
-                    .add_pass(wasm_opt::Pass::StripDebug)
-                    .run(tmp, out)?;
+                    .debug_info(true)
+                    .run(&inp[0], out)?;
             }
 
             #[cfg(not(feature = "static"))]
             {
                 let inp = &inp[0];
-                cmd!(sh, "wasm-opt -O4 --gufa -O4 --strip-debug {inp} -o {out}").run()?;
+                cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
             }
             Ok(())
         },
     )?;
     run_if_changed(
-        vec![format!("target/{TARGET}/release/promptkit_python.opt.wasm")],
+        vec![format!(
+            "target/{TARGET}/release/promptkit_python.pass2.wasm"
+        )],
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
             let wasm = std::fs::read(&inp[0])?;
