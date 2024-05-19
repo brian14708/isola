@@ -6,7 +6,7 @@ use std::pin::Pin;
 
 pub use bindgen::{exports::promptkit::vm::guest as exports, Sandbox};
 pub use state::VmState;
-use tempdir::TempDir;
+use tempfile::TempDir;
 use tokio::sync::mpsc;
 use wasmtime::{component::ResourceTableError, Store};
 

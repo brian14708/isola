@@ -145,7 +145,7 @@ where
     }
 
     pub async fn create(&self, hash: [u8; 32], env: E) -> anyhow::Result<Vm<E>> {
-        let workdir = tempdir::TempDir::new("vm").map_err(anyhow::Error::from)?;
+        let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
         let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, env);
         store.epoch_deadline_async_yield_and_update(1);
 
