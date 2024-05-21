@@ -6,7 +6,7 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0.83"
 wasm-opt = { version = "0.116.1", optional = true }
-wit-component = "0.207.0"
+wit-component = "0.208.0"
 wizer = { version = "6.0.0", optional = true }
 xshell = "0.2.6"
 
