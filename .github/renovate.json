@@ -1,17 +1,25 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", ":semanticCommits"],
+  "extends": [
+    "config:recommended",
+    ":semanticCommits"
+  ],
   "packageRules": [
     {
       "matchUpdateTypes": [
-        "minor",
+        "minor"
+      ],
+      "matchCurrentVersion": "!/^0/",
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": [
         "patch",
         "pin",
         "digest",
-        "devDependencies",
         "lockFileMaintenance"
       ],
-      "groupName": "minor updates",
+      "groupName": "patch updates",
       "automerge": true
     }
   ],
