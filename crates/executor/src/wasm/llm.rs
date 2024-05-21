@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use futures_util::Future;
 use promptkit_llm::tokenizers::{DecodeOption, EncodeOption, Tokenizer as LlmTokenizer};
 use tracing::{field::Empty, span};
 use wasmtime::component::Linker;
@@ -13,6 +12,7 @@ wasmtime::component::bindgen!({
     path: "../../apis/wit",
     interfaces: "import promptkit:llm/tokenizer;",
     async: true,
+    trappable_imports: true,
     with: {
         "promptkit:llm/tokenizer/tokenizer": types::Tokenizer,
     }
@@ -29,25 +29,29 @@ mod types {
     }
 }
 
-pub fn add_to_linker<T: LlmView>(linker: &mut Linker<T>) -> anyhow::Result<()> {
-    bindings::tokenizer::add_to_linker(linker, |v| v)?;
-    Ok(())
+pub fn add_to_linker<T: LlmView>(linker: &mut Linker<T>) -> wasmtime::Result<()> {
+    fn type_annotate<T, F>(val: F) -> F
+    where
+        F: Fn(&mut T) -> &mut dyn LlmView,
+    {
+        val
+    }
+    let closure = type_annotate::<T, _>(|t| t);
+    bindings::tokenizer::add_to_linker_get_host(linker, closure)
 }
 
+#[async_trait::async_trait]
 pub trait LlmView: Send {
     fn table(&mut self) -> &mut ResourceTable;
 
-    fn get_tokenizer(
-        &mut self,
-        name: &str,
-    ) -> impl Future<Output = Option<Arc<dyn LlmTokenizer + Send + Sync>>> + Send;
+    async fn get_tokenizer(&mut self, name: &str) -> Option<Arc<dyn LlmTokenizer + Send + Sync>>;
 }
 
 #[async_trait::async_trait]
-impl<I: LlmView> tokenizer::Host for I {}
+impl tokenizer::Host for dyn LlmView + '_ {}
 
 #[async_trait::async_trait]
-impl<I: LlmView> tokenizer::HostTokenizer for I {
+impl tokenizer::HostTokenizer for dyn LlmView + '_ {
     async fn new(
         &mut self,
         name: String,

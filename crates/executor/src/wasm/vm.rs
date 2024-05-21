@@ -9,7 +9,7 @@ wasmtime::component::bindgen!({
     path: "../../apis/wit",
     interfaces: "import promptkit:vm/host;",
     async: true,
-
+    trappable_imports: true,
     with: {
         "promptkit:vm/host/argument-iterator": types::ArgumentIterator,
     },
@@ -35,22 +35,28 @@ pub mod types {
     }
 }
 
+#[async_trait::async_trait]
 pub trait VmView: Send {
     fn table(&mut self) -> &mut ResourceTable;
 
-    fn emit(
-        &mut self,
-        data: Vec<u8>,
-    ) -> impl std::future::Future<Output = wasmtime::Result<()>> + Send;
+    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()>;
 }
 
-pub fn add_to_linker<T: VmView>(linker: &mut wasmtime::component::Linker<T>) -> anyhow::Result<()> {
-    bindings::host::add_to_linker(linker, |v| v)?;
-    Ok(())
+pub fn add_to_linker<T: VmView>(
+    linker: &mut wasmtime::component::Linker<T>,
+) -> wasmtime::Result<()> {
+    fn type_annotate<T, F>(val: F) -> F
+    where
+        F: Fn(&mut T) -> &mut dyn VmView,
+    {
+        val
+    }
+    let closure = type_annotate::<T, _>(|t| t);
+    bindings::host::add_to_linker_get_host(linker, closure)
 }
 
 #[async_trait::async_trait]
-impl<I: VmView> bindings::host::Host for I {
+impl bindings::host::Host for dyn VmView + '_ {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         VmView::emit(self, data).await?;
         Ok(())
@@ -88,7 +94,7 @@ impl<I: VmView> bindings::host::Host for I {
 }
 
 #[async_trait::async_trait]
-impl<I: VmView> HostArgumentIterator for I {
+impl HostArgumentIterator for dyn VmView + '_ {
     async fn read(
         &mut self,
         resource: wasmtime::component::Resource<types::ArgumentIterator>,

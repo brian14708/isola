@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc};
+use std::{path::Path, pin::Pin, sync::Arc};
 
 use anyhow::anyhow;
 use parking_lot::Mutex;
@@ -83,6 +83,7 @@ impl<E: Send> WasiView for VmState<E> {
     }
 }
 
+#[async_trait::async_trait]
 impl<E: Env + Send> LlmView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()
@@ -101,12 +102,14 @@ impl<E: Env + Send> HttpView for VmState<E> {
     fn send_request(
         &mut self,
         req: reqwest::Request,
-    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
-    {
-        self.env.send_request(req)
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static>,
+    > {
+        Box::pin(self.env.send_request(req))
     }
 }
 
+#[async_trait::async_trait]
 impl<E: Send> VmView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         self.table.get_mut()

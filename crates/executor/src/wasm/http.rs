@@ -1,3 +1,4 @@
+use std::pin::Pin;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -15,6 +16,7 @@ wasmtime::component::bindgen!({
     path: "../../apis/wit",
     interfaces: "import promptkit:http/client;",
     async: true,
+    trappable_imports: true,
     with: {
         "wasi": wasmtime_wasi::bindings,
 
@@ -134,16 +136,24 @@ pub trait HttpView: Send {
     fn send_request(
         &mut self,
         req: reqwest::Request,
-    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static;
+    ) -> Pin<
+        Box<dyn std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static>,
+    >;
 }
 
-pub fn add_to_linker<T: HttpView>(linker: &mut Linker<T>) -> anyhow::Result<()> {
-    bindings::client::add_to_linker(linker, |v| v)?;
-    Ok(())
+pub fn add_to_linker<T: HttpView>(linker: &mut Linker<T>) -> wasmtime::Result<()> {
+    fn type_annotate<T, F>(val: F) -> F
+    where
+        F: Fn(&mut T) -> &mut dyn HttpView,
+    {
+        val
+    }
+    let closure = type_annotate::<T, _>(|t| t);
+    bindings::client::add_to_linker_get_host(linker, closure)
 }
 
 #[async_trait::async_trait]
-impl<I: HttpView> Host for I {
+impl Host for dyn HttpView + '_ {
     async fn fetch(
         &mut self,
         request: wasmtime::component::Resource<Request>,
@@ -189,7 +199,7 @@ impl<I: HttpView> Host for I {
 }
 
 #[async_trait::async_trait]
-impl<I: HttpView> HostRequest for I {
+impl HostRequest for dyn HttpView + '_ {
     async fn new(
         &mut self,
         method: Method,
@@ -272,7 +282,7 @@ impl<I: HttpView> HostRequest for I {
 }
 
 #[async_trait::async_trait]
-impl<I: HttpView> HostFutureResponse for I {
+impl HostFutureResponse for dyn HttpView + '_ {
     async fn subscribe(
         &mut self,
         id: wasmtime::component::Resource<FutureResponse>,
@@ -308,7 +318,7 @@ impl<I: HttpView> HostFutureResponse for I {
 }
 
 #[async_trait::async_trait]
-impl<I: HttpView> HostResponse for I {
+impl HostResponse for dyn HttpView + '_ {
     async fn status(
         &mut self,
         id: wasmtime::component::Resource<Response>,
