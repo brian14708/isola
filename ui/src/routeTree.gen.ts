@@ -36,10 +36,16 @@ const UiIndexLazyRoute = UiIndexLazyImport.update({
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
     '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
       preLoaderRoute: typeof IndexImport
       parentRoute: typeof rootRoute
     }
     '/ui/': {
+      id: '/ui/'
+      path: '/ui'
+      fullPath: '/ui'
       preLoaderRoute: typeof UiIndexLazyImport
       parentRoute: typeof rootRoute
     }
@@ -48,6 +54,6 @@ declare module '@tanstack/react-router' {
 
 // Create and export the route tree
 
-export const routeTree = rootRoute.addChildren([IndexRoute, UiIndexLazyRoute])
+export const routeTree = rootRoute.addChildren({ IndexRoute, UiIndexLazyRoute })
 
 /* prettier-ignore-end */
