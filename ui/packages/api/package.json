@@ -10,7 +10,7 @@
     "generate": "buf generate ../../../apis/proto && node post-generate.js"
   },
   "devDependencies": {
-    "@bufbuild/buf": "^1.30.0",
+    "@bufbuild/buf": "^1.32.1",
     "@protobuf-ts/plugin": "^2.9.3"
   },
   "dependencies": {
