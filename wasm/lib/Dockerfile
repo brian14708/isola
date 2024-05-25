@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 
-FROM docker.io/library/fedora:39
+FROM docker.io/library/fedora:41
 ENV CC=clang
 ENV WASI_SDK_PATH=/opt/wasi-sdk
 ENV WASMTIME_HOME=/opt/wasmtime
 
-RUN dnf -y --nodocs --setopt=install_weak_deps=False install /usr/bin/{blurb,clang,curl,git,ln,tar,xz} 'dnf-command(builddep)' && \
+RUN dnf -y --nodocs --setopt=install_weak_deps=False install /usr/bin/{blurb,clang,curl,git,ln,tar,xz} 'dnf-command(builddep)' llvm && \
     dnf -y --nodocs --setopt=install_weak_deps=False builddep python3 && \
     dnf -y clean all
 
