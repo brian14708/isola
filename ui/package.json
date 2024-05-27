@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm run -r generate && vite",
-    "build": "pnpm run -r generate && tsc && vite build",
+    "build": "pnpm run -r generate && vite build && tsc",
     "format": "prettier --write .",
     "lint": "prettier --check . && eslint .",
     "preview": "vite preview"
