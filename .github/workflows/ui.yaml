@@ -1,0 +1,40 @@
+name: Server (UI)
+
+on:
+  push:
+    branches:
+      - main
+      - renovate/**
+    paths:
+      - .github/**
+      - ui/**
+      - apis/**
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Install pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          package_json_file: ui/package.json
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+      - name: Install
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+      - name: Build
+        working-directory: ui
+        run: pnpm run build
+      - name: Lint
+        working-directory: ui
+        run: pnpm run lint
