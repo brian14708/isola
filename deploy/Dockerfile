@@ -1,17 +1,17 @@
 # syntax=docker/dockerfile:1
 
-FROM docker.io/library/rust:alpine AS server-build
-RUN apk add --no-cache protobuf-dev musl-dev cmake build-base
-WORKDIR /src
+FROM cgr.dev/chainguard/rust:latest-dev AS server-build
+USER root
+RUN apk add --no-cache protobuf-dev cmake glibc-dev
 COPY crates crates
 COPY apis apis
 COPY Cargo.toml .
 COPY Cargo.lock .
-RUN --mount=type=cache,target=/src/target/release \
-    --mount=type=cache,target=/usr/local/cargo/registry \
+RUN --mount=type=cache,target=/work/target/release \
+    --mount=type=cache,target=/root/.cargo/registry \
     cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
-FROM docker.io/library/node:22-bookworm AS ui-build
+FROM docker.io/library/node:22 AS ui-build
 WORKDIR /src
 COPY ui/pnpm-workspace.yaml .
 COPY ui/package.json .
@@ -43,13 +43,13 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask-release build-all
 
-FROM cgr.dev/chainguard/static:latest
+FROM cgr.dev/chainguard/glibc-dynamic:latest
 WORKDIR /app
 USER nonroot
-COPY --from=server-build /src/target/promptkit_server .
-COPY --from=ui-build /src/dist ui/dist
+COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit_server .
+COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
-COPY --from=wasm-build /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
+COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
 
 EXPOSE 3000
