@@ -26,11 +26,20 @@ RUN pnpm run build
 
 FROM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasip1
+
+RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
+ENV PYENV_ROOT=/root/.pyenv \
+    PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH
+RUN curl https://pyenv.run | bash
+RUN eval "$(pyenv init -)"
+RUN pyenv install 3.12 && pyenv global 3.12
+
 WORKDIR /src/wasm
 COPY apis ../apis
 COPY wasm .
-RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/wasi-deps/downloads \
+RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/src/wasm/target/release \
+    --mount=type=cache,target=/src/wasm/downloads \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask-release build-all
 

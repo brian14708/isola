@@ -15,9 +15,3 @@ url = "2.5.0"
 wasi = { workspace = true }
 wasi-runtime = { path = "../wasi-runtime" }
 wit-bindgen = "0.25.0"
-
-[build-dependencies]
-flate2 = "1.0.29"
-tar = "0.4.40"
-ureq = "2.9.7"
-url = "2.5.0"
