@@ -14,4 +14,4 @@ thiserror = "1.0.59"
 url = "2.5.0"
 wasi = { workspace = true }
 wasi-runtime = { path = "../wasi-runtime" }
-wit-bindgen = "0.25.0"
+wit-bindgen = "0.26.0"
