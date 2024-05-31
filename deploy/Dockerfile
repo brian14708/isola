@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/work/target/release \
     --mount=type=cache,target=/root/.cargo/registry \
     cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
-FROM docker.io/library/node:22 AS ui-build
+FROM --platform=$BUILDPLATFORM docker.io/library/node:22 AS ui-build
 WORKDIR /src
 COPY ui/pnpm-workspace.yaml .
 COPY ui/package.json .
@@ -24,7 +24,7 @@ COPY ui .
 COPY apis ../apis
 RUN pnpm run build
 
-FROM docker.io/library/rust:bookworm AS wasm-build
+FROM --platform=$BUILDPLATFORM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasip1
 
 RUN apt-get update && apt-get install -y cmake && rm -rf /var/lib/apt/lists/*
