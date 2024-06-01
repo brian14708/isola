@@ -1,8 +1,7 @@
-version: v1
+version: v2
 managed:
   enabled: true
 plugins:
-  - name: ts
-    path: ./node_modules/.bin/protoc-gen-ts
+  - local: ./node_modules/.bin/protoc-gen-ts
     out: generated
     strategy: all
