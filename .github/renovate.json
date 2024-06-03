@@ -1,24 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":semanticCommitTypeAll(chore)"
-  ],
+  "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "packageRules": [
     {
-      "matchUpdateTypes": [
-        "minor"
-      ],
+      "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
     },
     {
-      "matchUpdateTypes": [
-        "patch",
-        "pin",
-        "digest",
-        "lockFileMaintenance"
-      ],
+      "matchUpdateTypes": ["patch", "pin", "digest", "lockFileMaintenance"],
       "groupName": "patch updates",
       "automerge": true
     }
@@ -27,9 +17,5 @@
   "lockFileMaintenance": {
     "enabled": true
   },
-  "ignoreDeps": [
-    "http_02",
-    "http_body_04",
-    "tower-http_04"
-  ]
+  "ignoreDeps": ["http_02", "http_body_04", "tower-http_04"]
 }
