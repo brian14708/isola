@@ -54,5 +54,11 @@ fn main() {
         for lib in &libs {
             println!("cargo:rustc-link-lib={lib}");
         }
+        {
+            let mut dst = outdir.clone();
+            dst.push(".build-timestamp");
+            std::fs::File::create(dst.clone()).unwrap();
+            println!("cargo:rerun-if-changed={}", dst.display());
+        }
     }
 }
