@@ -1,6 +1,5 @@
 [alias]
-xtask = "run --package xtask --"
-xtask-release = "run --release --features static --package xtask --"
+xtask = "run --release --package xtask --"
 
 [target.wasm32-wasip1]
 rustflags = [

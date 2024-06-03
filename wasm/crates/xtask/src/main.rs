@@ -62,21 +62,8 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         format!("target/{TARGET}/release/promptkit_python.pass1.wasm"),
         |inp, out| -> Result<()> {
-            #[cfg(feature = "static")]
-            {
-                wasm_opt::OptimizationOptions::new_opt_level_4()
-                    .all_features()
-                    .debug_info(true)
-                    .add_pass(wasm_opt::Pass::Gufa)
-                    .add_pass(wasm_opt::Pass::StripDebug)
-                    .run(&inp[0], out)?;
-            }
-
-            #[cfg(not(feature = "static"))]
-            {
-                let inp = &inp[0];
-                cmd!(sh, "wasm-opt -g -O4 --gufa --strip-debug {inp} -o {out}").run()?;
-            }
+            let inp = &inp[0];
+            cmd!(sh, "wasm-opt -g -O4 --strip-debug {inp} -o {out}").run()?;
             Ok(())
         },
     )?;
@@ -88,28 +75,15 @@ fn build_python(sh: &Shell) -> Result<()> {
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
             let workdir = sh.create_temp_dir()?;
-            #[cfg(feature = "static")]
-            {
-                let wasm = std::fs::read(&inp[0])?;
-                let wasm = wizer::Wizer::new()
-                    .allow_wasi(true)?
-                    .wasm_bulk_memory(true)
-                    .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
-                    .map_dir("/workdir", workdir.path())
-                    .run(&wasm)?;
+            let wasm = std::fs::read(&inp[0])?;
+            let wasm = wizer::Wizer::new()
+                .allow_wasi(true)?
+                .wasm_bulk_memory(true)
+                .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
+                .map_dir("/workdir", workdir.path())
+                .run(&wasm)?;
 
-                std::fs::write(out, wasm)?;
-            }
-
-            #[cfg(not(feature = "static"))]
-            {
-                let workdir = workdir.path();
-                let inp = &inp[0];
-                cmd!(
-                    sh,
-                    "wizer --allow-wasi --wasm-bulk-memory true {inp} --mapdir /usr::target/wasm32-wasip1/wasi-deps/usr --mapdir /workdir::{workdir} -o {out}"
-                ).run()?;
-            }
+            std::fs::write(out, wasm)?;
             Ok(())
         },
     )?;
@@ -120,19 +94,8 @@ fn build_python(sh: &Shell) -> Result<()> {
         )],
         format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
         |inp, out| -> Result<()> {
-            #[cfg(feature = "static")]
-            {
-                wasm_opt::OptimizationOptions::new_opt_level_4()
-                    .all_features()
-                    .debug_info(true)
-                    .run(&inp[0], out)?;
-            }
-
-            #[cfg(not(feature = "static"))]
-            {
-                let inp = &inp[0];
-                cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
-            }
+            let inp = &inp[0];
+            cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
             Ok(())
         },
     )?;
