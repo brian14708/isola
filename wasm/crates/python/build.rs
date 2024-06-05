@@ -56,8 +56,9 @@ fn main() {
         }
         {
             let mut dst = outdir.clone();
-            dst.push(".build-timestamp");
-            std::fs::File::create(dst.clone()).unwrap();
+            dst.push("include");
+            dst.push(libpython_binary);
+            dst.push("Python.h");
             println!("cargo:rerun-if-changed={}", dst.display());
         }
     }
