@@ -12,7 +12,7 @@ thread_local! {
 }
 
 #[pymodule]
-#[pyo3(name = "logging")]
+#[pyo3(name = "_promptkit_logging")]
 pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
     #[pyo3(signature = (msg, *args, **kwds))]

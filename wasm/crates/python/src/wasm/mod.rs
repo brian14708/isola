@@ -7,7 +7,7 @@ mod logging;
 use std::cell::RefCell;
 
 use cbor4ii::core::utils::SliceReader;
-use pyo3::{append_to_inittab, prelude::*, wrap_pymodule};
+use pyo3::{append_to_inittab, prelude::*};
 use serde::de::DeserializeSeed;
 
 use crate::{
@@ -81,22 +81,6 @@ impl guest::Guest for Global {
     }
 }
 
-#[pymodule]
-#[pyo3(name = "models")]
-fn models_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_wrapped(wrap_pymodule!(llm::llm_module))?;
-    Ok(())
-}
-
-#[pymodule]
-#[pyo3(name = "promptkit")]
-fn promptkit_module(module: Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_wrapped(wrap_pymodule!(http::http_module))?;
-    module.add_wrapped(wrap_pymodule!(logging::logging_module))?;
-    module.add_wrapped(wrap_pymodule!(models_module))?;
-    Ok(())
-}
-
 #[pyclass]
 pub struct ArgIter {
     iter: host::ArgumentIterator,
@@ -141,7 +125,13 @@ pub extern "C" fn _initialize() {
     unsafe { __wasm_call_ctors() };
 
     GLOBAL_SCOPE.with(|scope| {
-        append_to_inittab!(promptkit_module);
+        use http::http_module;
+        append_to_inittab!(http_module);
+        use logging::logging_module;
+        append_to_inittab!(logging_module);
+        use llm::llm_module;
+        append_to_inittab!(llm_module);
+
         let v = Scope::new();
         let code = include_str!("prelude.py");
         v.load_script(code).unwrap();

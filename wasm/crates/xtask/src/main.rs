@@ -1,4 +1,5 @@
 use std::{
+    env, fs,
     path::{Path, PathBuf},
     str::FromStr,
 };
@@ -47,23 +48,39 @@ fn build_all(sh: &Shell) -> Result<()> {
 
 fn build_python(sh: &Shell) -> Result<()> {
     const TARGET: &str = "wasm32-wasip1";
-    cmd!(
+
+    let dbg = env::var("DEBUG").is_ok();
+    if dbg {
+        cmd!(
         sh,
         "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
     )
-    .env("PYO3_CROSS_PYTHON_VERSION", "3.12")
-    .env("CARGO_PROFILE_RELEASE_LTO", "thin")
-    .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3")
-    .env("CARGO_PROFILE_RELEASE_PANIC", "abort")
-    .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
-    .run()?;
+        .env("PYO3_CROSS_PYTHON_VERSION", "3.12")
+        .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1")
+        .run()?;
+    } else {
+        cmd!(
+        sh,
+        "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
+    )
+        .env("PYO3_CROSS_PYTHON_VERSION", "3.12")
+        .env("CARGO_PROFILE_RELEASE_LTO", "thin")
+        .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3")
+        .env("CARGO_PROFILE_RELEASE_PANIC", "abort")
+        .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
+        .run()?;
+    }
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         format!("target/{TARGET}/release/promptkit_python.pass1.wasm"),
         |inp, out| -> Result<()> {
             let inp = &inp[0];
-            cmd!(sh, "wasm-opt -g -O4 --strip-debug {inp} -o {out}").run()?;
+            if dbg {
+                cmd!(sh, "wasm-opt -g -O1 --strip-debug {inp} -o {out}").run()?;
+            } else {
+                cmd!(sh, "wasm-opt -g -O4 --strip-debug {inp} -o {out}").run()?;
+            }
             Ok(())
         },
     )?;
@@ -95,7 +112,11 @@ fn build_python(sh: &Shell) -> Result<()> {
         format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
         |inp, out| -> Result<()> {
             let inp = &inp[0];
-            cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
+            if dbg {
+                cmd!(sh, "wasm-opt -g -O1 --strip-debug {inp} -o {out}").run()?;
+            } else {
+                cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
+            }
             Ok(())
         },
     )?;
@@ -117,6 +138,11 @@ fn build_python(sh: &Shell) -> Result<()> {
             std::fs::write(out, wasm)?;
             Ok(())
         },
+    )?;
+
+    copy_dir_all(
+        PathBuf::from("crates/python/bundled"),
+        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
     )?;
 
     Ok(())
@@ -141,6 +167,20 @@ fn run_if_changed(
         }
     } else {
         return f(inputs, output);
+    }
+    Ok(())
+}
+
+fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    fs::create_dir_all(&dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        } else {
+            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
+        }
     }
     Ok(())
 }

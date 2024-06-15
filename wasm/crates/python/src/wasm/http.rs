@@ -21,7 +21,7 @@ use crate::{
 use super::promptkit::http::client::{HttpError, Request};
 
 #[pymodule]
-#[pyo3(name = "http")]
+#[pyo3(name = "_promptkit_http")]
 pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
     #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json", validate_status=true))]
