@@ -19,7 +19,6 @@ use tonic::codec::CompressionEncoding;
 use tracing::{level_filters::LevelFilter, Level};
 use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
-mod hybrid;
 mod otel;
 mod proto;
 mod routes;
@@ -106,16 +105,16 @@ async fn main() -> anyhow::Result<()> {
 
             let grpc = tonic::transport::Server::builder()
                 .accept_http1(true)
-                .layer(grpc_server_tracing_layer())
                 .add_service(service)
                 .add_service(tonic_web::enable(
                     ScriptServiceServer::new(service::ScriptServer::new(state))
                         .send_compressed(CompressionEncoding::Gzip)
                         .accept_compressed(CompressionEncoding::Gzip),
                 ))
-                .into_service();
+                .into_router()
+                .layer(grpc_server_tracing_layer());
 
-            server::serve(app, grpc, 3000).await
+            server::serve(app.merge(grpc), 3000).await
         }
         _ => Err(anyhow!("unknown task")),
     }

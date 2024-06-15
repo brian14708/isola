@@ -4,24 +4,13 @@ use axum::Router;
 use opentelemetry::global;
 use tokio::{net::TcpListener, signal};
 
-pub async fn serve<Grpc, GrpcBody>(app: Router, grpc: Grpc, port: u16) -> anyhow::Result<()>
-where
-    Grpc: tower::Service<http::Request<tonic::body::BoxBody>, Response = http::Response<GrpcBody>>
-        + Send
-        + Clone
-        + 'static,
-    GrpcBody: http_body::Body<Data = bytes::Bytes, Error = tonic::Status> + Send + 'static,
-    <Grpc as tower::Service<http::Request<tonic::body::BoxBody>>>::Future: std::marker::Send,
-{
+pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
-    axum::serve(
-        listener,
-        crate::hybrid::hybrid(app.into_make_service(), grpc),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
+    axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     global::shutdown_tracer_provider();
     Ok(())
 }

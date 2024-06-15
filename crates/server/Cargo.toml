@@ -6,13 +6,10 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0.82"
 axum = { version = "0.7.5", features = ["http2"] }
-bytes = "1.6.0"
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
 coarsetime = "0.1.34"
 futures-util = "0.3.30"
 http = "1.1.0"
-http-body = "1.0.0"
-http-body-util = "0.1.1"
 mimalloc = { version = "0.1.41", default-features = false }
 moka = { version = "0.12.7", features = ["future"] }
 opentelemetry = "0.23.0"
@@ -34,7 +31,6 @@ tokio-stream = "0.1.15"
 tonic = { version = "0.12.0", features = ["gzip"] }
 tonic-reflection = "0.12.0"
 tonic-web = "0.12.0"
-tower = "0.4.13"
 tower-http = { version = "0.5.2", features = ["fs", "trace"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.24.0"
