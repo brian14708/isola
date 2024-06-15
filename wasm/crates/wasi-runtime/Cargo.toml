@@ -1,8 +1,0 @@
-[package]
-name = "wasi-runtime"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-wasi = { workspace = true }
-slab = { version = "0.4.9", default-features = false }

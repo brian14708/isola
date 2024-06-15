@@ -1190,7 +1190,6 @@ dependencies = [
  "thiserror",
  "url",
  "wasi 0.13.1+wasi-0.2.0",
- "wasi-runtime",
  "wit-bindgen",
 ]
 
@@ -1749,14 +1748,6 @@ dependencies = [
  "wasmtime",
  "wiggle",
  "windows-sys",
-]
-
-[[package]]
-name = "wasi-runtime"
-version = "0.1.0"
-dependencies = [
- "slab",
- "wasi 0.13.1+wasi-0.2.0",
 ]
 
 [[package]]
