@@ -39,6 +39,14 @@ async fn main() -> anyhow::Result<()> {
         .add_directive("[{promptkit.user}]=off".parse().unwrap());
 
     if let Ok(e) = std::env::var("OTEL_COLLECTOR_URL") {
+        let e = {
+            // compatibility with old env var
+            let mut u = url::Url::parse(&e).expect("OTEL_COLLECTOR_URL is not a valid URL");
+            if u.path() == "/" {
+                u = u.join("/v1/traces").expect("failed to append /v1/traces");
+            }
+            u.to_string()
+        };
         let tracer = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(opentelemetry_otlp::new_exporter().http().with_endpoint(e))

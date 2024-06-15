@@ -41,6 +41,7 @@ tower-http_04 = { package = "tower-http", version = "0.4.4", features = ["trace"
 tracing = "0.1.40"
 tracing-opentelemetry = "0.24.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "parking_lot"] }
+url = "2.5.1"
 
 [build-dependencies]
 tonic-build = "0.11.0"
