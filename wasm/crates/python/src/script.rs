@@ -208,6 +208,21 @@ impl Scope {
                 f
             };
 
+            let obj = if obj.hasattr("__await__").unwrap_or_default()
+                || obj.hasattr("__aiter__").unwrap_or_default()
+            {
+                let module = py
+                    .import_bound(intern!(py, "promptkit.asyncio"))
+                    .expect("failed to import promptkit.asyncio");
+                module
+                    .getattr(intern!(py, "run"))
+                    .expect("failed to get asyncio.run")
+                    .call1((obj,))
+                    .map_err(|e| Error::from_pyerr(py, e))?
+            } else {
+                obj
+            };
+
             if Self::is_serializable(&obj) {
                 match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
                     Ok(s) => return Ok(Some(s)),

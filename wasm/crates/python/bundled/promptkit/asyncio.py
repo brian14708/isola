@@ -10,6 +10,12 @@ __all__ = [
 ]
 
 
+class _TimerHandle(asyncio.TimerHandle):
+    def __init__(self, waker, when, callback, args, loop, context):
+        super().__init__(when, callback, args, loop)
+        self.waker = waker
+
+
 class PollLoop(asyncio.AbstractEventLoop):
     def __init__(self):
         self.wakers = []
@@ -28,7 +34,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                 if not handle._cancelled:
                     handle._run()
 
-            if self.wakers:
+            if self.wakers and len(handles) == 0:
                 [pollables, wakers] = list(map(list, zip(*self.wakers)))
 
                 new_wakers = []
@@ -60,7 +66,14 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.running = False
 
     def close(self):
+        for handle in self.handles:
+            handle.cancel()
+        for pollable, waker in self.wakers:
+            pollable.release()
+        self.handles = []
+        self.wakers = []
         self.running = False
+        self.exception = None
 
     def shutdown_asyncgens(self):
         pass
@@ -74,8 +87,8 @@ class PollLoop(asyncio.AbstractEventLoop):
         return handle
 
     def call_later(self, delay, callback, *args, context=None):
-        handle = asyncio.Handle(callback, args, self, context)
         waker = self.create_future()
+        handle = _TimerHandle(waker, delay + self.time(), callback, args, self, context)
         fut = _promptkit_sys.sleep(delay)
         self.wakers.append((fut, waker))
 
@@ -83,11 +96,19 @@ class PollLoop(asyncio.AbstractEventLoop):
             if not handle._cancelled:
                 handle._run()
 
-        waker.add_done_callback(cb)
+        waker.add_done_callback(cb, context=context)
         return handle
 
     def call_at(self, when, callback, *args, context=None):
         return self.call_later(when - self.time(), callback, *args, context=context)
+
+    def _timer_handle_cancelled(self, handle):
+        for i, (pollable, waker) in enumerate(self.wakers):
+            if waker == handle.waker:
+                self.wakers.pop(i)
+                waker.cancel()
+                pollable.release()
+                break
 
     def time(self):
         return time.monotonic()
@@ -100,6 +121,18 @@ class PollLoop(asyncio.AbstractEventLoop):
 
     def get_debug(self):
         return False
+
+
+class LoopGuard:
+    def __init__(self, loop):
+        self.loop = loop
+
+    def __enter__(self):
+        asyncio.set_event_loop(self.loop)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        asyncio.set_event_loop(None)
+        self.loop.close()
 
 
 def new_event_loop():
@@ -122,16 +155,11 @@ def _iter(loop, it):
             break
 
 
-_global_loop = None
-
-
 def run(main):
-    global _global_loop
-    if _global_loop is None:
-        _global_loop = new_event_loop()
-    asyncio.set_event_loop(_global_loop)
+    loop = new_event_loop()
 
-    if hasattr(main, "__aiter__"):
-        return _iter(_global_loop, main)
-    else:
-        return _global_loop.run_until_complete(main)
+    with LoopGuard(loop):
+        if hasattr(main, "__aiter__"):
+            return _iter(loop, main)
+        else:
+            return loop.run_until_complete(main)
