@@ -1,4 +1,13 @@
 import asyncio
+import time
+
+import _promptkit_sys
+
+__all__ = [
+    "new_event_loop",
+    "run",
+    "wait_for",
+]
 
 
 class PollLoop(asyncio.AbstractEventLoop):
@@ -24,12 +33,12 @@ class PollLoop(asyncio.AbstractEventLoop):
 
                 new_wakers = []
                 ready = [False] * len(pollables)
-                for index in poll.poll(pollables):
+                for index in _promptkit_sys.poll(pollables):
                     ready[index] = True
 
                 for (ready, pollable), waker in zip(zip(ready, pollables), wakers):
                     if ready:
-                        pollable.__exit__()
+                        pollable.release()
                         waker.set_result(None)
                     else:
                         new_wakers.append((pollable, waker))
@@ -64,6 +73,25 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.handles.append(handle)
         return handle
 
+    def call_later(self, delay, callback, *args, context=None):
+        handle = asyncio.Handle(callback, args, self, context)
+        waker = self.create_future()
+        fut = _promptkit_sys.sleep(delay)
+        self.wakers.append((fut, waker))
+
+        def cb(_):
+            if not handle._cancelled:
+                handle._run()
+
+        waker.add_done_callback(cb)
+        return handle
+
+    def call_at(self, when, callback, *args, context=None):
+        return self.call_later(when - self.time(), callback, *args, context=context)
+
+    def time(self):
+        return time.monotonic()
+
     def create_task(self, coro, *, name=None, context=None):
         return asyncio.Task(coro, loop=self, name=name, context=context)
 
@@ -74,19 +102,36 @@ class PollLoop(asyncio.AbstractEventLoop):
         return False
 
 
-async def register(loop: PollLoop, pollable):
+def new_event_loop():
+    return PollLoop()
+
+
+async def wait_for(pollable):
+    loop = asyncio.get_event_loop()
     waker = loop.create_future()
     loop.wakers.append((pollable, waker))
     await waker
 
-def new_event_loop():
-    return PollLoop()
+
+def _iter(loop, it):
+    it = aiter(it)
+    while True:
+        try:
+            yield loop.run_until_complete(it.__anext__())
+        except StopAsyncIteration:
+            break
+
 
 _global_loop = None
+
 
 def run(main):
     global _global_loop
     if _global_loop is None:
         _global_loop = new_event_loop()
     asyncio.set_event_loop(_global_loop)
-    return _global_loop.run_until_complete(main)
+
+    if hasattr(main, "__aiter__"):
+        return _iter(_global_loop, main)
+    else:
+        return _global_loop.run_until_complete(main)

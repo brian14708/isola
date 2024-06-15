@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use cbor4ii::core::utils::SliceReader;
 use pyo3::{append_to_inittab, prelude::*};
 use serde::de::DeserializeSeed;
+use wasi::{clocks::monotonic_clock::subscribe_duration, io::poll::poll as host_poll};
 
 use crate::{
     error::Error,
@@ -27,6 +28,46 @@ wit_bindgen::generate!({
         "wasi:io/streams@0.2.0": wasi::io::streams,
     },
 });
+
+#[pymodule]
+#[pyo3(name = "_promptkit_sys")]
+pub fn sys_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    #[pyfn(module)]
+    #[pyo3(signature = (duration))]
+    fn sleep(duration: f64) -> PyPollable {
+        let poll = subscribe_duration(
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            {
+                (duration * 1_000_000_000.0) as u64
+            },
+        );
+        PyPollable { inner: Some(poll) }
+    }
+
+    #[pyfn(module)]
+    #[pyo3(signature = (poll))]
+    #[allow(clippy::needless_pass_by_value)]
+    fn poll(poll: Vec<PyRef<'_, PyPollable>>) -> Vec<u32> {
+        let p = poll
+            .iter()
+            .map(|p| p.inner.as_ref().expect("pollable already released"))
+            .collect::<Vec<_>>();
+        host_poll(&p)
+    }
+    Ok(())
+}
+
+#[pyclass]
+struct PyPollable {
+    inner: Option<wasi::io::poll::Pollable>,
+}
+
+#[pymethods]
+impl PyPollable {
+    fn release(mut slf: PyRefMut<'_, Self>) {
+        slf.inner.take();
+    }
+}
 
 export!(Global);
 
@@ -131,6 +172,7 @@ pub extern "C" fn _initialize() {
         append_to_inittab!(logging_module);
         use llm::llm_module;
         append_to_inittab!(llm_module);
+        append_to_inittab!(sys_module);
 
         let v = Scope::new();
         let code = include_str!("prelude.py");
