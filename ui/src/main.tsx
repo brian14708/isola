@@ -8,7 +8,7 @@ import { routeTree } from "./routeTree.gen";
 
 import "./index.css";
 
-const router = createRouter({ routeTree });
+const router = createRouter({ routeTree, basepath: "/ui/" });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

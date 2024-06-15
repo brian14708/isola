@@ -11,7 +11,7 @@ import { Editor } from "@/components/editor";
 import { EditorMenu } from "@/components/editor-menu";
 import { useToast } from "@/components/ui/use-toast";
 
-export const Route = createLazyFileRoute("/ui/")({
+export const Route = createLazyFileRoute("/")({
   component: Index,
 });
 
