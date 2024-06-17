@@ -15,7 +15,7 @@ pub struct PyObjectDeserializer<'c> {
 
 impl<'c> PyObjectDeserializer<'c> {
     pub fn new(py: Python<'c>) -> Self {
-        PyObjectDeserializer { py }
+        Self { py }
     }
 }
 

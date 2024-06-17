@@ -64,6 +64,7 @@ mod types {
 
     pub struct Response {
         pub(crate) status: u16,
+        pub(crate) headers: Vec<(String, String)>,
         pub(crate) body: Option<(reqwest::Response, tracing::Span)>,
     }
 
@@ -188,6 +189,16 @@ impl Host for dyn HttpView + '_ {
 
                     Ok(Response {
                         status: resp.status().as_u16(),
+                        headers: resp
+                            .headers()
+                            .iter()
+                            .map(|(k, v)| {
+                                (
+                                    k.as_str().to_lowercase().to_string(),
+                                    v.to_str().unwrap().to_string(),
+                                )
+                            })
+                            .collect(),
                         body: Some((resp, span)),
                     })
                 }),
@@ -254,9 +265,9 @@ impl HostRequest for dyn HttpView + '_ {
     async fn set_timeout(
         &mut self,
         request: wasmtime::component::Resource<Request>,
-        timeout_ms: u64,
+        timeout_ns: u64,
     ) -> wasmtime::Result<()> {
-        self.table().get_mut(&request)?.timeout = Some(Duration::from_millis(timeout_ms));
+        self.table().get_mut(&request)?.timeout = Some(Duration::from_nanos(timeout_ns));
         Ok(())
     }
 
@@ -324,6 +335,13 @@ impl HostResponse for dyn HttpView + '_ {
         id: wasmtime::component::Resource<Response>,
     ) -> wasmtime::Result<u16> {
         Ok(self.table().get(&id)?.status)
+    }
+
+    async fn headers(
+        &mut self,
+        id: wasmtime::component::Resource<Response>,
+    ) -> wasmtime::Result<Vec<(String, String)>> {
+        Ok(self.table().get(&id)?.headers.clone())
     }
 
     async fn body(

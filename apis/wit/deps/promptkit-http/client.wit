@@ -30,7 +30,7 @@ interface client {
         constructor(method: method);
         set-url: func(url: string) -> result<_, request-error>;
         set-header: func(key: string, value: string) -> result<_, request-error>;
-        set-timeout: func(timeout-ms: u64);
+        set-timeout: func(timeout-ns: u64);
         write-body: func(body: list<u8>) -> result<_, request-error>;
     }
     resource future-response {
@@ -39,6 +39,7 @@ interface client {
     }
     resource response {
         status: func() -> u16;
+        headers: func() -> list<tuple<string, string>>;
         body: func() -> result<input-stream>;
     }
 

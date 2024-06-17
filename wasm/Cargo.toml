@@ -10,3 +10,7 @@ edition = "2021"
 
 [workspace.dependencies]
 wasi = "0.13.0"
+
+[profile.xtask]
+inherits = "release"
+opt-level = 1

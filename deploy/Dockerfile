@@ -41,6 +41,7 @@ COPY apis ../apis
 COPY wasm .
 RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/src/wasm/target/release \
+    --mount=type=cache,target=/src/wasm/target/xtask \
     --mount=type=cache,target=/src/wasm/downloads \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask build-all

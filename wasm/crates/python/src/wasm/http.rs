@@ -1,477 +1,303 @@
-use std::io::{BufRead, BufReader, Read, Write};
+use core::panic;
+use std::io::Write;
 
-use eventsource::event::{parse_event_line, Event};
 use pyo3::{
     prelude::*,
-    types::{PyBytes, PyDict, PyString},
+    types::{IntoPyDict, PyBytes, PyDict},
 };
 use serde::de::DeserializeSeed;
 use url::Url;
-use wasi::io::streams::StreamError;
-use wasi_runtime::{
-    futures::{block_on, Reactor},
-    streams::BlockingStreamReader,
+use wasi::io::{
+    poll::Pollable,
+    streams::{InputStream, StreamError},
 };
 
 use crate::{
     serde::{PyObjectDeserializer, PyObjectSerializer},
-    wasm::promptkit::http::client::{self, Method},
+    wasm::{
+        body_buffer,
+        promptkit::http::client::{self, Method},
+    },
 };
 
-use super::promptkit::http::client::{HttpError, Request};
+use super::{
+    body_buffer::BodyBuffer,
+    promptkit::http::client::{FutureResponse, HttpError, Request, Response},
+    PyPollable,
+};
 
 #[pymodule]
 #[pyo3(name = "_promptkit_http")]
 pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     #[pyfn(module)]
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json", validate_status=true))]
-    fn get(
+    fn new_buffer(kind: &str) -> Buffer {
+        Buffer {
+            inner: body_buffer::Buffer::new(kind),
+        }
+    }
+
+    #[pyfn(module)]
+    fn loads_json<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyAny>> {
+        Ok(PyObjectDeserializer::new(py)
+            .deserialize(&mut serde_json::Deserializer::from_str(s))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?
+            .into_bound(py))
+    }
+
+    #[pyfn(module)]
+    #[pyo3(signature = (method, url, params, headers, body, timeout))]
+    fn fetch(
         py: Python<'_>,
+        method: &str,
         url: &str,
         params: Option<&Bound<'_, PyDict>>,
         headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-        response: &str,
-        validate_status: bool,
-    ) -> PyResult<PyObject> {
-        let (request, extract) = build_request(
-            py,
-            Method::Get,
-            url,
-            params,
-            headers,
-            timeout,
-            response,
-            None,
-        )?;
-        blocking_fetch(py, request, validate_status, &extract)
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *, response="json", validate_status=true))]
-    fn get_async(
-        py: Python<'_>,
-        url: &str,
-        params: Option<&Bound<'_, PyDict>>,
-        headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-        response: &str,
-        validate_status: bool,
-    ) -> PyResult<PyObject> {
-        let (request, extract) = build_request(
-            py,
-            Method::Get,
-            url,
-            params,
-            headers,
-            timeout,
-            response,
-            None,
-        )?;
-        Ok(AsyncResponse::new_py(py, request, extract, validate_status))
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (url, params=None, headers=None, timeout=None, *))]
-    fn get_sse(
-        py: Python<'_>,
-        url: &str,
-        params: Option<&Bound<'_, PyDict>>,
-        headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-    ) -> PyResult<PyObject> {
-        get(py, url, params, headers, timeout, "sse+json", true)
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json", validate_status=true))]
-    fn post(
-        py: Python<'_>,
-        url: &str,
-        data: Option<PyObject>,
-        headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-        response: &str,
-        validate_status: bool,
-    ) -> PyResult<PyObject> {
-        let (request, extract) = build_request(
-            py,
-            Method::Post,
-            url,
-            None,
-            headers,
-            timeout,
-            response,
-            data,
-        )?;
-        blocking_fetch(py, request, validate_status, &extract)
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *, response="json", validate_status=true))]
-    fn post_async(
-        py: Python<'_>,
-        url: &str,
-        data: Option<PyObject>,
-        headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-        response: &str,
-        validate_status: bool,
-    ) -> PyResult<PyObject> {
-        let (request, extract) = build_request(
-            py,
-            Method::Post,
-            url,
-            None,
-            headers,
-            timeout,
-            response,
-            data,
-        )?;
-        Ok(AsyncResponse::new_py(py, request, extract, validate_status))
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (url, data=None, headers=None, timeout=None, *))]
-    fn post_sse(
-        py: Python<'_>,
-        url: &str,
-        data: Option<PyObject>,
-        headers: Option<&Bound<'_, PyDict>>,
-        timeout: Option<f32>,
-    ) -> PyResult<PyObject> {
-        post(py, url, data, headers, timeout, "sse+json", true)
-    }
-
-    #[pyfn(module)]
-    #[pyo3(signature = (requests, *, ignore_error=false))]
-    fn fetch_all(
-        py: Python<'_>,
-        mut requests: Vec<PyRefMut<AsyncResponse>>,
-        ignore_error: bool,
-    ) -> PyResult<Vec<PyObject>> {
-        block_on(|reactor| async move {
-            let f = requests.iter_mut().map(|r| r.fetch(py, &reactor));
-            if ignore_error {
-                Ok(futures::future::join_all(f)
-                    .await
-                    .into_iter()
-                    .map(|e| e.unwrap_or_else(|e| e.into_py(py)))
-                    .collect())
-            } else {
-                futures::future::try_join_all(f).await
+        body: Option<PyObject>,
+        timeout: Option<f64>,
+    ) -> PyResult<PyFutureResponse> {
+        let mut request = client::Request::new(match method {
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            "DELETE" => Method::Delete,
+            "HEAD" => Method::Head,
+            "PATCH" => Method::Patch,
+            "PUT" => Method::Put,
+            _ => {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "invalid method".to_string(),
+                ))
             }
-        })
+        });
+
+        if let Some(params) = params {
+            let mut u = Url::parse(url)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+            for (k, v) in params {
+                u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
+            }
+            request.set_url(u.as_ref())
+        } else {
+            request.set_url(url)
+        }
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+
+        if let Some(headers) = headers {
+            for (k, v) in headers {
+                request
+                    .set_header(k.extract()?, v.extract()?)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+            }
+        }
+
+        if let Some(timeout) = timeout {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            request.set_timeout((timeout * 1_000_000_000.0) as u64);
+        }
+
+        if let Some(body) = body {
+            if let Ok(b) = body.extract::<Bound<PyBytes>>(py) {
+                request
+                    .write_body(b.as_bytes())
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+            } else {
+                struct RequestWriter<'a>(&'a mut Request);
+                impl Write for RequestWriter<'_> {
+                    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                        self.0
+                            .write_body(buf)
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        Ok(buf.len())
+                    }
+                    fn flush(&mut self) -> std::io::Result<()> {
+                        Ok(())
+                    }
+                }
+
+                request
+                    .set_header("content-type", "application/json")
+                    .unwrap();
+                PyObjectSerializer::to_json_writer(
+                    RequestWriter(&mut request),
+                    body.into_bound(py),
+                )
+                .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?;
+            }
+        }
+
+        let request = client::fetch(request)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        Ok(PyFutureResponse::new(request))
     }
 
     Ok(())
 }
 
-#[pyclass]
-struct AsyncResponse {
-    request: Option<Request>,
-    extract: ResponseExtractor,
-    validate_status: bool,
-}
-
-impl AsyncResponse {
-    fn new_py(
-        py: Python<'_>,
-        request: Request,
-        extract: ResponseExtractor,
-        validate_status: bool,
-    ) -> PyObject {
-        Self {
-            request: Some(request),
-            extract,
-            validate_status,
+macro_rules! create_future {
+    ($name:ident, $future_type:ident, $type:ident) => {
+        #[pyclass]
+        struct $name {
+            inner: Option<$future_type>,
         }
-        .into_py(py)
-    }
 
-    async fn fetch(&mut self, py: Python<'_>, reactor: &Reactor) -> PyResult<PyObject> {
-        let resp = client::fetch(self.request.take().unwrap())
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-        reactor.wait_for(resp.subscribe()).await;
-        let resp = resp.get().unwrap().unwrap().map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>(match e {
-                HttpError::Cancelled => "cancelled".to_string(),
-                HttpError::Timeout => "timeout".to_string(),
-                HttpError::StatusCode(code) => format!("status code: {code}"),
-                HttpError::Unknown(s) => s,
-            })
-        })?;
-        if self.validate_status {
-            let status = resp.status();
-            if !(200..300).contains(&status) {
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
-                    "status code: {status}"
-                )));
+        impl $name {
+            fn new(f: $future_type) -> Self {
+                Self { inner: Some(f) }
             }
-        };
+        }
 
-        let body = resp.body().unwrap();
-        let mut buf = Vec::new();
-
-        loop {
-            reactor.wait_for(body.subscribe()).await;
-            match body.read(8192) {
-                Ok(v) => buf.extend_from_slice(&v),
-                Err(StreamError::Closed) => break,
-                Err(StreamError::LastOperationFailed(e)) => {
-                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        e.to_debug_string(),
-                    ))
+        #[pymethods]
+        impl $name {
+            fn wait(mut slf: PyRefMut<'_, Self>) -> PyResult<$type> {
+                match slf.inner.take() {
+                    Some(f) => {
+                        f.subscribe().block();
+                        f.get().expect("not ready").expect("wasm error").try_into()
+                    }
+                    _ => panic!("invalid state"),
                 }
             }
-        }
-        self.extract.extract_body(py, &buf)
-    }
-}
 
-#[allow(clippy::too_many_arguments)]
-fn build_request(
-    py: Python<'_>,
-    method: client::Method,
-    url: &str,
-    params: Option<&Bound<'_, PyDict>>,
-    headers: Option<&Bound<'_, PyDict>>,
-    timeout: Option<f32>,
-    response: &str,
-    body: Option<PyObject>,
-) -> PyResult<(client::Request, ResponseExtractor)> {
-    let extract = ResponseExtractor::from_str(response)?;
-    let mut request = client::Request::new(method);
-    extract.set_accept_header(&request);
-
-    if let Some(params) = params {
-        let mut u = Url::parse(url)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-        for (k, v) in params {
-            u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
-        }
-        request.set_url(u.as_ref())
-    } else {
-        request.set_url(url)
-    }
-    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-
-    if let Some(headers) = headers {
-        for (k, v) in headers {
-            request
-                .set_header(k.extract()?, v.extract()?)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-        }
-    }
-
-    if let Some(timeout) = timeout {
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        request.set_timeout((timeout * 1000.0) as u64);
-    }
-
-    if let Some(body) = body {
-        request
-            .set_header("content-type", "application/json")
-            .unwrap();
-        PyObjectSerializer::to_json_writer(RequestWriter(&mut request), body.into_bound(py))
-            .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?;
-    }
-
-    Ok((request, extract))
-}
-
-struct RequestWriter<'a>(&'a mut Request);
-
-impl Write for RequestWriter<'_> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0
-            .write_body(buf)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-#[derive(Clone)]
-enum ResponseExtractor {
-    Json,
-    Text,
-    Binary,
-    SseJson,
-}
-
-impl ResponseExtractor {
-    fn from_str(format: &str) -> PyResult<Self> {
-        match format {
-            "text" => Ok(Self::Text),
-            "json" => Ok(Self::Json),
-            "binary" => Ok(Self::Binary),
-            "sse+json" => Ok(Self::SseJson),
-            _ => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                "invalid response format".to_string(),
-            )),
-        }
-    }
-
-    fn set_accept_header(&self, request: &Request) {
-        request
-            .set_header(
-                "accept",
-                match self {
-                    Self::Text => "text/*",
-                    Self::Json => "application/json",
-                    Self::Binary => "application/octet-stream",
-                    Self::SseJson => "text/event-stream",
-                },
-            )
-            .unwrap();
-    }
-
-    fn extract_body(&self, py: Python<'_>, body: &[u8]) -> PyResult<PyObject> {
-        match self {
-            Self::Text => Ok(PyString::new_bound(
-                py,
-                std::str::from_utf8(body)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?,
-            )
-            .into()),
-            Self::Binary => Ok(PyBytes::new_bound(py, body).into()),
-            Self::Json => PyObjectDeserializer::new(py)
-                .deserialize(&mut serde_json::Deserializer::from_slice(body))
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
-            Self::SseJson => {
-                let mut v = vec![];
-                let mut reader = BufReader::new(body);
-                let mut evt = Event::new();
-                let mut buf = String::new();
-                loop {
-                    buf.clear();
-                    let line = reader.read_line(&mut buf).map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                    })?;
-                    if line == 0 {
-                        break;
-                    }
-
-                    match parse_event_line(&buf, &mut evt) {
-                        eventsource::event::ParseResult::Dispatch => {
-                            if evt.data.trim() == "[DONE]" {
-                                break;
-                            }
-                            v.push(
-                                PyObjectDeserializer::new(py)
-                                    .deserialize(&mut serde_json::Deserializer::from_str(&evt.data))
-                                    .map_err(|e| {
-                                        PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                                            e.to_string(),
-                                        )
-                                    })?,
-                            );
-                            evt = Event::new();
-                        }
-                        eventsource::event::ParseResult::Next
-                        | eventsource::event::ParseResult::SetRetry(_) => {}
-                    }
+            fn subscribe(slf: PyRef<'_, Self>) -> PyPollable {
+                match slf.inner.as_ref() {
+                    Some(f) => f.subscribe().into(),
+                    _ => panic!("invalid state"),
                 }
-                Ok(v.into_py(py))
             }
-        }
-    }
 
-    fn extract_blocking(
-        &self,
-        py: Python<'_>,
-        mut body: BlockingStreamReader,
-    ) -> PyResult<PyObject> {
-        match self {
-            Self::Text | Self::Binary | Self::Json => {
-                let mut buf = Vec::new();
-                body.read_to_end(&mut buf)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                self.extract_body(py, &buf)
+            fn get(mut slf: PyRefMut<'_, Self>) -> PyResult<$type> {
+                match slf.inner.take() {
+                    Some(f) => f.get().expect("not ready").expect("wasm error").try_into(),
+                    _ => panic!("invalid state"),
+                }
             }
-            Self::SseJson => Ok(SseIter {
-                response: BufReader::new(body),
-            }
-            .into_py(py)),
-        }
-    }
-}
 
-fn blocking_fetch(
-    py: Python<'_>,
-    request: Request,
-    validate_status: bool,
-    extract: &ResponseExtractor,
-) -> PyResult<PyObject> {
-    let resp = client::fetch(request)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-    resp.subscribe().block();
-    let resp = resp.get().unwrap().unwrap().map_err(|e| {
-        PyErr::new::<pyo3::exceptions::PyTypeError, _>(match e {
-            HttpError::Cancelled => "cancelled".to_string(),
-            HttpError::Timeout => "timeout".to_string(),
-            HttpError::StatusCode(code) => format!("status code: {code}"),
-            HttpError::Unknown(s) => s,
-        })
-    })?;
-    if validate_status {
-        let status = resp.status();
-        if !(200..300).contains(&status) {
-            return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
-                "status code: {status}"
-            )));
+            fn release(mut slf: PyRefMut<'_, Self>) {
+                slf.inner.take();
+            }
         }
     };
-
-    let body = resp.body().unwrap();
-    extract.extract_blocking(py, BlockingStreamReader::new(body))
 }
 
+create_future!(PyFutureResponse, FutureResponse, PyResponse);
+
 #[pyclass]
-struct SseIter {
-    response: BufReader<BlockingStreamReader>,
+struct PyResponse {
+    response: Option<Response>,
+    body: Option<InputStream>,
+}
+
+impl TryFrom<Result<Response, HttpError>> for PyResponse {
+    type Error = PyErr;
+
+    fn try_from(value: Result<Response, HttpError>) -> Result<Self, Self::Error> {
+        match value {
+            Ok(response) => Ok(Self {
+                response: Some(response),
+                body: None,
+            }),
+            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(match e {
+                HttpError::Cancelled => "cancelled".to_string(),
+                HttpError::Timeout => "timeout".to_string(),
+                HttpError::StatusCode(code) => {
+                    format!("status code: {code}")
+                }
+                HttpError::Unknown(s) => s,
+            })),
+        }
+    }
 }
 
 #[pymethods]
-impl SseIter {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
-        slf
+impl PyResponse {
+    fn close(&mut self) {
+        self.body.take();
+        self.response.take();
     }
 
-    fn __next__(mut slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
-        let mut evt = Event::new();
-        let mut buf = String::new();
-        loop {
-            buf.clear();
-            let line = slf
-                .response
-                .read_line(&mut buf)
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-            if line == 0 {
+    fn status(&self) -> u16 {
+        self.response.as_ref().expect("response closed").status()
+    }
+
+    #[allow(clippy::needless_pass_by_value)]
+    fn headers(slf: PyRef<'_, Self>) -> Bound<'_, PyDict> {
+        slf.response
+            .as_ref()
+            .expect("response closed")
+            .headers()
+            .into_py_dict_bound(slf.py())
+    }
+
+    fn read_into(&mut self, buf: &mut Buffer) -> PyResult<Option<PyPollable>> {
+        read_into(self, &mut buf.inner).map(|p| p.map(Into::into))
+    }
+
+    fn blocking_read<'py>(
+        &mut self,
+        py: Python<'py>,
+        kind: &str,
+    ) -> PyResult<Option<Bound<'py, PyAny>>> {
+        let mut buf = body_buffer::Buffer::new(kind);
+        while let Some(p) = read_into(self, &mut buf)? {
+            p.block();
+        }
+        buf.decode_all(py)
+    }
+}
+
+fn read_into(
+    slf: &mut PyResponse,
+    buf: &mut impl body_buffer::BodyBuffer,
+) -> PyResult<Option<Pollable>> {
+    let stream = if let Some(b) = slf.body.as_mut() {
+        b
+    } else {
+        slf.body = Some(
+            slf.response
+                .as_mut()
+                .expect("response closed")
+                .body()
+                .expect("body already read"),
+        );
+        slf.body.as_mut().unwrap()
+    };
+
+    loop {
+        match InputStream::read(stream, 16384) {
+            Ok(v) => {
+                if !v.is_empty() {
+                    buf.write(v);
+                    continue;
+                }
+
+                let poll = stream.subscribe();
+                return Ok(Some(poll));
+            }
+            Err(StreamError::LastOperationFailed(e)) => {
+                slf.body.take();
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    e.to_debug_string(),
+                ));
+            }
+            Err(StreamError::Closed) => {
+                buf.close();
                 return Ok(None);
             }
-
-            match parse_event_line(&buf, &mut evt) {
-                eventsource::event::ParseResult::Dispatch => {
-                    return Ok(if evt.data.trim() == "[DONE]" {
-                        None
-                    } else {
-                        Some(
-                            PyObjectDeserializer::new(slf.py())
-                                .deserialize(&mut serde_json::Deserializer::from_str(&evt.data))
-                                .map_err(|e| {
-                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                                })?,
-                        )
-                    })
-                }
-                eventsource::event::ParseResult::Next
-                | eventsource::event::ParseResult::SetRetry(_) => {}
-            }
         }
+    }
+}
+
+#[pyclass]
+struct Buffer {
+    inner: body_buffer::Buffer,
+}
+
+#[pymethods]
+impl Buffer {
+    fn next(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner.decode(py).map(|o| o.map(Into::into))
+    }
+
+    fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        self.inner.decode_all(py).map(|o| o.map(Into::into))
     }
 }

@@ -1,5 +1,6 @@
 #![allow(clippy::missing_safety_doc, clippy::module_name_repetitions)]
 
+mod body_buffer;
 mod http;
 mod llm;
 mod logging;
@@ -62,10 +63,30 @@ struct PyPollable {
     inner: Option<wasi::io::poll::Pollable>,
 }
 
+impl From<wasi::io::poll::Pollable> for PyPollable {
+    fn from(p: wasi::io::poll::Pollable) -> Self {
+        Self { inner: Some(p) }
+    }
+}
+
 #[pymethods]
 impl PyPollable {
-    fn release(mut slf: PyRefMut<'_, Self>) {
-        slf.inner.take();
+    fn subscribe(slf: Bound<'_, Self>) -> Bound<'_, Self> {
+        slf
+    }
+
+    #[allow(clippy::unused_self)]
+    fn get(&self) {}
+
+    fn release(&mut self) {
+        self.inner.take();
+    }
+
+    fn wait(&self) {
+        self.inner
+            .as_ref()
+            .expect("pollable already released")
+            .block();
     }
 }
 
@@ -129,7 +150,7 @@ pub struct ArgIter {
 
 #[pymethods]
 impl ArgIter {
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+    fn __iter__(slf: Bound<'_, Self>) -> Bound<'_, Self> {
         slf
     }
 
@@ -144,7 +165,8 @@ impl ArgIter {
                             .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                            })?,
+                            })?
+                            .to_object(slf.py()),
                     ))
                 }
                 host::Argument::Iterator(_) => todo!(),
