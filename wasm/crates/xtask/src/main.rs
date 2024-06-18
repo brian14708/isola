@@ -71,6 +71,11 @@ fn build_python(sh: &Shell) -> Result<()> {
         .run()?;
     }
 
+    copy_dir_all(
+        PathBuf::from("crates/python/bundled"),
+        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
+    )?;
+
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         format!("target/{TARGET}/release/promptkit_python.pass1.wasm"),
@@ -105,24 +110,20 @@ fn build_python(sh: &Shell) -> Result<()> {
         },
     )?;
 
+    // run_if_changed(
+    //     vec![format!(
+    //         "target/{TARGET}/release/promptkit_python.init.wasm"
+    //     )],
+    //     format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
+    //     |inp, out| -> Result<()> {
+    //         let inp = &inp[0];
+    //         cmd!(sh, "wasm-opt -g -Os --strip-debug {inp} -o {out}").run()?;
+    //         Ok(())
+    //     },
+    // )?;
     run_if_changed(
         vec![format!(
             "target/{TARGET}/release/promptkit_python.init.wasm"
-        )],
-        format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
-        |inp, out| -> Result<()> {
-            let inp = &inp[0];
-            if dbg {
-                cmd!(sh, "wasm-opt -g -O1 --strip-debug {inp} -o {out}").run()?;
-            } else {
-                cmd!(sh, "wasm-opt -g -O4 {inp} -o {out}").run()?;
-            }
-            Ok(())
-        },
-    )?;
-    run_if_changed(
-        vec![format!(
-            "target/{TARGET}/release/promptkit_python.pass2.wasm"
         )],
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
@@ -138,11 +139,6 @@ fn build_python(sh: &Shell) -> Result<()> {
             std::fs::write(out, wasm)?;
             Ok(())
         },
-    )?;
-
-    copy_dir_all(
-        PathBuf::from("crates/python/bundled"),
-        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
     )?;
 
     Ok(())

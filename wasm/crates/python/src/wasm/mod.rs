@@ -1,6 +1,7 @@
 #![allow(clippy::missing_safety_doc, clippy::module_name_repetitions)]
 
 mod body_buffer;
+mod future;
 mod http;
 mod llm;
 mod logging;
@@ -8,6 +9,7 @@ mod logging;
 use std::cell::RefCell;
 
 use cbor4ii::core::utils::SliceReader;
+use future::PyPollable;
 use pyo3::{append_to_inittab, prelude::*};
 use serde::de::DeserializeSeed;
 use wasi::{clocks::monotonic_clock::subscribe_duration, io::poll::poll as host_poll};
@@ -42,52 +44,17 @@ pub fn sys_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
                 (duration * 1_000_000_000.0) as u64
             },
         );
-        PyPollable { inner: Some(poll) }
+        poll.into()
     }
 
     #[pyfn(module)]
     #[pyo3(signature = (poll))]
     #[allow(clippy::needless_pass_by_value)]
     fn poll(poll: Vec<PyRef<'_, PyPollable>>) -> Vec<u32> {
-        let p = poll
-            .iter()
-            .map(|p| p.inner.as_ref().expect("pollable already released"))
-            .collect::<Vec<_>>();
+        let p = poll.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
         host_poll(&p)
     }
     Ok(())
-}
-
-#[pyclass]
-struct PyPollable {
-    inner: Option<wasi::io::poll::Pollable>,
-}
-
-impl From<wasi::io::poll::Pollable> for PyPollable {
-    fn from(p: wasi::io::poll::Pollable) -> Self {
-        Self { inner: Some(p) }
-    }
-}
-
-#[pymethods]
-impl PyPollable {
-    fn subscribe(slf: Bound<'_, Self>) -> Bound<'_, Self> {
-        slf
-    }
-
-    #[allow(clippy::unused_self)]
-    fn get(&self) {}
-
-    fn release(&mut self) {
-        self.inner.take();
-    }
-
-    fn wait(&self) {
-        self.inner
-            .as_ref()
-            .expect("pollable already released")
-            .block();
-    }
 }
 
 export!(Global);

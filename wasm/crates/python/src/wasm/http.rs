@@ -22,6 +22,7 @@ use crate::{
 
 use super::{
     body_buffer::BodyBuffer,
+    future::create_future,
     promptkit::http::client::{FutureResponse, HttpError, Request, Response},
     PyPollable,
 };
@@ -130,52 +131,6 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
     }
 
     Ok(())
-}
-
-macro_rules! create_future {
-    ($name:ident, $future_type:ident, $type:ident) => {
-        #[pyclass]
-        struct $name {
-            inner: Option<$future_type>,
-        }
-
-        impl $name {
-            fn new(f: $future_type) -> Self {
-                Self { inner: Some(f) }
-            }
-        }
-
-        #[pymethods]
-        impl $name {
-            fn wait(mut slf: PyRefMut<'_, Self>) -> PyResult<$type> {
-                match slf.inner.take() {
-                    Some(f) => {
-                        f.subscribe().block();
-                        f.get().expect("not ready").expect("wasm error").try_into()
-                    }
-                    _ => panic!("invalid state"),
-                }
-            }
-
-            fn subscribe(slf: PyRef<'_, Self>) -> PyPollable {
-                match slf.inner.as_ref() {
-                    Some(f) => f.subscribe().into(),
-                    _ => panic!("invalid state"),
-                }
-            }
-
-            fn get(mut slf: PyRefMut<'_, Self>) -> PyResult<$type> {
-                match slf.inner.take() {
-                    Some(f) => f.get().expect("not ready").expect("wasm error").try_into(),
-                    _ => panic!("invalid state"),
-                }
-            }
-
-            fn release(mut slf: PyRefMut<'_, Self>) {
-                slf.inner.take();
-            }
-        }
-    };
 }
 
 create_future!(PyFutureResponse, FutureResponse, PyResponse);

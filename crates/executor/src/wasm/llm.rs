@@ -68,19 +68,22 @@ impl tokenizer::HostTokenizer for dyn LlmView + '_ {
         tokenizer: wasmtime::component::Resource<Tokenizer>,
         data: String,
     ) -> wasmtime::Result<Vec<u32>> {
-        let span = span!(
-            target: "promptkit::llm",
-            tracing::Level::INFO,
-            "llm::tokenizer::encode",
-            promptkit.user = true,
-            llm.tokenizer.input_len = data.len(),
-            llm.tokenizer.token_count = Empty,
-        );
-        let _guard = span.enter();
-        let tokenizer = self.table().get(&tokenizer)?;
-        let ids = tokenizer.inner.encode(&data, &EncodeOption {})?.ids;
-        span.record("llm.tokenizer.token_count", ids.len());
-        Ok(ids)
+        let tokenizer = self.table().get(&tokenizer)?.inner.clone();
+        wasmtime_wasi::runtime::spawn_blocking(move || {
+            let span = span!(
+                target: "promptkit::llm",
+                tracing::Level::INFO,
+                "llm::tokenizer::encode",
+                promptkit.user = true,
+                llm.tokenizer.input_len = data.len(),
+                llm.tokenizer.token_count = Empty,
+            );
+            let _guard = span.enter();
+            let ids = tokenizer.encode(&data, &EncodeOption {})?.ids;
+            span.record("llm.tokenizer.token_count", ids.len());
+            Ok(ids)
+        })
+        .await
     }
 
     async fn decode(
@@ -88,19 +91,22 @@ impl tokenizer::HostTokenizer for dyn LlmView + '_ {
         tokenizer: wasmtime::component::Resource<Tokenizer>,
         tokens: Vec<u32>,
     ) -> wasmtime::Result<String> {
-        let span = span!(
-            target: "promptkit::llm",
-            tracing::Level::INFO,
-            "llm::tokenizer::decode",
-            promptkit.user = true,
-            llm.tokenizer.token_count = tokens.len(),
-            llm.tokenizer.output_len = Empty,
-        );
-        let _guard = span.enter();
-        let tokenizer = self.table().get(&tokenizer)?;
-        let out = tokenizer.inner.decode(&tokens, &DecodeOption {})?;
-        span.record("llm.tokenizer.output_len", out.len());
-        Ok(out)
+        let tokenizer = self.table().get(&tokenizer)?.inner.clone();
+        wasmtime_wasi::runtime::spawn_blocking(move || {
+            let span = span!(
+                target: "promptkit::llm",
+                tracing::Level::INFO,
+                "llm::tokenizer::decode",
+                promptkit.user = true,
+                llm.tokenizer.token_count = tokens.len(),
+                llm.tokenizer.output_len = Empty,
+            );
+            let _guard = span.enter();
+            let out = tokenizer.decode(&tokens, &DecodeOption {})?;
+            span.record("llm.tokenizer.output_len", out.len());
+            Ok(out)
+        })
+        .await
     }
 
     async fn get_special_token(
