@@ -10,9 +10,12 @@ use std::cell::RefCell;
 
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
-use pyo3::{append_to_inittab, prelude::*};
+use pyo3::{append_to_inittab, intern, prelude::*};
 use serde::de::DeserializeSeed;
-use wasi::{clocks::monotonic_clock::subscribe_duration, io::poll::poll as host_poll};
+use wasi::{
+    clocks::monotonic_clock::subscribe_duration,
+    io::{poll::poll as host_poll, streams::StreamError},
+};
 
 use crate::{
     error::Error,
@@ -35,6 +38,8 @@ wit_bindgen::generate!({
 #[pymodule]
 #[pyo3(name = "_promptkit_sys")]
 pub fn sys_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
+    module.add_class::<PyPollable>()?;
+
     #[pyfn(module)]
     #[pyo3(signature = (duration))]
     fn sleep(duration: f64) -> PyPollable {
@@ -121,24 +126,63 @@ impl ArgIter {
         slf
     }
 
-    #[allow(clippy::needless_pass_by_value)]
-    fn __next__(slf: PyRefMut<'_, Self>) -> PyResult<Option<PyObject>> {
-        match slf.iter.read() {
-            Some(a) => match a {
+    fn __next__(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        match self.iter.blocking_read() {
+            Ok(a) => match a {
                 host::Argument::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
-                        PyObjectDeserializer::new(slf.py())
+                        PyObjectDeserializer::new(py)
                             .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
                             })?
-                            .to_object(slf.py()),
+                            .to_object(py),
                     ))
                 }
                 host::Argument::Iterator(_) => todo!(),
             },
-            None => Ok(None),
+            Err(StreamError::Closed) => Ok(None),
+            Err(StreamError::LastOperationFailed(e)) => Err(PyErr::new::<
+                pyo3::exceptions::PyTypeError,
+                _,
+            >(e.to_string())),
+        }
+    }
+
+    fn __aiter__(slf: Bound<'_, Self>) -> PyResult<Bound<'_, PyAny>> {
+        let py = slf.py();
+        let module = py
+            .import_bound(intern!(py, "promptkit.asyncio"))
+            .expect("failed to import promptkit.asyncio");
+        module
+            .getattr(intern!(py, "_aiter_arg"))
+            .expect("failed to get asyncio.aiter_arg")
+            .call1((slf,))
+    }
+
+    fn read(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        match self.iter.read() {
+            Some(Ok(a)) => match a {
+                host::Argument::Cbor(c) => {
+                    let c = SliceReader::new(&c);
+                    Ok(Some(
+                        PyObjectDeserializer::new(py)
+                            .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
+                            })?
+                            .to_object(py),
+                    ))
+                }
+                host::Argument::Iterator(_) => todo!(),
+            },
+            Some(Err(StreamError::Closed)) => Ok(None),
+            Some(Err(StreamError::LastOperationFailed(e))) => Err(PyErr::new::<
+                pyo3::exceptions::PyTypeError,
+                _,
+            >(e.to_string())),
+            None => Ok(Some(PyPollable::from(self.iter.subscribe()).into_py(py))),
         }
     }
 }

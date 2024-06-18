@@ -1,6 +1,5 @@
-use tokio_stream::StreamExt;
 use tracing::event;
-use wasmtime_wasi::ResourceTable;
+use wasmtime_wasi::{bindings::io::streams::StreamError, Pollable, ResourceTable};
 
 use self::bindings::host::HostArgumentIterator;
 use bindings::host::{Argument, LogLevel};
@@ -11,6 +10,7 @@ wasmtime::component::bindgen!({
     async: true,
     trappable_imports: true,
     with: {
+        "wasi": wasmtime_wasi::bindings,
         "promptkit:vm/host/argument-iterator": types::ArgumentIterator,
     },
 });
@@ -20,17 +20,53 @@ pub use promptkit::vm as bindings;
 pub mod types {
     use std::pin::Pin;
 
-    use futures_util::Stream;
+    use futures_util::{FutureExt, StreamExt};
+    use tokio_stream::Stream;
+    use wasmtime_wasi::{bindings::io::streams::StreamError, Subscribe};
 
     pub use super::bindings::host::Argument;
 
     pub struct ArgumentIterator {
         pub(crate) stream: Pin<Box<dyn Stream<Item = Argument> + Send>>,
+        pub(crate) peek: Option<Result<Argument, StreamError>>,
     }
 
     impl ArgumentIterator {
         pub fn new(stream: Pin<Box<dyn Stream<Item = Argument> + Send>>) -> Self {
-            Self { stream }
+            Self { stream, peek: None }
+        }
+
+        pub async fn next(&mut self) -> Result<Argument, StreamError> {
+            match self.peek.take() {
+                Some(v) => v,
+                None => match self.stream.next().await {
+                    Some(v) => Ok(v),
+                    None => Err(StreamError::Closed),
+                },
+            }
+        }
+
+        pub fn try_next(&mut self) -> Option<Result<Argument, StreamError>> {
+            match self.peek.take() {
+                Some(v) => Some(v),
+                None => match self.stream.next().now_or_never() {
+                    None => None,
+                    Some(None) => Some(Err(StreamError::Closed)),
+                    Some(Some(v)) => Some(Ok(v)),
+                },
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl Subscribe for ArgumentIterator {
+        async fn ready(&mut self) {
+            if self.peek.is_none() {
+                self.peek = match self.stream.next().await {
+                    Some(v) => Some(Ok(v)),
+                    None => Some(Err(StreamError::Closed)),
+                }
+            }
         }
     }
 }
@@ -98,9 +134,23 @@ impl HostArgumentIterator for dyn VmView + '_ {
     async fn read(
         &mut self,
         resource: wasmtime::component::Resource<types::ArgumentIterator>,
-    ) -> wasmtime::Result<Option<Argument>> {
+    ) -> wasmtime::Result<Option<Result<Argument, StreamError>>> {
+        Ok(self.table().get_mut(&resource)?.try_next())
+    }
+
+    async fn blocking_read(
+        &mut self,
+        resource: wasmtime::component::Resource<types::ArgumentIterator>,
+    ) -> wasmtime::Result<Result<Argument, StreamError>> {
         let response = self.table().get_mut(&resource)?;
-        Ok(response.stream.next().await)
+        Ok(response.next().await)
+    }
+
+    async fn subscribe(
+        &mut self,
+        resource: wasmtime::component::Resource<types::ArgumentIterator>,
+    ) -> wasmtime::Result<wasmtime::component::Resource<Pollable>> {
+        wasmtime_wasi::subscribe(self.table(), resource)
     }
 
     fn drop(

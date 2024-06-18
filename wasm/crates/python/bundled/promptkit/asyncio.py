@@ -169,3 +169,11 @@ def run(main):
         if hasattr(main, "__aiter__"):
             return _iter(loop, main)
         return loop.run_until_complete(main)
+
+
+async def _aiter_arg(args):
+    while (result := args.read()) is not None:
+        if type(result) is _promptkit_sys.PyPollable:
+            await subscribe(result)
+        else:
+            yield result

@@ -54,12 +54,5 @@ fn main() {
         for lib in &libs {
             println!("cargo:rustc-link-lib={lib}");
         }
-        {
-            let mut dst = outdir.clone();
-            dst.push("include");
-            dst.push(libpython_binary);
-            dst.push("Python.h");
-            println!("cargo:rerun-if-changed={}", dst.display());
-        }
     }
 }
