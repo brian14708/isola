@@ -72,7 +72,7 @@ impl<E> VmManager<E> {
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
 
         let mut pooling_config = PoolingAllocationConfig::default();
-        pooling_config.memory_pages(64 * 1024 * 1024 / (64 * 1024));
+        pooling_config.max_memory_size(MAX_MEMORY);
         config.allocation_strategy(InstanceAllocationStrategy::Pooling(pooling_config));
 
         config
