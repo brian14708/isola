@@ -78,22 +78,6 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
-        format!("target/{TARGET}/release/promptkit_python.pass1.wasm"),
-        |inp, out| -> Result<()> {
-            let inp = &inp[0];
-            if dbg {
-                cmd!(sh, "wasm-opt -g -O1 --strip-debug {inp} -o {out}").run()?;
-            } else {
-                cmd!(sh, "wasm-opt -g -O4 --strip-debug {inp} -o {out}").run()?;
-            }
-            Ok(())
-        },
-    )?;
-
-    run_if_changed(
-        vec![format!(
-            "target/{TARGET}/release/promptkit_python.pass1.wasm"
-        )],
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
             let workdir = sh.create_temp_dir()?;
@@ -110,21 +94,28 @@ fn build_python(sh: &Shell) -> Result<()> {
         },
     )?;
 
-    // run_if_changed(
-    //     vec![format!(
-    //         "target/{TARGET}/release/promptkit_python.init.wasm"
-    //     )],
-    //     format!("target/{TARGET}/release/promptkit_python.pass2.wasm"),
-    //     |inp, out| -> Result<()> {
-    //         let inp = &inp[0];
-    //         cmd!(sh, "wasm-opt -g -Os --strip-debug {inp} -o {out}").run()?;
-    //         Ok(())
-    //     },
-    // )?;
     run_if_changed(
         vec![format!(
             "target/{TARGET}/release/promptkit_python.init.wasm"
         )],
+        format!("target/{TARGET}/release/promptkit_python.opt.wasm"),
+        |inp, out| -> Result<()> {
+            let inp = &inp[0];
+            if dbg {
+                cmd!(sh, "wasm-opt -O1 --strip-debug {inp} -o {out}").run()?;
+            } else {
+                cmd!(
+                    sh,
+                    "wasm-opt --precompute-propagate -O4 -O4 --strip-debug {inp} -o {out}"
+                )
+                .run()?;
+            }
+            Ok(())
+        },
+    )?;
+
+    run_if_changed(
+        vec![format!("target/{TARGET}/release/promptkit_python.opt.wasm")],
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
             let wasm = std::fs::read(&inp[0])?;
