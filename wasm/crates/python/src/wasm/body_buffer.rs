@@ -27,7 +27,7 @@ pub enum Buffer {
 impl Buffer {
     pub fn new(kind: &str) -> Self {
         match kind {
-            "bytes" => Self::Bytes(Bytes::default()),
+            "binary" | "bytes" => Self::Bytes(Bytes::default()),
             "lines" => Self::Lines(Lines::default()),
             "json" => Self::Json(Json::default()),
             "text" => Self::Text(Text::default()),
