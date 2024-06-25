@@ -1,7 +1,9 @@
 use core::slice;
 
 use pyo3::{
-    intern, pyclass, pymethods, pymodule,
+    intern,
+    prelude::PyModuleMethods,
+    pyclass, pymethods, pymodule,
     types::{PyAnyMethods, PyByteArray, PyBytes, PyBytesMethods, PyMemoryView, PyModule},
     Bound, PyAny, PyObject, PyResult,
 };

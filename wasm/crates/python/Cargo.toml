@@ -7,7 +7,7 @@ edition.workspace = true
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
 eventsource = { version = "0.5.0", default-features = false }
 futures = { version = "0.3.30", default-features = false, features = ["std"] }
-pyo3 = { version = "0.21.2", features = ["abi3"] }
+pyo3 = { version = "0.22.0", features = ["abi3"] }
 serde = "1.0.199"
 serde_json = "1.0.116"
 thiserror = "1.0.59"
