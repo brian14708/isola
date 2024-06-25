@@ -29,15 +29,19 @@ use super::{
 
 #[pymodule]
 #[pyo3(name = "_promptkit_http")]
-pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    #[pyfn(module)]
+pub mod http_module {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
+    use pyo3::pyfunction;
+
+    #[pyfunction]
     fn new_buffer(kind: &str) -> Buffer {
         Buffer {
             inner: body_buffer::Buffer::new(kind),
         }
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     fn loads_json<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyAny>> {
         Ok(PyObjectDeserializer::new(py)
             .deserialize(&mut serde_json::Deserializer::from_str(s))
@@ -45,7 +49,7 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
             .into_bound(py))
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
     fn fetch(
         py: Python<'_>,
@@ -129,8 +133,6 @@ pub fn http_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         Ok(PyFutureResponse::new(request))
     }
-
-    Ok(())
 }
 
 create_future!(PyFutureResponse, FutureResponse, PyResponse);

@@ -1,10 +1,8 @@
 use core::slice;
 
 use pyo3::{
-    intern,
-    prelude::PyModuleMethods,
-    pyclass, pymethods, pymodule,
-    types::{PyAnyMethods, PyByteArray, PyBytes, PyBytesMethods, PyMemoryView, PyModule},
+    intern, pyclass, pymethods, pymodule,
+    types::{PyAnyMethods, PyByteArray, PyBytes, PyBytesMethods, PyMemoryView},
     Bound, PyAny, PyObject, PyResult,
 };
 
@@ -12,9 +10,9 @@ use super::promptkit::llm::tokenizer;
 
 #[pymodule]
 #[pyo3(name = "_promptkit_llm")]
-pub fn llm_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<Tokenizer>()?;
-    Ok(())
+pub mod llm_module {
+    #[pymodule_export]
+    use super::Tokenizer;
 }
 
 #[pyclass]

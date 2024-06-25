@@ -13,8 +13,11 @@ thread_local! {
 
 #[pymodule]
 #[pyo3(name = "_promptkit_logging")]
-pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    #[pyfn(module)]
+pub mod logging_module {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
+
+    #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]
     fn debug(
         msg: &Bound<'_, PyString>,
@@ -36,7 +39,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         })
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]
     fn info(
         msg: &Bound<'_, PyString>,
@@ -58,7 +61,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         })
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]
     fn warning(
         msg: &Bound<'_, PyString>,
@@ -80,7 +83,7 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         })
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]
     fn error(
         msg: &Bound<'_, PyString>,
@@ -101,8 +104,6 @@ pub fn logging_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
             Ok(())
         })
     }
-
-    Ok(())
 }
 
 const fn loglevel_to_i32(level: host::LogLevel) -> i32 {

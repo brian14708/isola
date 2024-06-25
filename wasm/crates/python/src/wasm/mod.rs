@@ -37,10 +37,14 @@ wit_bindgen::generate!({
 
 #[pymodule]
 #[pyo3(name = "_promptkit_sys")]
-pub fn sys_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add_class::<PyPollable>()?;
+pub mod sys_module {
+    #[allow(clippy::wildcard_imports)]
+    use super::*;
 
-    #[pyfn(module)]
+    #[pymodule_export]
+    use super::PyPollable;
+
+    #[pyfunction]
     #[pyo3(signature = (duration))]
     fn sleep(duration: f64) -> PyPollable {
         let poll = subscribe_duration(
@@ -52,14 +56,13 @@ pub fn sys_module(module: &Bound<'_, PyModule>) -> PyResult<()> {
         poll.into()
     }
 
-    #[pyfn(module)]
+    #[pyfunction]
     #[pyo3(signature = (poll))]
     #[allow(clippy::needless_pass_by_value)]
     fn poll(poll: Vec<PyRef<'_, PyPollable>>) -> Vec<u32> {
         let p = poll.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
         host_poll(&p)
     }
-    Ok(())
 }
 
 export!(Global);
