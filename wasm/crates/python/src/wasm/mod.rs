@@ -32,6 +32,11 @@ wit_bindgen::generate!({
         "wasi:io/poll@0.2.0": wasi::io::poll,
         "wasi:io/error@0.2.0": wasi::io::error,
         "wasi:io/streams@0.2.0": wasi::io::streams,
+
+        "promptkit:vm/host": generate,
+        "promptkit:vm/guest": generate,
+        "promptkit:http/client": generate,
+        "promptkit:llm/tokenizer": generate,
     },
 });
 
