@@ -261,7 +261,7 @@ def post_sse(url, data=None, headers=None, timeout=None):
             yield _http.loads_json(event.data)
 
 
-async def _fetch(r, ignore_errors):
+async def _fetch(r, ignore_error):
     extra = r.extra or {}
     try:
         async with r as resp:
@@ -269,14 +269,14 @@ async def _fetch(r, ignore_errors):
                 _validate_status(resp)
             return await resp._aread(extra.get("type", "json"))
     except Exception as e:
-        if ignore_errors:
+        if ignore_error:
             return e
         raise e
 
 
-async def _fetch_all(requests, ignore_errors):
-    return await asyncio.gather(*[_fetch(r, ignore_errors) for r in requests])
+async def _fetch_all(requests, ignore_error):
+    return await asyncio.gather(*[_fetch(r, ignore_error) for r in requests])
 
 
-def fetch_all(requests, ignore_errors=False):
-    return asyncio_run(_fetch_all(requests, ignore_errors))
+def fetch_all(requests, ignore_error=False):
+    return asyncio_run(_fetch_all(requests, ignore_error))
