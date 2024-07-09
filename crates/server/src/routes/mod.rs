@@ -18,6 +18,6 @@ pub fn router(state: &AppState) -> axum::Router {
         .with_state(state.clone())
         .nest_service(
             "/ui",
-            ServeDir::new("ui/dist").fallback(ServeFile::new("ui/dist/index.html")),
+            ServeDir::new("ui/build").fallback(ServeFile::new("ui/build/404.html")),
         )
 }

@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
 FROM cgr.dev/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app
 COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit_server .
-COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
+COPY --from=ui-build --chown=nonroot:nonroot /src/build ui/build
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
