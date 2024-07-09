@@ -1,16 +1,16 @@
 use std::time::Duration;
 
-use http_02::{Response, Uri};
+use http::{Response, Uri};
 use opentelemetry::trace::{TraceContextExt, TraceId};
 use opentelemetry_sdk::trace::RandomIdGenerator;
 use opentelemetry_semantic_conventions::trace;
-use tower_http_04::{
+use tower_http::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
     trace::{DefaultOnBodyChunk, DefaultOnEos, DefaultOnRequest, OnFailure, OnResponse},
 };
 use tracing::{field::Empty, Span};
 
-pub fn grpc_server_tracing_layer() -> tower_http_04::trace::TraceLayer<
+pub fn grpc_server_tracing_layer() -> tower_http::trace::TraceLayer<
     SharedClassifier<GrpcErrorsAsFailures>,
     MakeSpan,
     DefaultOnRequest,
@@ -19,7 +19,7 @@ pub fn grpc_server_tracing_layer() -> tower_http_04::trace::TraceLayer<
     DefaultOnEos,
     OtelOnGrpcFailure,
 > {
-    tower_http_04::trace::TraceLayer::new_for_grpc()
+    tower_http::trace::TraceLayer::new_for_grpc()
         .make_span_with(MakeSpan)
         .on_response(OtelOnResponse)
         .on_failure(OtelOnGrpcFailure)
@@ -28,16 +28,16 @@ pub fn grpc_server_tracing_layer() -> tower_http_04::trace::TraceLayer<
 #[derive(Clone)]
 pub struct MakeSpan;
 
-impl<B> tower_http_04::trace::MakeSpan<B> for MakeSpan {
-    fn make_span(&mut self, request: &http_02::Request<B>) -> tracing::Span {
-        struct HeaderExtractor<'a>(&'a http_02::HeaderMap);
+impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
+    fn make_span(&mut self, request: &http::Request<B>) -> tracing::Span {
+        struct HeaderExtractor<'a>(&'a http::HeaderMap);
         impl<'a> opentelemetry::propagation::Extractor for HeaderExtractor<'a> {
             fn get(&self, key: &str) -> Option<&str> {
                 self.0.get(key).and_then(|value| value.to_str().ok())
             }
 
             fn keys(&self) -> Vec<&str> {
-                self.0.keys().map(http_02::HeaderName::as_str).collect()
+                self.0.keys().map(http::HeaderName::as_str).collect()
             }
         }
         let extractor = HeaderExtractor(request.headers());
@@ -50,7 +50,7 @@ impl<B> tower_http_04::trace::MakeSpan<B> for MakeSpan {
 
         let server_addr = request
             .headers()
-            .get(http_02::header::HOST)
+            .get(http::header::HOST)
             .map_or(request.uri().host(), |h| h.to_str().ok())
             .unwrap_or("");
         let span = tracing::info_span!(

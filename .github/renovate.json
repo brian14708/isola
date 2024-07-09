@@ -16,6 +16,5 @@
   "automergeType": "branch",
   "lockFileMaintenance": {
     "enabled": true
-  },
-  "ignoreDeps": ["http_02", "http_body_04", "tower-http_04"]
+  }
 }
