@@ -2,6 +2,8 @@ use std::{
     env, fs,
     path::{Path, PathBuf},
     str::FromStr,
+    time::SystemTime,
+    vec,
 };
 
 use anyhow::Result;
@@ -71,9 +73,34 @@ fn build_python(sh: &Shell) -> Result<()> {
         .run()?;
     }
 
-    copy_dir_all(
-        PathBuf::from("crates/python/bundled"),
-        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
+    run_if_changed(
+        vec!["crates/python/bundled/requirements.txt".to_string()],
+        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12/requirements.txt"),
+        |_, _| {
+            copy_dir_all(
+                PathBuf::from("crates/python/bundled"),
+                format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
+            )?;
+
+            cmd!(
+                sh,
+                "python3 -m pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/wasi-deps/usr/local/lib/python3.12"
+            ).run()?;
+
+            cmd!(
+                sh,
+                "python3 -m compileall target/{TARGET}/wasi-deps/usr/local/lib/python3.12"
+            )
+            .run()?;
+
+            fs::OpenOptions::new()
+                .write(true)
+                .open(format!(
+                    "target/{TARGET}/wasi-deps/usr/local/lib/python3.12/requirements.txt"
+                ))?
+                .set_modified(SystemTime::now())?;
+            Ok(())
+        },
     )?;
 
     run_if_changed(
@@ -164,6 +191,9 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result
         let entry = entry?;
         let ty = entry.file_type()?;
         if ty.is_dir() {
+            if entry.file_name() == "__pycache__" {
+                continue;
+            }
             copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
         } else {
             fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;

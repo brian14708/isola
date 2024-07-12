@@ -2,6 +2,7 @@
 name = "promptkit_python"
 version.workspace = true
 edition.workspace = true
+exclude = ["/bundled"]
 
 [dependencies]
 cbor4ii = { version = "0.3.2", features = ["serde1"] }
