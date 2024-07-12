@@ -1,0 +1,12 @@
+version: v2
+managed:
+  enabled: true
+plugins:
+  - local: protoc-gen-es
+    out: src/lib/rpc
+    opt: target=ts
+  - local: protoc-gen-connect-es
+    out: src/lib/rpc
+    opt: target=ts
+inputs:
+  - directory: ../apis/proto/

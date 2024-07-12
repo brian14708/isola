@@ -2,3 +2,7 @@
 package-lock.json
 pnpm-lock.yaml
 yarn.lock
+
+# Generated code
+src/lib/rpc/**/*_pb.ts
+src/lib/rpc/**/*_connect.ts

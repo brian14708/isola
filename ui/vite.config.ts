@@ -9,4 +9,14 @@ export default defineConfig({
 			compiler: "svelte",
 		}),
 	],
+	server: {
+		proxy: {
+			"/v1/": {
+				target: "http://localhost:3000",
+			},
+			"/promptkit.": {
+				target: "http://localhost:3000",
+			},
+		},
+	},
 });
