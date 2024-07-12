@@ -102,11 +102,11 @@ fn build_python(sh: &Shell) -> Result<()> {
         |inp, out| -> Result<()> {
             let inp = &inp[0];
             if dbg {
-                cmd!(sh, "wasm-opt -O1 --strip-debug {inp} -o {out}").run()?;
+                cmd!(sh, "wasm-opt -g -O1 --strip-debug {inp} -o {out}").run()?;
             } else {
                 cmd!(
                     sh,
-                    "wasm-opt --precompute-propagate -O4 -O4 --strip-debug {inp} -o {out}"
+                    "wasm-opt --precompute-propagate -g -O4 --gufa -O4 --strip-debug {inp} -o {out}"
                 )
                 .run()?;
             }

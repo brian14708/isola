@@ -28,8 +28,11 @@ FROM --platform=$BUILDPLATFORM docker.io/library/rust:bookworm AS wasm-build
 RUN rustup target add wasm32-wasip1
 
 RUN apt-get update && \
-    apt-get install -y cmake binaryen && \
+    apt-get install -y cmake && \
     rm -rf /var/lib/apt/lists/*
+RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_118/binaryen-version_118-$(uname -m)-linux.tar.gz" && \
+    tar -xzf /usr/local/binaryen.tar.gz --strip-component 1 -C /usr/local/ && \
+    rm /usr/local/binaryen.tar.gz
 ENV PYENV_ROOT=/root/.pyenv \
     PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH
 RUN curl https://pyenv.run | bash
