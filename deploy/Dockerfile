@@ -11,7 +11,7 @@ RUN --mount=type=cache,target=/work/target/release \
     --mount=type=cache,target=/root/.cargo/registry \
     cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
-FROM --platform=$BUILDPLATFORM docker.io/library/node:22 AS ui-build
+FROM --platform=$BUILDPLATFORM docker.io/library/node:latest AS ui-build
 WORKDIR /src
 COPY ui/pnpm-workspace.yaml .
 COPY ui/package.json .
@@ -24,7 +24,7 @@ COPY ui .
 COPY apis ../apis
 RUN pnpm run build
 
-FROM --platform=$BUILDPLATFORM docker.io/library/rust:bookworm AS wasm-build
+FROM --platform=$BUILDPLATFORM docker.io/library/rust:latest AS wasm-build
 RUN rustup target add wasm32-wasip1
 
 RUN apt-get update && \
@@ -49,14 +49,16 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask build-all
 
-FROM cgr.dev/chainguard/glibc-dynamic:latest
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app
-USER nonroot
 COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit_server .
 COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
 
-EXPOSE 3000
+FROM cgr.dev/chainguard/glibc-dynamic:latest
+WORKDIR /app
+COPY --from=staging /app .
+EXPOSE 3000/tcp
 CMD ["./promptkit_server"]
