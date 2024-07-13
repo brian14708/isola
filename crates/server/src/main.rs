@@ -114,7 +114,14 @@ async fn main() -> anyhow::Result<()> {
                 .into_router()
                 .layer(grpc_server_tracing_layer());
 
-            server::serve(app.merge(grpc), 3000).await
+            server::serve(
+                app.merge(grpc),
+                std::env::var("PORT")
+                    .ok()
+                    .and_then(|p| p.parse::<u16>().ok())
+                    .unwrap_or(3000),
+            )
+            .await
         }
         _ => Err(anyhow!("unknown task")),
     }
