@@ -13,9 +13,7 @@ RUN --mount=type=cache,target=/work/target/release \
 
 FROM --platform=$BUILDPLATFORM docker.io/library/node:latest AS ui-build
 WORKDIR /src
-COPY ui/pnpm-workspace.yaml .
 COPY ui/package.json .
-COPY ui/packages/api/package.json packages/api/package.json
 RUN npm install -g $(cat package.json | grep -o 'pnpm@[0-9.]\+')
 COPY ui/pnpm-lock.yaml .
 RUN --mount=type=cache,target=/root/.cache/pnpm/store \
