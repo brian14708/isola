@@ -39,6 +39,12 @@ impl Scope {
         Python::with_gil(|py| {
             let locals = PyDict::new_bound(py);
             let stdio = if let Ok(sys) = PyModule::import_bound(py, intern!(py, "sys")) {
+                if let Ok(path) = sys.getattr(intern!(py, "path")) {
+                    let path = path.downcast_exact::<PyList>().ok();
+                    if let Some(path) = path {
+                        let _ = path.insert(1, "/usr/local/lib/bundle.zip");
+                    }
+                }
                 if let (Ok(stdout), Ok(stderr)) = (
                     sys.getattr(intern!(py, "stdout")),
                     sys.getattr(intern!(py, "stderr")),

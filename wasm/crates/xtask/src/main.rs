@@ -1,8 +1,8 @@
 use std::{
-    env, fs,
+    env,
+    fs::remove_dir_all,
     path::{Path, PathBuf},
     str::FromStr,
-    time::SystemTime,
     vec,
 };
 
@@ -75,33 +75,23 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec!["crates/python/bundled/requirements.txt".to_string()],
-        format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12/requirements.txt"),
+        format!("target/{TARGET}/python-deps/setuptools/__init__.py"),
         |_, _| {
-            copy_dir_all(
-                PathBuf::from("crates/python/bundled"),
-                format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.12"),
-            )?;
+            let _ = remove_dir_all("target/{TARGET}/python-deps");
 
             cmd!(
                 sh,
-                "python3 -m pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/wasi-deps/usr/local/lib/python3.12"
+                "python3 -m pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
             ).run()?;
 
-            cmd!(
-                sh,
-                "python3 -m compileall target/{TARGET}/wasi-deps/usr/local/lib/python3.12"
-            )
-            .run()?;
-
-            fs::OpenOptions::new()
-                .write(true)
-                .open(format!(
-                    "target/{TARGET}/wasi-deps/usr/local/lib/python3.12/requirements.txt"
-                ))?
-                .set_modified(SystemTime::now())?;
             Ok(())
         },
     )?;
+
+    cmd!(
+        sh,
+        "python3 crates/python/bundle.py target/{TARGET}/wasi-deps/usr/local/lib/bundle.zip target/{TARGET}/python-deps crates/python/bundled"
+    ).run()?;
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
@@ -181,23 +171,6 @@ fn run_if_changed(
         }
     } else {
         return f(inputs, output);
-    }
-    Ok(())
-}
-
-fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
-    fs::create_dir_all(&dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let ty = entry.file_type()?;
-        if ty.is_dir() {
-            if entry.file_name() == "__pycache__" {
-                continue;
-            }
-            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
-        } else {
-            fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
-        }
     }
     Ok(())
 }
