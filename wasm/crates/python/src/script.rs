@@ -262,6 +262,55 @@ impl Scope {
             Err(Error::UnexpectedError("unsupported return type"))
         })
     }
+
+    pub fn analyze(&self, request: InputValue<'_>) -> Result<Option<Vec<u8>>> {
+        Python::with_gil(|py| {
+            let module = py
+                .import_bound(intern!(py, "promptkit._analyze"))
+                .expect("failed to import promptkit._analyze");
+            let dict: &Bound<'_, PyDict> = self
+                .locals
+                .downcast_bound(py)
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            let obj = module
+                .getattr(intern!(py, "analyze"))
+                .expect("failed to get analyze")
+                .call(
+                    (
+                        dict,
+                        match request {
+                            InputValue::Json(v) => PyObjectDeserializer::new(py)
+                                .deserialize(v)
+                                .map_err(|_| Error::UnexpectedError("serde error"))?,
+                            InputValue::JsonStr(v) => PyObjectDeserializer::new(py)
+                                .deserialize(&mut serde_json::Deserializer::from_str(&v))
+                                .map_err(|_| Error::UnexpectedError("serde error"))?,
+                            InputValue::Iter(_) => {
+                                return Err(Error::UnexpectedError("unsupported"))
+                            }
+                            InputValue::Cbor(v) => {
+                                let c = SliceReader::new(v.as_ref());
+                                PyObjectDeserializer::new(py)
+                                    .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                                    .map_err(|_| Error::UnexpectedError("serde error"))?
+                            }
+                        },
+                    ),
+                    None,
+                )
+                .map_err(|e| Error::from_pyerr(py, e))?;
+            match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
+                Ok(s) => Ok(Some(s)),
+                Err(cbor4ii::serde::EncodeError::Core(_)) => {
+                    Err(Error::UnexpectedError("serde error"))
+                }
+                Err(cbor4ii::serde::EncodeError::Custom(s)) => Err(Error::PythonError {
+                    cause: s.to_string(),
+                    traceback: None,
+                }),
+            }
+        })
+    }
 }
 
 #[cfg(test)]

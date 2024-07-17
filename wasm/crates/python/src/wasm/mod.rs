@@ -103,8 +103,15 @@ impl guest::Guest for Global {
     fn call_func(func: String, args: Vec<host::Argument>) -> Result<Option<Vec<u8>>, guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {
-                let ret = vm
-                    .run(
+                let ret = if func == "$analyze" {
+                    if let Some(host::Argument::Cbor(s)) = args.first() {
+                        vm.analyze(InputValue::Cbor(s.into()))
+                            .map_err(Into::<guest::Error>::into)
+                    } else {
+                        return Err(Error::UnexpectedError("Invalid argument").into());
+                    }
+                } else {
+                    vm.run(
                         &func,
                         args.into_iter().map(|f| match f {
                             host::Argument::Cbor(s) => InputValue::Cbor(s.into()),
@@ -113,7 +120,8 @@ impl guest::Guest for Global {
                         [],
                         host::emit,
                     )
-                    .map_err(Into::<guest::Error>::into);
+                    .map_err(Into::<guest::Error>::into)
+                };
                 vm.flush();
                 ret
             } else {

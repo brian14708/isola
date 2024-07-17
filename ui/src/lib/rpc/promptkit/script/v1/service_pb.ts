@@ -983,3 +983,237 @@ export class Runtime extends Message<Runtime> {
   }
 }
 
+/**
+ * @generated from message promptkit.script.v1.AnalyzeRequest
+ */
+export class AnalyzeRequest extends Message<AnalyzeRequest> {
+  /**
+   * @generated from field: promptkit.script.v1.Source source = 1;
+   */
+  source?: Source;
+
+  /**
+   * @generated from field: promptkit.script.v1.ExecutionSpec spec = 2;
+   */
+  spec?: ExecutionSpec;
+
+  /**
+   * @generated from field: repeated string methods = 3;
+   */
+  methods: string[] = [];
+
+  constructor(data?: PartialMessage<AnalyzeRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "promptkit.script.v1.AnalyzeRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source", kind: "message", T: Source },
+    { no: 2, name: "spec", kind: "message", T: ExecutionSpec },
+    { no: 3, name: "methods", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AnalyzeRequest {
+    return new AnalyzeRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AnalyzeRequest {
+    return new AnalyzeRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AnalyzeRequest {
+    return new AnalyzeRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AnalyzeRequest | PlainMessage<AnalyzeRequest> | undefined, b: AnalyzeRequest | PlainMessage<AnalyzeRequest> | undefined): boolean {
+    return proto3.util.equals(AnalyzeRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message promptkit.script.v1.TypeInfo
+ */
+export class TypeInfo extends Message<TypeInfo> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string json_schema = 2;
+   */
+  jsonSchema = "";
+
+  constructor(data?: PartialMessage<TypeInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "promptkit.script.v1.TypeInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "json_schema", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TypeInfo {
+    return new TypeInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TypeInfo {
+    return new TypeInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TypeInfo {
+    return new TypeInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TypeInfo | PlainMessage<TypeInfo> | undefined, b: TypeInfo | PlainMessage<TypeInfo> | undefined): boolean {
+    return proto3.util.equals(TypeInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message promptkit.script.v1.MethodInfo
+ */
+export class MethodInfo extends Message<MethodInfo> {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * @generated from field: string description = 2;
+   */
+  description = "";
+
+  /**
+   * @generated from field: repeated promptkit.script.v1.TypeInfo argument_types = 3;
+   */
+  argumentTypes: TypeInfo[] = [];
+
+  /**
+   * @generated from field: promptkit.script.v1.TypeInfo result_type = 4;
+   */
+  resultType?: TypeInfo;
+
+  constructor(data?: PartialMessage<MethodInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "promptkit.script.v1.MethodInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "argument_types", kind: "message", T: TypeInfo, repeated: true },
+    { no: 4, name: "result_type", kind: "message", T: TypeInfo },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MethodInfo {
+    return new MethodInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MethodInfo {
+    return new MethodInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MethodInfo {
+    return new MethodInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MethodInfo | PlainMessage<MethodInfo> | undefined, b: MethodInfo | PlainMessage<MethodInfo> | undefined): boolean {
+    return proto3.util.equals(MethodInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message promptkit.script.v1.AnalyzeResult
+ */
+export class AnalyzeResult extends Message<AnalyzeResult> {
+  /**
+   * @generated from field: repeated promptkit.script.v1.MethodInfo method_infos = 1;
+   */
+  methodInfos: MethodInfo[] = [];
+
+  constructor(data?: PartialMessage<AnalyzeResult>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "promptkit.script.v1.AnalyzeResult";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "method_infos", kind: "message", T: MethodInfo, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AnalyzeResult {
+    return new AnalyzeResult().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AnalyzeResult {
+    return new AnalyzeResult().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AnalyzeResult {
+    return new AnalyzeResult().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AnalyzeResult | PlainMessage<AnalyzeResult> | undefined, b: AnalyzeResult | PlainMessage<AnalyzeResult> | undefined): boolean {
+    return proto3.util.equals(AnalyzeResult, a, b);
+  }
+}
+
+/**
+ * @generated from message promptkit.script.v1.AnalyzeResponse
+ */
+export class AnalyzeResponse extends Message<AnalyzeResponse> {
+  /**
+   * @generated from oneof promptkit.script.v1.AnalyzeResponse.result_type
+   */
+  resultType: {
+    /**
+     * @generated from field: promptkit.script.v1.AnalyzeResult analyze_result = 1;
+     */
+    value: AnalyzeResult;
+    case: "analyzeResult";
+  } | {
+    /**
+     * @generated from field: promptkit.script.v1.Error error = 15;
+     */
+    value: Error;
+    case: "error";
+  } | { case: undefined; value?: undefined } = { case: undefined };
+
+  constructor(data?: PartialMessage<AnalyzeResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "promptkit.script.v1.AnalyzeResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "analyze_result", kind: "message", T: AnalyzeResult, oneof: "result_type" },
+    { no: 15, name: "error", kind: "message", T: Error, oneof: "result_type" },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AnalyzeResponse {
+    return new AnalyzeResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): AnalyzeResponse {
+    return new AnalyzeResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): AnalyzeResponse {
+    return new AnalyzeResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: AnalyzeResponse | PlainMessage<AnalyzeResponse> | undefined, b: AnalyzeResponse | PlainMessage<AnalyzeResponse> | undefined): boolean {
+    return proto3.util.equals(AnalyzeResponse, a, b);
+  }
+}
+

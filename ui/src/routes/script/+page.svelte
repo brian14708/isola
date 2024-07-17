@@ -19,6 +19,7 @@
 		Result,
 	} from "$lib/rpc/promptkit/script/v1/service_pb";
 	import { TraceLevel } from "$lib/rpc/promptkit/script/v1/trace_pb";
+	import { Button } from "$lib/components/ui/button";
 
 	let editor: CodeMirror;
 	const form = superForm(DEFAULT_DATA, {
@@ -94,7 +95,7 @@
 			source: {
 				sourceType: {
 					value: {
-						script: d.code,
+						script: d.code + `\n\n# ${new Date().getTime()}`,
 						runtime: "python3",
 					},
 					case: "scriptInline" as const,
@@ -127,7 +128,6 @@
 				if (currentId !== runId) {
 					return;
 				}
-				console.log("A");
 				ret.metadata?.traces?.forEach((trace) => {
 					traces.push(
 						`[${trace.timestamp?.seconds}.${trace.timestamp?.nanos}] ${JSON.stringify(trace.toJson())}`
@@ -165,6 +165,9 @@
 				}
 			}
 		} catch (e) {
+			if (currentId !== runId) {
+				return;
+			}
 			result = {
 				error: `${e}`,
 			};
@@ -199,6 +202,70 @@
 			formData.set(DEFAULT_DATA);
 			editor.setContent(DEFAULT_DATA.code);
 			save();
+		}
+	}
+
+	async function analyze() {
+		const d = save();
+		const currentId = ++runId;
+		result = {
+			loading: true,
+			data: [],
+			traces: [],
+		};
+
+		const secs = Math.floor(d.timeout);
+		try {
+			const r = await cli.analyze({
+				source: {
+					sourceType: {
+						value: {
+							script: d.code + `\n\n# ${new Date().getTime()}`,
+							runtime: "python3",
+						},
+						case: "scriptInline" as const,
+					},
+				},
+				spec: {
+					timeout: {
+						seconds: BigInt(secs),
+						nanos: Math.floor((d.timeout - secs) * 1e9),
+					},
+				},
+				methods: [d.method],
+			});
+			if (currentId !== runId) {
+				return;
+			}
+			switch (r.resultType.case) {
+				case "error": {
+					result = {
+						error: `${r.resultType.value?.message}`,
+					};
+					break;
+				}
+				case "analyzeResult": {
+					result = {
+						loading: false,
+						data: r.resultType.value?.methodInfos?.map((r) => JSON.stringify(r.toJson())) || [],
+						traces: [],
+					};
+					break;
+				}
+				default: {
+					result = {
+						error: "unknown message",
+					};
+					break;
+				}
+			}
+		} catch (e) {
+			if (currentId !== runId) {
+				return;
+			}
+			result = {
+				error: `${e}`,
+			};
 		}
 	}
 </script>
@@ -248,6 +315,7 @@
 				</Form.Field>
 
 				<Form.Button>Run</Form.Button>
+				<Button onclick={analyze}>Analyze</Button>
 			</form>
 		</div>
 		<div class="col-span-5 row-span-4 overflow-auto rounded-md border p-2">

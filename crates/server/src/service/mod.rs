@@ -12,14 +12,16 @@ use tracing::{level_filters::LevelFilter, span, Instrument, Span};
 use crate::{
     otel::RequestSpanExt,
     proto::script::v1::{
-        self as script, argument::Marker, execute_client_stream_request, execute_stream_request,
-        result, script_service_server::ScriptService, ErrorCode, Trace,
+        self as script, analyze_response, argument::Marker, execute_client_stream_request,
+        execute_stream_request, result, script_service_server::ScriptService, ContentType,
+        ErrorCode, Trace,
     },
     routes::{AppState, VmEnv},
     service::prost_serde::{argument, parse_source},
     utils::stream::{join_with, stream_until},
 };
 
+mod ipc;
 mod prost_serde;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -55,6 +57,82 @@ impl ScriptService for ScriptServer {
             runtimes: vec![script::Runtime {
                 name: "python3".into(),
             }],
+        }))
+    }
+
+    async fn analyze(
+        &self,
+        mut request: tonic::Request<script::AnalyzeRequest>,
+    ) -> Result<tonic::Response<script::AnalyzeResponse>, Status> {
+        let ParsedSpec {
+            method,
+            args,
+            timeout,
+            stream_tx: None,
+            span,
+            log_level,
+            trace_events: None,
+            env,
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
+        else {
+            return Err(Status::invalid_argument("unexpected stream marker"));
+        };
+        if !(method.is_empty() && args.is_empty()) {
+            return Err(Status::invalid_argument("method & args not allowed"));
+        }
+        let script = parse_source(&request.get_ref().source)?;
+
+        let req = cbor4ii::serde::to_vec(
+            vec![],
+            &Into::<ipc::AnalyzeRequest>::into(request.get_ref()),
+        )
+        .map_err(|e| Status::internal(e.to_string()))?;
+
+        let result = async {
+            let run = async {
+                let stream = self
+                    .state
+                    .vm
+                    .exec(
+                        script,
+                        "$analyze",
+                        [ExecArgument::Cbor(req)],
+                        env.as_ref(),
+                        log_level,
+                    )
+                    .await
+                    .map_err(|e| {
+                        Status::invalid_argument(format!("failed to start script: {e}"))
+                    })?;
+                let m = non_stream_result(stream, [ContentType::Cbor as i32]).await?;
+                match m.result_type {
+                    Some(result::ResultType::Cbor(c)) => {
+                        let r: ipc::AnalyzeResult =
+                            cbor4ii::serde::from_slice(&c).map_err(|e| {
+                                Status::internal(format!("failed to decode result: {e}"))
+                            })?;
+                        Ok(analyze_response::ResultType::AnalyzeResult(r.into()))
+                    }
+                    Some(result::ResultType::Error(e)) => {
+                        Ok(analyze_response::ResultType::Error(e))
+                    }
+                    _ => Err(Status::internal("unexpected result type")),
+                }
+            };
+            match tokio::time::timeout(timeout, run).await {
+                Ok(Ok(v)) => Ok(v),
+                Ok(Err(s)) => Err(s),
+                Err(_) => Ok(analyze_response::ResultType::Error(script::Error {
+                    code: i32::from(script::ErrorCode::DeadlineExceeded),
+                    message: "deadline execeeded".to_string(),
+                })),
+            }
+        }
+        .instrument(span)
+        .await?;
+
+        Ok(Response::new(script::AnalyzeResponse {
+            result_type: Some(result),
         }))
     }
 

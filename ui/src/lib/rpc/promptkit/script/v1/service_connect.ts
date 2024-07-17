@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExecuteClientStreamRequest, ExecuteClientStreamResponse, ExecuteRequest, ExecuteResponse, ExecuteServerStreamRequest, ExecuteServerStreamResponse, ExecuteStreamRequest, ExecuteStreamResponse, ListRuntimeRequest, ListRuntimeResponse } from "./service_pb.js";
+import { AnalyzeRequest, AnalyzeResponse, ExecuteClientStreamRequest, ExecuteClientStreamResponse, ExecuteRequest, ExecuteResponse, ExecuteServerStreamRequest, ExecuteServerStreamResponse, ExecuteStreamRequest, ExecuteStreamResponse, ListRuntimeRequest, ListRuntimeResponse } from "./service_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -19,6 +19,15 @@ export const ScriptService = {
       name: "ListRuntime",
       I: ListRuntimeRequest,
       O: ListRuntimeResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc promptkit.script.v1.ScriptService.Analyze
+     */
+    analyze: {
+      name: "Analyze",
+      I: AnalyzeRequest,
+      O: AnalyzeResponse,
       kind: MethodKind.Unary,
     },
     /**
