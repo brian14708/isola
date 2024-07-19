@@ -13,5 +13,5 @@ serde = "1.0.199"
 serde_json = "1.0.116"
 thiserror = "1.0.59"
 url = "2.5.0"
-wasi = { workspace = true }
+wasi = "0.13.0"
 wit-bindgen = "0.28.0"

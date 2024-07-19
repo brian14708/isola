@@ -1,2 +1,2 @@
-setuptools==71.0.0
+setuptools==71.0.3
 apischema @ git+https://github.com/wyfo/apischema.git
