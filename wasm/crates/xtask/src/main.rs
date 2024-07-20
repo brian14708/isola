@@ -98,15 +98,11 @@ fn build_python(sh: &Shell) -> Result<()> {
         format!("target/{TARGET}/release/promptkit_python.init.wasm"),
         |inp, out| -> Result<()> {
             let workdir = sh.create_temp_dir()?;
-            let wasm = std::fs::read(&inp[0])?;
-            let wasm = wizer::Wizer::new()
-                .allow_wasi(true)?
-                .wasm_bulk_memory(true)
-                .map_dir("/usr", "target/wasm32-wasip1/wasi-deps/usr")
-                .map_dir("/workdir", workdir.path())
-                .run(&wasm)?;
-
-            std::fs::write(out, wasm)?;
+            let workdir = workdir.path();
+            let inp = &inp[0];
+            cmd!(
+                sh, "wizer {inp} --allow-wasi --wasm-bulk-memory true --mapdir /usr::target/{TARGET}/wasi-deps/usr --mapdir /workdir::{workdir} -o {out}"
+            ).run()?;
             Ok(())
         },
     )?;
