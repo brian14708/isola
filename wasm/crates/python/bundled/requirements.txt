@@ -1,2 +1,2 @@
-setuptools==71.0.3
+setuptools==71.1.0
 apischema @ https://github.com/wyfo/apischema/archive/refs/heads/master.zip
