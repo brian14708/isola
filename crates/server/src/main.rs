@@ -4,7 +4,9 @@
 use std::{env::args, path::PathBuf};
 
 use anyhow::anyhow;
-use opentelemetry::{global, propagation::TextMapCompositePropagator, KeyValue};
+use opentelemetry::{
+    global, propagation::TextMapCompositePropagator, trace::TracerProvider, KeyValue,
+};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     propagation::{BaggagePropagator, TraceContextPropagator},
@@ -46,11 +48,11 @@ async fn main() -> anyhow::Result<()> {
             }
             u.to_string()
         };
-        let tracer = opentelemetry_otlp::new_pipeline()
+        let provider = opentelemetry_otlp::new_pipeline()
             .tracing()
             .with_exporter(opentelemetry_otlp::new_exporter().http().with_endpoint(e))
             .with_trace_config(
-                trace::config()
+                trace::Config::default()
                     .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
                     .with_id_generator(RandomIdGenerator::default())
                     .with_resource(Resource::new(vec![KeyValue::new(
@@ -67,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
             .with_location(false)
             .with_tracked_inactivity(false)
             .with_threads(false)
-            .with_tracer(tracer)
+            .with_tracer(provider.tracer("promptkit"))
             .with_filter(FilterFn::new(|metadata| {
                 *metadata.level() <= LevelFilter::INFO
                     && metadata
