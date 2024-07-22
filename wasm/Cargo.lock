@@ -622,6 +622,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasi-preview1-component-adapter-provider"
+version = "23.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dba2aacb2ea1d483b13ae73bcdda9069dbf7424b20f72e0ad02d6988e4ec0bbb"
+
+[[package]]
 name = "wasm-encoder"
 version = "0.214.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -787,6 +793,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "wasi-preview1-component-adapter-provider",
  "wit-component",
  "xshell",
 ]

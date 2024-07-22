@@ -16,7 +16,7 @@ use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
-    component::{Component, InstancePre, ResourceTableError},
+    component::{Component, ResourceTableError},
     Config, Engine,
 };
 
@@ -24,7 +24,7 @@ use crate::{
     error::Error,
     vm::{
         exports::{Argument, LogLevel},
-        Sandbox, Vm, VmState,
+        SandboxPre, Vm, VmState,
     },
     vm_cache::VmCache,
     Env,
@@ -35,7 +35,7 @@ const EPOCH_TICK: Duration = Duration::from_millis(10);
 
 pub struct VmManager<E> {
     engine: Engine,
-    instance_pre: InstancePre<VmState<E>>,
+    instance_pre: SandboxPre<VmState<E>>,
     cache: Arc<VmCache<E>>,
     epoch_ticker: JoinHandle<()>,
     _env: std::marker::PhantomData<E>,
@@ -127,7 +127,7 @@ where
 
         Ok(Self {
             engine: engine.clone(),
-            instance_pre,
+            instance_pre: SandboxPre::new(instance_pre)?,
             cache: Arc::new(VmCache::new()),
             epoch_ticker: tokio::task::spawn(async move {
                 let mut interval = tokio::time::interval(EPOCH_TICK);
@@ -145,7 +145,7 @@ where
         let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, env);
         store.epoch_deadline_async_yield_and_update(1);
 
-        let (bindings, _) = Sandbox::instantiate_pre(&mut store, &self.instance_pre).await?;
+        let bindings = self.instance_pre.instantiate_async(&mut store).await?;
         Ok(Vm {
             hash,
             store,

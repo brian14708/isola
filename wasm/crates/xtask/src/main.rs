@@ -136,7 +136,7 @@ fn build_python(sh: &Shell) -> Result<()> {
                 .module(&wasm)?
                 .adapter(
                     "wasi_snapshot_preview1",
-                    include_bytes!("../wasi_snapshot_preview1.reactor.wasm"),
+                    wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
                 )?
                 .encode()?;
 

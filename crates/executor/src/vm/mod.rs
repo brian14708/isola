@@ -4,7 +4,7 @@ mod state;
 
 use std::pin::Pin;
 
-pub use bindgen::{exports::promptkit::vm::guest as exports, Sandbox};
+pub use bindgen::{exports::promptkit::vm::guest as exports, Sandbox, SandboxPre};
 pub use state::VmState;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
