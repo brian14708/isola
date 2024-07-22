@@ -1,14 +1,14 @@
 include(FetchContent)
 
-set(WASI_SDK_VERSION 22)
+set(WASI_SDK_VERSION 23)
 if(APPLE)
-  set(WASI_HOST_OS "macos")
+  set(WASI_HOST_OS "arm64-macos")
   set(WASI_SHA256
-      "cf5f524de23f231756ec2f3754fc810ea3f6206841a968c45d8b7ea47cfc3a61")
+      "808ae100b4328de391d5d2d72e6e96639fee2d36cf0ab8a774094aa829ec0711")
 else()
-  set(WASI_HOST_OS "linux")
+  set(WASI_HOST_OS "x86_64-linux")
   set(WASI_SHA256
-      "fa46b8f1b5170b0fecc0daf467c39f44a6d326b80ced383ec4586a50bc38d7b8")
+      "521838d92816c92a731dee9246b0364eb00e300c5e2336e6dfa38f26a6494b06")
 endif()
 
 FetchContent_Declare(
