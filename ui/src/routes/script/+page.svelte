@@ -1,25 +1,28 @@
 <script lang="ts">
-	import CodeMirror from "$lib/components/editor/CodeMirror.svelte";
-	import Menubar from "./Menubar.svelte";
 	import JSON5 from "json5";
 	import { superForm } from "sveltekit-superforms";
 	import { get } from "svelte/store";
 	import { superstructClient } from "sveltekit-superforms/adapters";
-	import { dataSchema, type Data, DEFAULT_DATA } from "./schema";
+	import { toJsonString } from "@bufbuild/protobuf";
 	import * as Form from "$lib/components/ui/form";
 	import { Input } from "$lib/components/ui/input";
 	import { Checkbox } from "$lib/components/ui/checkbox";
 	import { Textarea } from "$lib/components/ui/textarea";
 	import client from "$lib/rpc/client";
-	import { ScriptService } from "$lib/rpc/promptkit/script/v1/service_connect";
 	import type { PromiseClient } from "@connectrpc/connect";
 	import {
 		ContentType,
-		ExecutionStreamMetadata,
-		Result,
+		MethodInfoSchema,
+		ScriptService,
+		type ExecutionMetadata,
+		type ExecutionStreamMetadata,
+		type Result,
 	} from "$lib/rpc/promptkit/script/v1/service_pb";
-	import { TraceLevel } from "$lib/rpc/promptkit/script/v1/trace_pb";
+	import { TraceLevel, TraceSchema } from "$lib/rpc/promptkit/script/v1/trace_pb";
 	import { Button } from "$lib/components/ui/button";
+	import CodeMirror from "$lib/components/editor/CodeMirror.svelte";
+	import Menubar from "./Menubar.svelte";
+	import { dataSchema, type Data, DEFAULT_DATA } from "./schema";
 
 	let editor: CodeMirror;
 	const form = superForm(DEFAULT_DATA, {
@@ -124,13 +127,16 @@
 				traces: [],
 			};
 			const { data, traces } = result;
-			const append = (ret: { result?: Result; metadata?: ExecutionStreamMetadata }) => {
+			const append = (ret: {
+				result?: Result;
+				metadata?: ExecutionStreamMetadata | ExecutionMetadata;
+			}) => {
 				if (currentId !== runId) {
 					return;
 				}
 				ret.metadata?.traces?.forEach((trace) => {
 					traces.push(
-						`[${trace.timestamp?.seconds}.${trace.timestamp?.nanos}] ${JSON.stringify(trace.toJson())}`
+						`[${trace.timestamp?.seconds}.${trace.timestamp?.nanos}] ${toJsonString(TraceSchema, trace)}`
 					);
 				});
 				switch (ret.result?.resultType.case) {
@@ -247,7 +253,8 @@
 				case "analyzeResult": {
 					result = {
 						loading: false,
-						data: r.resultType.value?.methodInfos?.map((r) => JSON.stringify(r.toJson())) || [],
+						data:
+							r.resultType.value?.methodInfos?.map((r) => toJsonString(MethodInfoSchema, r)) || [],
 						traces: [],
 					};
 					break;
