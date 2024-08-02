@@ -1,6 +1,6 @@
 import { createPromiseClient, type PromiseClient } from "@connectrpc/connect";
 import { createGrpcWebTransport } from "@connectrpc/connect-web";
-import type { ServiceType } from "@bufbuild/protobuf";
+import type { DescService } from "@bufbuild/protobuf";
 
 const transport = createGrpcWebTransport({
 	baseUrl: "/",
@@ -9,10 +9,10 @@ const transport = createGrpcWebTransport({
 	interceptors: [],
 });
 
-const clientMap: Record<string, PromiseClient<ServiceType>> = {};
+const clientMap: Record<string, PromiseClient<DescService>> = {};
 const isBrowser = typeof window !== "undefined";
 
-export default function client<T extends ServiceType>(service: T): PromiseClient<T> {
+export default function client<T extends DescService>(service: T): PromiseClient<T> {
 	if (!isBrowser) {
 		throw new Error("Cannot create client in non-browser environment");
 	}
