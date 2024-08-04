@@ -32,6 +32,9 @@ wit_bindgen::generate!({
         "wasi:io/poll@0.2.0": wasi::io::poll,
         "wasi:io/error@0.2.0": wasi::io::error,
         "wasi:io/streams@0.2.0": wasi::io::streams,
+        "wasi:clocks/monotonic-clock@0.2.0": wasi::clocks::monotonic_clock,
+        "wasi:http/types@0.2.0": wasi::http::types,
+        "wasi:http/outgoing-handler@0.2.0": wasi::http::outgoing_handler,
 
         "promptkit:vm/host": generate,
         "promptkit:vm/guest": generate,

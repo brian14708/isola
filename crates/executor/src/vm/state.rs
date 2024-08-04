@@ -1,14 +1,21 @@
 use std::{path::Path, pin::Pin, sync::Arc};
 
 use anyhow::anyhow;
-use parking_lot::Mutex;
+use futures_util::StreamExt;
+use http_body_util::BodyExt;
 use promptkit_llm::tokenizers::Tokenizer;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::timeout};
 use wasmtime::{
     component::{Linker, ResourceTable},
     Engine, Store,
 };
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi_http::{
+    bindings::http::outgoing_handler::ErrorCode,
+    body::{HyperIncomingBody, HyperOutgoingBody},
+    types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
+    HttpResult, WasiHttpCtx, WasiHttpView,
+};
 
 use crate::{
     resource::MemoryLimiter, trace_output::TraceOutput, wasm::vm::VmView, Env, ExecStreamItem,
@@ -23,8 +30,9 @@ pub struct VmRunState {
 pub struct VmState<E> {
     limiter: MemoryLimiter,
     env: E,
-    wasi: Mutex<WasiCtx>,
-    table: Mutex<ResourceTable>,
+    wasi: WasiCtx,
+    http: WasiHttpCtx,
+    table: ResourceTable,
     pub(crate) run: Option<VmRunState>,
 }
 
@@ -32,6 +40,7 @@ impl<E: Env + Send> VmState<E> {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::http::add_to_linker(&mut linker)?;
         crate::wasm::llm::add_to_linker(&mut linker)?;
         crate::wasm::vm::add_to_linker(&mut linker)?;
@@ -59,8 +68,9 @@ impl<E: Env + Send> VmState<E> {
             Self {
                 limiter,
                 env,
-                wasi: Mutex::new(wasi),
-                table: Mutex::new(ResourceTable::new()),
+                wasi,
+                http: WasiHttpCtx::new(),
+                table: ResourceTable::new(),
                 run: None,
             },
         );
@@ -75,18 +85,18 @@ impl<E: Env + Send> VmState<E> {
 
 impl<E: Send> WasiView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
+        &mut self.table
     }
 
     fn ctx(&mut self) -> &mut WasiCtx {
-        self.wasi.get_mut()
+        &mut self.wasi
     }
 }
 
 #[async_trait::async_trait]
 impl<E: Env + Send> LlmView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
+        &mut self.table
     }
 
     async fn get_tokenizer(&mut self, name: &str) -> Option<Arc<dyn Tokenizer + Send + Sync>> {
@@ -96,7 +106,7 @@ impl<E: Env + Send> LlmView for VmState<E> {
 
 impl<E: Env + Send> HttpView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
+        &mut self.table
     }
 
     fn send_request(
@@ -112,7 +122,7 @@ impl<E: Env + Send> HttpView for VmState<E> {
 #[async_trait::async_trait]
 impl<E: Send> VmView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
-        self.table.get_mut()
+        &mut self.table
     }
 
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
@@ -123,4 +133,83 @@ impl<E: Send> VmView for VmState<E> {
             Err(anyhow!("output channel missing"))
         }
     }
+}
+
+#[async_trait::async_trait]
+impl<E: Env + Send> WasiHttpView for VmState<E> {
+    fn ctx(&mut self) -> &mut WasiHttpCtx {
+        &mut self.http
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
+
+    fn send_request(
+        &mut self,
+        request: hyper::Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse> {
+        let request = hyper_to_reqwest(request)?;
+        let resp = timeout(config.first_byte_timeout, self.env.send_request(request));
+
+        let handle = wasmtime_wasi::runtime::spawn(async move {
+            let resp = match resp.await {
+                Ok(Ok(r)) => r,
+                Ok(Err(e)) => {
+                    return Ok(Err(ErrorCode::InternalError(Some(format!(
+                        "request error: {e}"
+                    )))))
+                }
+                Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
+            };
+            Ok(Ok(IncomingResponse {
+                resp: reqwest_to_hyper(resp)?,
+                worker: None,
+                between_bytes_timeout: config.between_bytes_timeout,
+            }))
+        });
+        Ok(HostFutureIncomingResponse::pending(handle))
+    }
+}
+
+fn hyper_to_reqwest(
+    mut request: hyper::Request<HyperOutgoingBody>,
+) -> HttpResult<reqwest::Request> {
+    let mut r = reqwest::Request::new(
+        std::mem::take(request.method_mut()),
+        reqwest::Url::parse(request.uri().to_string().as_str())
+            .map_err(|e| ErrorCode::InternalError(Some(format!("invalid url: {e}"))))?,
+    );
+    *r.version_mut() = request.version();
+    *r.headers_mut() = std::mem::take(request.headers_mut());
+    *r.body_mut() = Some(reqwest::Body::wrap_stream(
+        request.into_body().into_data_stream(),
+    ));
+    Ok(r)
+}
+
+fn reqwest_to_hyper(
+    mut response: reqwest::Response,
+) -> HttpResult<hyper::Response<HyperIncomingBody>> {
+    let mut builder = http::response::Builder::new()
+        .status(response.status())
+        .version(response.version());
+    if let Some(h) = builder.headers_mut() {
+        *h = std::mem::take(response.headers_mut());
+    }
+
+    let (part, body) = builder
+        .body(http_body_util::StreamBody::new(
+            response.bytes_stream().map(|r| match r {
+                Ok(b) => Ok(hyper::body::Frame::data(b)),
+                Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
+            }),
+        ))
+        .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?
+        .into_parts();
+    Ok(hyper::Response::<HyperIncomingBody>::from_parts(
+        part,
+        HyperIncomingBody::new(body),
+    ))
 }

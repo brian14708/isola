@@ -354,8 +354,9 @@ def gen():
         let mut v = vec![];
         let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
         assert_eq!(x, None);
-        for i in 0..10 {
-            assert_eq!(v[i], cbor4ii::serde::to_vec(vec![], &i).unwrap(),);
+        assert_eq!(v.len(), 10);
+        for (i, vv) in v.iter().enumerate() {
+            assert_eq!(*vv, cbor4ii::serde::to_vec(vec![], &i).unwrap());
         }
     }
 }

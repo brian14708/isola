@@ -1,4 +1,4 @@
-use std::io::Write;
+use std::io::{BufWriter, Write};
 
 use pyo3::{
     types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple},
@@ -242,7 +242,8 @@ impl<'s> PyObjectSerializer<'s> {
         writer: impl Write,
         object: Bound<'s, PyAny>,
     ) -> Result<(), serde_json::Error> {
-        serde_json::to_writer(writer, &Self::new(object, 0))
+        let w = BufWriter::new(writer);
+        serde_json::to_writer(w, &Self::new(object, 0))
     }
 
     pub fn to_cbor(
@@ -398,6 +399,7 @@ mod tests {
                 .into_bound(py);
             v.clear();
             assert!(PyObjectSerializer::to_json_writer(&mut v, p).is_err());
+            #[allow(clippy::cast_precision_loss)]
             let p = PyFloat::new_bound(py, u64::MAX as f64 + 1.0);
             v.clear();
             assert!(PyObjectSerializer::to_json_writer(&mut v, p.into_any()).is_ok());
