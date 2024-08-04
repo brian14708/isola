@@ -2,7 +2,6 @@ use std::path::Path;
 
 use anyhow::anyhow;
 use futures_util::StreamExt;
-use http_body_util::BodyExt;
 use tokio::{sync::mpsc, time::timeout};
 use wasmtime::{
     component::{Linker, ResourceTable},
@@ -119,11 +118,14 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
         request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        let request = hyper_to_reqwest(request)?;
-        let resp = timeout(config.first_byte_timeout, self.env.send_request(request));
+        // let request = hyper_to_reqwest(request)?;
+        let resp = timeout(
+            config.first_byte_timeout,
+            self.env.send_request_http(request),
+        );
 
         let handle = wasmtime_wasi::runtime::spawn(async move {
-            let resp = match resp.await {
+            let (part, body) = match resp.await {
                 Ok(Ok(r)) => r,
                 Ok(Err(e)) => {
                     return Ok(Err(ErrorCode::InternalError(Some(format!(
@@ -131,54 +133,23 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
                     )))))
                 }
                 Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
-            };
+            }
+            .map(|b| {
+                http_body_util::StreamBody::new(b.map(|e| match e {
+                    Ok(e) => Ok(e),
+                    Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
+                }))
+            })
+            .into_parts();
             Ok(Ok(IncomingResponse {
-                resp: reqwest_to_hyper(resp)?,
+                resp: hyper::Response::<HyperIncomingBody>::from_parts(
+                    part,
+                    HyperIncomingBody::new(body),
+                ),
                 worker: None,
                 between_bytes_timeout: config.between_bytes_timeout,
             }))
         });
         Ok(HostFutureIncomingResponse::pending(handle))
     }
-}
-
-fn hyper_to_reqwest(
-    mut request: hyper::Request<HyperOutgoingBody>,
-) -> HttpResult<reqwest::Request> {
-    let mut r = reqwest::Request::new(
-        std::mem::take(request.method_mut()),
-        reqwest::Url::parse(request.uri().to_string().as_str())
-            .map_err(|e| ErrorCode::InternalError(Some(format!("invalid url: {e}"))))?,
-    );
-    *r.version_mut() = request.version();
-    *r.headers_mut() = std::mem::take(request.headers_mut());
-    *r.body_mut() = Some(reqwest::Body::wrap_stream(
-        request.into_body().into_data_stream(),
-    ));
-    Ok(r)
-}
-
-fn reqwest_to_hyper(
-    mut response: reqwest::Response,
-) -> HttpResult<hyper::Response<HyperIncomingBody>> {
-    let mut builder = http::response::Builder::new()
-        .status(response.status())
-        .version(response.version());
-    if let Some(h) = builder.headers_mut() {
-        *h = std::mem::take(response.headers_mut());
-    }
-
-    let (part, body) = builder
-        .body(http_body_util::StreamBody::new(
-            response.bytes_stream().map(|r| match r {
-                Ok(b) => Ok(hyper::body::Frame::data(b)),
-                Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
-            }),
-        ))
-        .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?
-        .into_parts();
-    Ok(hyper::Response::<HyperIncomingBody>::from_parts(
-        part,
-        HyperIncomingBody::new(body),
-    ))
 }

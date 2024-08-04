@@ -1,7 +1,17 @@
-use std::str::FromStr;
+use std::{
+    future::Future,
+    pin::Pin,
+    str::FromStr,
+    task::{Context, Poll},
+};
 
+use bytes::Bytes;
+use futures_core::Stream;
+use futures_util::StreamExt;
 use http::{HeaderName, HeaderValue};
+use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::trace;
+use pin_project::pin_project;
 use tracing::{field::Empty, Instrument};
 
 use promptkit_executor::Env;
@@ -11,11 +21,7 @@ pub struct VmEnv {
     pub http: reqwest::Client,
 }
 
-impl VmEnv {}
-
-impl Env for VmEnv {
-    fn hash(&self, _update: impl FnMut(&[u8])) {}
-
+impl VmEnv {
     fn send_request(
         &self,
         mut req: reqwest::Request,
@@ -71,6 +77,132 @@ impl Env for VmEnv {
             }
 
             Ok(resp)
+        }
+    }
+}
+
+impl Env for VmEnv {
+    type Error = anyhow::Error;
+
+    fn hash(&self, _update: impl FnMut(&[u8])) {}
+
+    fn send_request_http<B>(
+        &self,
+        mut request: http::Request<B>,
+    ) -> impl Future<
+        Output = anyhow::Result<
+            http::Response<
+                Pin<
+                    Box<
+                        dyn futures_core::Stream<Item = anyhow::Result<http_body::Frame<Bytes>>>
+                            + Send
+                            + Sync
+                            + 'static,
+                    >,
+                >,
+            >,
+        >,
+    > + Send
+           + 'static
+    where
+        B: http_body::Body + Send + Sync + 'static,
+        B::Error: std::error::Error + Send + Sync,
+        bytes::Bytes: From<B::Data>,
+    {
+        let span = tracing::span!(
+            target: "promptkit::http",
+            tracing::Level::INFO,
+            "http::fetch",
+            promptkit.user = true,
+            http.response.body_size = Empty,
+            { trace::OTEL_STATUS_CODE } = Empty,
+        );
+        let _enter = span.enter();
+
+        let make_request = || {
+            let mut r = reqwest::Request::new(
+                std::mem::take(request.method_mut()),
+                reqwest::Url::parse(request.uri().to_string().as_str())?,
+            );
+            *r.version_mut() = request.version();
+            *r.headers_mut() = std::mem::take(request.headers_mut());
+            *r.body_mut() = Some(reqwest::Body::wrap_stream(
+                request.into_body().into_data_stream(),
+            ));
+
+            let resp = self.send_request(r);
+            Ok::<_, anyhow::Error>(resp)
+        };
+
+        let resp = make_request();
+        let s = span.clone();
+        async move {
+            let mut resp = resp?.await.map_err(Into::<anyhow::Error>::into)?;
+
+            let mut builder = http::response::Builder::new()
+                .status(resp.status())
+                .version(resp.version());
+            if let Some(h) = builder.headers_mut() {
+                *h = std::mem::take(resp.headers_mut());
+            }
+            let b: Pin<
+                Box<
+                    dyn futures_core::Stream<Item = anyhow::Result<http_body::Frame<Bytes>>>
+                        + Send
+                        + Sync
+                        + 'static,
+                >,
+            > = Box::pin(InstrumentStream {
+                stream: resp.bytes_stream().map(|f| match f {
+                    Ok(d) => Ok(http_body::Frame::data(d)),
+                    Err(e) => Err(e.into()),
+                }),
+                span: s,
+                size: 0,
+            });
+            let b = builder.body(b)?;
+            Ok(b)
+        }
+        .instrument(span.clone())
+    }
+}
+
+#[pin_project]
+struct InstrumentStream<S> {
+    #[pin]
+    stream: S,
+    span: tracing::Span,
+    size: usize,
+}
+
+impl<S: Stream<Item = Result<http_body::Frame<Bytes>, E>>, E> Stream for InstrumentStream<S> {
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let this = self.project();
+        let span = &this.span;
+        let enter = span.enter();
+        match this.stream.poll_next(cx) {
+            Poll::Ready(None) => {
+                span.record(trace::OTEL_STATUS_CODE, "OK");
+                span.record("http.response.body_size", *this.size as u64);
+                drop(enter);
+                *this.span = tracing::Span::none();
+                Poll::Ready(None)
+            }
+            Poll::Ready(Some(Ok(f))) => {
+                if let Some(d) = f.data_ref() {
+                    *this.size += d.len();
+                }
+                Poll::Ready(Some(Ok(f)))
+            }
+            Poll::Ready(Some(Err(e))) => {
+                span.record(trace::OTEL_STATUS_CODE, "ERROR");
+                drop(enter);
+                *this.span = tracing::Span::none();
+                Poll::Ready(Some(Err(e)))
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
