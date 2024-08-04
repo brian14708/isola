@@ -37,7 +37,6 @@ wit_bindgen::generate!({
 
         "promptkit:vm/host": generate,
         "promptkit:vm/guest": generate,
-        "promptkit:http/client": generate,
     },
 });
 
