@@ -1,7 +1,5 @@
 use std::future::Future;
-use std::sync::Arc;
 
-use promptkit_llm::tokenizers::Tokenizer;
 use thiserror::Error;
 
 pub trait Env {
@@ -11,11 +9,6 @@ pub trait Env {
         &self,
         _request: reqwest::Request,
     ) -> impl Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static;
-
-    fn get_tokenizer(
-        &self,
-        _name: &str,
-    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, EnvError>> + Send;
 }
 
 #[derive(Error, Debug)]

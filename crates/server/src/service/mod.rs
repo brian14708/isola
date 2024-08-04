@@ -35,8 +35,6 @@ impl ScriptServer {
     pub fn new(state: AppState) -> Self {
         let base_env = VmEnv {
             http: Client::builder().gzip(true).build().unwrap(),
-            cache: moka::future::Cache::new(16),
-            llm_config: None,
         };
         Self { state, base_env }
     }
@@ -573,7 +571,7 @@ fn parse_spec<'a>(
             span,
             log_level,
             trace_events: trace,
-            env: base_env.update(spec.llm_config.as_ref()),
+            env: Cow::Borrowed(base_env),
         })
     } else {
         Ok(ParsedSpec {

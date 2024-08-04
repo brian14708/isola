@@ -1,9 +1,8 @@
-use std::{path::Path, pin::Pin, sync::Arc};
+use std::{path::Path, pin::Pin};
 
 use anyhow::anyhow;
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
-use promptkit_llm::tokenizers::Tokenizer;
 use tokio::{sync::mpsc, time::timeout};
 use wasmtime::{
     component::{Linker, ResourceTable},
@@ -21,7 +20,7 @@ use crate::{
     resource::MemoryLimiter, trace_output::TraceOutput, wasm::vm::VmView, Env, ExecStreamItem,
 };
 
-use crate::wasm::{http::HttpView, llm::LlmView};
+use crate::wasm::http::HttpView;
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -42,7 +41,6 @@ impl<E: Env + Send> VmState<E> {
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::http::add_to_linker(&mut linker)?;
-        crate::wasm::llm::add_to_linker(&mut linker)?;
         crate::wasm::vm::add_to_linker(&mut linker)?;
         Ok(linker)
     }
@@ -90,17 +88,6 @@ impl<E: Send> WasiView for VmState<E> {
 
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
-    }
-}
-
-#[async_trait::async_trait]
-impl<E: Env + Send> LlmView for VmState<E> {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
-    async fn get_tokenizer(&mut self, name: &str) -> Option<Arc<dyn Tokenizer + Send + Sync>> {
-        self.env.get_tokenizer(name).await.ok()
     }
 }
 

@@ -1,55 +1,20 @@
-use std::{borrow::Cow, str::FromStr, sync::Arc};
+use std::str::FromStr;
 
-use anyhow::anyhow;
 use http::{HeaderName, HeaderValue};
 use opentelemetry_semantic_conventions::trace;
-use promptkit_llm::tokenizers::Tokenizer;
-use tracing::{field::Empty, span, Instrument};
+use tracing::{field::Empty, Instrument};
 
-use promptkit_executor::{Env, EnvError};
-
-use crate::proto::{common::v1::RemoteFile, llm::v1::tokenizer};
+use promptkit_executor::Env;
 
 #[derive(Clone)]
 pub struct VmEnv {
     pub http: reqwest::Client,
-    pub cache: moka::future::Cache<String, Arc<dyn Tokenizer + Send + Sync>>,
-
-    pub llm_config: Option<crate::proto::llm::v1::LlmConfig>,
 }
 
-impl VmEnv {
-    pub fn update<'a>(
-        &'a self,
-        llm_config: Option<&crate::proto::llm::v1::LlmConfig>,
-    ) -> Cow<'a, Self> {
-        if let Some(llm_config) = llm_config {
-            Cow::Owned(Self {
-                http: self.http.clone(),
-                cache: self.cache.clone(),
-                llm_config: Some(llm_config.clone()),
-            })
-        } else {
-            Cow::Borrowed(self)
-        }
-    }
-}
+impl VmEnv {}
 
 impl Env for VmEnv {
-    fn hash(&self, mut update: impl FnMut(&[u8])) {
-        if let Some(llm_config) = &self.llm_config {
-            for t in &llm_config.tokenizers {
-                update(t.name.as_bytes());
-                update(&t.r#type.to_be_bytes());
-                match &t.source {
-                    Some(tokenizer::Source::RemoteFile(RemoteFile { digest, .. })) => {
-                        update(digest.as_bytes());
-                    }
-                    None => unimplemented!(),
-                }
-            }
-        }
-    }
+    fn hash(&self, _update: impl FnMut(&[u8])) {}
 
     fn send_request(
         &self,
@@ -107,54 +72,5 @@ impl Env for VmEnv {
 
             Ok(resp)
         }
-    }
-
-    async fn get_tokenizer(
-        &self,
-        name: &str,
-    ) -> Result<Arc<dyn Tokenizer + Send + Sync>, EnvError> {
-        if let Some(llm_config) = &self.llm_config {
-            for t in &llm_config.tokenizers {
-                if t.name == name {
-                    match &t.source {
-                        Some(tokenizer::Source::RemoteFile(RemoteFile { digest, url })) => {
-                            let tokenizer = self.cache.try_get_with::<_, EnvError>(
-                                digest.clone(),
-                                async move {
-                                    let span = span!(
-                                        target: "promptkit::llm",
-                                        tracing::Level::INFO,
-                                        "llm::tokenizer::initialize",
-                                        promptkit.user = true,
-                                    );
-                                    let req = {
-                                        let _guard = span.enter();
-                                        self.send_request(reqwest::Request::new(
-                                            reqwest::Method::GET,
-                                            reqwest::Url::parse(url)
-                                                .map_err(|e| EnvError::Internal(e.into()))?,
-                                        ))
-                                    };
-
-                                    let resp = req.instrument(span.clone()).await?;
-                                    let bytes = resp.bytes().instrument(span.clone()).await?;
-                                    let _guard = span.enter();
-                                    let tokenizer = promptkit_llm::tokenizers::load_spm(&bytes)
-                                        .map_err(|e| EnvError::Internal(e.into()))?;
-                                    Ok(Arc::new(tokenizer) as Arc<dyn Tokenizer + Send + Sync>)
-                                },
-                            );
-                            return tokenizer.await.map_err(|e| {
-                                Arc::try_unwrap(e).unwrap_or_else(|_| {
-                                    EnvError::Internal(anyhow!("unknown error"))
-                                })
-                            });
-                        }
-                        None => unimplemented!(),
-                    }
-                }
-            }
-        }
-        Err(EnvError::NotFound)
     }
 }

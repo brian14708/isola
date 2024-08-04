@@ -3,7 +3,6 @@ package promptkit.script.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/struct.proto";
-import "promptkit/llm/v1/llm.proto";
 import "promptkit/script/v1/trace.proto";
 
 message ScriptInline {
@@ -57,11 +56,11 @@ message Result {
 }
 
 message ExecutionSpec {
+  reserved 4;
+
   google.protobuf.Duration timeout = 1;
   repeated Argument arguments = 2;
   string method = 3;
-
-  llm.v1.LLMConfig llm_config = 4;
 
   TraceLevel trace_level = 20;
 }
