@@ -3,6 +3,7 @@
 mod body_buffer;
 mod future;
 mod http;
+mod llm;
 mod logging;
 
 use std::cell::RefCell;
@@ -37,6 +38,7 @@ wit_bindgen::generate!({
 
         "promptkit:vm/host": generate,
         "promptkit:vm/guest": generate,
+        "promptkit:llm/tokenizer": generate,
     },
 });
 
@@ -219,6 +221,8 @@ pub extern "C" fn _initialize() {
         append_to_inittab!(http_module);
         use logging::logging_module;
         append_to_inittab!(logging_module);
+        use llm::llm_module;
+        append_to_inittab!(llm_module);
         append_to_inittab!(sys_module);
 
         let v = Scope::new();

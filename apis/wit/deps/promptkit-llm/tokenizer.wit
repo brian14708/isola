@@ -1,0 +1,10 @@
+package promptkit:llm;
+
+interface tokenizer {
+    resource tokenizer {
+        constructor(%name: string);
+        encode: func(%str: string) -> list<u32>;
+        decode: func(%list: list<u32>) -> string;
+        get-special-token: func(%token: string) -> option<u32>;
+    }
+}
