@@ -23,7 +23,7 @@ pub struct VmEnv {
 
 impl VmEnv {
     fn send_request(
-        &self,
+        http: reqwest::Client,
         mut req: reqwest::Request,
     ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
     {
@@ -58,7 +58,6 @@ impl VmEnv {
             injector.inject_context(&context, &mut RequestCarrier { request: &mut req });
         });
 
-        let http = self.http.clone();
         async move {
             let resp = match http.execute(req).instrument(span.clone()).await {
                 Ok(resp) => resp,
@@ -107,7 +106,7 @@ impl Env for VmEnv {
     where
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,
-        bytes::Bytes: From<B::Data>,
+        B::Data: Send,
     {
         let span = tracing::span!(
             target: "promptkit::http",
@@ -119,25 +118,27 @@ impl Env for VmEnv {
         );
         let _enter = span.enter();
 
-        let make_request = || {
+        let s = span.clone();
+        let http = self.http.clone();
+        async move {
             let mut r = reqwest::Request::new(
                 std::mem::take(request.method_mut()),
                 reqwest::Url::parse(request.uri().to_string().as_str())?,
             );
             *r.version_mut() = request.version();
             *r.headers_mut() = std::mem::take(request.headers_mut());
-            *r.body_mut() = Some(reqwest::Body::wrap_stream(
-                request.into_body().into_data_stream(),
+            *r.body_mut() = Some(reqwest::Body::from(
+                request
+                    .into_body()
+                    .collect()
+                    .await
+                    .map_err(Into::<anyhow::Error>::into)?
+                    .to_bytes(),
             ));
 
-            let resp = self.send_request(r);
-            Ok::<_, anyhow::Error>(resp)
-        };
-
-        let resp = make_request();
-        let s = span.clone();
-        async move {
-            let mut resp = resp?.await.map_err(Into::<anyhow::Error>::into)?;
+            let mut resp = Self::send_request(http, r)
+                .await
+                .map_err(Into::<anyhow::Error>::into)?;
 
             let mut builder = http::response::Builder::new()
                 .status(resp.status())

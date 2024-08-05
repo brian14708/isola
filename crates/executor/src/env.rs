@@ -30,5 +30,5 @@ pub trait Env {
     where
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,
-        bytes::Bytes: From<B::Data>;
+        B::Data: Send;
 }
