@@ -102,27 +102,40 @@ impl guest::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<host::Argument>) -> Result<Option<Vec<u8>>, guest::Error> {
+    fn call_func(
+        func: String,
+        args: Vec<guest::Argument>,
+    ) -> Result<Option<Vec<u8>>, guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {
                 let ret = if func == "$analyze" {
-                    if let Some(host::Argument::Cbor(s)) = args.first() {
+                    if let Some(guest::Argument {
+                        name: None,
+                        value: host::Value::Cbor(s),
+                    }) = args.first()
+                    {
                         vm.analyze(InputValue::Cbor(s.into()))
                             .map_err(Into::<guest::Error>::into)
                     } else {
-                        return Err(Error::UnexpectedError("Invalid argument").into());
+                        return Err(Error::UnexpectedError("Invalid Value").into());
                     }
                 } else {
-                    vm.run(
-                        &func,
-                        args.into_iter().map(|f| match f {
-                            host::Argument::Cbor(s) => InputValue::Cbor(s.into()),
-                            host::Argument::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
-                        }),
-                        [],
-                        host::emit,
-                    )
-                    .map_err(Into::<guest::Error>::into)
+                    let mut positional = vec![];
+                    let mut named = vec![];
+                    for arg in args.into_iter() {
+                        let guest::Argument { name, value } = arg;
+                        let value = match value {
+                            host::Value::Cbor(s) => InputValue::Cbor(s.into()),
+                            host::Value::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
+                        };
+                        if let Some(name) = name {
+                            named.push((name.into(), value));
+                        } else {
+                            positional.push(value);
+                        }
+                    }
+                    vm.run(&func, positional, named, host::emit)
+                        .map_err(Into::<guest::Error>::into)
                 };
                 vm.flush();
                 ret
@@ -135,7 +148,7 @@ impl guest::Guest for Global {
 
 #[pyclass]
 pub struct ArgIter {
-    iter: host::ArgumentIterator,
+    iter: host::ValueIterator,
 }
 
 #[pymethods]
@@ -147,7 +160,7 @@ impl ArgIter {
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         match self.iter.blocking_read() {
             Ok(a) => match a {
-                host::Argument::Cbor(c) => {
+                host::Value::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
                         PyObjectDeserializer::new(py)
@@ -158,7 +171,7 @@ impl ArgIter {
                             .to_object(py),
                     ))
                 }
-                host::Argument::Iterator(_) => todo!(),
+                host::Value::Iterator(_) => todo!(),
             },
             Err(StreamError::Closed) => Ok(None),
             Err(StreamError::LastOperationFailed(e)) => Err(PyErr::new::<
@@ -182,7 +195,7 @@ impl ArgIter {
     fn read(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         match self.iter.read() {
             Some(Ok(a)) => match a {
-                host::Argument::Cbor(c) => {
+                host::Value::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
                         PyObjectDeserializer::new(py)
@@ -193,7 +206,7 @@ impl ArgIter {
                             .to_object(py),
                     ))
                 }
-                host::Argument::Iterator(_) => todo!(),
+                host::Value::Iterator(_) => todo!(),
             },
             Some(Err(StreamError::Closed)) => Ok(None),
             Some(Err(StreamError::LastOperationFailed(e))) => Err(PyErr::new::<

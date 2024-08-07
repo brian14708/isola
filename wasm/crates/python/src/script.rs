@@ -128,7 +128,7 @@ impl Scope {
         &self,
         name: &str,
         positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
-        named: impl IntoIterator<Item = (&'a str, InputValue<'a>)>,
+        named: impl IntoIterator<Item = (Cow<'a, str>, InputValue<'a>)>,
         mut callback: impl FnMut(&[u8]),
     ) -> Result<Option<Vec<u8>>>
     where

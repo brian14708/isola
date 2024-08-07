@@ -1,7 +1,7 @@
 package promptkit:vm;
 
 interface guest {
-    use host.{argument, log-level};
+    use host.{value, log-level};
     enum error-code {
         unknown,
         internal,
@@ -10,6 +10,10 @@ interface guest {
     record error {
         code: error-code,
         message: string,
+    }
+    record argument {
+        name: option<string>,
+        value: value,
     }
 
     set-log-level: func(%level: option<log-level>) -> ();

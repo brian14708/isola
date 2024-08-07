@@ -2,7 +2,7 @@ use std::{borrow::Cow, pin::Pin, time::Duration};
 
 use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
-use promptkit_executor::{ExecArgument, ExecStreamItem};
+use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
 use reqwest::Client;
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{once, wrappers::UnboundedReceiverStream};
@@ -96,7 +96,10 @@ impl ScriptService for ScriptServer {
                     .exec(
                         script,
                         "$analyze",
-                        [ExecArgument::Cbor(req)],
+                        [ExecArgument {
+                            name: None,
+                            value: ExecArgumentValue::Cbor(req),
+                        }],
                         env.as_ref(),
                         log_level,
                     )
@@ -536,17 +539,30 @@ fn parse_spec<'a>(
         let mut rx = Some(rx);
         let args = std::mem::take(&mut spec.arguments)
             .into_iter()
-            .map(|a| match argument(a) {
-                Ok(Ok(a)) => Ok(ExecArgument::Cbor(a)),
-                Ok(Err(Marker::Stream)) => {
-                    if let Some(rx) = rx.take() {
-                        Ok(ExecArgument::CborStream(rx))
-                    } else {
-                        Err(Status::invalid_argument("invalid marker arguments"))
+            .map(|mut a| {
+                let name = if a.name.is_empty() {
+                    None
+                } else {
+                    Some(std::mem::take(&mut a.name))
+                };
+                match argument(a) {
+                    Ok(Ok(a)) => Ok(ExecArgument {
+                        name: name,
+                        value: ExecArgumentValue::Cbor(a),
+                    }),
+                    Ok(Err(Marker::Stream)) => {
+                        if let Some(rx) = rx.take() {
+                            Ok(ExecArgument {
+                                name: name,
+                                value: ExecArgumentValue::CborStream(rx),
+                            })
+                        } else {
+                            Err(Status::invalid_argument("invalid marker arguments"))
+                        }
                     }
+                    Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
+                    Err(e) => Err(e),
                 }
-                Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                Err(e) => Err(e),
             })
             .collect::<Result<Vec<_>, _>>()?;
 

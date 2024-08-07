@@ -1,8 +1,8 @@
 use tracing::event;
 use wasmtime_wasi::{bindings::io::streams::StreamError, Pollable, ResourceTable};
 
-use self::bindings::host::HostArgumentIterator;
-use bindings::host::{Argument, LogLevel};
+use self::bindings::host::HostValueIterator;
+use bindings::host::{LogLevel, Value};
 
 wasmtime::component::bindgen!({
     path: "../../apis/wit",
@@ -11,7 +11,7 @@ wasmtime::component::bindgen!({
     trappable_imports: true,
     with: {
         "wasi": wasmtime_wasi::bindings,
-        "promptkit:vm/host/argument-iterator": types::ArgumentIterator,
+        "promptkit:vm/host/value-iterator": types::ValueIterator,
     },
 });
 
@@ -24,19 +24,19 @@ pub mod types {
     use tokio_stream::Stream;
     use wasmtime_wasi::{bindings::io::streams::StreamError, Subscribe};
 
-    pub use super::bindings::host::Argument;
+    pub use super::bindings::host::Value;
 
-    pub struct ArgumentIterator {
-        pub(crate) stream: Pin<Box<dyn Stream<Item = Argument> + Send>>,
-        pub(crate) peek: Option<Result<Argument, StreamError>>,
+    pub struct ValueIterator {
+        pub(crate) stream: Pin<Box<dyn Stream<Item = Value> + Send>>,
+        pub(crate) peek: Option<Result<Value, StreamError>>,
     }
 
-    impl ArgumentIterator {
-        pub fn new(stream: Pin<Box<dyn Stream<Item = Argument> + Send>>) -> Self {
+    impl ValueIterator {
+        pub fn new(stream: Pin<Box<dyn Stream<Item = Value> + Send>>) -> Self {
             Self { stream, peek: None }
         }
 
-        pub async fn next(&mut self) -> Result<Argument, StreamError> {
+        pub async fn next(&mut self) -> Result<Value, StreamError> {
             match self.peek.take() {
                 Some(v) => v,
                 None => match self.stream.next().await {
@@ -46,7 +46,7 @@ pub mod types {
             }
         }
 
-        pub fn try_next(&mut self) -> Option<Result<Argument, StreamError>> {
+        pub fn try_next(&mut self) -> Option<Result<Value, StreamError>> {
             match self.peek.take() {
                 Some(v) => Some(v),
                 None => match self.stream.next().now_or_never() {
@@ -59,7 +59,7 @@ pub mod types {
     }
 
     #[async_trait::async_trait]
-    impl Subscribe for ArgumentIterator {
+    impl Subscribe for ValueIterator {
         async fn ready(&mut self) {
             if self.peek.is_none() {
                 self.peek = match self.stream.next().await {
@@ -130,32 +130,32 @@ impl bindings::host::Host for dyn VmView + '_ {
 }
 
 #[async_trait::async_trait]
-impl HostArgumentIterator for dyn VmView + '_ {
+impl HostValueIterator for dyn VmView + '_ {
     async fn read(
         &mut self,
-        resource: wasmtime::component::Resource<types::ArgumentIterator>,
-    ) -> wasmtime::Result<Option<Result<Argument, StreamError>>> {
+        resource: wasmtime::component::Resource<types::ValueIterator>,
+    ) -> wasmtime::Result<Option<Result<Value, StreamError>>> {
         Ok(self.table().get_mut(&resource)?.try_next())
     }
 
     async fn blocking_read(
         &mut self,
-        resource: wasmtime::component::Resource<types::ArgumentIterator>,
-    ) -> wasmtime::Result<Result<Argument, StreamError>> {
+        resource: wasmtime::component::Resource<types::ValueIterator>,
+    ) -> wasmtime::Result<Result<Value, StreamError>> {
         let response = self.table().get_mut(&resource)?;
         Ok(response.next().await)
     }
 
     async fn subscribe(
         &mut self,
-        resource: wasmtime::component::Resource<types::ArgumentIterator>,
+        resource: wasmtime::component::Resource<types::ValueIterator>,
     ) -> wasmtime::Result<wasmtime::component::Resource<Pollable>> {
         wasmtime_wasi::subscribe(self.table(), resource)
     }
 
     fn drop(
         &mut self,
-        rep: wasmtime::component::Resource<types::ArgumentIterator>,
+        rep: wasmtime::component::Resource<types::ValueIterator>,
     ) -> wasmtime::Result<()> {
         self.table().delete(rep)?;
         Ok(())

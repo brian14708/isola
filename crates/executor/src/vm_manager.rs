@@ -27,6 +27,7 @@ use crate::{
         SandboxPre, Vm, VmState,
     },
     vm_cache::VmCache,
+    wasm::vm::types::Value,
     Env,
 };
 
@@ -47,9 +48,14 @@ pub enum ExecStreamItem {
     Error(anyhow::Error),
 }
 
-pub enum ExecArgument {
+pub enum ExecArgumentValue {
     Cbor(Vec<u8>),
     CborStream(mpsc::Receiver<Vec<u8>>),
+}
+
+pub struct ExecArgument {
+    pub name: Option<String>,
+    pub value: ExecArgumentValue,
 }
 
 pub enum ExecSource<'a> {
@@ -262,11 +268,16 @@ where
         Ok(self.exec_impl(
             func,
             args.into_iter()
-                .map::<Result<_, ResourceTableError>, _>(|a| match a {
-                    ExecArgument::Cbor(a) => Ok(Argument::Cbor(a)),
-                    ExecArgument::CborStream(s) => Ok(Argument::Iterator(
-                        vm.new_iter(Box::pin(ReceiverStream::new(s).map(Argument::Cbor)))?,
-                    )),
+                .map::<Result<_, ResourceTableError>, _>(|a| {
+                    Ok(Argument {
+                        name: a.name,
+                        value: match a.value {
+                            ExecArgumentValue::Cbor(a) => Value::Cbor(a),
+                            ExecArgumentValue::CborStream(s) => Value::Iterator(
+                                vm.new_iter(Box::pin(ReceiverStream::new(s).map(Value::Cbor)))?,
+                            ),
+                        },
+                    })
                 })
                 .collect::<Result<_, _>>()?,
             vm,

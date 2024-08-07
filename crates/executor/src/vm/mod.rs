@@ -12,7 +12,7 @@ use wasmtime::{component::ResourceTableError, Store};
 
 use crate::{vm::run::VmRun, Env, ExecStreamItem};
 
-use crate::wasm::vm::{bindings::host::Argument, types::ArgumentIterator, VmView};
+use crate::wasm::vm::{bindings::host::Value, types::ValueIterator, VmView};
 
 pub struct Vm<E> {
     pub(crate) hash: [u8; 32],
@@ -31,11 +31,11 @@ where
 
     pub fn new_iter(
         &mut self,
-        stream: Pin<Box<dyn tokio_stream::Stream<Item = Argument> + Send>>,
-    ) -> wasmtime::Result<wasmtime::component::Resource<ArgumentIterator>, ResourceTableError> {
+        stream: Pin<Box<dyn tokio_stream::Stream<Item = Value> + Send>>,
+    ) -> wasmtime::Result<wasmtime::component::Resource<ValueIterator>, ResourceTableError> {
         self.store
             .data_mut()
             .table()
-            .push(ArgumentIterator::new(stream))
+            .push(ValueIterator::new(stream))
     }
 }

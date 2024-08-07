@@ -4,13 +4,13 @@ interface host {
     use wasi:io/poll@0.2.0.{pollable};
     use wasi:io/streams@0.2.0.{stream-error};
 
-    variant argument {
+    variant value {
         cbor(list<u8>),
-        iterator(argument-iterator),
+        iterator(value-iterator),
     }
-    resource argument-iterator {
-        read: func() -> option<result<argument, stream-error>>;
-        blocking-read: func() -> result<argument, stream-error>;
+    resource value-iterator {
+        read: func() -> option<result<value, stream-error>>;
+        blocking-read: func() -> result<value, stream-error>;
         subscribe: func() -> pollable;
     }
     enum log-level {

@@ -32,6 +32,9 @@ message Argument {
     bytes cbor = 3;
     Marker marker = 15;
   }
+
+  // named arguments
+  string name = 4;
 }
 
 enum ContentType {
