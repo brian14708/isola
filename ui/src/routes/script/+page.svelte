@@ -93,7 +93,7 @@
 
 		const secs = Math.floor(d.timeout);
 		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const args: any[] = JSON5.parse(d.arguments);
+		const args: Record<string, any> | Array<any> = JSON5.parse(d.arguments);
 		const req = {
 			source: {
 				sourceType: {
@@ -110,12 +110,20 @@
 					seconds: BigInt(secs),
 					nanos: Math.floor((d.timeout - secs) * 1e9),
 				},
-				arguments: args.map((arg) => ({
-					argumentType: {
-						case: "json" as const,
-						value: JSON.stringify(arg),
-					},
-				})),
+				arguments: Array.isArray(args)
+					? args.map((arg) => ({
+							argumentType: {
+								case: "json" as const,
+								value: JSON.stringify(arg),
+							},
+						}))
+					: Object.entries(args).map(([key, value]) => ({
+							argumentType: {
+								case: "json" as const,
+								value: JSON.stringify(value),
+							},
+							name: key,
+						})),
 				traceLevel: TraceLevel.ALL,
 			},
 			resultContentType: [ContentType.JSON],
