@@ -223,6 +223,7 @@ impl TryFrom<Result<IncomingResponse, ErrorCode>> for PyResponse {
 #[pymethods]
 impl PyResponse {
     fn close(&mut self) {
+        self.stream.take();
         self.body.take();
         self.response.take();
     }

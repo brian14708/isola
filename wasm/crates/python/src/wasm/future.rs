@@ -30,9 +30,9 @@ impl PyPollable {
         self.inner.take();
     }
 
-    fn wait(&self) {
+    fn wait(&mut self) {
         self.inner
-            .as_ref()
+            .take()
             .expect("pollable already released")
             .block();
     }
