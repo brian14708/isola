@@ -256,7 +256,7 @@ def post_sse(url, data=None, headers=None, timeout=None):
     with Request("POST", url, None, headers, data, timeout) as resp:
         _validate_status(resp)
         for event in resp.iter_sse():
-            if event.data == "[DONE]":
+            if event.data.startswith("[DONE]"):
                 break
             yield _http.loads_json(event.data)
 

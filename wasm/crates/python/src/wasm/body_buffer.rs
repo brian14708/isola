@@ -288,33 +288,43 @@ impl BodyBuffer for ServerSentEvent {
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
-        let line = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
-            (_, Some(idx)) => {
-                let mut b = vec![0; idx + 1];
-                self.buffer.read_exact(&mut b).unwrap();
-                b
-            }
-            (true, None) => {
-                if self.buffer.is_empty() {
-                    return Ok(None);
+        loop {
+            let line = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
+                (_, Some(idx)) => {
+                    let mut b = vec![0; idx + 1];
+                    self.buffer.read_exact(&mut b).unwrap();
+                    b
                 }
+                (true, None) => {
+                    if self.buffer.is_empty() {
+                        if !self.event.is_empty() {
+                            let evt = (&self.event.id, &self.event.event_type, &self.event.data)
+                                .to_object(py)
+                                .into_bound(py);
+                            self.event.clear();
+                            return Ok(Some(evt));
+                        }
+                        return Ok(None);
+                    }
 
-                std::mem::take(&mut self.buffer).into()
-            }
-            (false, None) => return Ok(None),
-        };
-        let line = String::from_utf8(line)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                    let s = std::mem::take(&mut self.buffer);
+                    s.into()
+                }
+                (false, None) => return Ok(None),
+            };
+            let line = String::from_utf8(line)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
 
-        match parse_event_line(&line, &mut self.event) {
-            eventsource::event::ParseResult::Next
-            | eventsource::event::ParseResult::SetRetry(_) => Ok(None),
-            eventsource::event::ParseResult::Dispatch => {
-                let evt = (&self.event.id, &self.event.event_type, &self.event.data)
-                    .to_object(py)
-                    .into_bound(py);
-                self.event.clear();
-                Ok(Some(evt))
+            match parse_event_line(&line, &mut self.event) {
+                eventsource::event::ParseResult::Next
+                | eventsource::event::ParseResult::SetRetry(_) => continue,
+                eventsource::event::ParseResult::Dispatch => {
+                    let evt = (&self.event.id, &self.event.event_type, &self.event.data)
+                        .to_object(py)
+                        .into_bound(py);
+                    self.event.clear();
+                    return Ok(Some(evt));
+                }
             }
         }
     }
