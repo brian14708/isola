@@ -115,7 +115,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         |inp, out| -> Result<()> {
             let inp = &inp[0];
             if dbg {
-                cmd!(sh, "wasm-opt -O1 --strip-debug {inp} -o {out}").run()?;
+                cmd!(sh, "cp {inp} {out}").run()?;
             } else {
                 cmd!(
                     sh,
