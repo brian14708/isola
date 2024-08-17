@@ -122,7 +122,7 @@ impl guest::Guest for Global {
                 } else {
                     let mut positional = vec![];
                     let mut named = vec![];
-                    for arg in args.into_iter() {
+                    for arg in args {
                         let guest::Argument { name, value } = arg;
                         let value = match value {
                             host::Value::Cbor(s) => InputValue::Cbor(s.into()),

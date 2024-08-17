@@ -547,13 +547,13 @@ fn parse_spec<'a>(
                 };
                 match argument(a) {
                     Ok(Ok(a)) => Ok(ExecArgument {
-                        name: name,
+                        name,
                         value: ExecArgumentValue::Cbor(a),
                     }),
                     Ok(Err(Marker::Stream)) => {
                         if let Some(rx) = rx.take() {
                             Ok(ExecArgument {
-                                name: name,
+                                name,
                                 value: ExecArgumentValue::CborStream(rx),
                             })
                         } else {
