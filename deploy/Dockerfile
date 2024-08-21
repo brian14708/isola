@@ -31,7 +31,7 @@ RUN apt-get update && \
 RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_118/binaryen-version_118-$(uname -m)-linux.tar.gz" && \
     tar -xzf /usr/local/binaryen.tar.gz --strip-component 1 -C /usr/local/ && \
     rm /usr/local/binaryen.tar.gz
-RUN curl -L -o /usr/local/wizer.tar.xz "https://github.com/bytecodealliance/wizer/releases/download/v6.0.0/wizer-v6.0.0-$(uname -m)-linux.tar.xz" && \
+RUN curl -L -o /usr/local/wizer.tar.xz "https://github.com/bytecodealliance/wizer/releases/download/v7.0.4/wizer-v7.0.4-$(uname -m)-linux.tar.xz" && \
     tar -xJf /usr/local/wizer.tar.xz --strip-component 1 -C /usr/local/bin && \
     rm /usr/local/wizer.tar.xz
 ENV PYENV_ROOT=/root/.pyenv \
