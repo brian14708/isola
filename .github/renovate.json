@@ -3,6 +3,13 @@
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "packageRules": [
     {
+      "groupName": "wasmtime",
+      "matchPackageNames": ["/^wasi-/", "/^wasmtime/"],
+      "matchUpdateTypes": [
+        "major"
+      ]
+    },
+    {
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
