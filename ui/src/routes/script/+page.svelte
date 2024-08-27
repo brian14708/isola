@@ -100,6 +100,7 @@
 					value: {
 						script: d.code + `\n\n# ${new Date().getTime()}`,
 						runtime: "python3",
+						prelude: d.prelude,
 					},
 					case: "scriptInline" as const,
 				},
@@ -327,6 +328,18 @@
 						<Checkbox {...attrs} bind:checked={$formData.stream} />
 						<Form.Label>Stream</Form.Label>
 					</Form.Control>
+				</Form.Field>
+				<Form.Field {form} name="prelude">
+					<Form.Control let:attrs>
+						<Form.Label>Prelude</Form.Label>
+						<Textarea
+							{...attrs}
+							class="resize-none font-mono"
+							rows={6}
+							bind:value={$formData.prelude}
+						/>
+					</Form.Control>
+					<Form.FieldErrors />
 				</Form.Field>
 
 				<Form.Button>Run</Form.Button>

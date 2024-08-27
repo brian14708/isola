@@ -8,11 +8,13 @@ import {
 	nonempty,
 	object,
 	string,
+	optional,
 } from "superstruct";
 import JSON5 from "json5";
 
 export const dataSchema = object({
 	code: string(),
+	prelude: optional(string()),
 	arguments: refine(string(), "JSON5", (s: string) => {
 		try {
 			JSON5.parse(s, () => undefined);
@@ -29,6 +31,7 @@ export type Data = Infer<typeof dataSchema>;
 export const DEFAULT_DATA: Data = {
 	code: `def handle(request):
     return request`,
+	prelude: ``,
 	arguments: `[
   { "value": 123 }
 ]`,

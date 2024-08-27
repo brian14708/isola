@@ -59,7 +59,7 @@ pub struct ExecArgument {
 }
 
 pub enum ExecSource<'a> {
-    Script(&'a str),
+    Script(&'a str, &'a str),
     Bundle(&'a [u8]),
 }
 
@@ -217,7 +217,10 @@ where
     ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
         let mut hasher = Sha256::new();
         match script {
-            ExecSource::Script(s) => hasher.update(s),
+            ExecSource::Script(p, s) => {
+                hasher.update(p);
+                hasher.update(s);
+            }
             ExecSource::Bundle(b) => hasher.update(b),
         }
         env.hash(|data| hasher.update(data));
@@ -229,7 +232,19 @@ where
         } else {
             let mut vm = self.create(hash, env.clone()).await?;
             match script {
-                ExecSource::Script(script) => {
+                ExecSource::Script(prelude, script) => {
+                    if !prelude.is_empty() {
+                        vm.sandbox
+                            .promptkit_vm_guest()
+                            .call_eval_script(&mut vm.store, prelude)
+                            .await?
+                            .map_err(|e| {
+                                anyhow::Error::from(Error::ExecutionError(
+                                    e.code,
+                                    format!("Failed executing prelude:\n{}", e.message),
+                                ))
+                            })?;
+                    }
                     vm.sandbox
                         .promptkit_vm_guest()
                         .call_eval_script(&mut vm.store, script)
