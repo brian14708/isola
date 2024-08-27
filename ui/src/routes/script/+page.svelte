@@ -237,6 +237,7 @@
 						value: {
 							script: d.code + `\n\n# ${new Date().getTime()}`,
 							runtime: "python3",
+							prelude: d.prelude,
 						},
 						case: "scriptInline" as const,
 					},
