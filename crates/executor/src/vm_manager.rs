@@ -22,12 +22,9 @@ use wasmtime::{
 
 use crate::{
     error::Error,
-    vm::{
-        exports::{Argument, LogLevel},
-        SandboxPre, Vm, VmState,
-    },
+    vm::{exports::Argument, SandboxPre, Vm, VmState},
     vm_cache::VmCache,
-    wasm::vm::types::Value,
+    wasm::{logging::bindings::logging::Level, vm::types::Value},
     Env,
 };
 
@@ -180,10 +177,10 @@ where
                             &mut store,
                             match level {
                                 LevelFilter::OFF => None,
-                                LevelFilter::ERROR => Some(LogLevel::Error),
-                                LevelFilter::WARN => Some(LogLevel::Warn),
-                                LevelFilter::INFO => Some(LogLevel::Info),
-                                LevelFilter::DEBUG | LevelFilter::TRACE => Some(LogLevel::Debug),
+                                LevelFilter::ERROR => Some(Level::Error),
+                                LevelFilter::WARN => Some(Level::Warn),
+                                LevelFilter::INFO => Some(Level::Info),
+                                LevelFilter::DEBUG | LevelFilter::TRACE => Some(Level::Debug),
                             },
                         )
                         .await;

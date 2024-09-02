@@ -8,14 +8,15 @@ mod logging;
 
 use std::cell::RefCell;
 
+use self::wasi::logging::logging::Level;
+use ::wasi::{
+    clocks::monotonic_clock::subscribe_duration,
+    io::{poll::poll as host_poll, streams::StreamError},
+};
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
 use pyo3::{append_to_inittab, intern, prelude::*};
 use serde::de::DeserializeSeed;
-use wasi::{
-    clocks::monotonic_clock::subscribe_duration,
-    io::{poll::poll as host_poll, streams::StreamError},
-};
 
 use crate::{
     error::Error,
@@ -29,13 +30,14 @@ wit_bindgen::generate!({
     world: "sandbox",
     path: "../../../apis/wit",
     with: {
-        "wasi:io/poll@0.2.0": wasi::io::poll,
-        "wasi:io/error@0.2.0": wasi::io::error,
-        "wasi:io/streams@0.2.0": wasi::io::streams,
-        "wasi:clocks/monotonic-clock@0.2.0": wasi::clocks::monotonic_clock,
-        "wasi:http/types@0.2.0": wasi::http::types,
-        "wasi:http/outgoing-handler@0.2.0": wasi::http::outgoing_handler,
+        "wasi:io/poll@0.2.0": ::wasi::io::poll,
+        "wasi:io/error@0.2.0": ::wasi::io::error,
+        "wasi:io/streams@0.2.0": ::wasi::io::streams,
+        "wasi:clocks/monotonic-clock@0.2.0": ::wasi::clocks::monotonic_clock,
+        "wasi:http/types@0.2.0": ::wasi::http::types,
+        "wasi:http/outgoing-handler@0.2.0": ::wasi::http::outgoing_handler,
 
+        "wasi:logging/logging": generate,
         "promptkit:vm/host": generate,
         "promptkit:vm/guest": generate,
         "promptkit:llm/tokenizer": generate,
@@ -77,7 +79,7 @@ export!(Global);
 pub struct Global;
 
 impl guest::Guest for Global {
-    fn set_log_level(level: Option<host::LogLevel>) {
+    fn set_log_level(level: Option<Level>) {
         logging::set_log_level(level);
     }
 

@@ -41,6 +41,7 @@ impl<E: Env + Send> VmState<E> {
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::llm::add_to_linker(&mut linker)?;
+        crate::wasm::logging::add_to_linker(&mut linker)?;
         crate::wasm::vm::add_to_linker(&mut linker)?;
         Ok(linker)
     }

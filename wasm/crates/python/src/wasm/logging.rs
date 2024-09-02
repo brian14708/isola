@@ -5,7 +5,9 @@ use pyo3::{
     types::{PyDict, PyString, PyTuple},
 };
 
-use crate::{serde::PyLogDict, wasm::promptkit::vm::host};
+use crate::serde::PyLogDict;
+
+use super::wasi::logging::logging::Level;
 
 thread_local! {
      static GLOBAL_LOGGING: RefCell<i32> = const { RefCell::new(0) };
@@ -14,6 +16,8 @@ thread_local! {
 #[pymodule]
 #[pyo3(name = "_promptkit_logging")]
 pub mod logging_module {
+    use crate::wasm::wasi::logging::logging::{log, Level};
+
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
@@ -25,7 +29,7 @@ pub mod logging_module {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host::LogLevel::Debug) {
+            if *l <= loglevel_to_i32(Level::Debug) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -33,7 +37,7 @@ pub mod logging_module {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host::emit_log(host::LogLevel::Debug, &m);
+                log(Level::Debug, "log", &m);
             }
             Ok(())
         })
@@ -47,7 +51,7 @@ pub mod logging_module {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host::LogLevel::Info) {
+            if *l <= loglevel_to_i32(Level::Info) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -55,7 +59,7 @@ pub mod logging_module {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host::emit_log(host::LogLevel::Info, &m);
+                log(Level::Info, "log", &m);
             }
             Ok(())
         })
@@ -69,7 +73,7 @@ pub mod logging_module {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host::LogLevel::Warn) {
+            if *l <= loglevel_to_i32(Level::Warn) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -77,7 +81,7 @@ pub mod logging_module {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host::emit_log(host::LogLevel::Warn, &m);
+                log(Level::Warn, "log", &m);
             }
             Ok(())
         })
@@ -91,7 +95,7 @@ pub mod logging_module {
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
-            if *l <= loglevel_to_i32(host::LogLevel::Error) {
+            if *l <= loglevel_to_i32(Level::Error) {
                 let msg = if args.len() > 0 {
                     msg.call_method("format", args, None)?
                 } else {
@@ -99,23 +103,23 @@ pub mod logging_module {
                 };
                 let m = PyLogDict::to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-                host::emit_log(host::LogLevel::Error, &m);
+                log(Level::Error, "log", &m);
             }
             Ok(())
         })
     }
 }
 
-const fn loglevel_to_i32(level: host::LogLevel) -> i32 {
+const fn loglevel_to_i32(level: Level) -> i32 {
     match level {
-        host::LogLevel::Debug => -4,
-        host::LogLevel::Info => -3,
-        host::LogLevel::Warn => -2,
-        host::LogLevel::Error => -1,
+        Level::Trace | Level::Debug => -4,
+        Level::Info => -3,
+        Level::Warn => -2,
+        Level::Error | Level::Critical => -1,
     }
 }
 
-pub fn set_log_level(level: Option<host::LogLevel>) {
+pub fn set_log_level(level: Option<Level>) {
     GLOBAL_LOGGING.with_borrow_mut(|l| match level {
         Some(level) => *l = loglevel_to_i32(level),
         None => *l = 0,

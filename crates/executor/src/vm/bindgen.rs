@@ -4,6 +4,7 @@ wasmtime::component::bindgen!({
     async: true,
     trappable_imports: true,
     with: {
+        "wasi:logging": crate::wasm::logging::bindings,
         "promptkit:vm": crate::wasm::vm::bindings,
     },
 });

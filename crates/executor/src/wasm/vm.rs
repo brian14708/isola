@@ -1,8 +1,7 @@
-use tracing::event;
 use wasmtime_wasi::{bindings::io::streams::StreamError, Pollable, ResourceTable};
 
 use self::bindings::host::HostValueIterator;
-use bindings::host::{LogLevel, Value};
+use bindings::host::Value;
 
 wasmtime::component::bindgen!({
     path: "../../apis/wit",
@@ -95,36 +94,6 @@ pub fn add_to_linker<T: VmView>(
 impl bindings::host::Host for dyn VmView + '_ {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         VmView::emit(self, data).await?;
-        Ok(())
-    }
-
-    async fn emit_log(&mut self, log_level: LogLevel, data: String) -> wasmtime::Result<()> {
-        match log_level {
-            LogLevel::Debug => event!(
-                target: "promptkit::debug",
-                tracing::Level::DEBUG,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Info => event!(
-                target: "promptkit::info",
-                tracing::Level::INFO,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Warn => event!(
-                target: "promptkit::warn",
-                tracing::Level::WARN,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-            LogLevel::Error => event!(
-                target: "promptkit::error",
-                tracing::Level::ERROR,
-                promptkit.log.output = &data,
-                promptkit.user = true,
-            ),
-        };
         Ok(())
     }
 }
