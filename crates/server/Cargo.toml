@@ -37,7 +37,7 @@ tonic-reflection = "0.12.0"
 tonic-web = "0.12.0"
 tower-http = { version = "0.5.2", features = ["fs", "trace"] }
 tracing = "0.1.40"
-tracing-opentelemetry = "0.25.0"
+tracing-opentelemetry = "0.26.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "parking_lot"] }
 url = "2.5.1"
 
