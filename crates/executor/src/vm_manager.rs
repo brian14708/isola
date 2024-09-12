@@ -15,13 +15,10 @@ use smallvec::SmallVec;
 use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{info, level_filters::LevelFilter};
-use wasmtime::{
-    component::{Component, ResourceTableError},
-    Config, Engine,
-};
+use wasmtime::{component::Component, Config, Engine};
 
 use crate::{
-    error::Error,
+    error::{Error, Result},
     vm::{exports::Argument, SandboxPre, Vm, VmState},
     vm_cache::VmCache,
     wasm::{logging::bindings::logging::Level, vm::types::Value},
@@ -42,7 +39,7 @@ pub struct VmManager<E> {
 pub enum ExecStreamItem {
     Data(Vec<u8>),
     End(Option<Vec<u8>>),
-    Error(anyhow::Error),
+    Error(Error),
 }
 
 pub enum ExecArgumentValue {
@@ -77,12 +74,12 @@ impl<E> VmManager<E> {
         config
     }
 
-    pub fn compile(path: &Path) -> anyhow::Result<()> {
+    pub fn compile(path: &Path) -> Result<()> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
         let component = Component::from_file(&engine, path)?;
         let data = component.serialize()?;
-        std::fs::write(path.with_extension("wasm.cache"), data)?;
+        std::fs::write(path.with_extension("wasm.cache"), data).map_err(anyhow::Error::from)?;
         Ok(())
     }
 }
@@ -91,7 +88,7 @@ impl<E> VmManager<E>
 where
     E: Env + Send + Sync + Clone,
 {
-    pub fn new(path: &Path) -> anyhow::Result<Self> {
+    pub fn new(path: &Path) -> Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
 
@@ -99,7 +96,10 @@ where
         let component = {
             let cache_path = path.with_extension("wasm.cache");
 
-            let mod_time = std::fs::metadata(path)?.modified()?;
+            let mod_time = std::fs::metadata(path)
+                .map_err(anyhow::Error::from)?
+                .modified()
+                .map_err(anyhow::Error::from)?;
             let cache = std::fs::metadata(&cache_path)
                 .map_err(anyhow::Error::from)
                 .and_then(|v| {
@@ -117,7 +117,7 @@ where
                 #[cfg(debug_assertions)]
                 {
                     let data = component.serialize()?;
-                    std::fs::write(cache_path, data)?;
+                    std::fs::write(cache_path, data).map_err(anyhow::Error::from)?;
                 }
                 component
             }
@@ -143,7 +143,7 @@ where
         })
     }
 
-    pub async fn create(&self, hash: [u8; 32], env: E) -> anyhow::Result<Vm<E>> {
+    pub async fn create(&self, hash: [u8; 32], env: E) -> Result<Vm<E>> {
         let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
         let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, env);
         store.epoch_deadline_async_yield_and_update(1);
@@ -196,7 +196,7 @@ where
                     _ = tx.send(ExecStreamItem::Error(err.into())).await;
                 }
                 Err(err) => {
-                    _ = tx.send(ExecStreamItem::Error(err)).await;
+                    _ = tx.send(ExecStreamItem::Error(err.into())).await;
                 }
             };
         });
@@ -211,7 +211,7 @@ where
         args: impl IntoIterator<Item = ExecArgument>,
         env: &E,
         level: LevelFilter,
-    ) -> anyhow::Result<impl Stream<Item = ExecStreamItem> + Send> {
+    ) -> Result<impl Stream<Item = ExecStreamItem> + Send> {
         let mut hasher = Sha256::new();
         match script {
             ExecSource::Script(p, s) => {
@@ -234,31 +234,26 @@ where
                         vm.sandbox
                             .promptkit_vm_guest()
                             .call_eval_script(&mut vm.store, prelude)
-                            .await?
-                            .map_err(|e| {
-                                anyhow::Error::from(Error::ExecutionError(
-                                    e.code,
-                                    format!("Failed executing prelude:\n{}", e.message),
-                                ))
-                            })?;
+                            .await??;
                     }
                     vm.sandbox
                         .promptkit_vm_guest()
                         .call_eval_script(&mut vm.store, script)
-                        .await?
-                        .map_err(|e| {
-                            anyhow::Error::from(Error::ExecutionError(e.code, e.message))
-                        })?;
+                        .await??;
                 }
                 ExecSource::Bundle(bundle) => {
-                    let mut zip = zip::ZipArchive::new(Cursor::new(bundle))?;
+                    let mut zip =
+                        zip::ZipArchive::new(Cursor::new(bundle)).map_err(anyhow::Error::from)?;
                     let manifest: Manifest = serde_json::from_reader(
                         zip.by_name("manifest.json").map_err(anyhow::Error::from)?,
-                    )?;
+                    )
+                    .map_err(anyhow::Error::from)?;
 
                     let name = hex::encode(hash) + ".zip";
-                    let mut file = tokio::fs::File::create(vm.workdir.path().join(&name)).await?;
-                    file.write_all(bundle).await?;
+                    let mut file = tokio::fs::File::create(vm.workdir.path().join(&name))
+                        .await
+                        .map_err(anyhow::Error::from)?;
+                    file.write_all(bundle).await.map_err(anyhow::Error::from)?;
                     drop(file);
 
                     vm.sandbox
@@ -268,10 +263,7 @@ where
                             &(String::from("/workdir/") + &name),
                             &manifest.entrypoint,
                         )
-                        .await?
-                        .map_err(|e| {
-                            anyhow::Error::from(Error::ExecutionError(e.code, e.message))
-                        })?;
+                        .await??;
                 }
             }
             vm
@@ -280,18 +272,19 @@ where
         Ok(self.exec_impl(
             func,
             args.into_iter()
-                .map::<Result<_, ResourceTableError>, _>(|a| {
+                .map(|a| {
                     Ok(Argument {
                         name: a.name,
                         value: match a.value {
                             ExecArgumentValue::Cbor(a) => Value::Cbor(a),
                             ExecArgumentValue::CborStream(s) => Value::Iterator(
-                                vm.new_iter(Box::pin(ReceiverStream::new(s).map(Value::Cbor)))?,
+                                vm.new_iter(Box::pin(ReceiverStream::new(s).map(Value::Cbor)))
+                                    .map_err(anyhow::Error::from)?,
                             ),
                         },
                     })
                 })
-                .collect::<Result<_, _>>()?,
+                .collect::<anyhow::Result<_>>()?,
             vm,
             level,
         ))

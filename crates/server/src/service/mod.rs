@@ -614,24 +614,20 @@ fn timeout_error() -> script::Result {
     }
 }
 
-fn error_result(err: anyhow::Error) -> script::Result {
+fn error_result(err: promptkit_executor::error::Error) -> script::Result {
     script::Result {
-        result_type: Some(result::ResultType::Error(match err
-            .downcast::<promptkit_executor::error::Error>()
-        {
-            Ok(err) => match err {
-                promptkit_executor::error::Error::ExecutionError(c, cause) => script::Error {
-                    code: match c {
-                        promptkit_executor::error::ErrorCode::Unknown => ErrorCode::Unknown,
-                        promptkit_executor::error::ErrorCode::Internal => ErrorCode::Internal,
-                        promptkit_executor::error::ErrorCode::Aborted => ErrorCode::GuestAborted,
-                    }
-                    .into(),
-                    message: cause,
-                },
+        result_type: Some(result::ResultType::Error(match err {
+            promptkit_executor::error::Error::ExecutionError(c, cause) => script::Error {
+                code: match c {
+                    promptkit_executor::error::ErrorCode::Unknown => ErrorCode::Unknown,
+                    promptkit_executor::error::ErrorCode::Internal => ErrorCode::Internal,
+                    promptkit_executor::error::ErrorCode::Aborted => ErrorCode::GuestAborted,
+                }
+                .into(),
+                message: cause,
             },
-            Err(err) => script::Error {
-                code: i32::from(script::ErrorCode::Internal),
+            promptkit_executor::error::Error::Other(err) => script::Error {
+                code: ErrorCode::Unknown.into(),
                 message: err.to_string(),
             },
         })),
