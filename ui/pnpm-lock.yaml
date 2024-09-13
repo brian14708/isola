@@ -79,7 +79,7 @@ importers:
         version: 2.44.0(eslint@9.10.0(jiti@1.21.6))(svelte@5.0.0-next.244)
       formsnap:
         specifier: ^1.0.1
-        version: 1.0.1(svelte@5.0.0-next.244)(sveltekit-superforms@2.17.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244))
+        version: 1.0.1(svelte@5.0.0-next.244)(sveltekit-superforms@2.18.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(@types/json-schema@7.0.15)(svelte@5.0.0-next.244))
       globals:
         specifier: ^15.8.0
         version: 15.9.0
@@ -115,7 +115,7 @@ importers:
         version: 1.1.1(svelte@5.0.0-next.244)
       sveltekit-superforms:
         specifier: ^2.16.0
-        version: 2.17.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)
+        version: 2.18.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(@types/json-schema@7.0.15)(svelte@5.0.0-next.244)
       tailwind-merge:
         specifier: ^2.4.0
         version: 2.5.2
@@ -822,6 +822,22 @@ packages:
   '@types/validator@13.12.1':
     resolution: {integrity: sha512-w0URwf7BQb0rD/EuiG12KP0bailHKHP5YVviJG9zw3ykAokL0TuxU2TUqMB7EwZ59bDHYdeTIvjI5m0S7qHfOA==}
 
+  '@typeschema/class-validator@0.2.0':
+    resolution: {integrity: sha512-zq0qeflVu1Z6D0ttkqAWZMtxJeNEQ70yo/025sV0jujiOOgQx38JXrky77nSWWPp2E1KIMtgkToQbkzkXyW5yg==}
+    peerDependencies:
+      class-validator: ^0.14.1
+    peerDependenciesMeta:
+      class-validator:
+        optional: true
+
+  '@typeschema/core@0.14.0':
+    resolution: {integrity: sha512-Ia6PtZHcL3KqsAWXjMi5xIyZ7XMH4aSnOQes8mfMLx+wGFGtGRNlwe6Y7cYvX+WfNK67OL0/HSe9t8QDygV0/w==}
+    peerDependencies:
+      '@types/json-schema': ^7.0.15
+    peerDependenciesMeta:
+      '@types/json-schema':
+        optional: true
+
   '@typescript-eslint/eslint-plugin@8.5.0':
     resolution: {integrity: sha512-lHS5hvz33iUFQKuPFGheAB84LwcJ60G8vKnEhnfcK1l8kGVLro2SFYW6K0/tj8FUhRJ0VHyg1oAfg50QGbPPHw==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
@@ -1018,6 +1034,9 @@ packages:
   chokidar@3.6.0:
     resolution: {integrity: sha512-7VT13fmjotKpGipCW9JEQAusEPE+Ei8nl6/g4FBAmIm0GOOLMua9NDDo/DWp0ZAxCr3cPq5ZpBqmPAQgDda2Pw==}
     engines: {node: '>= 8.10.0'}
+
+  class-validator@0.14.1:
+    resolution: {integrity: sha512-2VEG9JICxIqTpoK1eMzZqaV+u/EiwEJkMGzTrZf6sU/fwsnOITVgYJ8yojSy6CaXtO9V0Cc6ZQZ8h8m4UBuLwQ==}
 
   clsx@2.1.1:
     resolution: {integrity: sha512-eYm0QWBtUrBWZWG0d386OGAw16Z995PiOVo2B7bjWSbHedGl5e0ZWaq65kOGgUSNesEIDkB9ISbTg/JK9dhCZA==}
@@ -1409,6 +1428,9 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  libphonenumber-js@1.11.8:
+    resolution: {integrity: sha512-0fv/YKpJBAgXKy0kaS3fnqoUVN8901vUYAKIGD/MWZaDfhJt1nZjPL3ZzdZBt/G8G8Hw2J1xOIrXWdNHFHPAvg==}
 
   lilconfig@2.1.0:
     resolution: {integrity: sha512-utWOt/GHzuUxnLKxB6dk81RoOeoNeHgbrXiuGk4yyF5qlRz+iIVWu56E2fqGHFrXz0QNUhLB/8nKqvRH66JKGQ==}
@@ -1859,8 +1881,8 @@ packages:
     resolution: {integrity: sha512-whSOcKdpuAFd5xD9J2EhuHeRs4J4nHis6NSUKRXpC3HQoCmsoKhyIldMjiv6QFkQpe6QMsid8lwvgLXkZTSC/A==}
     engines: {node: '>=18'}
 
-  sveltekit-superforms@2.17.0:
-    resolution: {integrity: sha512-QrX8pkcmE0XoeVU42zMhsah4FoDrgtPc/4cZEr38rDlgU+DE0xNc5J0E7z1456sUJNbFjaB0+HZwwAkX0vYqaA==}
+  sveltekit-superforms@2.18.0:
+    resolution: {integrity: sha512-INx2EwWk82WcUdG5iEMtcJ+NLvBpYOdiHDRa68Q9p9W+YRAN3mxwiqj5gpfVrvBPlGfFZypeAze54pBZ/wlspw==}
     peerDependencies:
       '@sveltejs/kit': 1.x || 2.x
       svelte: 3.x || 4.x || >=5.0.0-next.51
@@ -2675,6 +2697,20 @@ snapshots:
   '@types/validator@13.12.1':
     optional: true
 
+  '@typeschema/class-validator@0.2.0(@types/json-schema@7.0.15)(class-validator@0.14.1)':
+    dependencies:
+      '@typeschema/core': 0.14.0(@types/json-schema@7.0.15)
+    optionalDependencies:
+      class-validator: 0.14.1
+    transitivePeerDependencies:
+      - '@types/json-schema'
+    optional: true
+
+  '@typeschema/core@0.14.0(@types/json-schema@7.0.15)':
+    optionalDependencies:
+      '@types/json-schema': 7.0.15
+    optional: true
+
   '@typescript-eslint/eslint-plugin@8.5.0(@typescript-eslint/parser@8.5.0(eslint@9.10.0(jiti@1.21.6))(typescript@5.6.2))(eslint@9.10.0(jiti@1.21.6))(typescript@5.6.2)':
     dependencies:
       '@eslint-community/regexpp': 4.11.0
@@ -2911,6 +2947,13 @@ snapshots:
       readdirp: 3.6.0
     optionalDependencies:
       fsevents: 2.3.3
+
+  class-validator@0.14.1:
+    dependencies:
+      '@types/validator': 13.12.1
+      libphonenumber-js: 1.11.8
+      validator: 13.12.0
+    optional: true
 
   clsx@2.1.1: {}
 
@@ -3205,11 +3248,11 @@ snapshots:
       cross-spawn: 7.0.3
       signal-exit: 4.1.0
 
-  formsnap@1.0.1(svelte@5.0.0-next.244)(sveltekit-superforms@2.17.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)):
+  formsnap@1.0.1(svelte@5.0.0-next.244)(sveltekit-superforms@2.18.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(@types/json-schema@7.0.15)(svelte@5.0.0-next.244)):
     dependencies:
       nanoid: 5.0.7
       svelte: 5.0.0-next.244
-      sveltekit-superforms: 2.17.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)
+      sveltekit-superforms: 2.18.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(@types/json-schema@7.0.15)(svelte@5.0.0-next.244)
 
   fraction.js@4.3.7: {}
 
@@ -3339,6 +3382,9 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  libphonenumber-js@1.11.8:
+    optional: true
 
   lilconfig@2.1.0: {}
 
@@ -3716,7 +3762,7 @@ snapshots:
       magic-string: 0.30.11
       zimmerframe: 1.1.2
 
-  sveltekit-superforms@2.17.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244):
+  sveltekit-superforms@2.18.0(@sveltejs/kit@2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3))(@types/json-schema@7.0.15)(svelte@5.0.0-next.244):
     dependencies:
       '@sveltejs/kit': 2.5.26(@sveltejs/vite-plugin-svelte@4.0.0-next.7(svelte@5.0.0-next.244)(vite@5.4.3))(svelte@5.0.0-next.244)(vite@5.4.3)
       devalue: 5.0.0
@@ -3729,8 +3775,10 @@ snapshots:
       '@gcornut/valibot-json-schema': 0.31.0
       '@sinclair/typebox': 0.32.35
       '@sodaru/yup-to-json-schema': 2.0.1
+      '@typeschema/class-validator': 0.2.0(@types/json-schema@7.0.15)(class-validator@0.14.1)
       '@vinejs/vine': 1.8.0
       arktype: 2.0.0-beta.0
+      class-validator: 0.14.1
       joi: 17.13.3
       json-schema-to-ts: 3.1.1
       superstruct: 2.0.2
@@ -3738,6 +3786,8 @@ snapshots:
       yup: 1.4.0
       zod: 3.23.8
       zod-to-json-schema: 3.23.3(zod@3.23.8)
+    transitivePeerDependencies:
+      - '@types/json-schema'
 
   tabbable@6.2.0: {}
 
