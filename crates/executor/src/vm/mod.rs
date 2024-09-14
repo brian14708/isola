@@ -4,15 +4,15 @@ mod state;
 
 use std::pin::Pin;
 
-pub use bindgen::{exports::promptkit::vm::guest as exports, Sandbox, SandboxPre};
+use bindgen::host::{Value, ValueIterator};
+pub use bindgen::{guest as exports, Sandbox, SandboxPre};
 pub use state::VmState;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use wasmtime::{component::ResourceTableError, Store};
+use wasmtime_wasi::WasiView;
 
 use crate::{vm::run::VmRun, Env, ExecStreamItem};
-
-use crate::wasm::vm::{bindings::host::Value, types::ValueIterator, VmView};
 
 pub struct Vm<E> {
     pub(crate) hash: [u8; 32],

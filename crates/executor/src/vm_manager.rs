@@ -19,9 +19,12 @@ use wasmtime::{component::Component, Config, Engine};
 
 use crate::{
     error::{Error, Result},
-    vm::{exports::Argument, SandboxPre, Vm, VmState},
+    vm::{
+        exports::{Argument, Value},
+        SandboxPre, Vm, VmState,
+    },
     vm_cache::VmCache,
-    wasm::{logging::bindings::logging::Level, vm::types::Value},
+    wasm::logging::bindings::logging::Level,
     Env,
 };
 
@@ -232,12 +235,12 @@ where
                 ExecSource::Script(prelude, script) => {
                     if !prelude.is_empty() {
                         vm.sandbox
-                            .promptkit_vm_guest()
+                            .promptkit_script_guest()
                             .call_eval_script(&mut vm.store, prelude)
                             .await??;
                     }
                     vm.sandbox
-                        .promptkit_vm_guest()
+                        .promptkit_script_guest()
                         .call_eval_script(&mut vm.store, script)
                         .await??;
                 }
@@ -257,7 +260,7 @@ where
                     drop(file);
 
                     vm.sandbox
-                        .promptkit_vm_guest()
+                        .promptkit_script_guest()
                         .call_eval_bundle(
                             &mut vm.store,
                             &(String::from("/workdir/") + &name),

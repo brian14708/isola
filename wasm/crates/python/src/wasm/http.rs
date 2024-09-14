@@ -1,13 +1,7 @@
 use core::{panic, str};
 use std::io::Write;
 
-use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyDict},
-};
-use serde::de::DeserializeSeed;
-use url::Url;
-use wasi::{
+use super::wasi::{
     http::{
         outgoing_handler::{ErrorCode, FutureIncomingResponse},
         types::{IncomingBody, IncomingResponse},
@@ -17,6 +11,12 @@ use wasi::{
         streams::{InputStream, StreamError},
     },
 };
+use pyo3::{
+    prelude::*,
+    types::{PyBytes, PyDict},
+};
+use serde::de::DeserializeSeed;
+use url::Url;
 
 use crate::{
     serde::{PyObjectDeserializer, PyObjectSerializer},
@@ -30,13 +30,13 @@ use super::{body_buffer::BodyBuffer, future::create_future, PyPollable};
 pub mod http_module {
     use std::borrow::Cow;
 
+    use super::super::wasi::http::{
+        outgoing_handler::{handle, OutgoingRequest, RequestOptions},
+        types::{Fields, Method, OutgoingBody, Scheme},
+    };
     #[allow(clippy::wildcard_imports)]
     use super::*;
     use pyo3::pyfunction;
-    use wasi::http::{
-        outgoing_handler::{handle, RequestOptions},
-        types::{Fields, Method, OutgoingBody, Scheme},
-    };
 
     #[pyfunction]
     fn new_buffer(kind: &str) -> Buffer {
@@ -100,7 +100,7 @@ pub mod http_module {
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         }
 
-        let request = wasi::http::outgoing_handler::OutgoingRequest::new(header_fields);
+        let request = OutgoingRequest::new(header_fields);
         request
             .set_method(&match method {
                 "GET" => Method::Get,

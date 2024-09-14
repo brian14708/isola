@@ -1,4 +1,4 @@
-package promptkit:vm;
+package promptkit:script;
 
 interface host {
     use wasi:io/poll@0.2.0.{pollable};

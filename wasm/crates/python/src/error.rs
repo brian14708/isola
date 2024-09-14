@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::wasm::exports::{
     self,
-    promptkit::vm::guest::{self, ErrorCode},
+    promptkit::script::guest::{self, ErrorCode},
 };
 
 #[derive(Error, Debug)]
@@ -30,7 +30,7 @@ impl Error {
     }
 }
 
-impl From<Error> for exports::promptkit::vm::guest::Error {
+impl From<Error> for exports::promptkit::script::guest::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::PythonError {

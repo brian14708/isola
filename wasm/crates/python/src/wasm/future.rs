@@ -1,5 +1,7 @@
 use pyo3::{pyclass, pymethods, Bound};
 
+use super::wasi;
+
 #[pyclass]
 pub struct PyPollable {
     inner: Option<wasi::io::poll::Pollable>,

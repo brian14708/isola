@@ -1,6 +1,5 @@
 use std::{path::Path, sync::Arc};
 
-use anyhow::anyhow;
 use futures_util::StreamExt;
 use promptkit_llm::tokenizers::Tokenizer;
 use tokio::{sync::mpsc, time::timeout};
@@ -8,7 +7,10 @@ use wasmtime::{
     component::{Linker, ResourceTable},
     Engine, Store,
 };
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{
+    bindings::io::streams::StreamError, DirPerms, FilePerms, Pollable, WasiCtx, WasiCtxBuilder,
+    WasiView,
+};
 use wasmtime_wasi_http::{
     bindings::http::outgoing_handler::ErrorCode,
     body::{HyperIncomingBody, HyperOutgoingBody},
@@ -16,11 +18,11 @@ use wasmtime_wasi_http::{
     HttpResult, WasiHttpCtx, WasiHttpView,
 };
 
-use crate::{
-    resource::MemoryLimiter, trace_output::TraceOutput, wasm::vm::VmView, Env, ExecStreamItem,
-};
+use crate::{resource::MemoryLimiter, trace_output::TraceOutput, Env, ExecStreamItem};
 
 use crate::wasm::llm::LlmView;
+
+use super::bindgen::host::{add_to_linker, Host, HostValueIterator, Value, ValueIterator};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -42,7 +44,7 @@ impl<E: Env + Send> VmState<E> {
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::llm::add_to_linker(&mut linker)?;
         crate::wasm::logging::add_to_linker(&mut linker)?;
-        crate::wasm::vm::add_to_linker(&mut linker)?;
+        add_to_linker(&mut linker, |s| s)?;
         Ok(linker)
     }
 
@@ -104,18 +106,44 @@ impl<E: Env + Send> LlmView for VmState<E> {
 }
 
 #[async_trait::async_trait]
-impl<E: Send> VmView for VmState<E> {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
+impl<E: Send> Host for VmState<E> {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
             run.output.send(ExecStreamItem::Data(data)).await?;
             Ok(())
         } else {
-            Err(anyhow!("output channel missing"))
+            Err(anyhow::anyhow!("output channel missing"))
         }
+    }
+}
+
+#[async_trait::async_trait]
+impl<E: Send> HostValueIterator for VmState<E> {
+    async fn read(
+        &mut self,
+        resource: wasmtime::component::Resource<ValueIterator>,
+    ) -> wasmtime::Result<Option<Result<Value, StreamError>>> {
+        Ok(self.table().get_mut(&resource)?.try_next())
+    }
+
+    async fn blocking_read(
+        &mut self,
+        resource: wasmtime::component::Resource<ValueIterator>,
+    ) -> wasmtime::Result<Result<Value, StreamError>> {
+        let response = self.table().get_mut(&resource)?;
+        Ok(response.next().await)
+    }
+
+    async fn subscribe(
+        &mut self,
+        resource: wasmtime::component::Resource<ValueIterator>,
+    ) -> wasmtime::Result<wasmtime::component::Resource<Pollable>> {
+        wasmtime_wasi::subscribe(self.table(), resource)
+    }
+
+    fn drop(&mut self, rep: wasmtime::component::Resource<ValueIterator>) -> wasmtime::Result<()> {
+        self.table().delete(rep)?;
+        Ok(())
     }
 }
 

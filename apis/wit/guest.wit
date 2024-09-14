@@ -1,4 +1,4 @@
-package promptkit:vm;
+package promptkit:script;
 
 interface guest {
     use host.{value};

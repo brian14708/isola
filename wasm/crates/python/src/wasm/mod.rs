@@ -9,7 +9,7 @@ mod logging;
 use std::cell::RefCell;
 
 use self::wasi::logging::logging::Level;
-use ::wasi::{
+use self::wasi::{
     clocks::monotonic_clock::subscribe_duration,
     io::{poll::poll as host_poll, streams::StreamError},
 };
@@ -24,24 +24,12 @@ use crate::{
     serde::PyObjectDeserializer,
 };
 
-use self::{exports::promptkit::vm::guest, promptkit::vm::host};
+use self::{exports::promptkit::script::guest, promptkit::script::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
     path: "../../../apis/wit",
-    with: {
-        "wasi:io/poll@0.2.0": ::wasi::io::poll,
-        "wasi:io/error@0.2.0": ::wasi::io::error,
-        "wasi:io/streams@0.2.0": ::wasi::io::streams,
-        "wasi:clocks/monotonic-clock@0.2.0": ::wasi::clocks::monotonic_clock,
-        "wasi:http/types@0.2.0": ::wasi::http::types,
-        "wasi:http/outgoing-handler@0.2.0": ::wasi::http::outgoing_handler,
-
-        "wasi:logging/logging": generate,
-        "promptkit:vm/host": generate,
-        "promptkit:vm/guest": generate,
-        "promptkit:llm/tokenizer": generate,
-    },
+    generate_all,
 });
 
 #[pymodule]
@@ -179,7 +167,7 @@ impl ArgIter {
             Err(StreamError::LastOperationFailed(e)) => Err(PyErr::new::<
                 pyo3::exceptions::PyTypeError,
                 _,
-            >(e.to_string())),
+            >(e.to_debug_string())),
         }
     }
 
@@ -211,10 +199,11 @@ impl ArgIter {
                 host::Value::Iterator(_) => todo!(),
             },
             Some(Err(StreamError::Closed)) => Ok(None),
-            Some(Err(StreamError::LastOperationFailed(e))) => Err(PyErr::new::<
-                pyo3::exceptions::PyTypeError,
-                _,
-            >(e.to_string())),
+            Some(Err(StreamError::LastOperationFailed(e))) => {
+                Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    e.to_debug_string(),
+                ))
+            }
             None => Ok(Some(PyPollable::from(self.iter.subscribe()).into_py(py))),
         }
     }
@@ -246,4 +235,43 @@ pub extern "C" fn _initialize() {
         v.flush();
         scope.borrow_mut().replace(v);
     });
+}
+
+impl std::io::Write for wasi::io::streams::OutputStream {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = loop {
+            match self.check_write().map(std::num::NonZeroU64::new) {
+                Ok(Some(n)) => {
+                    break n;
+                }
+                Ok(None) => {
+                    self.subscribe().block();
+                }
+                Err(StreamError::Closed) => return Ok(0),
+                Err(StreamError::LastOperationFailed(e)) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e.to_debug_string(),
+                    ))
+                }
+            };
+        };
+        let n = n
+            .get()
+            .try_into()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let n = buf.len().min(n);
+        wasi::io::streams::OutputStream::write(self, &buf[..n]).map_err(|e| match e {
+            StreamError::Closed => std::io::ErrorKind::UnexpectedEof.into(),
+            StreamError::LastOperationFailed(e) => {
+                std::io::Error::new(std::io::ErrorKind::Other, e.to_debug_string())
+            }
+        })?;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.blocking_flush()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+    }
 }
