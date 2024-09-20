@@ -141,7 +141,10 @@ impl<E: Send> HostValueIterator for VmState<E> {
         wasmtime_wasi::subscribe(self.table(), resource)
     }
 
-    fn drop(&mut self, rep: wasmtime::component::Resource<ValueIterator>) -> wasmtime::Result<()> {
+    async fn drop(
+        &mut self,
+        rep: wasmtime::component::Resource<ValueIterator>,
+    ) -> wasmtime::Result<()> {
         self.table().delete(rep)?;
         Ok(())
     }

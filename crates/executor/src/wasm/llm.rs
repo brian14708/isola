@@ -118,7 +118,7 @@ impl tokenizer::HostTokenizer for dyn LlmView + '_ {
         Ok(tokenizer.inner.special_token(&name))
     }
 
-    fn drop(
+    async fn drop(
         &mut self,
         tokenizer: wasmtime::component::Resource<Tokenizer>,
     ) -> wasmtime::Result<()> {
