@@ -1,7 +1,7 @@
 package promptkit:script;
 
 world sandbox {
-    import wasi:http/outgoing-handler@0.2.0;
+    import wasi:http/outgoing-handler@0.2.1;
     import wasi:logging/logging;
     import promptkit:llm/tokenizer;
     import host;
