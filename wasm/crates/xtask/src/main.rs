@@ -57,7 +57,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         sh,
         "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
     )
-        .env("PYO3_CROSS_PYTHON_VERSION", "3.12")
+        .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
         .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1")
         .run()?;
     } else {
@@ -65,7 +65,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         sh,
         "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
     )
-        .env("PYO3_CROSS_PYTHON_VERSION", "3.12")
+        .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
         .env("CARGO_PROFILE_RELEASE_LTO", "thin")
         .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3")
         .env("CARGO_PROFILE_RELEASE_PANIC", "abort")

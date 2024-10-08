@@ -29,7 +29,7 @@ thiserror = "1.0.59"
 tokio = { version = "1.37.0", features = ["fs"] }
 tokio-stream = "0.1.15"
 tracing = "0.1.40"
-wasmtime = { version = "25.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation"] }
+wasmtime = { version = "25.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation", "gc"] }
 wasmtime-wasi = "25.0.0"
 wasmtime-wasi-http = "25.0.0"
 zip = { version = "2.0.0", default-features = false, features = ["deflate"] }

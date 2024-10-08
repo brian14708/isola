@@ -39,7 +39,7 @@ fn main() {
             panic!("Failed to run cmake {:?}", e);
         }
 
-        let libpython_binary = "python3.12";
+        let libpython_binary = "python3.13";
 
         let lib_paths = vec!["lib"];
 

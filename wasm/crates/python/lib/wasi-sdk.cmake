@@ -31,6 +31,7 @@ target_link_libraries(
   wasi
   INTERFACE
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.a
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.a
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-signal.a
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.a
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.a
