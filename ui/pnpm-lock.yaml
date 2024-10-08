@@ -13,10 +13,10 @@ importers:
         version: 1.44.0
       '@bufbuild/protobuf':
         specifier: ^2.0.0
-        version: 2.1.0
+        version: 2.2.0
       '@bufbuild/protoc-gen-es':
         specifier: ^2.0.0
-        version: 2.1.0(@bufbuild/protobuf@2.1.0)
+        version: 2.1.0(@bufbuild/protobuf@2.2.0)
       '@codemirror/commands':
         specifier: ^6.6.0
         version: 6.7.0
@@ -34,10 +34,10 @@ importers:
         version: 6.34.1
       '@connectrpc/connect':
         specifier: 2.0.0-beta.1
-        version: 2.0.0-beta.1(@bufbuild/protobuf@2.1.0)
+        version: 2.0.0-beta.1(@bufbuild/protobuf@2.2.0)
       '@connectrpc/connect-web':
         specifier: 2.0.0-beta.1
-        version: 2.0.0-beta.1(@bufbuild/protobuf@2.1.0)(@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.1.0))
+        version: 2.0.0-beta.1(@bufbuild/protobuf@2.2.0)(@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.2.0))
       '@iconify/json':
         specifier: ^2.2.227
         version: 2.2.256
@@ -210,6 +210,9 @@ packages:
 
   '@bufbuild/protobuf@2.1.0':
     resolution: {integrity: sha512-+2Mx67Y3skJ4NCD/qNSdBJNWtu6x6Qr53jeNg+QcwiL6mt0wK+3jwHH2x1p7xaYH6Ve2JKOVn0OxU35WsmqI9A==}
+
+  '@bufbuild/protobuf@2.2.0':
+    resolution: {integrity: sha512-+imAQkHf7U/Rwvu0wk1XWgsP3WnpCWmK7B48f0XqSNzgk64+grljTKC7pnO/xBiEMUziF7vKRfbBnOQhg126qQ==}
 
   '@bufbuild/protoc-gen-es@2.1.0':
     resolution: {integrity: sha512-xGadPol0k8cdDNSbMdHMo0QEK0JvebxGD6KQl5hCVfLTFbpMM4dfMiubyT9gdcwqfwstRe5Tin0Us3dyOzHtag==}
@@ -2198,11 +2201,13 @@ snapshots:
 
   '@bufbuild/protobuf@2.1.0': {}
 
-  '@bufbuild/protoc-gen-es@2.1.0(@bufbuild/protobuf@2.1.0)':
+  '@bufbuild/protobuf@2.2.0': {}
+
+  '@bufbuild/protoc-gen-es@2.1.0(@bufbuild/protobuf@2.2.0)':
     dependencies:
       '@bufbuild/protoplugin': 2.1.0
     optionalDependencies:
-      '@bufbuild/protobuf': 2.1.0
+      '@bufbuild/protobuf': 2.2.0
     transitivePeerDependencies:
       - supports-color
 
@@ -2267,14 +2272,14 @@ snapshots:
       style-mod: 4.1.2
       w3c-keyname: 2.2.8
 
-  '@connectrpc/connect-web@2.0.0-beta.1(@bufbuild/protobuf@2.1.0)(@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.1.0))':
+  '@connectrpc/connect-web@2.0.0-beta.1(@bufbuild/protobuf@2.2.0)(@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.2.0))':
     dependencies:
-      '@bufbuild/protobuf': 2.1.0
-      '@connectrpc/connect': 2.0.0-beta.1(@bufbuild/protobuf@2.1.0)
+      '@bufbuild/protobuf': 2.2.0
+      '@connectrpc/connect': 2.0.0-beta.1(@bufbuild/protobuf@2.2.0)
 
-  '@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.1.0)':
+  '@connectrpc/connect@2.0.0-beta.1(@bufbuild/protobuf@2.2.0)':
     dependencies:
-      '@bufbuild/protobuf': 2.1.0
+      '@bufbuild/protobuf': 2.2.0
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
