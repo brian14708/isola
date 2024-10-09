@@ -215,11 +215,6 @@ thread_local! {
 
 #[export_name = "wizer.initialize"]
 pub extern "C" fn _initialize() {
-    extern "C" {
-        fn __wasm_call_ctors();
-    }
-    unsafe { __wasm_call_ctors() };
-
     GLOBAL_SCOPE.with(|scope| {
         use http::http_module;
         append_to_inittab!(http_module);
