@@ -8,6 +8,5 @@ members = [
 version = "0.1.0"
 edition = "2021"
 
-[profile.xtask]
-inherits = "release"
-opt-level = 1
+[profile.release]
+lto = true
