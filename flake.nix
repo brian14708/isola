@@ -1,6 +1,6 @@
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     fenix = {
       url = "github:nix-community/fenix";
@@ -31,27 +31,41 @@
             targets.wasm32-wasip1.stable.rust-std
           ]
         );
-        mkShell = pkgs.mkShell.override { stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.stdenv; };
+        mkShell = pkgs.mkShell.override {
+          stdenv =
+            if pkgs.stdenv.isLinux then
+              pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv
+            else
+              pkgs.clangStdenv;
+        };
       in
       {
+        formatter = pkgs.nixfmt-rfc-style;
         devShells.default = mkShell {
-          packages = with pkgs; [
-            nixfmt-rfc-style
+          buildInputs =
+            with pkgs;
+            [
+              nodejs
+              pnpm
+              svelte-language-server
 
-            nodejs
-            pnpm
-            svelte-language-server
+              (python313.withPackages (ps: with ps; [ pip ]))
 
-            (python313.withPackages (ps: with ps; [ pip ]))
-
-            cmake
-            protobuf_28
-            gcc
-            wizer
-            binaryen
-            rust-analyzer
-            rust-toolchain
-          ];
+              cmake
+              protobuf_28
+              pkg-config
+              gcc
+              wizer
+              binaryen
+              rust-analyzer
+              rust-toolchain
+            ]
+            ++ lib.optional stdenv.isDarwin [
+              darwin.apple_sdk.frameworks.Security
+              darwin.apple_sdk.frameworks.CoreFoundation
+              darwin.apple_sdk.frameworks.SystemConfiguration
+              libiconv
+            ];
         };
       }
     );
