@@ -23,5 +23,8 @@
   "automergeType": "branch",
   "lockFileMaintenance": {
     "enabled": true
+  },
+  "nix": {
+    "enabled": true
   }
 }
