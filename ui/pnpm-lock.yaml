@@ -76,7 +76,7 @@ importers:
         version: 9.1.0(eslint@9.12.0(jiti@1.21.6))
       eslint-plugin-svelte:
         specifier: ^2.42.0
-        version: 2.44.1(eslint@9.12.0(jiti@1.21.6))(svelte@5.0.0-next.265)
+        version: 2.45.0(eslint@9.12.0(jiti@1.21.6))(svelte@5.0.0-next.265)
       formsnap:
         specifier: ^1.0.1
         version: 1.0.1(svelte@5.0.0-next.265)(sveltekit-superforms@2.19.1(@sveltejs/kit@2.7.1(@sveltejs/vite-plugin-svelte@4.0.0-next.8(svelte@5.0.0-next.265)(vite@5.4.9))(svelte@5.0.0-next.265)(vite@5.4.9))(@types/json-schema@7.0.15)(svelte@5.0.0-next.265))
@@ -942,6 +942,11 @@ packages:
     engines: {node: '>=0.4.0'}
     hasBin: true
 
+  acorn@8.13.0:
+    resolution: {integrity: sha512-8zSiw54Oxrdym50NlZ9sUusyO1Z1ZchgRLWRaK6c86XJFClyCgFKetdowBg5bKxyp/u+CDBJG4Mpp0m3HLZl9w==}
+    engines: {node: '>=0.4.0'}
+    hasBin: true
+
   ajv@6.12.6:
     resolution: {integrity: sha512-j3fVLgvTo527anyYyJOGTYJbG+vnnQYvE0m5mmkc1TK+nxAppkCLMIL0aZ4dblVCNoGShhm+kzE4ZUykBoMg4g==}
 
@@ -1172,8 +1177,8 @@ packages:
     peerDependencies:
       eslint: '>=7.0.0'
 
-  eslint-plugin-svelte@2.44.1:
-    resolution: {integrity: sha512-w6wkoJPw1FJKFtM/2oln21rlu5+HTd2CSkkzhm32A+trNoW2EYQqTQAbDTU6k2GI/6Vh64rBHYQejqEgDld7fw==}
+  eslint-plugin-svelte@2.45.0:
+    resolution: {integrity: sha512-8wOaRUCq0M+8yiR5bXrwKzemp6aIzt+19LoB+LcrizkyyIIIk8F24KuY3paQS2haGet5JPFJVuYgvkX2uy3Uiw==}
     engines: {node: ^14.17.0 || >=16.0.0}
     peerDependencies:
       eslint: ^7.0.0 || ^8.0.0-0 || ^9.0.0-0
@@ -2852,11 +2857,17 @@ snapshots:
     dependencies:
       acorn: 8.12.1
 
+  acorn-jsx@5.3.2(acorn@8.13.0):
+    dependencies:
+      acorn: 8.13.0
+
   acorn-typescript@1.4.13(acorn@8.12.1):
     dependencies:
       acorn: 8.12.1
 
   acorn@8.12.1: {}
+
+  acorn@8.13.0: {}
 
   ajv@6.12.6:
     dependencies:
@@ -3116,7 +3127,7 @@ snapshots:
     dependencies:
       eslint: 9.12.0(jiti@1.21.6)
 
-  eslint-plugin-svelte@2.44.1(eslint@9.12.0(jiti@1.21.6))(svelte@5.0.0-next.265):
+  eslint-plugin-svelte@2.45.0(eslint@9.12.0(jiti@1.21.6))(svelte@5.0.0-next.265):
     dependencies:
       '@eslint-community/eslint-utils': 4.4.0(eslint@9.12.0(jiti@1.21.6))
       '@jridgewell/sourcemap-codec': 1.5.0
@@ -3201,8 +3212,8 @@ snapshots:
 
   espree@9.6.1:
     dependencies:
-      acorn: 8.12.1
-      acorn-jsx: 5.3.2(acorn@8.12.1)
+      acorn: 8.13.0
+      acorn-jsx: 5.3.2(acorn@8.13.0)
       eslint-visitor-keys: 3.4.3
 
   esquery@1.6.0:
