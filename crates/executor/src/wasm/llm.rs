@@ -9,8 +9,7 @@ use self::bindings::tokenizer;
 use self::types::Tokenizer;
 
 wasmtime::component::bindgen!({
-    path: "../../apis/wit",
-    interfaces: "import promptkit:llm/tokenizer;",
+    path: "../../apis/wit/deps/promptkit-llm",
     async: true,
     trappable_imports: true,
     with: {

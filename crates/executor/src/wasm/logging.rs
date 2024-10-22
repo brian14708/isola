@@ -2,8 +2,7 @@ use tracing::event;
 use wasmtime_wasi::WasiView;
 
 wasmtime::component::bindgen!({
-    path: "../../apis/wit",
-    interfaces: "import wasi:logging/logging;",
+    path: "../../apis/wit/deps/logging",
     trappable_imports: true,
 });
 
