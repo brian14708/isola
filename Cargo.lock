@@ -374,6 +374,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67ba02a97a2bd10f4b59b25c7973101c79642302776489e030cd13cdab09ed15"
 
 [[package]]
+name = "component-init"
+version = "0.1.0"
+source = "git+https://github.com/dicej/component-init#6964d14deeda3f60865f085f3806abfd5ddd501f"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures",
+ "wasm-convert",
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
+]
+
+[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -767,6 +780,7 @@ checksum = "65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876"
 dependencies = [
  "futures-channel",
  "futures-core",
+ "futures-executor",
  "futures-io",
  "futures-sink",
  "futures-task",
@@ -835,6 +849,7 @@ version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9fa08315bb612088cc391249efdc3bc77536f16c91f6cf495e6fbe85b20a4a81"
 dependencies = [
+ "futures-channel",
  "futures-core",
  "futures-io",
  "futures-macro",
@@ -1692,6 +1707,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "component-init",
  "futures-core",
  "futures-util",
  "hex",
@@ -3131,12 +3147,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65fc09f10666a9f147042251e0dda9c18f166ff7de300607007e96bdebc1068d"
 
 [[package]]
+name = "wasm-convert"
+version = "0.1.0"
+source = "git+https://github.com/dicej/wasm-convert?rev=a42b419#a42b419ecee68ed24b06b77cee95d55183846e37"
+dependencies = [
+ "wasm-encoder 0.219.1",
+ "wasmparser 0.219.1",
+]
+
+[[package]]
 name = "wasm-encoder"
 version = "0.218.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22b896fa8ceb71091ace9bcb81e853f54043183a1c9667cf93422c40252ffa0a"
 dependencies = [
  "leb128",
+]
+
+[[package]]
+name = "wasm-encoder"
+version = "0.219.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "29cbbd772edcb8e7d524a82ee8cef8dd046fc14033796a754c3ad246d019fa54"
+dependencies = [
+ "leb128",
+ "wasmparser 0.219.1",
 ]
 
 [[package]]
@@ -3167,6 +3202,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmparser"
+version = "0.219.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c771866898879073c53b565a6c7b49953795159836714ac56a5befb581227c5"
+dependencies = [
+ "ahash",
+ "bitflags",
+ "hashbrown 0.14.5",
+ "indexmap 2.6.0",
+ "semver",
+ "serde",
+]
+
+[[package]]
 name = "wasmprinter"
 version = "0.218.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3174,7 +3223,7 @@ checksum = "0ace089155491837b75f474bf47c99073246d1b737393fe722d6dee311595ddc"
 dependencies = [
  "anyhow",
  "termcolor",
- "wasmparser",
+ "wasmparser 0.218.0",
 ]
 
 [[package]]
@@ -3211,7 +3260,7 @@ dependencies = [
  "smallvec",
  "sptr",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.218.0",
  "wasmtime-asm-macros",
  "wasmtime-component-macro",
  "wasmtime-component-util",
@@ -3275,7 +3324,7 @@ dependencies = [
  "smallvec",
  "target-lexicon",
  "thiserror",
- "wasmparser",
+ "wasmparser 0.218.0",
  "wasmtime-environ",
  "wasmtime-versioned-export-macros",
 ]
@@ -3299,8 +3348,8 @@ dependencies = [
  "serde_derive",
  "smallvec",
  "target-lexicon",
- "wasm-encoder",
- "wasmparser",
+ "wasm-encoder 0.218.0",
+ "wasmparser 0.218.0",
  "wasmprinter",
  "wasmtime-component-util",
 ]
@@ -3414,7 +3463,7 @@ dependencies = [
  "gimli",
  "object",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.218.0",
  "wasmtime-cranelift",
  "wasmtime-environ",
  "winch-codegen",
@@ -3555,7 +3604,7 @@ dependencies = [
  "regalloc2",
  "smallvec",
  "target-lexicon",
- "wasmparser",
+ "wasmparser 0.218.0",
  "wasmtime-cranelift",
  "wasmtime-environ",
 ]
@@ -3706,7 +3755,7 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "unicode-xid",
- "wasmparser",
+ "wasmparser 0.218.0",
 ]
 
 [[package]]

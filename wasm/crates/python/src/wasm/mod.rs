@@ -67,6 +67,48 @@ export!(Global);
 pub struct Global;
 
 impl guest::Guest for Global {
+    fn initialize(preinit: bool) {
+        GLOBAL_SCOPE.with(|scope| {
+            let mut scope = scope.borrow_mut();
+            if scope.is_none() {
+                use http::http_module;
+                append_to_inittab!(http_module);
+                use logging::logging_module;
+                append_to_inittab!(logging_module);
+                use llm::llm_module;
+                append_to_inittab!(llm_module);
+                append_to_inittab!(sys_module);
+
+                let v = Scope::new();
+                let code = include_str!("prelude.py");
+                v.load_script(code).unwrap();
+                v.flush();
+                scope.replace(v);
+            }
+        });
+
+        // https://github.com/bytecodealliance/componentize-py/blob/72348e0ebd74ef1027c52528409a289765ed5c4c/runtime/src/lib.rs#L377
+        if preinit {
+            #[link(wasm_import_module = "wasi_snapshot_preview1")]
+            extern "C" {
+                #[cfg_attr(target_arch = "wasm32", link_name = "reset_adapter_state")]
+                fn reset_adapter_state();
+            }
+
+            // This tells wasi-libc to reset its preopen state, forcing re-initialization at runtime.
+            #[link(wasm_import_module = "env")]
+            extern "C" {
+                #[cfg_attr(target_arch = "wasm32", link_name = "__wasilibc_reset_preopens")]
+                fn wasilibc_reset_preopens();
+            }
+
+            unsafe {
+                reset_adapter_state();
+                wasilibc_reset_preopens();
+            }
+        }
+    }
+
     fn set_log_level(level: Option<Level>) {
         logging::set_log_level(level);
     }
@@ -211,25 +253,6 @@ impl ArgIter {
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
-}
-
-#[export_name = "wizer.initialize"]
-pub extern "C" fn _initialize() {
-    GLOBAL_SCOPE.with(|scope| {
-        use http::http_module;
-        append_to_inittab!(http_module);
-        use logging::logging_module;
-        append_to_inittab!(logging_module);
-        use llm::llm_module;
-        append_to_inittab!(llm_module);
-        append_to_inittab!(sys_module);
-
-        let v = Scope::new();
-        let code = include_str!("prelude.py");
-        v.load_script(code).unwrap();
-        v.flush();
-        scope.borrow_mut().replace(v);
-    });
 }
 
 impl std::io::Write for wasi::io::streams::OutputStream {

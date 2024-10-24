@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            VmManager::<()>::compile(&PathBuf::from("wasm/target/promptkit_python.wasm"))?;
+            VmManager::<()>::compile(&PathBuf::from("wasm/target/promptkit_python.wasm")).await?;
             Ok(())
         }
         None | Some("serve") => {

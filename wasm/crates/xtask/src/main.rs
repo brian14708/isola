@@ -51,27 +51,13 @@ fn build_all(sh: &Shell) -> Result<()> {
 fn build_python(sh: &Shell) -> Result<()> {
     const TARGET: &str = "wasm32-wasip1";
 
-    let dbg = env::var("DEBUG").is_ok();
-    if dbg {
-        cmd!(
+    cmd!(
         sh,
         "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
     )
-        .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
-        .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "1")
-        .run()?;
-    } else {
-        cmd!(
-        sh,
-        "cargo rustc --crate-type cdylib --profile release --target {TARGET} -p promptkit_python"
-    )
-        .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
-        .env("CARGO_PROFILE_RELEASE_LTO", "thin")
-        .env("CARGO_PROFILE_RELEASE_OPT_LEVEL", "3")
-        .env("CARGO_PROFILE_RELEASE_PANIC", "abort")
-        .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
-        .run()?;
-    }
+    .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
+    .env("RUSTFLAGS", "-C relocation-model=pic")
+    .run()?;
 
     run_if_changed(
         vec!["crates/python/bundled/requirements.txt".to_string()],
@@ -95,45 +81,45 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
-        format!("target/{TARGET}/release/promptkit_python.init.wasm"),
-        |inp, out| -> Result<()> {
-            let workdir = sh.create_temp_dir()?;
-            let workdir = workdir.path();
-            let inp = &inp[0];
-            cmd!(
-                sh, "wizer {inp} --allow-wasi --wasm-bulk-memory true --mapdir /usr::target/{TARGET}/wasi-deps/usr --mapdir /workdir::{workdir} -o {out}"
-            ).run()?;
-            Ok(())
-        },
-    )?;
-
-    run_if_changed(
-        vec![format!(
-            "target/{TARGET}/release/promptkit_python.init.wasm"
-        )],
-        format!("target/{TARGET}/release/promptkit_python.opt.wasm"),
-        |inp, out| -> Result<()> {
-            let inp = &inp[0];
-            if dbg {
-                cmd!(sh, "cp {inp} {out}").run()?;
-            } else {
-                cmd!(
-                    sh,
-                    "wasm-opt --precompute-propagate -O4 --gufa -O4 --strip-debug {inp} -o {out}"
-                )
-                .run()?;
-            }
-            Ok(())
-        },
-    )?;
-
-    run_if_changed(
-        vec![format!("target/{TARGET}/release/promptkit_python.opt.wasm")],
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
             let wasm = std::fs::read(&inp[0])?;
-            let wasm = wit_component::ComponentEncoder::default()
-                .module(&wasm)?
+            let wasm = wit_component::Linker::default()
+            .validate(true)
+            .stack_size(8388608)
+            .use_built_in_libdl(true)
+            .library("", &wasm, false)?
+            .library(
+                "libc.so",
+                &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc.so"))?,
+                false,
+            )?
+            .library(
+                "libwasi-emulated-signal.so",
+                &std::fs::read(format!(
+                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-signal.so"
+                ))?,
+                false,
+            )?
+            .library(
+                "libwasi-emulated-getpid.so",
+                &std::fs::read(format!(
+                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-getpid.so"
+                ))?,
+                false,
+            )?
+            .library(
+                "libwasi-emulated-process-clocks.so",
+                &std::fs::read(format!(
+                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-process-clocks.so"
+                ))?,
+                false,
+            )?
+            .library(
+                "libpython3.13.so",
+                &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"))?,
+                false,
+            )?
                 .adapter(
                     "wasi_snapshot_preview1",
                     wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,

@@ -24,10 +24,11 @@ ExternalProject_Add(
   INSTALL_DIR ${WASMLIB_SYSROOT}
   EXCLUDE_FROM_ALL TRUE
   CONFIGURE_COMMAND
+    CFLAGS=-fPIC
     CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env
     <SOURCE_DIR>/configure
-      --prefix=/usr/local --host=wasm32-wasi
+      --prefix=/usr/local --host=wasm32-wasi --enable-shared
       --build=${PYTHON_BUILD_ARCH} --with-build-python=${Python3_EXECUTABLE}
       --disable-test-modules --with-pymalloc --with-computed-gotos --with-lto=thin
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
@@ -42,15 +43,34 @@ ExternalProject_Add_Step(
   WORKING_DIRECTORY <BINARY_DIR>)
 ExternalProject_Get_Property(python-build BINARY_DIR)
 install(DIRECTORY ${BINARY_DIR}/usr/ DESTINATION usr)
-add_library(python STATIC IMPORTED GLOBAL)
-add_dependencies(python python-build)
+
+file(WRITE ${CMAKE_BINARY_DIR}/python-stub.c "")
+
+add_library(python SHARED ${CMAKE_BINARY_DIR}/python-stub.c)
 set_target_properties(
   python
-  PROPERTIES IMPORTED_LOCATION ${WASMLIB_SYSROOT}/usr/local/lib/libpython${PYTHON_VERSION}.a
-             INTERFACE_INCLUDE_DIRECTORIES
-             ${WASMLIB_SYSROOT}/usr/local/include/python${PYTHON_VERSION})
+  PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
+             ${WASMLIB_SYSROOT}/usr/local/include/python${PYTHON_VERSION}
+             OUTPUT_NAME python${PYTHON_VERSION})
+add_dependencies(python python-build)
 target_link_libraries(
   python
-  INTERFACE zlib wasi ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
-            ${BINARY_DIR}/Modules/_decimal/libmpdec/libmpdec.a
-            ${BINARY_DIR}/Modules/expat/libexpat.a)
+  PUBLIC -Wl,--whole-archive
+         ${WASMLIB_SYSROOT}/usr/local/lib/libpython${PYTHON_VERSION}.a
+         -Wl,--no-whole-archive)
+target_link_libraries(
+  python PRIVATE
+         zlib
+         wasi
+         ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
+         ${BINARY_DIR}/Modules/_decimal/libmpdec/libmpdec.a
+         ${BINARY_DIR}/Modules/expat/libexpat.a)
+install(TARGETS python DESTINATION lib)
+install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
+        DESTINATION include)
+add_custom_command(
+    TARGET python POST_BUILD
+    DEPENDS python
+    COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}>
+    ARGS --strip-all $<TARGET_FILE:python>
+)

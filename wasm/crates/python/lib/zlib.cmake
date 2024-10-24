@@ -11,7 +11,7 @@ ExternalProject_Add(
   EXCLUDE_FROM_ALL TRUE
   CONFIGURE_COMMAND
     CC=${CMAKE_C_COMPILER} prefix=/ AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
-    CHOST=wasm32-wasi <SOURCE_DIR>/configure --static
+    CFLAGS=-fPIC CHOST=wasm32-wasi <SOURCE_DIR>/configure --static
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install)
 
 add_library(zlib STATIC IMPORTED GLOBAL)

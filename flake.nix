@@ -55,8 +55,6 @@
               protobuf_28
               pkg-config
               gcc
-              wizer
-              binaryen
               rust-analyzer
               rust-toolchain
             ]

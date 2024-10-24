@@ -14,6 +14,3 @@ project(wasmlibs VERSION 1.0.0)
 
 include(zlib)
 include(python)
-include(bundle)
-
-bundle_static_library(python python${PYTHON_VERSION})

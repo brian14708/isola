@@ -28,12 +28,6 @@ RUN rustup target add wasm32-wasip1
 RUN apt-get update && \
     apt-get install -y cmake && \
     rm -rf /var/lib/apt/lists/*
-RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_119/binaryen-version_119-$(uname -m)-linux.tar.gz" && \
-    tar -xzf /usr/local/binaryen.tar.gz --strip-component 1 -C /usr/local/ && \
-    rm /usr/local/binaryen.tar.gz
-RUN curl -L -o /usr/local/wizer.tar.xz "https://github.com/bytecodealliance/wizer/releases/download/v7.0.4/wizer-v7.0.4-$(uname -m)-linux.tar.xz" && \
-    tar -xJf /usr/local/wizer.tar.xz --strip-component 1 -C /usr/local/bin && \
-    rm /usr/local/wizer.tar.xz
 ENV PYENV_ROOT=/root/.pyenv \
     PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH
 RUN curl https://pyenv.run | bash

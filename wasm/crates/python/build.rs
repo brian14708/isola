@@ -39,12 +39,10 @@ fn main() {
             panic!("Failed to run cmake {:?}", e);
         }
 
+        println!("cargo:rustc-link-arg=-shared");
         let libpython_binary = "python3.13";
-
         let lib_paths = vec!["lib"];
-
         let libs = vec![libpython_binary];
-
         for lib_path in &lib_paths {
             let mut dst = outdir.clone();
             dst.push(lib_path);

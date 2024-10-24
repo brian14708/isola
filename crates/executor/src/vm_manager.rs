@@ -9,13 +9,18 @@ use std::{
 };
 
 use anyhow::anyhow;
+use component_init::Invoker;
+use futures_util::FutureExt;
 use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{info, level_filters::LevelFilter};
-use wasmtime::{component::Component, Config, Engine};
+use wasmtime::{
+    component::{Component, Instance},
+    Config, Engine, Store,
+};
 
 use crate::{
     error::{Error, Result},
@@ -77,12 +82,49 @@ impl<E> VmManager<E> {
         config
     }
 
-    pub fn compile(path: &Path) -> Result<()> {
+    pub async fn compile(path: &Path) -> anyhow::Result<()> {
+        let data = std::fs::read(path)?;
+        let data = component_init::initialize(&data, |instrumented| {
+            async move {
+                let mut config = Self::cfg();
+                config
+                    .epoch_interruption(false)
+                    .cranelift_opt_level(wasmtime::OptLevel::None);
+                let engine = Engine::new(&config)?;
+                let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
+                let component = Component::new(&engine, &instrumented)?;
+                let linker = VmState::new_linker(&engine)?;
+                let mut store = VmState::new(&engine, workdir.path(), MAX_MEMORY, MockEnv {});
+
+                let pre = linker.instantiate_pre(&component)?;
+                let binding = pre.instantiate_async(&mut store).await?;
+                let (_, idx) = component
+                    .export_index(None, "promptkit:script/guest")
+                    .ok_or_else(|| anyhow!("missing promptkit:script/guest"))?;
+                let (_, idx) = component
+                    .export_index(Some(&idx), "initialize")
+                    .ok_or_else(|| anyhow!("missing promptkit:script/guest.initialize"))?;
+                let func = binding
+                    .get_typed_func::<(bool,), ()>(&mut store, idx)
+                    .map_err(anyhow::Error::from)?;
+                func.call_async(&mut store, (true,)).await?;
+                func.post_return_async(&mut store).await?;
+
+                Ok(Box::new(MyInvoker {
+                    store,
+                    instance: binding,
+                }) as Box<dyn Invoker>)
+            }
+            .boxed()
+        })
+        .await?;
+
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
-        let component = Component::from_file(&engine, path)?;
+        let component = Component::new(&engine, &data)?;
+        println!("Serializing...");
         let data = component.serialize()?;
-        std::fs::write(path.with_extension("wasm.cache"), data).map_err(anyhow::Error::from)?;
+        std::fs::write(path.with_extension("wasm.cache"), data)?;
         Ok(())
     }
 }
@@ -152,6 +194,10 @@ where
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
+        bindings
+            .promptkit_script_guest()
+            .call_initialize(&mut store, false)
+            .await?;
         Ok(Vm {
             hash,
             store,
@@ -345,5 +391,102 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
         } else {
             Poll::Pending
         }
+    }
+}
+
+struct MyInvoker<S> {
+    store: Store<VmState<S>>,
+    instance: Instance,
+}
+
+#[async_trait::async_trait]
+impl<S: Send> Invoker for MyInvoker<S> {
+    async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
+        let func = self
+            .instance
+            .get_typed_func::<(), (i32,)>(&mut self.store, function)?;
+        let result = func.call_async(&mut self.store, ()).await?.0;
+        func.post_return_async(&mut self.store).await?;
+        Ok(result)
+    }
+
+    async fn call_s64(&mut self, function: &str) -> anyhow::Result<i64> {
+        let func = self
+            .instance
+            .get_typed_func::<(), (i64,)>(&mut self.store, function)?;
+        let result = func.call_async(&mut self.store, ()).await?.0;
+        func.post_return_async(&mut self.store).await?;
+        Ok(result)
+    }
+
+    async fn call_f32(&mut self, function: &str) -> anyhow::Result<f32> {
+        let func = self
+            .instance
+            .get_typed_func::<(), (f32,)>(&mut self.store, function)?;
+        let result = func.call_async(&mut self.store, ()).await?.0;
+        func.post_return_async(&mut self.store).await?;
+        Ok(result)
+    }
+
+    async fn call_f64(&mut self, function: &str) -> anyhow::Result<f64> {
+        let func = self
+            .instance
+            .get_typed_func::<(), (f64,)>(&mut self.store, function)?;
+        let result = func.call_async(&mut self.store, ()).await?.0;
+        func.post_return_async(&mut self.store).await?;
+        Ok(result)
+    }
+
+    async fn call_list_u8(&mut self, function: &str) -> anyhow::Result<Vec<u8>> {
+        let func = self
+            .instance
+            .get_typed_func::<(), (Vec<u8>,)>(&mut self.store, function)?;
+        let result = func.call_async(&mut self.store, ()).await?.0;
+        func.post_return_async(&mut self.store).await?;
+        Ok(result)
+    }
+}
+
+struct MockEnv {}
+
+impl Env for MockEnv {
+    type Error = anyhow::Error;
+
+    fn hash(&self, _update: impl FnMut(&[u8])) {}
+
+    #[allow(clippy::manual_async_fn)]
+    fn send_request_http<B>(
+        &self,
+        _request: http::Request<B>,
+    ) -> impl Future<
+        Output = Result<
+            http::Response<
+                Pin<
+                    Box<
+                        dyn futures_core::Stream<
+                                Item = Result<http_body::Frame<bytes::Bytes>, Self::Error>,
+                            > + Send
+                            + Sync
+                            + 'static,
+                    >,
+                >,
+            >,
+            Self::Error,
+        >,
+    > + Send
+           + 'static
+    where
+        B: http_body::Body + Send + Sync + 'static,
+        B::Error: std::error::Error + Send + Sync,
+        B::Data: Send,
+    {
+        async { todo!() }
+    }
+
+    async fn get_tokenizer(
+        &self,
+        _name: &str,
+    ) -> Result<Arc<dyn promptkit_llm::tokenizers::Tokenizer + Send + Sync>, Self::Error> {
+        todo!()
     }
 }

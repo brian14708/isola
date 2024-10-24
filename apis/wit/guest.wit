@@ -17,6 +17,7 @@ interface guest {
         value: value,
     }
 
+    initialize: func(%preinit: bool) -> ();
     set-log-level: func(%level: option<level>) -> ();
     eval-bundle: func(%bundle-path: string, entrypoint: string) -> result<_, error>;
     eval-script: func(%script: string) -> result<_, error>;
