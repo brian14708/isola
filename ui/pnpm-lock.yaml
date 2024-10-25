@@ -111,8 +111,8 @@ importers:
         specifier: ^4.0.0
         version: 4.0.5(svelte@5.1.0)(typescript@5.6.3)
       svelte-radix:
-        specifier: ^1.1.0
-        version: 1.1.1(svelte@5.1.0)
+        specifier: ^2.0.0
+        version: 2.0.0(svelte@5.1.0)
       sveltekit-superforms:
         specifier: ^2.16.0
         version: 2.20.0(@sveltejs/kit@2.7.2(@sveltejs/vite-plugin-svelte@4.0.0(svelte@5.1.0)(vite@5.4.9))(svelte@5.1.0)(vite@5.4.9))(@types/json-schema@7.0.15)(svelte@5.1.0)(typescript@5.6.3)
@@ -1901,10 +1901,11 @@ packages:
       svelte:
         optional: true
 
-  svelte-radix@1.1.1:
-    resolution: {integrity: sha512-TCbV7fzlJ2aEUB0nu2EodVA+r1eYj526IYpmGUTV32Z0bIrCUvx3K8xX3tcxR5dDFA5ZBU1Hxr4RYC4TDFEQ4A==}
+  svelte-radix@2.0.0:
+    resolution: {integrity: sha512-p+q+/X9MmD3031jlQs2ynsnDiGvKL6UAZ1l3PdgIpzFmQMJh0HsHCvpicLEtMNwQAlg+gYcDmCPYaLjsqOFRUQ==}
+    engines: {node: '>=18.0.0', npm: '>=7.0.0'}
     peerDependencies:
-      svelte: ^3.54.0 || ^4.0.0 || ^5.0.0 || ^5.0.0-next.1
+      svelte: ^5.0.0
 
   svelte@5.1.0:
     resolution: {integrity: sha512-qD0pUvL3P26Vx+K1VodZROSu7MjDHFDunEVZ+2d3LUDWHyYI87AJFOIws0HufKWHDgXbPO4FCSugmysnX4LDwA==}
@@ -3802,7 +3803,7 @@ snapshots:
     optionalDependencies:
       svelte: 5.1.0
 
-  svelte-radix@1.1.1(svelte@5.1.0):
+  svelte-radix@2.0.0(svelte@5.1.0):
     dependencies:
       svelte: 5.1.0
 
