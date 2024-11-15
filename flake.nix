@@ -41,30 +41,33 @@
       in
       {
         formatter = pkgs.nixfmt-rfc-style;
-        devShells.default = mkShell {
-          buildInputs =
-            with pkgs;
-            [
-              nodejs
-              pnpm
-              svelte-language-server
+        devShells.default =
+          (pkgs.buildFHSUserEnv {
+            name = "devshell";
+            targetPkgs =
+              pkgs:
+              with pkgs;
+              [
+                nodejs
+                pnpm
+                svelte-language-server
 
-              (python313.withPackages (ps: with ps; [ pip ]))
+                (python313.withPackages (ps: with ps; [ pip ]))
 
-              cmake
-              protobuf_28
-              pkg-config
-              gcc
-              rust-analyzer
-              rust-toolchain
-            ]
-            ++ lib.optional stdenv.isDarwin [
-              darwin.apple_sdk.frameworks.Security
-              darwin.apple_sdk.frameworks.CoreFoundation
-              darwin.apple_sdk.frameworks.SystemConfiguration
-              libiconv
-            ];
-        };
+                cmake
+                protobuf_28
+                pkg-config
+                gcc
+                rust-analyzer
+                rust-toolchain
+              ]
+              ++ lib.optional stdenv.isDarwin [
+                darwin.apple_sdk.frameworks.Security
+                darwin.apple_sdk.frameworks.CoreFoundation
+                darwin.apple_sdk.frameworks.SystemConfiguration
+                libiconv
+              ];
+          }).env;
       }
     );
 
