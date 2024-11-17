@@ -13,7 +13,7 @@ use futures_core::Stream;
 use futures_util::StreamExt;
 use http::{HeaderName, HeaderValue};
 use http_body_util::BodyExt;
-use opentelemetry_semantic_conventions::trace;
+use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project::pin_project;
 use promptkit_llm::tokenizers::Tokenizer;
 use tracing::{field::Empty, span, Instrument};

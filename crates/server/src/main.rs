@@ -48,10 +48,15 @@ async fn main() -> anyhow::Result<()> {
             }
             u.to_string()
         };
-        let provider = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(opentelemetry_otlp::new_exporter().http().with_endpoint(e))
-            .with_trace_config(
+        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
+            .with_batch_exporter(
+                opentelemetry_otlp::SpanExporter::builder()
+                    .with_http()
+                    .with_endpoint(e)
+                    .build()?,
+                opentelemetry_sdk::runtime::Tokio,
+            )
+            .with_config(
                 trace::Config::default()
                     .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
                     .with_id_generator(RandomIdGenerator::default())
@@ -60,7 +65,7 @@ async fn main() -> anyhow::Result<()> {
                         "promptkit",
                     )])),
             )
-            .install_batch(opentelemetry_sdk::runtime::Tokio)?;
+            .build();
         global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
             Box::new(TraceContextPropagator::new()),
             Box::new(BaggagePropagator::new()),

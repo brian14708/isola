@@ -3,7 +3,7 @@ use std::time::Duration;
 use http::{Response, Uri};
 use opentelemetry::trace::{TraceContextExt, TraceId};
 use opentelemetry_sdk::trace::RandomIdGenerator;
-use opentelemetry_semantic_conventions::trace;
+use opentelemetry_semantic_conventions::attribute as trace;
 use tower_http::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
     trace::{DefaultOnBodyChunk, DefaultOnEos, DefaultOnRequest, OnFailure, OnResponse},
