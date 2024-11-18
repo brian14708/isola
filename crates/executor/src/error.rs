@@ -4,7 +4,7 @@ pub use crate::vm::exports::ErrorCode;
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("[{}] {1}", error_code_to_string(*.0))]
+    #[error("[{code}] {1}", code = error_code_to_string(*.0))]
     ExecutionError(ErrorCode, String),
 
     #[error(transparent)]
