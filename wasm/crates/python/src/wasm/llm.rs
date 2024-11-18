@@ -40,8 +40,8 @@ impl Tokenizer {
             )
         };
         let py = slf.py();
-        let bytes = PyByteArray::new_bound(py, raw);
-        let mem = PyMemoryView::from_bound(&bytes)?;
+        let bytes = PyByteArray::new(py, raw);
+        let mem = PyMemoryView::from(&bytes)?;
         let obj = mem.call_method1("cast", (intern!(py, "I"),))?;
         Ok(obj.into())
     }

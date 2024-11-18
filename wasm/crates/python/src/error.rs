@@ -25,7 +25,7 @@ impl Error {
         let e = e.into();
         Error::PythonError {
             cause: e.to_string(),
-            traceback: e.traceback_bound(py).and_then(|e| e.format().ok()),
+            traceback: e.traceback(py).and_then(|e| e.format().ok()),
         }
     }
 }

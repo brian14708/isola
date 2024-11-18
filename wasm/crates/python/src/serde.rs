@@ -2,7 +2,7 @@ use std::io::{BufWriter, Write};
 
 use pyo3::{
     types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple},
-    Bound, IntoPy, PyAny, PyObject, PyTypeInfo, Python,
+    Bound, IntoPyObject, PyAny, PyObject, PyTypeInfo, Python,
 };
 use serde::{
     de::{DeserializeSeed, Visitor},
@@ -41,147 +41,147 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_i8<E>(self, v: i8) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_i16<E>(self, v: i16) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_i32<E>(self, v: i32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_i128<E>(self, v: i128) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_u128<E>(self, v: u128) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_f32<E>(self, v: f32) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_char<E>(self, v: char) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(v.into_py(self.py))
+        Ok(v.into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_none<E>(self) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(().into_py(self.py))
+        Ok(().into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -192,18 +192,28 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
         while let Some(elem) = seq.next_element_seed(self)? {
             elems.push(elem);
         }
-        Ok(elems.into_py(self.py))
+        Ok(elems
+            .into_pyobject(self.py)
+            .unwrap()
+            .as_any()
+            .clone()
+            .unbind())
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
-        let dict = PyDict::new_bound(self.py);
+        let dict = PyDict::new(self.py);
         while let Some((key, value)) = map.next_entry_seed(self, self)? {
             dict.set_item(key, value).unwrap();
         }
-        Ok(dict.into_py(self.py))
+        Ok(dict
+            .into_pyobject(self.py)
+            .unwrap()
+            .as_any()
+            .clone()
+            .unbind())
     }
 
     fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -217,7 +227,7 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
     where
         E: serde::de::Error,
     {
-        Ok(().into_py(self.py))
+        Ok(().into_pyobject(self.py).unwrap().as_any().clone().unbind())
     }
 
     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
@@ -295,7 +305,7 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
             serializer.serialize_bool(b)
         } else if self.pyobject.is_none() {
             serializer.serialize_none()
-        } else if PyFloat::is_exact_type_of_bound(&self.pyobject) {
+        } else if PyFloat::is_exact_type_of(&self.pyobject) {
             if let Ok(i) = self.pyobject.extract::<f64>() {
                 serializer.serialize_f64(i)
             } else {
@@ -304,7 +314,7 @@ impl<'s> serde::Serialize for PyObjectSerializer<'s> {
                     self.pyobject.get_type()
                 )))
             }
-        } else if PyInt::is_exact_type_of_bound(&self.pyobject) {
+        } else if PyInt::is_exact_type_of(&self.pyobject) {
             if let Ok(i) = self.pyobject.extract::<i32>() {
                 serializer.serialize_i32(i)
             } else if let Ok(i) = self.pyobject.extract::<i64>() {
@@ -388,8 +398,7 @@ mod tests {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             let mut v = vec![];
-            PyObjectSerializer::to_json_writer(&mut v, PyList::new_bound(py, [1]).into_any())
-                .unwrap();
+            PyObjectSerializer::to_json_writer(&mut v, PyList::new(py, [1]).into_any()).unwrap();
             assert_eq!(v, json!([1]).to_string().into_bytes());
 
             let p = u64::MAX.to_object(py);
@@ -400,7 +409,7 @@ mod tests {
             v.clear();
             assert!(PyObjectSerializer::to_json_writer(&mut v, p).is_err());
             #[allow(clippy::cast_precision_loss)]
-            let p = PyFloat::new_bound(py, u64::MAX as f64 + 1.0);
+            let p = PyFloat::new(py, u64::MAX as f64 + 1.0);
             v.clear();
             assert!(PyObjectSerializer::to_json_writer(&mut v, p.into_any()).is_ok());
         });

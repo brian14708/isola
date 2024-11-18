@@ -37,8 +37,8 @@ impl Scope {
     pub fn new() -> Self {
         prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let locals = PyDict::new_bound(py);
-            let stdio = if let Ok(sys) = PyModule::import_bound(py, intern!(py, "sys")) {
+            let locals = PyDict::new(py);
+            let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
                 if let Ok(path) = sys.getattr(intern!(py, "path")) {
                     let path = path.downcast_exact::<PyList>().ok();
                     if let Some(path) = path {
@@ -49,7 +49,10 @@ impl Scope {
                     sys.getattr(intern!(py, "stdout")),
                     sys.getattr(intern!(py, "stderr")),
                 ) {
-                    Some((stdout.to_object(py), stderr.to_object(py)))
+                    Some((
+                        stdout.into_pyobject(py).unwrap().into(),
+                        stderr.into_pyobject(py).unwrap().into(),
+                    ))
                 } else {
                     None
                 }
@@ -58,7 +61,7 @@ impl Scope {
             };
 
             Scope {
-                locals: locals.to_object(py),
+                locals: locals.into_pyobject(py).unwrap().into(),
                 stdio,
             }
         })
@@ -77,8 +80,8 @@ impl Scope {
 
     pub fn load_zip(&mut self, p: &str, entrypoint: &str) -> crate::error::Result<()> {
         Python::with_gil(|py| {
-            let sys = PyModule::import_bound(py, intern!(py, "sys"))
-                .map_err(|e| Error::from_pyerr(py, e))?;
+            let sys =
+                PyModule::import(py, intern!(py, "sys")).map_err(|e| Error::from_pyerr(py, e))?;
             let binding = sys
                 .getattr(intern!(py, "path"))
                 .map_err(|e| Error::from_pyerr(py, e))?;
@@ -87,17 +90,18 @@ impl Scope {
                 .map_err(|e| Error::from_pyerr(py, e))?;
             path.insert(0, p).map_err(|e| Error::from_pyerr(py, e))?;
             let module = py
-                .import_bound(PyString::new_bound(py, entrypoint))
+                .import(PyString::new(py, entrypoint))
                 .map_err(|e| Error::from_pyerr(py, e))?;
-            self.locals = module.dict().to_object(py);
+            self.locals = module.dict().into_pyobject(py).unwrap().into();
             Ok(())
         })
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
         Python::with_gil(|py| {
-            py.run_bound(
-                code,
+            let code = std::ffi::CString::new(code).unwrap();
+            py.run(
+                &code,
                 Some(
                     self.locals
                         .downcast_bound(py)
@@ -112,16 +116,16 @@ impl Scope {
 
     fn is_serializable(pyobject: &Bound<'_, PyAny>) -> bool {
         pyobject.is_none()
-            || PyDict::is_exact_type_of_bound(pyobject)
-            || PyList::is_exact_type_of_bound(pyobject)
-            || PyTuple::is_exact_type_of_bound(pyobject)
-            || PyString::is_exact_type_of_bound(pyobject)
-            || PyBool::is_exact_type_of_bound(pyobject)
-            || PyInt::is_exact_type_of_bound(pyobject)
-            || PyFloat::is_exact_type_of_bound(pyobject)
-            || PyBytes::is_exact_type_of_bound(pyobject)
-            || PyByteArray::is_exact_type_of_bound(pyobject)
-            || PyMemoryView::is_exact_type_of_bound(pyobject)
+            || PyDict::is_exact_type_of(pyobject)
+            || PyList::is_exact_type_of(pyobject)
+            || PyTuple::is_exact_type_of(pyobject)
+            || PyString::is_exact_type_of(pyobject)
+            || PyBool::is_exact_type_of(pyobject)
+            || PyInt::is_exact_type_of(pyobject)
+            || PyFloat::is_exact_type_of(pyobject)
+            || PyBytes::is_exact_type_of(pyobject)
+            || PyByteArray::is_exact_type_of(pyobject)
+            || PyMemoryView::is_exact_type_of(pyobject)
     }
 
     pub fn run<'a, U>(
@@ -147,7 +151,7 @@ impl Scope {
             };
 
             let obj = if f.is_callable() {
-                let args = PyTuple::new_bound(
+                let args = PyTuple::new(
                     py,
                     positional
                         .into_iter()
@@ -158,7 +162,9 @@ impl Scope {
                             InputValue::JsonStr(v) => Ok(PyObjectDeserializer::new(py)
                                 .deserialize(&mut serde_json::Deserializer::from_str(&v))
                                 .map_err(|_| Error::UnexpectedError("serde error"))?),
-                            InputValue::Iter(it) => Ok(it.into_py(py)),
+                            InputValue::Iter(it) => {
+                                Ok(it.into_pyobject(py).unwrap().into_any().into())
+                            }
                             InputValue::Cbor(v) => {
                                 let c = SliceReader::new(v.as_ref());
                                 Ok(PyObjectDeserializer::new(py)
@@ -167,8 +173,9 @@ impl Scope {
                             }
                         })
                         .collect::<Result<Vec<_>>>()?,
-                );
-                let kwargs = PyDict::new_bound(py);
+                )
+                .map_err(|_| Error::UnexpectedError("pyo3 error"))?;
+                let kwargs = PyDict::new(py);
                 for (k, v) in named {
                     match v {
                         InputValue::Json(v) => {
@@ -203,7 +210,7 @@ impl Scope {
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
                         InputValue::Iter(it) => kwargs
-                            .set_item(k, it.into_py(py))
+                            .set_item(k, it.into_pyobject(py).unwrap())
                             .map_err(|e| Error::from_pyerr(py, e))?,
                     }
                 }
@@ -218,7 +225,7 @@ impl Scope {
                 || obj.hasattr("__aiter__").unwrap_or_default()
             {
                 let module = py
-                    .import_bound(intern!(py, "promptkit.asyncio"))
+                    .import(intern!(py, "promptkit.asyncio"))
                     .expect("failed to import promptkit.asyncio");
                 module
                     .getattr(intern!(py, "run"))
@@ -245,7 +252,7 @@ impl Scope {
             }
 
             let mut ret: Option<Vec<u8>> = None;
-            if let Ok(iter) = obj.iter() {
+            if let Ok(iter) = obj.try_iter() {
                 for el in iter {
                     let mut tmp = PyObjectSerializer::to_cbor(
                         std::mem::take(&mut ret).unwrap_or_default(),
@@ -266,7 +273,7 @@ impl Scope {
     pub fn analyze(&self, request: InputValue<'_>) -> Result<Option<Vec<u8>>> {
         Python::with_gil(|py| {
             let module = py
-                .import_bound(intern!(py, "promptkit._analyze"))
+                .import(intern!(py, "promptkit._analyze"))
                 .expect("failed to import promptkit._analyze");
             let dict: &Bound<'_, PyDict> = self
                 .locals

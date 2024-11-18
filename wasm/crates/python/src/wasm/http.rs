@@ -235,7 +235,7 @@ impl PyResponse {
     #[allow(clippy::needless_pass_by_value)]
     fn headers(slf: PyRef<'_, Self>) -> PyResult<Bound<'_, PyDict>> {
         let hdrs = slf.response.as_ref().expect("response closed").headers();
-        let d = PyDict::new_bound(slf.py());
+        let d = PyDict::new(slf.py());
         for (k, v) in hdrs.entries() {
             d.set_item(
                 k,

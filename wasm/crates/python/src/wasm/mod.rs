@@ -200,7 +200,11 @@ impl ArgIter {
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
                             })?
-                            .to_object(py),
+                            .into_pyobject(py)
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
+                            })?
+                            .into(),
                     ))
                 }
                 host::Value::Iterator(_) => todo!(),
@@ -216,7 +220,7 @@ impl ArgIter {
     fn __aiter__(slf: Bound<'_, Self>) -> PyResult<Bound<'_, PyAny>> {
         let py = slf.py();
         let module = py
-            .import_bound(intern!(py, "promptkit.asyncio"))
+            .import(intern!(py, "promptkit.asyncio"))
             .expect("failed to import promptkit.asyncio");
         module
             .getattr(intern!(py, "_aiter_arg"))
@@ -235,7 +239,11 @@ impl ArgIter {
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
                             })?
-                            .to_object(py),
+                            .into_pyobject(py)
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
+                            })?
+                            .into(),
                     ))
                 }
                 host::Value::Iterator(_) => todo!(),
@@ -246,7 +254,13 @@ impl ArgIter {
                     e.to_debug_string(),
                 ))
             }
-            None => Ok(Some(PyPollable::from(self.iter.subscribe()).into_py(py))),
+            None => Ok(Some(
+                PyPollable::from(self.iter.subscribe())
+                    .into_pyobject(py)
+                    .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error"))?
+                    .into_any()
+                    .into(),
+            )),
         }
     }
 }

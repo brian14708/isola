@@ -3,7 +3,7 @@ use std::{collections::VecDeque, io::Read};
 use eventsource::event::parse_event_line;
 use pyo3::{
     types::{PyBytes, PyList, PyString},
-    Bound, PyAny, PyErr, PyResult, Python, ToPyObject,
+    Bound, IntoPyObject, PyAny, PyErr, PyResult, Python,
 };
 use serde::de::DeserializeSeed;
 
@@ -104,7 +104,7 @@ impl BodyBuffer for Bytes {
             return Ok(None);
         }
         Ok(Some(
-            PyBytes::new_bound_with(py, self.buffer.len(), |dest| {
+            PyBytes::new_with(py, self.buffer.len(), |dest| {
                 dest.copy_from_slice(&std::mem::take(&mut self.buffer));
                 Ok(())
             })
@@ -153,7 +153,7 @@ impl BodyBuffer for Lines {
         };
 
         Ok(Some(
-            PyString::new_bound(
+            PyString::new(
                 py,
                 &String::from_utf8(b)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?,
@@ -171,7 +171,7 @@ impl BodyBuffer for Lines {
         while let Some(obj) = self.decode(py)? {
             results.push(obj);
         }
-        Ok(Some(PyList::new_bound(py, results).into_any()))
+        Ok(Some(PyList::new(py, results)?.into_any()))
     }
 
     fn close(&mut self) {
@@ -244,7 +244,7 @@ impl BodyBuffer for Text {
         }
 
         Ok(Some(
-            PyString::new_bound(
+            PyString::new(
                 py,
                 &String::from_utf8(std::mem::take(&mut self.buffer))
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?,
@@ -299,8 +299,8 @@ impl BodyBuffer for ServerSentEvent {
                     if self.buffer.is_empty() {
                         if !self.event.is_empty() {
                             let evt = (&self.event.id, &self.event.event_type, &self.event.data)
-                                .to_object(py)
-                                .into_bound(py);
+                                .into_pyobject(py)?
+                                .into_any();
                             self.event.clear();
                             return Ok(Some(evt));
                         }
@@ -320,8 +320,8 @@ impl BodyBuffer for ServerSentEvent {
                 | eventsource::event::ParseResult::SetRetry(_) => continue,
                 eventsource::event::ParseResult::Dispatch => {
                     let evt = (&self.event.id, &self.event.event_type, &self.event.data)
-                        .to_object(py)
-                        .into_bound(py);
+                        .into_pyobject(py)?
+                        .into_any();
                     self.event.clear();
                     return Ok(Some(evt));
                 }
@@ -338,7 +338,7 @@ impl BodyBuffer for ServerSentEvent {
         while let Some(obj) = self.decode(py)? {
             results.push(obj);
         }
-        Ok(Some(PyList::new_bound(py, results).into_any()))
+        Ok(Some(PyList::new(py, results)?.into_any()))
     }
 
     fn close(&mut self) {
