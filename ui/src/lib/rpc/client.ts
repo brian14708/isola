@@ -5,7 +5,6 @@ import type { DescService } from "@bufbuild/protobuf";
 const transport = createGrpcWebTransport({
 	baseUrl: "/",
 	useBinaryFormat: true,
-	credentials: "include",
 	interceptors: [],
 });
 

@@ -9,7 +9,6 @@
 	import { Checkbox } from "$lib/components/ui/checkbox";
 	import { Textarea } from "$lib/components/ui/textarea";
 	import client from "$lib/rpc/client";
-	import type { PromiseClient } from "@connectrpc/connect";
 	import {
 		ContentType,
 		MethodInfoSchema,
@@ -76,7 +75,7 @@
 		return d;
 	}
 
-	let cli: PromiseClient<typeof ScriptService>;
+	let cli: ReturnType<typeof client<typeof ScriptService>>;
 	$effect(() => {
 		cli = client(ScriptService);
 	});
