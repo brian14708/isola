@@ -31,13 +31,6 @@
             targets.wasm32-wasip1.stable.rust-std
           ]
         );
-        mkShell = pkgs.mkShell.override {
-          stdenv =
-            if pkgs.stdenv.isLinux then
-              pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv
-            else
-              pkgs.clangStdenv;
-        };
       in
       {
         formatter = pkgs.nixfmt-rfc-style;
@@ -55,6 +48,7 @@
                 (python313.withPackages (ps: with ps; [ pip ]))
 
                 cmake
+                buf
                 protobuf_28
                 pkg-config
                 gcc
