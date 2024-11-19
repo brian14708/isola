@@ -3,7 +3,6 @@
 mod body_buffer;
 mod future;
 mod http;
-mod llm;
 mod logging;
 
 use std::cell::RefCell;
@@ -75,8 +74,6 @@ impl guest::Guest for Global {
                 append_to_inittab!(http_module);
                 use logging::logging_module;
                 append_to_inittab!(logging_module);
-                use llm::llm_module;
-                append_to_inittab!(llm_module);
                 append_to_inittab!(sys_module);
 
                 let v = Scope::new();

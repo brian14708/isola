@@ -482,11 +482,4 @@ impl Env for MockEnv {
     {
         async { todo!() }
     }
-
-    async fn get_tokenizer(
-        &self,
-        _name: &str,
-    ) -> Result<Arc<dyn promptkit_llm::tokenizers::Tokenizer + Send + Sync>, Self::Error> {
-        todo!()
-    }
 }

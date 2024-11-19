@@ -1,8 +1,6 @@
-use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-use promptkit_llm::tokenizers::Tokenizer;
 
 pub trait Env {
     type Error: std::fmt::Display + Send + Sync + 'static;
@@ -33,9 +31,4 @@ pub trait Env {
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send;
-
-    fn get_tokenizer(
-        &self,
-        _name: &str,
-    ) -> impl Future<Output = Result<Arc<dyn Tokenizer + Send + Sync>, Self::Error>> + Send;
 }

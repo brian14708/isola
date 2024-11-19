@@ -10,8 +10,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &[
                 "../../apis/proto/promptkit/script/v1/service.proto",
                 "../../apis/proto/promptkit/script/v1/error_code.proto",
-                "../../apis/proto/promptkit/llm/v1/llm.proto",
-                "../../apis/proto/promptkit/common/v1/common.proto",
             ],
             &["../../apis/proto"],
         )?;

@@ -1,9 +1,0 @@
-syntax = "proto3";
-package promptkit.common.v1;
-
-message RemoteFile {
-  string url = 1;
-
-  // The digest of the file "sha256:<hex>"
-  string digest = 2;
-}
