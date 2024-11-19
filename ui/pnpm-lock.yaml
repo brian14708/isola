@@ -87,8 +87,8 @@ importers:
         specifier: ^2.2.3
         version: 2.2.3
       mode-watcher:
-        specifier: ^0.4.0
-        version: 0.4.1(svelte@5.2.2)
+        specifier: ^0.5.0
+        version: 0.5.0(svelte@5.2.2)
       postcss:
         specifier: ^8.4.39
         version: 8.4.49
@@ -1535,8 +1535,8 @@ packages:
   mlly@1.7.3:
     resolution: {integrity: sha512-xUsx5n/mN0uQf4V548PKQ+YShA4/IW0KI1dZhrNrPCLG+xizETbHTkOa1f8/xut9JRPp8kQuMnz0oqwkTiLo/A==}
 
-  mode-watcher@0.4.1:
-    resolution: {integrity: sha512-bNC+1NXmwEFZtziCdZSgP7HFQTpqJPcQn9GwwJQGSf6SBF3neEPYV1uRwkYuAQwbsvsXIYtzaqgedDzJ7D1mhg==}
+  mode-watcher@0.5.0:
+    resolution: {integrity: sha512-5E6fh/aXhAVv+U+DbeM0hCmskQE9u7WSmvnCRijJB/MJu7HtB73sjiCaZ9n1M8QHmzLrBFo8XBAUcWXkDm8Z9A==}
     peerDependencies:
       svelte: ^4.0.0 || ^5.0.0-next.1
 
@@ -3528,7 +3528,7 @@ snapshots:
       pkg-types: 1.2.1
       ufo: 1.5.4
 
-  mode-watcher@0.4.1(svelte@5.2.2):
+  mode-watcher@0.5.0(svelte@5.2.2):
     dependencies:
       svelte: 5.2.2
 
