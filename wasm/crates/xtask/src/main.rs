@@ -65,10 +65,17 @@ fn build_python(sh: &Shell) -> Result<()> {
         |_, _| {
             let _ = remove_dir_all("target/{TARGET}/python-deps");
 
-            cmd!(
+            let r = cmd!(
                 sh,
-                "python3 -m pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
+                "uv pip install -U --system -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
+            ).run();
+
+            if r.is_err() {
+                cmd!(
+                sh,
+                "pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
             ).run()?;
+            }
 
             Ok(())
         },

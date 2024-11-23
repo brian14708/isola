@@ -45,7 +45,8 @@
                 pnpm
                 svelte-language-server
 
-                (python313.withPackages (ps: with ps; [ pip ]))
+                python313
+                uv
 
                 cmake
                 buf
