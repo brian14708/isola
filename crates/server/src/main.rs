@@ -10,7 +10,7 @@ use opentelemetry::{
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     propagation::{BaggagePropagator, TraceContextPropagator},
-    trace::{self, RandomIdGenerator, Sampler},
+    trace::{RandomIdGenerator, Sampler},
     Resource,
 };
 use opentelemetry_semantic_conventions::resource;
@@ -56,15 +56,12 @@ async fn main() -> anyhow::Result<()> {
                     .build()?,
                 opentelemetry_sdk::runtime::Tokio,
             )
-            .with_config(
-                trace::Config::default()
-                    .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
-                    .with_id_generator(RandomIdGenerator::default())
-                    .with_resource(Resource::new(vec![KeyValue::new(
-                        resource::SERVICE_NAME,
-                        "promptkit",
-                    )])),
-            )
+            .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
+            .with_id_generator(RandomIdGenerator::default())
+            .with_resource(Resource::new(vec![KeyValue::new(
+                resource::SERVICE_NAME,
+                "promptkit",
+            )]))
             .build();
         global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
             Box::new(TraceContextPropagator::new()),
