@@ -298,46 +298,56 @@
 		<div class="col-span-2 row-span-3 overflow-auto rounded-md border p-4">
 			<form method="POST" use:enhance class="space-y-6">
 				<Form.Field {form} name="arguments">
-					<Form.Control let:attrs>
-						<Form.Label>Arguments</Form.Label>
-						<Textarea
-							{...attrs}
-							class="resize-none font-mono"
-							rows={6}
-							bind:value={$formData.arguments}
-						/>
+					<Form.Control>
+						{#snippet children({ props })}
+							<Form.Label>Arguments</Form.Label>
+							<Textarea
+								{...props}
+								class="resize-none font-mono"
+								rows={6}
+								bind:value={$formData.arguments}
+							/>
+						{/snippet}
 					</Form.Control>
 					<Form.FieldErrors />
 				</Form.Field>
 				<Form.Field {form} name="method">
-					<Form.Control let:attrs>
-						<Form.Label>Method</Form.Label>
-						<Input {...attrs} bind:value={$formData.method} />
+					<Form.Control>
+						{#snippet children({ props })}
+							<Form.Label>Method</Form.Label>
+							<Input {...props} bind:value={$formData.method} />
+						{/snippet}
 					</Form.Control>
 					<Form.FieldErrors />
 				</Form.Field>
 				<Form.Field {form} name="timeout">
-					<Form.Control let:attrs>
-						<Form.Label>Timeout</Form.Label>
-						<Input {...attrs} type="number" min={0.1} step=".01" bind:value={$formData.timeout} />
+					<Form.Control>
+						{#snippet children({ props })}
+							<Form.Label>Timeout</Form.Label>
+							<Input {...props} type="number" min={0.1} step=".01" bind:value={$formData.timeout} />
+						{/snippet}
 					</Form.Control>
 					<Form.FieldErrors />
 				</Form.Field>
 				<Form.Field {form} name="stream" class="flex items-center space-x-2 space-y-0">
-					<Form.Control let:attrs>
-						<Checkbox {...attrs} bind:checked={$formData.stream} />
-						<Form.Label>Stream</Form.Label>
+					<Form.Control>
+						{#snippet children({ props })}
+							<Checkbox {...props} bind:checked={$formData.stream} />
+							<Form.Label>Stream</Form.Label>
+						{/snippet}
 					</Form.Control>
 				</Form.Field>
 				<Form.Field {form} name="prelude">
-					<Form.Control let:attrs>
-						<Form.Label>Prelude</Form.Label>
-						<Textarea
-							{...attrs}
-							class="resize-none font-mono"
-							rows={6}
-							bind:value={$formData.prelude}
-						/>
+					<Form.Control>
+						{#snippet children({ props })}
+							<Form.Label>Prelude</Form.Label>
+							<Textarea
+								{...props}
+								class="resize-none font-mono"
+								rows={6}
+								bind:value={$formData.prelude}
+							/>
+						{/snippet}
 					</Form.Control>
 					<Form.FieldErrors />
 				</Form.Field>

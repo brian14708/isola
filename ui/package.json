@@ -37,7 +37,7 @@
 		"eslint": "^9.15.0",
 		"eslint-config-prettier": "^9.1.0",
 		"eslint-plugin-svelte": "^2.42.0",
-		"formsnap": "^1.0.1",
+		"formsnap": "^2.0.0",
 		"globals": "^15.8.0",
 		"json5": "^2.2.3",
 		"lucide-svelte": "^0.468.0",
