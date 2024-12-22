@@ -37,7 +37,7 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
     }
 }
 
-pub fn parse_source(source: &Option<Source>) -> Result<ExecSource<'_>, Status> {
+pub fn parse_source(source: Option<&Source>) -> Result<ExecSource<'_>, Status> {
     match source {
         Some(Source {
             source_type: Some(SourceType::ScriptInline(i)),
@@ -229,7 +229,7 @@ struct ProstValueSerializer<'s> {
     value: &'s prost_types::Value,
 }
 
-impl<'s> serde::Serialize for ProstValueSerializer<'s> {
+impl serde::Serialize for ProstValueSerializer<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,

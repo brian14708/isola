@@ -31,7 +31,7 @@ pub struct MakeSpan;
 impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> tracing::Span {
         struct HeaderExtractor<'a>(&'a http::HeaderMap);
-        impl<'a> opentelemetry::propagation::Extractor for HeaderExtractor<'a> {
+        impl opentelemetry::propagation::Extractor for HeaderExtractor<'_> {
             fn get(&self, key: &str) -> Option<&str> {
                 self.0.get(key).and_then(|value| value.to_str().ok())
             }

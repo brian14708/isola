@@ -23,9 +23,7 @@ pub struct VmEnv {
 }
 
 impl VmEnv {
-    pub fn update(
-        &self,
-    ) -> Cow<'_, Self> {
+    pub fn update(&self) -> Cow<'_, Self> {
         Cow::Borrowed(self)
     }
 
@@ -52,7 +50,7 @@ impl VmEnv {
             struct RequestCarrier<'a> {
                 request: &'a mut reqwest::Request,
             }
-            impl<'a> opentelemetry::propagation::Injector for RequestCarrier<'a> {
+            impl opentelemetry::propagation::Injector for RequestCarrier<'_> {
                 fn set(&mut self, key: &str, value: String) {
                     let header_name = HeaderName::from_str(key).expect("Must be header name");
                     let header_value =
@@ -90,8 +88,7 @@ impl VmEnv {
 impl Env for VmEnv {
     type Error = anyhow::Error;
 
-    fn hash(&self, _update: impl FnMut(&[u8])) {
-    }
+    fn hash(&self, _update: impl FnMut(&[u8])) {}
 
     fn send_request_http<B>(
         &self,

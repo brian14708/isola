@@ -264,7 +264,7 @@ impl<'s> PyObjectSerializer<'s> {
     }
 }
 
-impl<'s> serde::Serialize for PyObjectSerializer<'s> {
+impl serde::Serialize for PyObjectSerializer<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -354,7 +354,7 @@ impl PyLogDict<'_> {
     }
 }
 
-impl<'s> serde::Serialize for PyLogDict<'s> {
+impl serde::Serialize for PyLogDict<'_> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
