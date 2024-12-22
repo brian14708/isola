@@ -4,9 +4,9 @@ include(ExternalProject)
 set(PYTHON_VERSION 3.13)
 FetchContent_Declare(
   python-src
-  URL "https://www.python.org/ftp/python/3.13.0/Python-3.13.0.tar.xz"
+  URL "https://www.python.org/ftp/python/3.13.1/Python-3.13.1.tar.xz"
   URL_HASH
-    SHA256=086de5882e3cb310d4dca48457522e2e48018ecd43da9cdf827f6a0759efb07d
+    SHA256=9cf9427bee9e2242e3877dd0f6b641c1853ca461f39d6503ce260a59c80bf0d9
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR})
 FetchContent_MakeAvailable(python-src)
 
