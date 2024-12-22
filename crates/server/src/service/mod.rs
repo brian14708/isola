@@ -1,4 +1,4 @@
-use std::{borrow::Cow, pin::Pin, time::Duration};
+use std::{borrow::Cow, collections::HashMap, pin::Pin, time::Duration};
 
 use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
@@ -256,6 +256,10 @@ impl ScriptService for ScriptServer {
                     if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
                     {
+                        let name = v.name.clone();
+                        let tx = tx
+                            .get_mut(&name)
+                            .ok_or_else(|| Status::invalid_argument("invalid marker arguments"))?;
                         let _ = tx
                             .send(
                                 argument(v)
@@ -362,6 +366,7 @@ impl ScriptService for ScriptServer {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn execute_stream(
         &self,
         mut request: tonic::Request<tonic::Streaming<script::ExecuteStreamRequest>>,
@@ -414,6 +419,10 @@ impl ScriptService for ScriptServer {
                     if let Some(execute_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
                     {
+                        let name = v.name.clone();
+                        let tx = tx
+                            .get_mut(&name)
+                            .ok_or_else(|| Status::invalid_argument("invalid marker arguments"))?;
                         let _ = tx
                             .send(
                                 argument(v)
@@ -521,7 +530,7 @@ struct ParsedSpec<'a> {
     method: String,
     args: Vec<ExecArgument>,
     timeout: Duration,
-    stream_tx: Option<mpsc::Sender<Vec<u8>>>,
+    stream_tx: Option<HashMap<String, mpsc::Sender<Vec<u8>>>>,
     log_level: LevelFilter,
     span: tracing::Span,
     trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
@@ -533,8 +542,7 @@ fn parse_spec<'a>(
     base_env: &'a VmEnv,
 ) -> Result<ParsedSpec<'a>, Status> {
     if let Some(spec) = spec {
-        let (tx, rx) = mpsc::channel(4);
-        let mut rx = Some(rx);
+        let mut streams = HashMap::new();
         let args = std::mem::take(&mut spec.arguments)
             .into_iter()
             .map(|mut a| {
@@ -549,13 +557,16 @@ fn parse_spec<'a>(
                         value: ExecArgumentValue::Cbor(a),
                     }),
                     Ok(Err(Marker::Stream)) => {
-                        if let Some(rx) = rx.take() {
+                        let (tx, rx) = mpsc::channel(4);
+                        let key = name.as_ref().map_or("", |v| v);
+                        if streams.contains_key(key) {
+                            Err(Status::invalid_argument("invalid marker arguments"))
+                        } else {
+                            streams.insert(key.to_string(), tx);
                             Ok(ExecArgument {
                                 name,
                                 value: ExecArgumentValue::CborStream(rx),
                             })
-                        } else {
-                            Err(Status::invalid_argument("invalid marker arguments"))
                         }
                     }
                     Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
@@ -583,7 +594,11 @@ fn parse_spec<'a>(
                 #[allow(clippy::cast_precision_loss)]
                 std::time::Duration::from_secs_f64(t.seconds as f64 + f64::from(t.nanos) * 1e-9)
             }),
-            stream_tx: if rx.is_none() { Some(tx) } else { None },
+            stream_tx: if streams.is_empty() {
+                None
+            } else {
+                Some(streams)
+            },
             span,
             log_level,
             trace_events: trace,

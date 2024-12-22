@@ -14,7 +14,7 @@ use self::wasi::{
 };
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
-use pyo3::{append_to_inittab, intern, prelude::*};
+use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
 use serde::de::DeserializeSeed;
 
 use crate::{
@@ -215,13 +215,9 @@ impl ArgIter {
     }
 
     fn __aiter__(slf: Bound<'_, Self>) -> PyResult<Bound<'_, PyAny>> {
-        let py = slf.py();
-        let module = py
-            .import(intern!(py, "promptkit.asyncio"))
-            .expect("failed to import promptkit.asyncio");
-        module
-            .getattr(intern!(py, "_aiter_arg"))
-            .expect("failed to get asyncio.aiter_arg")
+        static AITER: GILOnceCell<PyObject> = GILOnceCell::new();
+        AITER
+            .import(slf.py(), "promptkit.asyncio", "_aiter_arg")?
             .call1((slf,))
     }
 

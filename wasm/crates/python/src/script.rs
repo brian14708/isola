@@ -6,6 +6,7 @@ use pyo3::{
     intern,
     prelude::*,
     prepare_freethreaded_python,
+    sync::GILOnceCell,
     types::{
         PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyMemoryView, PyString,
         PyTuple,
@@ -38,6 +39,13 @@ impl Scope {
         prepare_freethreaded_python();
         Python::with_gil(|py| {
             let locals = PyDict::new(py);
+            locals
+                .set_item(
+                    "__builtins__",
+                    PyModule::import(py, intern!(py, "builtins")).unwrap(),
+                )
+                .unwrap();
+
             let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
                 if let Ok(path) = sys.getattr(intern!(py, "path")) {
                     let path = path.downcast_exact::<PyList>().ok();
@@ -224,12 +232,10 @@ impl Scope {
             let obj = if obj.hasattr("__await__").unwrap_or_default()
                 || obj.hasattr("__aiter__").unwrap_or_default()
             {
-                let module = py
-                    .import(intern!(py, "promptkit.asyncio"))
-                    .expect("failed to import promptkit.asyncio");
-                module
-                    .getattr(intern!(py, "run"))
-                    .expect("failed to get asyncio.run")
+                static ASYNC_RUN: GILOnceCell<PyObject> = GILOnceCell::new();
+                ASYNC_RUN
+                    .import(py, "promptkit.asyncio", "run")
+                    .expect("failed to import promptkit.asyncio")
                     .call1((obj,))
                     .map_err(|e| Error::from_pyerr(py, e))?
             } else {
