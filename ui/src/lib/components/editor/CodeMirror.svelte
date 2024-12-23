@@ -4,24 +4,12 @@
 	import { python } from "@codemirror/lang-python";
 	import { indentUnit } from "@codemirror/language";
 	import { indentWithTab } from "@codemirror/commands";
-	import { githubLight, githubDark } from "@uiw/codemirror-theme-github";
 	import { Compartment } from "@codemirror/state";
+	import { githubLight, githubDark } from "@uiw/codemirror-theme-github";
 	import { mode } from "mode-watcher";
 
 	let dom: HTMLDivElement;
 	let editor: EditorView;
-
-	// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-	void EditorView,
-		basicSetup,
-		keymap,
-		python,
-		indentUnit,
-		indentWithTab,
-		githubLight,
-		githubDark,
-		Compartment,
-		mode;
 
 	export function content() {
 		return editor.state.doc.toString();

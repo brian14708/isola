@@ -35,7 +35,7 @@
       {
         formatter = pkgs.nixfmt-rfc-style;
         devShells.default =
-          (pkgs.buildFHSUserEnv {
+          (pkgs.buildFHSEnv {
             name = "devshell";
             targetPkgs =
               pkgs:
