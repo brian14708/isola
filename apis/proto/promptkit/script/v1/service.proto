@@ -24,6 +24,7 @@ message Argument {
   enum Marker {
     MARKER_UNSPECIFIED = 0;
     MARKER_STREAM = 1;
+    MARKER_STREAM_CONTROL_CLOSE = 2;
   }
 
   oneof argument_type {

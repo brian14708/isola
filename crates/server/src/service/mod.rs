@@ -257,16 +257,20 @@ impl ScriptService for ScriptServer {
                         msg.request_type
                     {
                         let name = v.name.clone();
-                        let tx = tx
-                            .get_mut(&name)
-                            .ok_or_else(|| Status::invalid_argument("invalid marker arguments"))?;
-                        let _ = tx
-                            .send(
-                                argument(v)
-                                    .map_err(|_e| Status::invalid_argument("invalid arguments"))?
-                                    .map_err(|_| Status::invalid_argument("invalid marker"))?,
-                            )
-                            .await;
+                        let arg = argument(v)
+                            .map_err(|_e| Status::invalid_argument("invalid arguments"))?;
+                        match arg {
+                            Err(Marker::StreamControlClose) => {
+                                tx.remove(&name);
+                            }
+                            Err(_) => Err(Status::invalid_argument("invalid marker"))?,
+                            Ok(arg) => {
+                                let tx = tx.get_mut(&name).ok_or_else(|| {
+                                    Status::invalid_argument("invalid marker arguments")
+                                })?;
+                                let _ = tx.send(arg).await;
+                            }
+                        };
                     }
                 }
             }
@@ -420,16 +424,20 @@ impl ScriptService for ScriptServer {
                         msg.request_type
                     {
                         let name = v.name.clone();
-                        let tx = tx
-                            .get_mut(&name)
-                            .ok_or_else(|| Status::invalid_argument("invalid marker arguments"))?;
-                        let _ = tx
-                            .send(
-                                argument(v)
-                                    .map_err(|_e| Status::invalid_argument("invalid arguments"))?
-                                    .map_err(|_| Status::invalid_argument("invalid marker"))?,
-                            )
-                            .await;
+                        let arg = argument(v)
+                            .map_err(|_e| Status::invalid_argument("invalid arguments"))?;
+                        match arg {
+                            Err(Marker::StreamControlClose) => {
+                                tx.remove(&name);
+                            }
+                            Err(_) => Err(Status::invalid_argument("invalid marker"))?,
+                            Ok(arg) => {
+                                let tx = tx.get_mut(&name).ok_or_else(|| {
+                                    Status::invalid_argument("invalid marker arguments")
+                                })?;
+                                let _ = tx.send(arg).await;
+                            }
+                        };
                     }
                 }
             }
