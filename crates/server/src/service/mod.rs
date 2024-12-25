@@ -34,7 +34,13 @@ pub struct ScriptServer {
 impl ScriptServer {
     pub fn new(state: AppState) -> Self {
         let base_env = VmEnv {
-            http: Client::builder().gzip(true).build().unwrap(),
+            http: Client::builder()
+                .gzip(true)
+                .brotli(true)
+                .zstd(true)
+                .user_agent("PromptKit/1.0")
+                .build()
+                .unwrap(),
         };
         Self { state, base_env }
     }
