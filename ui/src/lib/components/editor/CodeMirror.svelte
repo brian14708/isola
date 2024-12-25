@@ -11,6 +11,17 @@
 	let dom: HTMLDivElement;
 	let editor: EditorView;
 
+	// eslint-disable-next-line @typescript-eslint/no-unused-expressions
+	void EditorView,
+		basicSetup,
+		keymap,
+		python,
+		indentUnit,
+		indentWithTab,
+		Compartment,
+		githubLight,
+		githubDark;
+
 	export function content() {
 		return editor.state.doc.toString();
 	}
