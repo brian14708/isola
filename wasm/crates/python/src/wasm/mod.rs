@@ -110,17 +110,6 @@ impl guest::Guest for Global {
         logging::set_log_level(level);
     }
 
-    fn eval_bundle(bundle_path: String, entrypoint: String) -> Result<(), guest::Error> {
-        GLOBAL_SCOPE.with_borrow_mut(|vm| {
-            if let Some(vm) = vm.as_mut() {
-                vm.load_zip(&bundle_path, &entrypoint)
-                    .map_err(Into::<guest::Error>::into)
-            } else {
-                Err(Error::UnexpectedError("VM not initialized").into())
-            }
-        })
-    }
-
     fn eval_script(script: String) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {

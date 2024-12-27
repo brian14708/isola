@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    io::Cursor,
+    io::{Cursor, Read},
     path::Path,
     pin::Pin,
     sync::Arc,
@@ -14,7 +14,7 @@ use futures_util::FutureExt;
 use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
@@ -68,6 +68,7 @@ pub enum ExecSource<'a> {
 #[derive(serde::Deserialize)]
 struct Manifest {
     entrypoint: String,
+    prelude: Option<String>,
 }
 
 impl<E> VmManager<E> {
@@ -298,20 +299,24 @@ where
                     )
                     .map_err(anyhow::Error::from)?;
 
-                    let name = hex::encode(hash) + ".zip";
-                    let mut file = tokio::fs::File::create(vm.workdir.path().join(&name))
-                        .await
+                    zip.extract(vm.workdir.path())
                         .map_err(anyhow::Error::from)?;
-                    file.write_all(bundle).await.map_err(anyhow::Error::from)?;
-                    drop(file);
+                    if let Some(prelude) = &manifest.prelude {
+                        vm.sandbox
+                            .promptkit_script_guest()
+                            .call_eval_script(&mut vm.store, prelude)
+                            .await??;
+                    }
+
+                    let mut entrypoint = String::new();
+                    zip.by_name(&manifest.entrypoint)
+                        .map_err(anyhow::Error::from)?
+                        .read_to_string(&mut entrypoint)
+                        .map_err(anyhow::Error::from)?;
 
                     vm.sandbox
                         .promptkit_script_guest()
-                        .call_eval_bundle(
-                            &mut vm.store,
-                            &(String::from("/workdir/") + &name),
-                            &manifest.entrypoint,
-                        )
+                        .call_eval_script(&mut vm.store, &entrypoint)
                         .await??;
                 }
             }

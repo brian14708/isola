@@ -51,6 +51,7 @@ impl Scope {
                     let path = path.downcast_exact::<PyList>().ok();
                     if let Some(path) = path {
                         let _ = path.insert(1, "/usr/local/lib/bundle.zip");
+                        let _ = path.insert(0, "/workdir");
                     }
                 }
                 if let (Ok(stdout), Ok(stderr)) = (
@@ -84,25 +85,6 @@ impl Scope {
             }
             Ok::<_, PyErr>(())
         });
-    }
-
-    pub fn load_zip(&mut self, p: &str, entrypoint: &str) -> crate::error::Result<()> {
-        Python::with_gil(|py| {
-            let sys =
-                PyModule::import(py, intern!(py, "sys")).map_err(|e| Error::from_pyerr(py, e))?;
-            let binding = sys
-                .getattr(intern!(py, "path"))
-                .map_err(|e| Error::from_pyerr(py, e))?;
-            let path = binding
-                .downcast_exact::<PyList>()
-                .map_err(|e| Error::from_pyerr(py, e))?;
-            path.insert(0, p).map_err(|e| Error::from_pyerr(py, e))?;
-            let module = py
-                .import(PyString::new(py, entrypoint))
-                .map_err(|e| Error::from_pyerr(py, e))?;
-            self.locals = module.dict().into_pyobject(py).unwrap().into();
-            Ok(())
-        })
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
