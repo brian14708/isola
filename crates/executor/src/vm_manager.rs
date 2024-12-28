@@ -1,6 +1,6 @@
 use std::{
     future::Future,
-    io::{Cursor, Read},
+    io::Cursor,
     path::Path,
     pin::Pin,
     sync::Arc,
@@ -21,6 +21,8 @@ use wasmtime::{
     component::{Component, Instance},
     Config, Engine, Store,
 };
+
+use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use crate::{
     error::{Error, Result},
@@ -292,15 +294,15 @@ where
                         .await??;
                 }
                 ExecSource::Bundle(bundle) => {
-                    let mut zip =
-                        zip::ZipArchive::new(Cursor::new(bundle)).map_err(anyhow::Error::from)?;
-                    let manifest: Manifest = serde_json::from_reader(
-                        zip.by_name("manifest.json").map_err(anyhow::Error::from)?,
+                    let base = vm.workdir.path();
+                    extract_zip(bundle, base).await?;
+                    let manifest: Manifest = serde_json::from_str(
+                        &tokio::fs::read_to_string(base.join("manifest.json"))
+                            .await
+                            .map_err(anyhow::Error::from)?,
                     )
                     .map_err(anyhow::Error::from)?;
 
-                    zip.extract(vm.workdir.path())
-                        .map_err(anyhow::Error::from)?;
                     if let Some(prelude) = &manifest.prelude {
                         vm.sandbox
                             .promptkit_script_guest()
@@ -308,15 +310,12 @@ where
                             .await??;
                     }
 
-                    let mut entrypoint = String::new();
-                    zip.by_name(&manifest.entrypoint)
-                        .map_err(anyhow::Error::from)?
-                        .read_to_string(&mut entrypoint)
-                        .map_err(anyhow::Error::from)?;
-
                     vm.sandbox
                         .promptkit_script_guest()
-                        .call_eval_script(&mut vm.store, &entrypoint)
+                        .call_eval_file(
+                            &mut vm.store,
+                            &["/workdir/", &manifest.entrypoint].join(""),
+                        )
                         .await??;
                 }
             }
@@ -487,4 +486,57 @@ impl Env for MockEnv {
     {
         async { todo!() }
     }
+}
+
+async fn extract_zip<'a>(data: &'a [u8], dest: &'_ Path) -> anyhow::Result<()> {
+    let mut zip =
+        async_zip::base::read::seek::ZipFileReader::new(Cursor::new(data).compat()).await?;
+    let mut dirs = std::collections::HashSet::new();
+
+    let n = zip.file().entries().len();
+    for idx in 0..n {
+        let entry = zip.file().entries().get(idx).unwrap();
+        let outpath = match entry.filename().as_str().ok().and_then(sanitize) {
+            Some(p) => dest.join(p),
+            None => continue,
+        };
+
+        if entry.dir().unwrap() {
+            if !dirs.contains(&outpath) {
+                tokio::fs::create_dir_all(&outpath).await?;
+                dirs.insert(outpath);
+            }
+            continue;
+        }
+
+        if let Some(p) = outpath.parent() {
+            if !dirs.contains(p) {
+                tokio::fs::create_dir_all(&p).await?;
+                dirs.insert(p.to_owned());
+            }
+        }
+
+        let mut out = tokio::fs::File::create(&outpath).await?;
+        let file = zip.reader_without_entry(idx).await?;
+        tokio::io::copy(&mut file.compat(), &mut out).await?;
+    }
+    Ok(())
+}
+
+fn sanitize(path: &str) -> Option<std::path::PathBuf> {
+    use std::path::Component;
+    if path.contains('\0') {
+        return None;
+    }
+    let path = std::path::PathBuf::from(path);
+    let mut depth = 0usize;
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => return None,
+            Component::ParentDir => depth = depth.checked_sub(1)?,
+            Component::Normal(_) => depth += 1,
+            Component::CurDir => (),
+        }
+    }
+    Some(path)
 }

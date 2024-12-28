@@ -120,6 +120,18 @@ impl guest::Guest for Global {
         })
     }
 
+    fn eval_file(path: String) -> Result<(), guest::Error> {
+        GLOBAL_SCOPE.with_borrow(|vm| {
+            if let Some(vm) = vm.as_ref() {
+                let script = std::fs::read_to_string(std::path::Path::new(&path))
+                    .map_err(|_e| Error::UnexpectedError("fail to read script"))?;
+                vm.load_script(&script).map_err(Into::<guest::Error>::into)
+            } else {
+                Err(Error::UnexpectedError("VM not initialized").into())
+            }
+        })
+    }
+
     fn call_func(
         func: String,
         args: Vec<guest::Argument>,
