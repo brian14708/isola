@@ -19,7 +19,7 @@ use promptkit_executor::Env;
 
 #[derive(Clone)]
 pub struct VmEnv {
-    pub http: reqwest::Client,
+    pub http: reqwest_middleware::ClientWithMiddleware,
 }
 
 impl VmEnv {
@@ -28,9 +28,9 @@ impl VmEnv {
     }
 
     fn send_request(
-        http: reqwest::Client,
+        http: reqwest_middleware::ClientWithMiddleware,
         mut req: reqwest::Request,
-    ) -> impl std::future::Future<Output = reqwest::Result<reqwest::Response>> + Send + 'static
+    ) -> impl std::future::Future<Output = reqwest_middleware::Result<reqwest::Response>> + Send + 'static
     {
         let span = tracing::span!(
             target: "promptkit::http",

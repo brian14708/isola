@@ -21,6 +21,7 @@ use crate::{
     utils::stream::{join_with, stream_until},
 };
 
+mod cache;
 mod ipc;
 mod prost_serde;
 
@@ -32,15 +33,26 @@ pub struct ScriptServer {
 }
 
 impl ScriptServer {
-    pub fn new(state: AppState) -> Self {
+    pub async fn new(state: AppState) -> Self {
+        use http_cache_reqwest::{Cache, CacheMode, HttpCache, HttpCacheOptions};
+        use reqwest_middleware::ClientBuilder;
+
         let base_env = VmEnv {
-            http: Client::builder()
-                .gzip(true)
-                .brotli(true)
-                .zstd(true)
-                .user_agent("PromptKit/1.0")
-                .build()
-                .unwrap(),
+            http: ClientBuilder::new(
+                Client::builder()
+                    .gzip(true)
+                    .brotli(true)
+                    .zstd(true)
+                    .user_agent("PromptKit/1.0")
+                    .build()
+                    .unwrap(),
+            )
+            .with(Cache(HttpCache {
+                mode: CacheMode::Default,
+                manager: cache::FoyerCache::new("/tmp/http-cache").await.unwrap(),
+                options: HttpCacheOptions::default(),
+            }))
+            .build(),
         };
         Self { state, base_env }
     }
