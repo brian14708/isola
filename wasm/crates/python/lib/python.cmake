@@ -44,7 +44,7 @@ ExternalProject_Add_Step(
 ExternalProject_Get_Property(python-build BINARY_DIR)
 install(DIRECTORY ${BINARY_DIR}/usr/ DESTINATION usr)
 
-file(WRITE ${CMAKE_BINARY_DIR}/python-stub.c "")
+file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/python-stub.c CONTENT "")
 
 add_library(python SHARED ${CMAKE_BINARY_DIR}/python-stub.c)
 set_target_properties(
