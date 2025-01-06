@@ -35,7 +35,6 @@ use crate::{
     Env,
 };
 
-const MAX_MEMORY: usize = 64 * 1024 * 1024;
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
 pub struct VmManager<E> {
@@ -85,6 +84,13 @@ impl<E> VmManager<E> {
         config
     }
 
+    fn get_max_memory() -> usize {
+        std::env::var("VM_MAX_MEMORY")
+            .ok()
+            .and_then(|f| f.parse().ok())
+            .unwrap_or(64 * 1024 * 1024)
+    }
+
     pub async fn compile(path: &Path) -> anyhow::Result<()> {
         let data = std::fs::read(path)?;
         let data = component_init::initialize(&data, |instrumented| {
@@ -97,7 +103,8 @@ impl<E> VmManager<E> {
                 let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
                 let component = Component::new(&engine, &instrumented)?;
                 let linker = VmState::new_linker(&engine)?;
-                let mut store = VmState::new(&engine, workdir.path(), MAX_MEMORY, MockEnv {});
+                let mut store =
+                    VmState::new(&engine, workdir.path(), Self::get_max_memory(), MockEnv {});
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
@@ -193,7 +200,7 @@ where
 
     pub async fn create(&self, hash: [u8; 32], env: E) -> Result<Vm<E>> {
         let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
-        let mut store = VmState::new(&self.engine, workdir.path(), MAX_MEMORY, env);
+        let mut store = VmState::new(&self.engine, workdir.path(), Self::get_max_memory(), env);
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
