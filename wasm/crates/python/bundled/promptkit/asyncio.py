@@ -26,20 +26,41 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.running = False
         self.closed = False
         self.handles = []
-        self.exception = None
 
     def run_until_complete(self, future):
         try:
             self.running = True
             asyncio.events._set_running_loop(self)
-            return self._run_until_complete(future)
+            result = self._run_until_complete(future).result()
+            return result
         finally:
+            self._cleanup()
+            self.running = False
+            asyncio.events._set_running_loop(None)
+
+    def run_async_generator(self, generator):
+        it = aiter(generator)
+        try:
+            self.running = True
+            asyncio.events._set_running_loop(self)
+
+            while True:
+                future = self._run_until_complete(anext(it))
+                exc = future.exception()
+                if exc is None:
+                    yield future.result()
+                elif isinstance(exc, StopAsyncIteration):
+                    return
+                else:
+                    raise exc
+        finally:
+            self._cleanup()
             self.running = False
             asyncio.events._set_running_loop(None)
 
     def _run_until_complete(self, future):
         future = asyncio.ensure_future(future, loop=self)
-        while self.running and not self.closed and not future.done():
+        while self.running and (self.handles or self.wakers) and (not future.done()):
             handles = self.handles
             self.handles = []
             for handle in handles:
@@ -65,10 +86,21 @@ class PollLoop(asyncio.AbstractEventLoop):
                         new_wakers.append((pollable, waker))
 
                 self.wakers = new_wakers
+        return future
 
-            if self.exception is not None:
-                raise self.exception
-        return future.result()
+    def _cleanup(self):
+        while self.handles or self.wakers:
+            handles = self.handles
+            self.handles = []
+            for handle in handles:
+                if not handle._cancelled:
+                    handle._run()
+
+            wakers = self.wakers
+            self.wakers = []
+            for pollable, waker in wakers:
+                waker.cancel()
+                pollable.release()
 
     def is_running(self):
         return self.running
@@ -82,10 +114,9 @@ class PollLoop(asyncio.AbstractEventLoop):
     def close(self):
         self.running = False
         self.closed = True
-        self.exception = None
 
     def call_exception_handler(self, context):
-        self.exception = context.get("exception", None)
+        pass
 
     def call_soon(self, callback, *args, context=None):
         handle = asyncio.Handle(callback, args, self, context)
@@ -130,11 +161,8 @@ class PollLoop(asyncio.AbstractEventLoop):
 def _iter(runner, it):
     try:
         loop = runner.get_loop()
-        it = aiter(it)
-        while True:
-            yield loop.run_until_complete(anext(it))
-    except StopAsyncIteration:
-        return
+        for v in loop.run_async_generator(it):
+            yield v
     finally:
         runner.close()
 
