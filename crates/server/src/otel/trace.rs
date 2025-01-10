@@ -6,23 +6,26 @@ use opentelemetry_sdk::trace::RandomIdGenerator;
 use opentelemetry_semantic_conventions::attribute as trace;
 use tower_http::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
-    trace::{DefaultOnBodyChunk, DefaultOnEos, DefaultOnRequest, OnFailure, OnResponse},
+    trace::{OnFailure, OnResponse},
 };
 use tracing::{field::Empty, Span};
 
 pub fn grpc_server_tracing_layer() -> tower_http::trace::TraceLayer<
     SharedClassifier<GrpcErrorsAsFailures>,
     MakeSpan,
-    DefaultOnRequest,
+    (),
     OtelOnResponse,
-    DefaultOnBodyChunk,
-    DefaultOnEos,
+    (),
+    (),
     OtelOnGrpcFailure,
 > {
     tower_http::trace::TraceLayer::new_for_grpc()
         .make_span_with(MakeSpan)
         .on_response(OtelOnResponse)
         .on_failure(OtelOnGrpcFailure)
+        .on_eos(())
+        .on_request(())
+        .on_body_chunk(())
 }
 
 #[derive(Clone)]

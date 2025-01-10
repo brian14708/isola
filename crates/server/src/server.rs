@@ -8,7 +8,7 @@ pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
     let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
-    axum::serve(listener, app.into_make_service())
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     global::shutdown_tracer_provider();

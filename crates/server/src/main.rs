@@ -102,25 +102,27 @@ async fn main() -> anyhow::Result<()> {
             let state = routes::AppState::new("wasm/target/promptkit_python.wasm")?;
             let app = routes::router(&state);
 
-            let grpc = tonic::service::Routes::new(tonic_web::enable(
-                ScriptServiceServer::new(service::ScriptServer::new(state).await)
-                    .send_compressed(CompressionEncoding::Gzip)
-                    .accept_compressed(CompressionEncoding::Gzip),
-            ))
-            .add_service(
-                tonic_reflection::server::Builder::configure()
-                    .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
-                    .build_v1()
-                    .unwrap(),
-            )
-            .add_service(
-                tonic_reflection::server::Builder::configure()
-                    .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
-                    .build_v1alpha()
-                    .unwrap(),
-            )
-            .into_axum_router()
-            .layer(grpc_server_tracing_layer());
+            let grpc = tonic::service::Routes::default()
+                .add_service(tonic_web::enable(
+                    ScriptServiceServer::new(service::ScriptServer::new(state).await)
+                        .send_compressed(CompressionEncoding::Gzip)
+                        .accept_compressed(CompressionEncoding::Gzip),
+                ))
+                .add_service(
+                    tonic_reflection::server::Builder::configure()
+                        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
+                        .build_v1()
+                        .unwrap(),
+                )
+                .add_service(
+                    tonic_reflection::server::Builder::configure()
+                        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
+                        .build_v1alpha()
+                        .unwrap(),
+                )
+                .prepare()
+                .into_axum_router()
+                .layer(grpc_server_tracing_layer());
 
             server::serve(
                 app.merge(grpc),
