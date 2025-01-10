@@ -43,7 +43,7 @@
 		"formsnap": "^2.0.0",
 		"globals": "^15.8.0",
 		"json5": "^2.2.3",
-		"lucide-svelte": "^0.469.0",
+		"lucide-svelte": "^0.471.0",
 		"mode-watcher": "^0.5.0",
 		"postcss": "^8.4.39",
 		"prettier": "^3.3.3",
