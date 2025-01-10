@@ -17,13 +17,14 @@ http-body = "1.0.1"
 http-body-util = "0.1.2"
 http-cache-reqwest = { version = "0.15.0", default-features = false }
 http-cache-semantics = "2.1.0"
+metrics = "0.24.1"
+metrics-exporter-prometheus = { version = "0.16.1", default-features = false }
 mimalloc = { version = "0.1.41", default-features = false }
 opentelemetry = "0.27.0"
 opentelemetry-otlp = { version = "0.27.0", features = ["http-proto", "reqwest-client", "reqwest-rustls"] }
 opentelemetry-semantic-conventions = { version = "0.27.0", features = ["semconv_experimental"] }
 opentelemetry_sdk = { version = "0.27.0", features = ["rt-tokio"] }
 pin-project = "1.1.5"
-prometheus-client = "0.23.0"
 promptkit_executor = { path = "../executor" }
 prost = "0.13.0"
 prost-types = "0.13.0"
