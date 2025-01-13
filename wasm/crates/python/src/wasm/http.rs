@@ -91,12 +91,9 @@ pub mod http_module {
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
             }
         }
-        if matches!(body, Body::Object(_)) && !header_fields.has(&"content-type".to_string()) {
+        if matches!(body, Body::Object(_)) && !header_fields.has("content-type") {
             header_fields
-                .append(
-                    &"content-type".to_string(),
-                    &"application/json".as_bytes().to_vec(),
-                )
+                .append("content-type", "application/json".as_bytes())
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         }
 

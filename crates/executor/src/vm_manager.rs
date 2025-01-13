@@ -495,7 +495,7 @@ impl Env for MockEnv {
     }
 }
 
-async fn extract_zip<'a>(data: &'a [u8], dest: &'_ Path) -> anyhow::Result<()> {
+async fn extract_zip(data: &[u8], dest: &Path) -> anyhow::Result<()> {
     let mut zip =
         async_zip::base::read::seek::ZipFileReader::new(Cursor::new(data).compat()).await?;
     let mut dirs = std::collections::HashSet::new();
