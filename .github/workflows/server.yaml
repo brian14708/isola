@@ -23,8 +23,6 @@ jobs:
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v4
-        with:
-          lfs: true
       - name: Install packages
         run: sudo apt-get install -y liblzma-dev protobuf-compiler
       - uses: Swatinem/rust-cache@v2
