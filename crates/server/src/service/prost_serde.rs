@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use cbor4ii::core::utils::{BufWriter, SliceReader};
+use cbor4ii::core::utils::SliceReader;
 use promptkit_executor::ExecSource;
 use serde::{
     de::Visitor,
@@ -22,14 +22,14 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
                 &ProstValueSerializer { value: &s },
             )
             .map_err(|_| Status::internal("failed to serialize argument to json"))?)),
-            script::argument::ArgumentType::Json(j) => {
-                let mut o = BufWriter::new(vec![]);
-                let mut s = cbor4ii::serde::Serializer::new(&mut o);
-                serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(&j))
-                    .serialize(&mut s)
-                    .unwrap();
-                Ok(Ok(o.into_inner()))
-            }
+            script::argument::ArgumentType::Json(j) => Ok(Ok(cbor4ii::serde::to_vec(
+                vec![],
+                &JsonValueSerializer {
+                    value: &serde_json::from_str(&j)
+                        .map_err(|_| Status::internal("failed to deserialize argument to json"))?,
+                },
+            )
+            .map_err(|_| Status::internal("failed to serialize argument to json"))?)),
             script::argument::ArgumentType::Cbor(c) => Ok(Ok(c)),
             script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(m)
                 .map_err(|e| Status::invalid_argument(format!("invalid marker: {e}")))?)),
@@ -263,6 +263,44 @@ impl serde::Serialize for ProstValueSerializer<'_> {
                 }
             },
             None => serializer.serialize_unit(),
+        }
+    }
+}
+
+struct JsonValueSerializer<'s> {
+    value: &'s serde_json::Value,
+}
+
+impl serde::Serialize for JsonValueSerializer<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self.value {
+            serde_json::Value::Null => serializer.serialize_none(),
+            serde_json::Value::Bool(b) => serializer.serialize_bool(*b),
+            serde_json::Value::Number(n) => {
+                if let Some(i) = n.as_i64() {
+                    serializer.serialize_i64(i)
+                } else {
+                    serializer.serialize_f64(n.as_f64().unwrap())
+                }
+            }
+            serde_json::Value::String(s) => serializer.serialize_str(s),
+            serde_json::Value::Array(vec) => {
+                let mut seq = serializer.serialize_seq(Some(vec.len()))?;
+                for value in vec {
+                    seq.serialize_element(&Self { value })?;
+                }
+                seq.end()
+            }
+            serde_json::Value::Object(m) => {
+                let mut map = serializer.serialize_map(Some(m.len()))?;
+                for (key, value) in m {
+                    map.serialize_entry(&key, &Self { value })?;
+                }
+                map.end()
+            }
         }
     }
 }

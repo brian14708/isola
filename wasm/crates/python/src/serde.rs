@@ -1,7 +1,7 @@
 use std::io::{BufWriter, Write};
 
 use pyo3::{
-    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple},
+    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple, PyNone},
     Bound, IntoPyObject, PyAny, PyObject, PyTypeInfo, Python,
 };
 use serde::{
@@ -181,7 +181,7 @@ impl<'de> Visitor<'de> for &PyObjectDeserializer<'de> {
     where
         E: serde::de::Error,
     {
-        Ok(().into_pyobject(self.py).unwrap().as_any().clone().unbind())
+        Ok(PyNone::get(self.py).as_any().clone().unbind())
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
