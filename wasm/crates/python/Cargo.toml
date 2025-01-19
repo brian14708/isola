@@ -5,7 +5,7 @@ edition.workspace = true
 exclude = ["/bundled", "bundle.py"]
 
 [dependencies]
-cbor4ii = { version = "0.3.2", features = ["serde1"] }
+cbor4ii = { version = "1.0.0", features = ["serde1"] }
 eventsource = { version = "0.5.0", default-features = false }
 pyo3 = { version = "0.23.0", features = ["abi3"] }
 serde = "1.0.199"
