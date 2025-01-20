@@ -90,7 +90,6 @@ impl<E: Send> WasiView for VmState<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: Send> Host for VmState<E> {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         if let Some(run) = &self.run {
@@ -102,7 +101,6 @@ impl<E: Send> Host for VmState<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: Send> HostValueIterator for VmState<E> {
     async fn read(
         &mut self,
@@ -135,7 +133,6 @@ impl<E: Send> HostValueIterator for VmState<E> {
     }
 }
 
-#[async_trait::async_trait]
 impl<E: Env + Send> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
