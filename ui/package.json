@@ -1,7 +1,7 @@
 {
 	"name": "@promptkit/ui",
 	"version": "0.1.0",
-	"packageManager": "pnpm@9.15.3",
+	"packageManager": "pnpm@9.15.4",
 	"private": true,
 	"engines": {
 		"node": ">=22"
@@ -25,8 +25,8 @@
 		"@codemirror/language": "^6.10.2",
 		"@codemirror/state": "^6.4.1",
 		"@codemirror/view": "^6.28.4",
-		"@connectrpc/connect": "2.0.0",
-		"@connectrpc/connect-web": "2.0.0",
+		"@connectrpc/connect": "2.0.1",
+		"@connectrpc/connect-web": "2.0.1",
 		"@iconify/json": "^2.2.227",
 		"@sveltejs/adapter-static": "^3.0.2",
 		"@sveltejs/kit": "^2.5.18",
@@ -34,7 +34,7 @@
 		"@types/eslint": "^9.0.0",
 		"@uiw/codemirror-theme-github": "4.23.7",
 		"autoprefixer": "^10.4.19",
-		"bits-ui": "1.0.0-next.77",
+		"bits-ui": "1.0.0-next.78",
 		"clsx": "^2.1.1",
 		"codemirror": "^6.0.1",
 		"eslint": "^9.15.0",
