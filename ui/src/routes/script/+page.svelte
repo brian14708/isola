@@ -329,7 +329,7 @@
 					</Form.Control>
 					<Form.FieldErrors />
 				</Form.Field>
-				<Form.Field {form} name="stream" class="flex items-center space-x-2 space-y-0">
+				<Form.Field {form} name="stream" class="flex items-center space-y-0 space-x-2">
 					<Form.Control>
 						{#snippet children({ props })}
 							<Checkbox {...props} bind:checked={$formData.stream} />
