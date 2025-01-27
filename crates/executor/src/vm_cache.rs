@@ -34,8 +34,8 @@ where
 
         let total = caches.values().map(Vec::len).sum::<usize>();
         if total > 64 {
-            let mut rng = rand::thread_rng();
-            let rm_idx = rng.gen_range(0..total);
+            let mut rng = rand::rng();
+            let rm_idx = rng.random_range(0..total);
 
             let mut idx = 0;
             let mut rm_key = None;
