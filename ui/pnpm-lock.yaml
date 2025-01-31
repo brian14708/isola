@@ -63,8 +63,8 @@ importers:
         specifier: ^10.4.19
         version: 10.4.20(postcss@8.5.1)
       bits-ui:
-        specifier: 1.0.0-next.78
-        version: 1.0.0-next.78(svelte@5.19.3)
+        specifier: 1.0.0-next.81
+        version: 1.0.0-next.81(svelte@5.19.3)
       clsx:
         specifier: ^2.1.1
         version: 2.1.1
@@ -120,7 +120,7 @@ importers:
         specifier: ^2.0.0
         version: 2.0.1(svelte@5.19.3)
       sveltekit-superforms:
-        specifier: ^2.21.1
+        specifier: ^2.23.1
         version: 2.23.1(@sveltejs/kit@2.16.1(@sveltejs/vite-plugin-svelte@5.0.3(svelte@5.19.3)(vite@6.0.11(jiti@2.4.2)(lightningcss@1.29.1)))(svelte@5.19.3)(vite@6.0.11(jiti@2.4.2)(lightningcss@1.29.1)))(@types/json-schema@7.0.15)(svelte@5.19.3)(typescript@5.7.3)
       tailwind-merge:
         specifier: ^3.0.0
@@ -930,8 +930,8 @@ packages:
   balanced-match@1.0.2:
     resolution: {integrity: sha512-3oSeUO0TMV67hN1AmbXsK4yaqU7tjiHlbxRDZOpH0KW9+CeX4bRAaX0Anxt0tx2MrpRpWwQaPwIlISEJhYU5Pw==}
 
-  bits-ui@1.0.0-next.78:
-    resolution: {integrity: sha512-jZjG2ObZ/CNyCNaXecpItC7hRXqJAgEfMhr06/eNrf3wHiiPyhdcy4OkzLcJyxeOrDyj+xma8cZTd3JRWqJdAw==}
+  bits-ui@1.0.0-next.81:
+    resolution: {integrity: sha512-LSvKvlPdDqBnRXKc2M/YyibR8d7XIvrZbgDxtevmCLcYxuIrFMBGir9uYPohPIUQcLterc/MdLNlG4glpCzNvg==}
     engines: {node: '>=18', pnpm: '>=8.7.0'}
     peerDependencies:
       svelte: ^5.11.0
@@ -1657,8 +1657,8 @@ packages:
     peerDependencies:
       svelte: ^5.7.0
 
-  runed@0.22.0:
-    resolution: {integrity: sha512-ZWVXWhOr0P5xdNgtviz6D1ivLUDWKLCbeC5SUEJ3zBkqLReVqWHenFxMNFeFaiC5bfxhFxyxzyzB+98uYFtwdA==}
+  runed@0.23.2:
+    resolution: {integrity: sha512-AhHCb5/B+YQW6ar1pzhGQOQy+byfjCH63ofuhrexSWwQKhC0EbQ60Z/wMYwETLo3ZubhwlNryxBt0seOMOrVFQ==}
     peerDependencies:
       svelte: ^5.7.0
 
@@ -2732,13 +2732,13 @@ snapshots:
 
   balanced-match@1.0.2: {}
 
-  bits-ui@1.0.0-next.78(svelte@5.19.3):
+  bits-ui@1.0.0-next.81(svelte@5.19.3):
     dependencies:
       '@floating-ui/core': 1.6.9
       '@floating-ui/dom': 1.6.13
       '@internationalized/date': 3.7.0
       esm-env: 1.2.2
-      runed: 0.22.0(svelte@5.19.3)
+      runed: 0.23.2(svelte@5.19.3)
       svelte: 5.19.3
       svelte-toolbelt: 0.7.0(svelte@5.19.3)
 
@@ -3402,7 +3402,7 @@ snapshots:
       esm-env: 1.2.2
       svelte: 5.19.3
 
-  runed@0.22.0(svelte@5.19.3):
+  runed@0.23.2(svelte@5.19.3):
     dependencies:
       esm-env: 1.2.2
       svelte: 5.19.3
