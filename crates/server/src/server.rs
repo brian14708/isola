@@ -1,11 +1,11 @@
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{Ipv6Addr, SocketAddr};
 
 use axum::Router;
 use opentelemetry::global;
 use tokio::{net::TcpListener, signal};
 
 pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
-    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
+    let addr = SocketAddr::from((Ipv6Addr::UNSPECIFIED, port));
     let listener = TcpListener::bind(addr).await.unwrap();
 
     axum::serve(listener, app)
