@@ -38,6 +38,9 @@ importers:
       '@connectrpc/connect-web':
         specifier: 2.0.1
         version: 2.0.1(@bufbuild/protobuf@2.2.3)(@connectrpc/connect@2.0.1(@bufbuild/protobuf@2.2.3))
+      '@eslint/js':
+        specifier: ^9.19.0
+        version: 9.19.0
       '@iconify/json':
         specifier: ^2.2.227
         version: 2.2.299
