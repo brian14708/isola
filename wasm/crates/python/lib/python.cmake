@@ -4,9 +4,9 @@ include(ExternalProject)
 set(PYTHON_VERSION 3.13)
 FetchContent_Declare(
   python-src
-  URL "https://www.python.org/ftp/python/3.13.1/Python-3.13.1.tar.xz"
+  URL "https://www.python.org/ftp/python/3.13.2/Python-3.13.2.tar.xz"
   URL_HASH
-    SHA256=9cf9427bee9e2242e3877dd0f6b641c1853ca461f39d6503ce260a59c80bf0d9
+    SHA256=d984bcc57cd67caab26f7def42e523b1c015bbc5dc07836cf4f0b63fa159eb56
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR})
 FetchContent_MakeAvailable(python-src)
 
@@ -24,13 +24,12 @@ ExternalProject_Add(
   INSTALL_DIR ${WASMLIB_SYSROOT}
   EXCLUDE_FROM_ALL TRUE
   CONFIGURE_COMMAND
-    CFLAGS=-fPIC
-    CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
+    CFLAGS=-fPIC CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env
-    <SOURCE_DIR>/configure
-      --prefix=/usr/local --host=wasm32-wasi --enable-shared
-      --build=${PYTHON_BUILD_ARCH} --with-build-python=${Python3_EXECUTABLE}
-      --disable-test-modules --with-pymalloc --with-computed-gotos --with-lto=thin
+    <SOURCE_DIR>/configure --prefix=/usr/local --host=wasm32-wasi
+    --enable-shared --build=${PYTHON_BUILD_ARCH}
+    --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
+    --with-pymalloc --with-computed-gotos --with-lto=thin
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
   DEPENDS zlib)
 ExternalProject_Add_Step(
@@ -44,7 +43,10 @@ ExternalProject_Add_Step(
 ExternalProject_Get_Property(python-build BINARY_DIR)
 install(DIRECTORY ${BINARY_DIR}/usr/ DESTINATION usr)
 
-file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/python-stub.c CONTENT "")
+file(
+  GENERATE
+  OUTPUT ${CMAKE_BINARY_DIR}/python-stub.c
+  CONTENT "")
 
 add_library(python SHARED ${CMAKE_BINARY_DIR}/python-stub.c)
 set_target_properties(
@@ -59,18 +61,15 @@ target_link_libraries(
          ${WASMLIB_SYSROOT}/usr/local/lib/libpython${PYTHON_VERSION}.a
          -Wl,--no-whole-archive)
 target_link_libraries(
-  python PRIVATE
-         zlib
-         wasi
-         ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
-         ${BINARY_DIR}/Modules/_decimal/libmpdec/libmpdec.a
-         ${BINARY_DIR}/Modules/expat/libexpat.a)
+  python
+  PRIVATE zlib wasi ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
+          ${BINARY_DIR}/Modules/_decimal/libmpdec/libmpdec.a
+          ${BINARY_DIR}/Modules/expat/libexpat.a)
 install(TARGETS python DESTINATION lib)
 install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
         DESTINATION include)
 add_custom_command(
-    TARGET python POST_BUILD
-    DEPENDS python
-    COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}>
-    ARGS --strip-all $<TARGET_FILE:python>
-)
+  TARGET python
+  POST_BUILD DEPENDS python
+  COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}> ARGS --strip-all
+          $<TARGET_FILE:python>)

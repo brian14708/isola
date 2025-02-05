@@ -32,7 +32,7 @@ ENV PYENV_ROOT=/root/.pyenv \
     PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH
 RUN curl https://pyenv.run | bash
 RUN eval "$(pyenv init -)"
-RUN pyenv install 3.13.1 && pyenv global 3.13.1
+RUN pyenv install 3.13.2 && pyenv global 3.13.2
 
 WORKDIR /src/wasm
 COPY apis ../apis
