@@ -46,10 +46,16 @@
                 pnpm
                 svelte-language-server
 
-                python313
-                uv
+                (python313.withPackages (
+                  p: with p; [
+                    cython
+                    setuptools
+                    uv
+                  ]
+                ))
 
                 cmake
+                ninja
                 buf
                 protobuf_28
                 pkg-config

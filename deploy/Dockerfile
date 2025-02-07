@@ -26,13 +26,16 @@ FROM --platform=$BUILDPLATFORM docker.io/library/rust:latest AS wasm-build
 RUN rustup target add wasm32-wasip1
 
 RUN apt-get update && \
-    apt-get install -y cmake && \
+    apt-get install -y cmake ninja-build && \
     rm -rf /var/lib/apt/lists/*
 ENV PYENV_ROOT=/root/.pyenv \
-    PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH
+    PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH \
+    PYENV_GIT_TAG=v2.5.2
 RUN curl https://pyenv.run | bash
 RUN eval "$(pyenv init -)"
 RUN pyenv install 3.13.2 && pyenv global 3.13.2
+RUN pip install --root-user-action=ignore \
+    cython
 
 WORKDIR /src/wasm
 COPY apis ../apis
@@ -43,6 +46,9 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/src/wasm/downloads \
     --mount=type=cache,target=/usr/local/cargo/registry \
     cargo xtask build-all
+
+RUN find /src/wasm/target/wasm32-wasip1/wasi-deps/usr/ -type f -name "*.so" -exec truncate -s 0 {} \;
+
 
 FROM cgr.dev/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app

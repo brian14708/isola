@@ -67,7 +67,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
             let r = cmd!(
                 sh,
-                "uv pip install -U --system -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
+                "uv pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
             ).run();
 
             if r.is_err() {
@@ -91,42 +91,64 @@ fn build_python(sh: &Shell) -> Result<()> {
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
             let wasm = std::fs::read(&inp[0])?;
-            let wasm = wit_component::Linker::default()
-            .validate(true)
-            .stack_size(8388608)
-            .use_built_in_libdl(true)
-            .library("", &wasm, false)?
-            .library(
-                "libc.so",
-                &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc.so"))?,
-                false,
-            )?
-            .library(
-                "libwasi-emulated-signal.so",
-                &std::fs::read(format!(
-                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-signal.so"
-                ))?,
-                false,
-            )?
-            .library(
-                "libwasi-emulated-getpid.so",
-                &std::fs::read(format!(
-                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-getpid.so"
-                ))?,
-                false,
-            )?
-            .library(
-                "libwasi-emulated-process-clocks.so",
-                &std::fs::read(format!(
-                    "target/{TARGET}/wasi-deps/lib/libwasi-emulated-process-clocks.so"
-                ))?,
-                false,
-            )?
-            .library(
-                "libpython3.13.so",
-                &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"))?,
-                false,
-            )?
+            let mut wasm = wit_component::Linker::default()
+                .validate(true)
+                .stack_size(8388608)
+                .use_built_in_libdl(true)
+                .library("", &wasm, false)?
+                .library(
+                    "libc.so",
+                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc.so"))?,
+                    false,
+                )?
+                .library(
+                    "libwasi-emulated-signal.so",
+                    &std::fs::read(format!(
+                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-signal.so"
+                    ))?,
+                    false,
+                )?
+                .library(
+                    "libwasi-emulated-getpid.so",
+                    &std::fs::read(format!(
+                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-getpid.so"
+                    ))?,
+                    false,
+                )?
+                .library(
+                    "libwasi-emulated-process-clocks.so",
+                    &std::fs::read(format!(
+                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-process-clocks.so"
+                    ))?,
+                    false,
+                )?
+                .library(
+                    "libc++.so",
+                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc++.so"))?,
+                    false,
+                )?
+                .library(
+                    "libc++abi.so",
+                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc++abi.so"))?,
+                    false,
+                )?
+                .library(
+                    "libpython3.13.so",
+                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"))?,
+                    false,
+                )?;
+
+            let base = format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.13/site-packages/");
+            for entry in glob::glob(&format!("{base}/**/*.so"))? {
+                let entry = entry?;
+                let filename = entry
+                    .to_str()
+                    .unwrap()
+                    .replace(&base, "/usr/local/lib/python3.13/site-packages/");
+                wasm = wasm.library(&filename, &std::fs::read(&entry)?, true)?;
+            }
+
+            let wasm = wasm
                 .adapter(
                     "wasi_snapshot_preview1",
                     wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,

@@ -1,0 +1,276 @@
+diff --git a/numpy/_core/src/common/npy_hashtable.cpp b/numpy/_core/src/common/npy_hashtable.cpp
+index a4244fa..fd1c5c3 100644
+--- a/numpy/_core/src/common/npy_hashtable.cpp
++++ b/numpy/_core/src/common/npy_hashtable.cpp
+@@ -13,7 +13,6 @@
+  */
+ 
+ #include <mutex>
+-#include <shared_mutex>
+ 
+ #include "templ_common.h"
+ #include "npy_hashtable.h"
+diff --git a/numpy/_core/src/umath/dispatching.cpp b/numpy/_core/src/umath/dispatching.cpp
+index 87b16cc..4af6a5a 100644
+--- a/numpy/_core/src/umath/dispatching.cpp
++++ b/numpy/_core/src/umath/dispatching.cpp
+@@ -39,7 +39,6 @@
+ #define _UMATHMODULE
+ 
+ #include <mutex>
+-#include <shared_mutex>
+ 
+ #define PY_SSIZE_T_CLEAN
+ #include <Python.h>
+diff --git a/numpy/fft/_pocketfft_umath.cpp b/numpy/fft/_pocketfft_umath.cpp
+index 8488887..0ba86c5 100644
+--- a/numpy/fft/_pocketfft_umath.cpp
++++ b/numpy/fft/_pocketfft_umath.cpp
+@@ -35,19 +35,7 @@ wrap_legacy_cpp_ufunc(char **args, npy_intp const *dimensions,
+                       ptrdiff_t const *steps, void *func)
+ {
+     NPY_ALLOW_C_API_DEF
+-    try {
+-        cpp_ufunc(args, dimensions, steps, func);
+-    }
+-    catch (std::bad_alloc& e) {
+-        NPY_ALLOW_C_API;
+-        PyErr_NoMemory();
+-        NPY_DISABLE_C_API;
+-    }
+-    catch (const std::exception& e) {
+-        NPY_ALLOW_C_API;
+-        PyErr_SetString(PyExc_RuntimeError, e.what());
+-        NPY_DISABLE_C_API;
+-    }
++    cpp_ufunc(args, dimensions, steps, func);
+ }
+ 
+ /*
+diff --git a/numpy/fft/pocketfft/pocketfft_hdronly.h b/numpy/fft/pocketfft/pocketfft_hdronly.h
+index 66eea06..f1e1171 100644
+--- a/numpy/fft/pocketfft/pocketfft_hdronly.h
++++ b/numpy/fft/pocketfft/pocketfft_hdronly.h
+@@ -161,7 +161,7 @@ inline void *aligned_alloc(size_t align, size_t size)
+   {
+   // aligned_alloc() requires that the requested size is a multiple of "align"
+   void *ptr = ::aligned_alloc(align,(size+align-1)&(~(align-1)));
+-  if (!ptr) throw std::bad_alloc();
++  if (!ptr) std::abort();
+   return ptr;
+   }
+ inline void aligned_dealloc(void *ptr)
+@@ -171,7 +171,7 @@ inline void *aligned_alloc(size_t align, size_t size)
+   {
+   align = std::max(align, alignof(max_align_t));
+   void *ptr = malloc(size+align);
+-  if (!ptr) throw std::bad_alloc();
++  if (!ptr) std::abort();
+   void *res = reinterpret_cast<void *>
+     ((reinterpret_cast<uintptr_t>(ptr) & ~(uintptr_t(align-1))) + uintptr_t(align));
+   (reinterpret_cast<void**>(res))[-1] = ptr;
+@@ -192,7 +192,7 @@ template<typename T> class arr
+       {
+       if (num==0) return nullptr;
+       void *res = malloc(num*sizeof(T));
+-      if (!res) throw std::bad_alloc();
++      if (!res) std::abort();
+       return reinterpret_cast<T *>(res);
+       }
+     static void dealloc(T *ptr)
+@@ -470,7 +470,7 @@ struct util // hack to avoid duplicate symbols
+           size_t x = f1175;
+           while (x*2 <= n) x *= 2;
+           if (x > bestfound) bestfound = x;
+-          while (true) 
++          while (true)
+           {
+             if (x * 3 <= n) x *= 3;
+             else if (x % 2 == 0) x /= 2;
+@@ -493,7 +493,7 @@ struct util // hack to avoid duplicate symbols
+       size_t x = f5;
+       while (x*2 <= n) x *= 2;
+       if (x > bestfound) bestfound = x;
+-      while (true) 
++      while (true)
+       {
+         if (x * 3 <= n) x *= 3;
+         else if (x % 2 == 0) x /= 2;
+@@ -517,11 +517,11 @@ struct util // hack to avoid duplicate symbols
+     const stride_t &stride_in, const stride_t &stride_out, bool inplace)
+     {
+     auto ndim = shape.size();
+-    if (ndim<1) throw std::runtime_error("ndim must be >= 1");
++    if (ndim<1) std::abort();
+     if ((stride_in.size()!=ndim) || (stride_out.size()!=ndim))
+-      throw std::runtime_error("stride dimension mismatch");
++      std::abort();
+     if (inplace && (stride_in!=stride_out))
+-      throw std::runtime_error("stride mismatch");
++      std::abort();
+     }
+ 
+   static POCKETFFT_NOINLINE void sanity_check(const shape_t &shape,
+@@ -533,8 +533,8 @@ struct util // hack to avoid duplicate symbols
+     shape_t tmp(ndim,0);
+     for (auto ax : axes)
+       {
+-      if (ax>=ndim) throw std::invalid_argument("bad axis number");
+-      if (++tmp[ax]>1) throw std::invalid_argument("axis specified repeatedly");
++      if (ax>=ndim) std::abort();
++      if (++tmp[ax]>1) std::abort();
+       }
+     }
+ 
+@@ -543,7 +543,7 @@ struct util // hack to avoid duplicate symbols
+     size_t axis)
+     {
+     sanity_check(shape, stride_in, stride_out, inplace);
+-    if (axis>=shape.size()) throw std::invalid_argument("bad axis number");
++    if (axis>=shape.size()) std::abort();
+     }
+ 
+ #ifdef POCKETFFT_NO_MULTITHREADING
+@@ -739,8 +739,6 @@ class thread_pool
+       size_t nthreads=workers_.size();
+       for (size_t i=0; i<nthreads; ++i)
+         {
+-        try
+-          {
+           auto *worker = &workers_[i];
+           worker->busy_flag.clear();
+           worker->work = nullptr;
+@@ -748,12 +746,6 @@ class thread_pool
+             {
+             worker->worker_main(shutdown_, unscheduled_tasks_, overflow_work_);
+             });
+-          }
+-        catch (...)
+-          {
+-          shutdown_locked();
+-          throw;
+-          }
+         }
+       }
+ 
+@@ -781,7 +773,7 @@ class thread_pool
+       {
+       lock_t lock(mut_);
+       if (shutdown_)
+-        throw std::runtime_error("Work item submitted after shutdown");
++        std::abort();
+ 
+       ++unscheduled_tasks_;
+ 
+@@ -1589,7 +1581,7 @@ template<bool fwd, typename T> void pass_all(T c[], T0 fct) const
+     POCKETFFT_NOINLINE cfftp(size_t length_)
+       : length(length_)
+       {
+-      if (length==0) throw std::runtime_error("zero-length FFT requested");
++      if (length==0) std::abort();
+       if (length==1) return;
+       factorize();
+       mem.resize(twsize());
+@@ -2398,7 +2390,7 @@ template<typename T> void radbg(size_t ido, size_t ip, size_t l1,
+     POCKETFFT_NOINLINE rfftp(size_t length_)
+       : length(length_)
+       {
+-      if (length==0) throw std::runtime_error("zero-length FFT requested");
++      if (length==0) std::abort();
+       if (length==1) return;
+       factorize();
+       mem.resize(twsize());
+@@ -2523,7 +2515,7 @@ template<typename T0> class pocketfft_c
+     POCKETFFT_NOINLINE pocketfft_c(size_t length)
+       : len(length)
+       {
+-      if (length==0) throw std::runtime_error("zero-length FFT requested");
++      if (length==0) std::abort();
+       size_t tmp = (length<50) ? 0 : util::largest_prime_factor(length);
+       if (tmp*tmp <= length)
+         {
+@@ -2560,7 +2552,7 @@ template<typename T0> class pocketfft_r
+     POCKETFFT_NOINLINE pocketfft_r(size_t length)
+       : len(length)
+       {
+-      if (length==0) throw std::runtime_error("zero-length FFT requested");
++      if (length==0) std::abort();
+       size_t tmp = (length<50) ? 0 : util::largest_prime_factor(length);
+       if (tmp*tmp <= length)
+         {
+@@ -2945,9 +2937,9 @@ template<size_t N> class multi_iter
+       {
+       auto nshares = threading::num_threads();
+       if (nshares==1) return;
+-      if (nshares==0) throw std::runtime_error("can't run with zero threads");
++      if (nshares==0) std::abort();
+       auto myshare = threading::thread_id();
+-      if (myshare>=nshares) throw std::runtime_error("impossible share requested");
++      if (myshare>=nshares) std::abort();
+       size_t nbase = rem/nshares;
+       size_t additional = rem%nshares;
+       size_t lo = myshare*nbase + ((myshare<additional) ? myshare : additional);
+@@ -2969,7 +2961,7 @@ template<size_t N> class multi_iter
+       }
+     void advance(size_t n)
+       {
+-      if (rem<n) throw std::runtime_error("underrun");
++      if (rem<n) std::abort();
+       for (size_t i=0; i<n; ++i)
+         {
+         p_i[i] = p_ii;
+@@ -3453,7 +3445,7 @@ template<typename T> void dct(const shape_t &shape,
+   const stride_t &stride_in, const stride_t &stride_out, const shape_t &axes,
+   int type, const T *data_in, T *data_out, T fct, bool ortho, size_t nthreads=1)
+   {
+-  if ((type<1) || (type>4)) throw std::invalid_argument("invalid DCT type");
++  if ((type<1) || (type>4)) std::abort();
+   if (util::prod(shape)==0) return;
+   util::sanity_check(shape, stride_in, stride_out, data_in==data_out, axes);
+   cndarr<T> ain(data_in, shape, stride_in);
+@@ -3471,7 +3463,7 @@ template<typename T> void dst(const shape_t &shape,
+   const stride_t &stride_in, const stride_t &stride_out, const shape_t &axes,
+   int type, const T *data_in, T *data_out, T fct, bool ortho, size_t nthreads=1)
+   {
+-  if ((type<1) || (type>4)) throw std::invalid_argument("invalid DST type");
++  if ((type<1) || (type>4)) std::abort();
+   if (util::prod(shape)==0) return;
+   util::sanity_check(shape, stride_in, stride_out, data_in==data_out, axes);
+   cndarr<T> ain(data_in, shape, stride_in);
+diff --git a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
+index 174104b..57c99ea 100644
+--- a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
++++ b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
+@@ -84,10 +84,10 @@ def to_native(self, copy: bool = False) -> T.List[str]:
+                     # First occurrence of a library
+                     group_start = i
+             # Only add groups if there are multiple libraries.
+-            if group_end > group_start >= 0:
+-                # Last occurrence of a library
+-                new.insert(group_end + 1, '-Wl,--end-group')
+-                new.insert(group_start, '-Wl,--start-group')
++            #if group_end > group_start >= 0:
++            #    # Last occurrence of a library
++            #    new.insert(group_end + 1, '-Wl,--end-group')
++            #    new.insert(group_start, '-Wl,--start-group')
+         # Remove system/default include paths added with -isystem
+         default_dirs = self.compiler.get_default_include_dirs()
+         if default_dirs:
+diff --git a/vendored-meson/meson/mesonbuild/scripts/depfixer.py b/vendored-meson/meson/mesonbuild/scripts/depfixer.py
+index db9c97d..dddf3e1 100644
+--- a/vendored-meson/meson/mesonbuild/scripts/depfixer.py
++++ b/vendored-meson/meson/mesonbuild/scripts/depfixer.py
+@@ -432,10 +432,10 @@ def fix_darwin(fname: str, rpath_dirs_to_remove: T.Set[bytes], new_rpath: str, f
+         if install_name_mappings:
+             for old, new in install_name_mappings.items():
+                 args += ['-change', old, new]
+-        if args:
+-            subprocess.check_call(['install_name_tool', fname] + args,
+-                                  stdout=subprocess.DEVNULL,
+-                                  stderr=subprocess.DEVNULL)
++        #if args:
++        #    subprocess.check_call(['install_name_tool', fname] + args,
++        #                          stdout=subprocess.DEVNULL,
++        #                          stderr=subprocess.DEVNULL)
+     except Exception as err:
+         raise SystemExit(err)
