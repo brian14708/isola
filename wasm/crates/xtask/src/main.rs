@@ -90,54 +90,52 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!("target/{TARGET}/release/promptkit_python.wasm")],
         "target/promptkit_python.wasm".to_string(),
         |inp, out| -> Result<()> {
-            let wasm = std::fs::read(&inp[0])?;
-            let mut wasm = wit_component::Linker::default()
-                .validate(true)
-                .stack_size(8388608)
-                .use_built_in_libdl(true)
-                .library("", &wasm, false)?
-                .library(
-                    "libc.so",
-                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc.so"))?,
-                    false,
-                )?
-                .library(
-                    "libwasi-emulated-signal.so",
-                    &std::fs::read(format!(
-                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-signal.so"
-                    ))?,
-                    false,
-                )?
-                .library(
-                    "libwasi-emulated-getpid.so",
-                    &std::fs::read(format!(
-                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-getpid.so"
-                    ))?,
-                    false,
-                )?
-                .library(
-                    "libwasi-emulated-process-clocks.so",
-                    &std::fs::read(format!(
-                        "target/{TARGET}/wasi-deps/lib/libwasi-emulated-process-clocks.so"
-                    ))?,
-                    false,
-                )?
-                .library(
-                    "libc++.so",
-                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc++.so"))?,
-                    false,
-                )?
-                .library(
-                    "libc++abi.so",
-                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libc++abi.so"))?,
-                    false,
-                )?
-                .library(
-                    "libpython3.13.so",
-                    &std::fs::read(format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"))?,
-                    false,
-                )?;
+            fn lib(
+                name: impl Into<String>,
+                path: impl AsRef<Path>,
+                dlopen: bool,
+            ) -> (String, PathBuf, bool) {
+                (name.into(), path.as_ref().to_path_buf(), dlopen)
+            }
 
+            let mut libs = vec![
+                lib("", &inp[0], false),
+                lib(
+                    "libc.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libc.so"),
+                    false,
+                ),
+                lib(
+                    "libwasi-emulated-signal.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libwasi-emulated-signal.so"),
+                    false,
+                ),
+                lib(
+                    "libwasi-emulated-getpid.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libwasi-emulated-getpid.so"),
+                    false,
+                ),
+                lib(
+                    "libwasi-emulated-process-clocks.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libwasi-emulated-process-clocks.so"),
+                    false,
+                ),
+                lib(
+                    "libc++.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libc++.so"),
+                    false,
+                ),
+                lib(
+                    "libc++abi.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libc++abi.so"),
+                    false,
+                ),
+                lib(
+                    "libpython3.13.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"),
+                    false,
+                ),
+            ];
             let base = format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.13/site-packages/");
             for entry in glob::glob(&format!("{base}/**/*.so"))? {
                 let entry = entry?;
@@ -145,9 +143,28 @@ fn build_python(sh: &Shell) -> Result<()> {
                     .to_str()
                     .unwrap()
                     .replace(&base, "/usr/local/lib/python3.13/site-packages/");
-                wasm = wasm.library(&filename, &std::fs::read(&entry)?, true)?;
+                libs.push(lib(filename, entry, true));
             }
 
+            let mut wasm = wit_component::Linker::default()
+                .validate(true)
+                .stack_size(8388608)
+                .use_built_in_libdl(true);
+            for lib in libs {
+                let filename = lib.1.file_name().unwrap().to_str().unwrap();
+                let outname = format!("target/{TARGET}/wasi-deps/lib/opt.{filename}");
+                run_if_changed(
+                    vec![lib.1.to_str().unwrap().to_string()],
+                    outname.clone(),
+                    |inp, out| -> Result<()> {
+                        let inp = inp[0].clone();
+                        cmd!(sh, "wasm-opt {inp} -g -O4 --strip-debug -o {out}").run()?;
+                        Ok(())
+                    },
+                )?;
+                let data = &std::fs::read(outname)?;
+                wasm = wasm.library(&lib.0, data, lib.2)?;
+            }
             let wasm = wasm
                 .adapter(
                     "wasi_snapshot_preview1",

@@ -66,6 +66,7 @@
                       ]
                     ))
 
+                    binaryen
                     cmake
                     ninja
                     buf
