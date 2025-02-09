@@ -36,6 +36,7 @@
                 "clippy"
                 "rustc"
                 "rustfmt"
+                "rust-src"
               ])
               targets.wasm32-wasip1.stable.rust-std
             ]

@@ -37,11 +37,11 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
     }
 }
 
-pub fn parse_source(source: Option<&Source>) -> Result<ExecSource<'_>, Status> {
+pub fn parse_source(source: Option<Source>) -> Result<ExecSource, Status> {
     match source {
         Some(Source {
             source_type: Some(SourceType::ScriptInline(i)),
-        }) => Ok(ExecSource::Script(&i.prelude, &i.script)),
+        }) => Ok(ExecSource::Script(i.prelude, i.script)),
         Some(Source {
             source_type: Some(SourceType::BundleInline(i)),
         }) => Ok(ExecSource::Bundle(i)),

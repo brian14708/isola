@@ -1,6 +1,5 @@
 use std::{
     future::Future,
-    io::Cursor,
     path::Path,
     pin::Pin,
     sync::Arc,
@@ -12,6 +11,7 @@ use anyhow::anyhow;
 use component_init::Invoker;
 use futures_util::FutureExt;
 use pin_project_lite::pin_project;
+use rc_zip_tokio::{rc_zip::parse::EntryKind, ReadZip};
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{sync::mpsc, task::JoinHandle};
@@ -21,8 +21,6 @@ use wasmtime::{
     component::{Component, Instance},
     Config, Engine, Store,
 };
-
-use tokio_util::compat::{FuturesAsyncReadCompatExt, TokioAsyncReadCompatExt};
 
 use crate::{
     error::{Error, Result},
@@ -61,9 +59,9 @@ pub struct ExecArgument {
     pub value: ExecArgumentValue,
 }
 
-pub enum ExecSource<'a> {
-    Script(&'a str, &'a str),
-    Bundle(&'a [u8]),
+pub enum ExecSource {
+    Script(String, String),
+    Bundle(Vec<u8>),
 }
 
 #[derive(serde::Deserialize)]
@@ -264,15 +262,15 @@ where
     }
 
     pub async fn exec(
-        &'_ self,
-        script: ExecSource<'_>,
+        &self,
+        script: ExecSource,
         func: &str,
         args: impl IntoIterator<Item = ExecArgument>,
         env: &E,
         level: LevelFilter,
     ) -> Result<impl Stream<Item = ExecStreamItem> + Send> {
         let mut hasher = Sha256::new();
-        match script {
+        match &script {
             ExecSource::Script(p, s) => {
                 hasher.update(p);
                 hasher.update(s);
@@ -292,12 +290,12 @@ where
                     if !prelude.is_empty() {
                         vm.sandbox
                             .promptkit_script_guest()
-                            .call_eval_script(&mut vm.store, prelude)
+                            .call_eval_script(&mut vm.store, &prelude)
                             .await??;
                     }
                     vm.sandbox
                         .promptkit_script_guest()
-                        .call_eval_script(&mut vm.store, script)
+                        .call_eval_script(&mut vm.store, &script)
                         .await??;
                 }
                 ExecSource::Bundle(bundle) => {
@@ -495,55 +493,34 @@ impl Env for MockEnv {
     }
 }
 
-async fn extract_zip(data: &[u8], dest: &Path) -> anyhow::Result<()> {
-    let mut zip =
-        async_zip::base::read::seek::ZipFileReader::new(Cursor::new(data).compat()).await?;
+async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()> {
+    let data = data.into();
+    let zip = data.read_zip().await?;
     let mut dirs = std::collections::HashSet::new();
-
-    let n = zip.file().entries().len();
-    for idx in 0..n {
-        let entry = zip.file().entries().get(idx).unwrap();
-        let outpath = match entry.filename().as_str().ok().and_then(sanitize) {
-            Some(p) => dest.join(p),
+    for entry in zip.entries() {
+        let outpath = match entry.sanitized_name() {
+            Some(v) => dest.join(v),
             None => continue,
         };
-
-        if entry.dir().unwrap() {
-            if !dirs.contains(&outpath) {
-                tokio::fs::create_dir_all(&outpath).await?;
-                dirs.insert(outpath);
+        match entry.kind() {
+            EntryKind::Directory => {
+                if !dirs.contains(&outpath) {
+                    tokio::fs::create_dir_all(&outpath).await?;
+                    dirs.insert(outpath);
+                }
             }
-            continue;
-        }
-
-        if let Some(p) = outpath.parent() {
-            if !dirs.contains(p) {
-                tokio::fs::create_dir_all(&p).await?;
-                dirs.insert(p.to_owned());
+            EntryKind::File => {
+                if let Some(p) = outpath.parent() {
+                    if !dirs.contains(p) {
+                        tokio::fs::create_dir_all(&p).await?;
+                        dirs.insert(p.to_owned());
+                    }
+                }
+                let mut out = tokio::fs::File::create(&outpath).await?;
+                tokio::io::copy(&mut entry.reader(), &mut out).await?;
             }
+            EntryKind::Symlink => continue, // skip for now
         }
-
-        let mut out = tokio::fs::File::create(&outpath).await?;
-        let file = zip.reader_without_entry(idx).await?;
-        tokio::io::copy(&mut file.compat(), &mut out).await?;
     }
     Ok(())
-}
-
-fn sanitize(path: &str) -> Option<std::path::PathBuf> {
-    use std::path::Component;
-    if path.contains('\0') {
-        return None;
-    }
-    let path = std::path::PathBuf::from(path);
-    let mut depth = 0usize;
-    for component in path.components() {
-        match component {
-            Component::Prefix(_) | Component::RootDir => return None,
-            Component::ParentDir => depth = depth.checked_sub(1)?,
-            Component::Normal(_) => depth += 1,
-            Component::CurDir => (),
-        }
-    }
-    Some(path)
 }

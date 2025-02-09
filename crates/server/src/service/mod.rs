@@ -96,7 +96,7 @@ impl ScriptService for ScriptServer {
         if !(method.is_empty() && args.is_empty()) {
             return Err(Status::invalid_argument("method & args not allowed"));
         }
-        let script = parse_source(request.get_ref().source.as_ref())?;
+        let script = parse_source(request.get_mut().source.take())?;
 
         let req = cbor4ii::serde::to_vec(
             vec![],
@@ -172,7 +172,7 @@ impl ScriptService for ScriptServer {
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
-        let script = parse_source(request.get_ref().source.as_ref())?;
+        let script = parse_source(request.get_mut().source.take())?;
 
         let result = async {
             let run = async {
@@ -227,7 +227,7 @@ impl ScriptService for ScriptServer {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
-        let script = parse_source(initial.source.as_ref())?;
+        let script = parse_source(initial.source.take())?;
         let ParsedSpec {
             method,
             args,
@@ -319,7 +319,7 @@ impl ScriptService for ScriptServer {
         else {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
-        let script = parse_source(request.get_ref().source.as_ref())?;
+        let script = parse_source(request.get_mut().source.take())?;
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
@@ -400,7 +400,7 @@ impl ScriptService for ScriptServer {
             return Err(Status::invalid_argument("initial request not found"));
         };
 
-        let script = parse_source(initial.source.as_ref())?;
+        let script = parse_source(initial.source.take())?;
         let ParsedSpec {
             method,
             args,
