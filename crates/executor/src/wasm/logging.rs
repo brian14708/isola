@@ -71,7 +71,7 @@ impl bindings::logging::Host for dyn WasiView + '_ {
                 promptkit.log.group = &context,
                 promptkit.user = true,
             ),
-        };
+        }
         Ok(())
     }
 }

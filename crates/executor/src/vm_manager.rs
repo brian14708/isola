@@ -112,9 +112,7 @@ impl<E> VmManager<E> {
                 let (_, idx) = component
                     .export_index(Some(&idx), "initialize")
                     .ok_or_else(|| anyhow!("missing promptkit:script/guest.initialize"))?;
-                let func = binding
-                    .get_typed_func::<(bool,), ()>(&mut store, idx)
-                    .map_err(anyhow::Error::from)?;
+                let func = binding.get_typed_func::<(bool,), ()>(&mut store, idx)?;
                 func.call_async(&mut store, (true,)).await?;
                 func.post_return_async(&mut store).await?;
 
@@ -255,7 +253,7 @@ where
                 Err(err) => {
                     _ = tx.send(ExecStreamItem::Error(err.into())).await;
                 }
-            };
+            }
         });
 
         join_with(ReceiverStream::new(rx), exec)
@@ -519,7 +517,7 @@ async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()
                 let mut out = tokio::fs::File::create(&outpath).await?;
                 tokio::io::copy(&mut entry.reader(), &mut out).await?;
             }
-            EntryKind::Symlink => continue, // skip for now
+            EntryKind::Symlink => {} // skip for now
         }
     }
     Ok(())

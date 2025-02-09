@@ -280,7 +280,7 @@ impl std::io::Write for wasi::io::streams::OutputStream {
                         e.to_debug_string(),
                     ))
                 }
-            };
+            }
         };
         let n = n
             .get()

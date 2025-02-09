@@ -317,7 +317,7 @@ impl BodyBuffer for ServerSentEvent {
 
             match parse_event_line(&line, &mut self.event) {
                 eventsource::event::ParseResult::Next
-                | eventsource::event::ParseResult::SetRetry(_) => continue,
+                | eventsource::event::ParseResult::SetRetry(_) => {}
                 eventsource::event::ParseResult::Dispatch => {
                     let evt = (&self.event.id, &self.event.event_type, &self.event.data)
                         .into_pyobject(py)?

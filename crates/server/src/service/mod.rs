@@ -288,7 +288,7 @@ impl ScriptService for ScriptServer {
                                 })?;
                                 let _ = tx.send(arg).await;
                             }
-                        };
+                        }
                     }
                 }
             }
@@ -455,7 +455,7 @@ impl ScriptService for ScriptServer {
                                 })?;
                                 let _ = tx.send(arg).await;
                             }
-                        };
+                        }
                     }
                 }
             }
