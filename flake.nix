@@ -64,11 +64,15 @@
                         cython
                         setuptools
                         uv
+                        typing-extensions
+                        pip
+                        wheel
                       ]
                     ))
 
                     binaryen
                     cmake
+                    maturin
                     ninja
                     buf
                     protobuf_28

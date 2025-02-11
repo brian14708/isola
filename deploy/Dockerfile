@@ -38,7 +38,7 @@ RUN curl https://pyenv.run | bash
 RUN eval "$(pyenv init -)"
 RUN pyenv install 3.13.2 && pyenv global 3.13.2
 RUN pip install --root-user-action=ignore \
-    cython
+    cython wheel typing-extensions maturin setuptools
 
 WORKDIR /src/wasm
 COPY apis ../apis

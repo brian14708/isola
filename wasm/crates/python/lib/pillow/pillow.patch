@@ -1,0 +1,113 @@
+diff --git a/setup.py b/setup.py
+index a85731d..526b289 100644
+--- a/setup.py
++++ b/setup.py
+@@ -313,6 +313,8 @@ class pil_build_ext(build_ext):
+         def __init__(self) -> None:
+             self._settings: dict[str, str | bool | None] = {}
+             for f in self.features:
++                self.set(f, False)
++            for f in self.required:
+                 self.set(f, None)
+ 
+         def require(self, feat: str) -> bool:
+@@ -358,6 +360,7 @@ class pil_build_ext(build_ext):
+         self.disable_platform_guessing = self.check_configuration(
+             "platform-guessing", "disable"
+         )
++        self.disable_platform_guessing = True
+         self.add_imaging_libs = ""
+         build_ext.initialize_options(self)
+         for x in self.feature:
+diff --git a/src/libImaging/Jpeg.h b/src/libImaging/Jpeg.h
+index 7cdba90..cf9a35d 100644
+--- a/src/libImaging/Jpeg.h
++++ b/src/libImaging/Jpeg.h
+@@ -10,11 +10,8 @@
+ 
+ #include "jpeglib.h"
+ 
+-#include <setjmp.h>
+-
+ typedef struct {
+     struct jpeg_error_mgr pub; /* "public" fields */
+-    jmp_buf setjmp_buffer;     /* for return to caller */
+ } JPEGERROR;
+ 
+ /* -------------------------------------------------------------------- */
+diff --git a/src/libImaging/JpegDecode.c b/src/libImaging/JpegDecode.c
+index 2970f56..4c9e803 100644
+--- a/src/libImaging/JpegDecode.c
++++ b/src/libImaging/JpegDecode.c
+@@ -114,13 +114,6 @@ jpeg_buffer_src(j_decompress_ptr cinfo, JPEGSOURCE *source) {
+ /* Error handler                                                        */
+ /* -------------------------------------------------------------------- */
+ 
+-METHODDEF(void)
+-error(j_common_ptr cinfo) {
+-    JPEGERROR *error;
+-    error = (JPEGERROR *)cinfo->err;
+-    longjmp(error->setjmp_buffer, 1);
+-}
+-
+ METHODDEF(void)
+ output(j_common_ptr cinfo) { /* nothing */ }
+ 
+@@ -133,17 +126,9 @@ ImagingJpegDecode(Imaging im, ImagingCodecState state, UINT8 *buf, Py_ssize_t by
+     JPEGSTATE *context = (JPEGSTATE *)state->context;
+     int ok;
+ 
+-    if (setjmp(context->error.setjmp_buffer)) {
+-        /* JPEG error handler */
+-        jpeg_destroy_decompress(&context->cinfo);
+-        state->errcode = IMAGING_CODEC_BROKEN;
+-        return -1;
+-    }
+-
+     if (!state->state) {
+         /* Setup decompression context */
+         context->cinfo.err = jpeg_std_error(&context->error.pub);
+-        context->error.pub.error_exit = error;
+         context->error.pub.output_message = output;
+         jpeg_create_decompress(&context->cinfo);
+         jpeg_buffer_src(&context->cinfo, &context->source);
+diff --git a/src/libImaging/JpegEncode.c b/src/libImaging/JpegEncode.c
+index 4372d51..334da7d 100644
+--- a/src/libImaging/JpegEncode.c
++++ b/src/libImaging/JpegEncode.c
+@@ -56,18 +56,6 @@ jpeg_buffer_dest(j_compress_ptr cinfo, JPEGDESTINATION *destination) {
+     destination->pub.term_destination = stub;
+ }
+ 
+-/* -------------------------------------------------------------------- */
+-/* Error handler                                                        */
+-/* -------------------------------------------------------------------- */
+-
+-METHODDEF(void)
+-error(j_common_ptr cinfo) {
+-    JPEGERROR *error;
+-    error = (JPEGERROR *)cinfo->err;
+-    (*cinfo->err->output_message)(cinfo);
+-    longjmp(error->setjmp_buffer, 1);
+-}
+-
+ /* -------------------------------------------------------------------- */
+ /* Encoder                                                              */
+ /* -------------------------------------------------------------------- */
+@@ -77,17 +65,9 @@ ImagingJpegEncode(Imaging im, ImagingCodecState state, UINT8 *buf, int bytes) {
+     JPEGENCODERSTATE *context = (JPEGENCODERSTATE *)state->context;
+     int ok;
+ 
+-    if (setjmp(context->error.setjmp_buffer)) {
+-        /* JPEG error handler */
+-        jpeg_destroy_compress(&context->cinfo);
+-        state->errcode = IMAGING_CODEC_BROKEN;
+-        return -1;
+-    }
+-
+     if (!state->state) {
+         /* Setup compression context (very similar to the decoder) */
+         context->cinfo.err = jpeg_std_error(&context->error.pub);
+-        context->error.pub.error_exit = error;
+         jpeg_create_compress(&context->cinfo);
+         jpeg_buffer_dest(&context->cinfo, &context->destination);

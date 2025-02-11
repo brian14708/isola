@@ -13,5 +13,7 @@ include(wasi-sdk)
 project(wasmlibs VERSION 1.0.0)
 
 include(zlib)
+include(libjpeg)
 include(python)
 include(numpy/numpy)
+include(pillow/pillow)
