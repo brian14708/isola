@@ -97,7 +97,7 @@
 			source: {
 				sourceType: {
 					value: {
-						script: d.code + `\n\n# ${new Date().getTime()}`,
+						script: d.code,
 						runtime: "python3",
 						prelude: d.prelude,
 					},
@@ -234,7 +234,7 @@
 				source: {
 					sourceType: {
 						value: {
-							script: d.code + `\n\n# ${new Date().getTime()}`,
+							script: d.code,
 							runtime: "python3",
 							prelude: d.prelude,
 						},
@@ -366,7 +366,11 @@
 					<div class="space-y-2 p-2">
 						<div class="font-bold">Result</div>
 						{#each result.data as d}
-							<pre>{d}</pre>
+							{#if d.startsWith('"data:image/')}
+								<img src={JSON.parse(d)} alt="result" />
+							{:else}
+								<pre>{d}</pre>
+							{/if}
 						{/each}
 						<div class="font-bold">Traces</div>
 						{#each result.traces as trace}
