@@ -1,7 +1,6 @@
 use std::net::{Ipv6Addr, SocketAddr};
 
 use axum::Router;
-use opentelemetry::global;
 use tokio::{net::TcpListener, signal};
 
 pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
@@ -11,7 +10,6 @@ pub async fn serve(app: Router, port: u16) -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-    global::shutdown_tracer_provider();
     Ok(())
 }
 

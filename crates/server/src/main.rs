@@ -33,64 +33,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let envfilter = tracing_subscriber::EnvFilter::builder()
-        .with_default_directive(Level::INFO.into())
-        .from_env()
-        .expect("failed to read env filter")
-        .add_directive("[{promptkit.user}]=off".parse().unwrap());
-
-    if let Ok(e) = std::env::var("OTEL_COLLECTOR_URL") {
-        let e = {
-            // compatibility with old env var
-            let mut u = url::Url::parse(&e).expect("OTEL_COLLECTOR_URL is not a valid URL");
-            if u.path() == "/" {
-                u = u.join("/v1/traces").expect("failed to append /v1/traces");
-            }
-            u.to_string()
-        };
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_batch_exporter(
-                opentelemetry_otlp::SpanExporter::builder()
-                    .with_http()
-                    .with_endpoint(e)
-                    .build()?,
-                opentelemetry_sdk::runtime::Tokio,
-            )
-            .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
-            .with_id_generator(RandomIdGenerator::default())
-            .with_resource(Resource::new(vec![KeyValue::new(
-                resource::SERVICE_NAME,
-                "promptkit",
-            )]))
-            .build();
-        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
-            Box::new(TraceContextPropagator::new()),
-            Box::new(BaggagePropagator::new()),
-        ]));
-        let opentelemetry = tracing_opentelemetry::layer()
-            .with_location(false)
-            .with_tracked_inactivity(false)
-            .with_threads(false)
-            .with_tracer(provider.tracer("promptkit"))
-            .with_filter(FilterFn::new(|metadata| {
-                *metadata.level() <= LevelFilter::INFO
-                    && metadata
-                        .fields()
-                        .iter()
-                        .any(|field| field.name() == "promptkit.user")
-            }));
-
-        tracing_subscriber::registry()
-            .with(opentelemetry)
-            .with(request_tracing_layer())
-            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
-            .init();
-    } else {
-        tracing_subscriber::registry()
-            .with(request_tracing_layer())
-            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
-            .init();
-    }
+    let _provider = init_tracing()?;
 
     let task = args().nth(1);
     match task.as_deref() {
@@ -134,5 +77,82 @@ async fn main() -> anyhow::Result<()> {
             .await
         }
         _ => Err(anyhow!("unknown task")),
+    }
+}
+
+struct ProviderGuard(Option<opentelemetry_sdk::trace::SdkTracerProvider>);
+
+impl Drop for ProviderGuard {
+    fn drop(&mut self) {
+        if let Some(provider) = self.0.take() {
+            let _ = provider.shutdown();
+        }
+    }
+}
+
+fn init_tracing() -> anyhow::Result<ProviderGuard> {
+    let envfilter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(Level::INFO.into())
+        .from_env()
+        .expect("failed to read env filter")
+        .add_directive("[{promptkit.user}]=off".parse().unwrap());
+
+    if let Ok(e) = std::env::var("OTEL_COLLECTOR_URL") {
+        let e = {
+            // compatibility with old env var
+            let mut u = url::Url::parse(&e).expect("OTEL_COLLECTOR_URL is not a valid URL");
+            if u.path() == "/" {
+                u = u.join("/v1/traces").expect("failed to append /v1/traces");
+            }
+            u.to_string()
+        };
+
+        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+            .with_batch_exporter(
+                opentelemetry_otlp::SpanExporter::builder()
+                    .with_http()
+                    .with_endpoint(e)
+                    .build()?,
+            )
+            .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
+            .with_id_generator(RandomIdGenerator::default())
+            .with_resource(
+                Resource::builder()
+                    .with_attribute(KeyValue::new(resource::SERVICE_NAME, "promptkit"))
+                    .build(),
+            )
+            .build();
+        global::set_tracer_provider(provider.clone());
+        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+            Box::new(TraceContextPropagator::new()),
+            Box::new(BaggagePropagator::new()),
+        ]));
+        let opentelemetry = tracing_opentelemetry::layer()
+            .with_location(false)
+            .with_tracked_inactivity(false)
+            .with_threads(false)
+            .with_tracer(provider.tracer("promptkit"))
+            .with_filter(FilterFn::new(|metadata| {
+                *metadata.level() <= LevelFilter::INFO
+                    && metadata
+                        .fields()
+                        .iter()
+                        .any(|field| field.name() == "promptkit.user")
+            }));
+
+        tracing_subscriber::registry()
+            .with(opentelemetry)
+            .with(request_tracing_layer())
+            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
+            .init();
+
+        Ok(ProviderGuard(Some(provider)))
+    } else {
+        tracing_subscriber::registry()
+            .with(request_tracing_layer())
+            .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter))
+            .init();
+
+        Ok(ProviderGuard(None))
     }
 }
