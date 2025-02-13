@@ -2,23 +2,12 @@ import importlib
 import io
 import sys
 import zipfile
-import re
 
 from promptkit.http import fetch
 
-__all__ = ["http", "pypi"]
+__all__ = ["http"]
 
 _module_type = type(sys)
-
-
-def _fetch_pypi(module_name, version, pypi_url):
-    url = pypi_url + module_name + "/"
-    with fetch("GET", url) as r:
-        urls = re.findall(r'(?<= href=")[^"]+\.whl', r.text())
-        for f in reversed(urls):
-            if version is None or version in f:
-                return f if f.startswith("http") else url + f
-        return None
 
 
 class HttpImporter:
@@ -116,37 +105,6 @@ class HttpImporter:
         return self.archive
 
 
-class PyPIImporter:
-    def __init__(self, index_url=None, replace={}):
-        self.url = index_url or "https://pypi.org/simple/"
-        self.module_importers = {}
-        self.replace = replace
-
-    def _find_module(self, module_name, path=None):
-        module_root = module_name.split(".")[0]
-        if module_root in self.module_importers:
-            return self.module_importers[module_root]
-
-        project_name, version = self.replace.get(module_root, (module_root, None))
-        if project_name is None or project_name.startswith("_"):
-            return None
-
-        url = _fetch_pypi(project_name, version, self.url)
-        if url is None:
-            return None
-
-        importer = HttpImporter(url)
-        found = importer._find_module(module_name)
-        self.module_importers[module_root] = found
-        return found
-
-    def find_spec(self, fullname, path, target=None):
-        loader = self._find_module(fullname, path)
-        if loader is not None:
-            return loader.find_spec(fullname, path, target)
-        return None
-
-
 class RepoGuard:
     def __init__(self, cls, *args, **kwargs):
         self.importer = cls(*args, **kwargs)
@@ -161,7 +119,3 @@ class RepoGuard:
 
 def http(*args, **kwargs):
     return RepoGuard(HttpImporter, *args, **kwargs)
-
-
-def pypi(*args, **kwargs):
-    return RepoGuard(PyPIImporter, *args, **kwargs)
