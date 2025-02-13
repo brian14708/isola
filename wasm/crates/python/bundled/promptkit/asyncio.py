@@ -68,15 +68,12 @@ class PollLoop(asyncio.AbstractEventLoop):
                     handle._run()
 
             if self.wakers and len(handles) == 0:
-                [pollables, wakers] = list(map(list, zip(*self.wakers)))
+                pollables = [p for p, _ in self.wakers]
+                ready_indices_set = _promptkit_sys.poll(pollables)
 
                 new_wakers = []
-                ready = [False] * len(pollables)
-                for index in _promptkit_sys.poll(pollables):
-                    ready[index] = True
-
-                for ready, pollable, waker in zip(ready, pollables, wakers):
-                    if ready:
+                for i, (pollable, waker) in enumerate(self.wakers):
+                    if i in ready_indices_set:
                         if isinstance(waker, asyncio.Handle):
                             self.handles.append(waker)
                         elif not waker.cancelled():

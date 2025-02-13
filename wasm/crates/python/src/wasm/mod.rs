@@ -14,7 +14,7 @@ use self::wasi::{
 };
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
-use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
+use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell, types::PySet};
 use serde::de::DeserializeSeed;
 
 use crate::{
@@ -55,9 +55,9 @@ pub mod sys_module {
     #[pyfunction]
     #[pyo3(signature = (poll))]
     #[allow(clippy::needless_pass_by_value)]
-    fn poll(poll: Vec<PyRef<'_, PyPollable>>) -> Vec<u32> {
+    fn poll<'py>(py: Python<'py>, poll: Vec<PyRef<'_, PyPollable>>) -> Bound<'py, PySet> {
         let p = poll.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
-        host_poll(&p)
+        PySet::new(py, host_poll(&p)).unwrap()
     }
 }
 
