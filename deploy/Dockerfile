@@ -51,6 +51,7 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     cargo xtask build-all
 
 RUN find /src/wasm/target/wasm32-wasip1/wasi-deps/usr/ -type f -name "*.so" -exec truncate -s 0 {} \;
+RUN python -m compileall /src/wasm/target/wasm32-wasip1/wasi-deps/usr/
 
 
 FROM cgr.dev/chainguard/glibc-dynamic:latest AS staging

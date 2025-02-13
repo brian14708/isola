@@ -2,7 +2,7 @@ import typing
 import inspect
 import json
 
-from apischema.json_schema import deserialization_schema, serialization_schema
+from pydantic import TypeAdapter
 
 
 def analyze(ctx, dict):
@@ -27,7 +27,7 @@ def analyze_function(fn):
             {
                 "name": name,
                 "json_schema": (
-                    type_to_schema(param.annotation, deserialization_schema)
+                    type_to_schema(param.annotation)
                     if param.annotation != inspect.Parameter.empty
                     else None
                 ),
@@ -36,7 +36,7 @@ def analyze_function(fn):
         ],
         "result_type": {
             "json_schema": (
-                type_to_schema(sig.return_annotation, serialization_schema)
+                type_to_schema(sig.return_annotation)
                 if sig.return_annotation != inspect.Signature.empty
                 else None
             )
@@ -44,22 +44,13 @@ def analyze_function(fn):
     }
 
 
-def type_to_schema(typ, to_schema):
+def type_to_schema(typ):
     try:
         if isinstance(typ, typing.Iterable) or isinstance(typ, typing.AsyncIterable):
-            schema = to_schema(typ.__args__[0])
+            schema = TypeAdapter(typ.__args__[0]).json_schema()
             schema["promptkit"] = {"stream": True}
         else:
-            schema = to_schema(typ)
+            schema = TypeAdapter(typ).json_schema()
         return json.dumps(schema)
     except:
         return None
-
-
-if __name__ == "__main__":
-
-    def test(a: int, b: typing.Iterable[int]) -> str:
-        """this is a test function"""
-        ...
-
-    print(analyze(locals(), {"method_infos": ["test", "nonexist"]}))

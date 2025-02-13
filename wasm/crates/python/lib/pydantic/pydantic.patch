@@ -1,0 +1,29 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 3468fec..e825f0d 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -50,7 +50,7 @@ hex = "0.4.3"
+ 
+ [lib]
+ name = "_pydantic_core"
+-crate-type = ["cdylib", "rlib"]
++crate-type = ["cdylib"]
+ 
+ [features]
+ # must be enabled when building with `cargo build`, maturin enables this automatically
+@@ -110,3 +110,5 @@ too_many_lines = "allow"
+ unnecessary_wraps = "allow"
+ unused_self = "allow"
+ used_underscore_binding = "allow"
++
++[workspace]
+diff --git a/build.rs b/build.rs
+index f8f6690..4efa98a 100644
+--- a/build.rs
++++ b/build.rs
+@@ -47,4 +47,5 @@ fn main() {
+ 
+     generate_self_schema();
+     println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());
++    println!("cargo:rustc-link-arg=-shared");
+ }

@@ -67,13 +67,13 @@ fn build_python(sh: &Shell) -> Result<()> {
 
             let r = cmd!(
                 sh,
-                "uv pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
+                "uv pip install -U -r crates/python/bundled/requirements.txt --no-deps --target target/{TARGET}/python-deps"
             ).run();
 
             if r.is_err() {
                 cmd!(
                 sh,
-                "pip install -U -r crates/python/bundled/requirements.txt --target target/{TARGET}/python-deps"
+                "pip install -U -r crates/python/bundled/requirements.txt --no-deps --target target/{TARGET}/python-deps"
             ).run()?;
             }
 
@@ -158,7 +158,11 @@ fn build_python(sh: &Shell) -> Result<()> {
                     outname.clone(),
                     |inp, out| -> Result<()> {
                         let inp = inp[0].clone();
-                        cmd!(sh, "wasm-opt {inp} -g -O4 --strip-debug -o {out}").run()?;
+                        cmd!(
+                            sh,
+                            "wasm-opt {inp} --enable-bulk-memory -g -O4 --strip-debug -o {out}"
+                        )
+                        .run()?;
                         Ok(())
                     },
                 )?;
