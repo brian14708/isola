@@ -70,6 +70,6 @@ install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
         DESTINATION include)
 add_custom_command(
   TARGET python
-  DEPENDS python
+  POST_BUILD
   COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}> ARGS --strip-all
           $<TARGET_FILE:python>)
