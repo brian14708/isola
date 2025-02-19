@@ -1,7 +1,7 @@
 use std::io::{BufWriter, Write};
 
 use pyo3::{
-    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyTuple, PyNone},
+    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
     Bound, IntoPyObject, PyAny, PyObject, PyTypeInfo, Python,
 };
 use serde::{
@@ -390,7 +390,6 @@ impl serde::Serialize for PyLogDict<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyo3::ToPyObject;
     use serde_json::json;
 
     #[test]
@@ -398,14 +397,14 @@ mod tests {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             let mut v = vec![];
-            PyObjectSerializer::to_json_writer(&mut v, PyList::new(py, [1]).into_any()).unwrap();
+            PyObjectSerializer::to_json_writer(&mut v, PyList::new(py, [1]).unwrap().into_any())
+                .unwrap();
             assert_eq!(v, json!([1]).to_string().into_bytes());
 
-            let p = u64::MAX.to_object(py);
+            let p = u64::MAX.into_pyobject(py).unwrap();
             let p = p
-                .call_method_bound(py, "__add__", (1.to_object(py),), None)
-                .unwrap()
-                .into_bound(py);
+                .call_method("__add__", (1_u32.into_pyobject(py).unwrap(),), None)
+                .unwrap();
             v.clear();
             assert!(PyObjectSerializer::to_json_writer(&mut v, p).is_err());
             #[allow(clippy::cast_precision_loss)]
