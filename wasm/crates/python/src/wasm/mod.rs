@@ -15,12 +15,11 @@ use self::wasi::{
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
 use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell, types::PySet};
-use serde::de::DeserializeSeed;
 
 use crate::{
     error::Error,
     script::{InputValue, Scope},
-    serde::PyObjectDeserializer,
+    serde::PyValue,
 };
 
 use self::{exports::promptkit::script::guest, promptkit::script::host};
@@ -193,14 +192,9 @@ impl ArgIter {
                 host::Value::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
-                        PyObjectDeserializer::new(py)
-                            .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                        PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                            })?
-                            .into_pyobject(py)
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
                             })?
                             .into(),
                     ))
@@ -228,8 +222,7 @@ impl ArgIter {
                 host::Value::Cbor(c) => {
                     let c = SliceReader::new(&c);
                     Ok(Some(
-                        PyObjectDeserializer::new(py)
-                            .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                        PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
                             })?

@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, vec};
 
 use cbor4ii::core::utils::SliceReader;
 use pyo3::{
@@ -13,11 +13,10 @@ use pyo3::{
     },
     PyTypeInfo,
 };
-use serde::de::DeserializeSeed;
 
 use crate::{
     error::{Error, Result},
-    serde::{PyObjectDeserializer, PyObjectSerializer},
+    serde::PyValue,
     wasm::ArgIter,
 };
 
@@ -146,20 +145,21 @@ impl Scope {
                     positional
                         .into_iter()
                         .map(|v| match v {
-                            InputValue::Json(v) => Ok(PyObjectDeserializer::new(py)
-                                .deserialize(v)
+                            InputValue::Json(v) => Ok(PyValue::deserialize(py, v)
                                 .map_err(|_| Error::UnexpectedError("serde error"))?),
-                            InputValue::JsonStr(v) => Ok(PyObjectDeserializer::new(py)
-                                .deserialize(&mut serde_json::Deserializer::from_str(&v))
-                                .map_err(|_| Error::UnexpectedError("serde error"))?),
-                            InputValue::Iter(it) => {
-                                Ok(it.into_pyobject(py).unwrap().into_any().into())
-                            }
+                            InputValue::JsonStr(v) => Ok(PyValue::deserialize(
+                                py,
+                                &mut serde_json::Deserializer::from_str(&v),
+                            )
+                            .map_err(|_| Error::UnexpectedError("serde error"))?),
+                            InputValue::Iter(it) => Ok(it.into_pyobject(py).unwrap().into_any()),
                             InputValue::Cbor(v) => {
                                 let c = SliceReader::new(v.as_ref());
-                                Ok(PyObjectDeserializer::new(py)
-                                    .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
-                                    .map_err(|_| Error::UnexpectedError("serde error"))?)
+                                Ok(PyValue::deserialize(
+                                    py,
+                                    &mut cbor4ii::serde::Deserializer::new(c),
+                                )
+                                .map_err(|_| Error::UnexpectedError("serde error"))?)
                             }
                         })
                         .collect::<Result<Vec<_>>>()?,
@@ -172,8 +172,7 @@ impl Scope {
                             kwargs
                                 .set_item(
                                     k,
-                                    PyObjectDeserializer::new(py)
-                                        .deserialize(v)
+                                    PyValue::deserialize(py, v)
                                         .map_err(|_| Error::UnexpectedError("serde error"))?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
@@ -182,9 +181,11 @@ impl Scope {
                             kwargs
                                 .set_item(
                                     k,
-                                    PyObjectDeserializer::new(py)
-                                        .deserialize(&mut serde_json::Deserializer::from_str(&v))
-                                        .map_err(|_| Error::UnexpectedError("serde error"))?,
+                                    PyValue::deserialize(
+                                        py,
+                                        &mut serde_json::Deserializer::from_str(&v),
+                                    )
+                                    .map_err(|_| Error::UnexpectedError("serde error"))?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
@@ -193,9 +194,11 @@ impl Scope {
                             kwargs
                                 .set_item(
                                     k,
-                                    PyObjectDeserializer::new(py)
-                                        .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
-                                        .map_err(|_| Error::UnexpectedError("serde error"))?,
+                                    PyValue::deserialize(
+                                        py,
+                                        &mut cbor4ii::serde::Deserializer::new(c),
+                                    )
+                                    .map_err(|_| Error::UnexpectedError("serde error"))?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
@@ -225,7 +228,7 @@ impl Scope {
             };
 
             if Self::is_serializable(&obj) {
-                match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
+                match cbor4ii::serde::to_vec(vec![], &PyValue::new(obj)) {
                     Ok(s) => return Ok(Some(s)),
                     Err(cbor4ii::serde::EncodeError::Core(_)) => {
                         return Err(Error::UnexpectedError("serde error"))
@@ -242,10 +245,11 @@ impl Scope {
             let mut ret: Option<Vec<u8>> = None;
             if let Ok(iter) = obj.try_iter() {
                 for el in iter {
-                    let mut tmp = PyObjectSerializer::to_cbor(
-                        std::mem::take(&mut ret).unwrap_or_default(),
-                        el.map_err(|e| Error::from_pyerr(py, e))?,
-                    )
+                    let mut tmp = {
+                        let v = std::mem::take(&mut ret).unwrap_or_default();
+                        let object = el.map_err(|e| Error::from_pyerr(py, e))?;
+                        cbor4ii::serde::to_vec(v, &PyValue::new(object))
+                    }
                     .map_err(|_| Error::UnexpectedError("serde error"))?;
                     callback(&tmp);
                     tmp.clear();
@@ -274,19 +278,19 @@ impl Scope {
                     (
                         dict,
                         match request {
-                            InputValue::Json(v) => PyObjectDeserializer::new(py)
-                                .deserialize(v)
+                            InputValue::Json(v) => PyValue::deserialize(py, v)
                                 .map_err(|_| Error::UnexpectedError("serde error"))?,
-                            InputValue::JsonStr(v) => PyObjectDeserializer::new(py)
-                                .deserialize(&mut serde_json::Deserializer::from_str(&v))
-                                .map_err(|_| Error::UnexpectedError("serde error"))?,
+                            InputValue::JsonStr(v) => PyValue::deserialize(
+                                py,
+                                &mut serde_json::Deserializer::from_str(&v),
+                            )
+                            .map_err(|_| Error::UnexpectedError("serde error"))?,
                             InputValue::Iter(_) => {
                                 return Err(Error::UnexpectedError("unsupported"))
                             }
                             InputValue::Cbor(v) => {
                                 let c = SliceReader::new(v.as_ref());
-                                PyObjectDeserializer::new(py)
-                                    .deserialize(&mut cbor4ii::serde::Deserializer::new(c))
+                                PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
                                     .map_err(|_| Error::UnexpectedError("serde error"))?
                             }
                         },
@@ -294,7 +298,7 @@ impl Scope {
                     None,
                 )
                 .map_err(|e| Error::from_pyerr(py, e))?;
-            match PyObjectSerializer::to_cbor(vec![], obj.clone()) {
+            match cbor4ii::serde::to_vec(vec![], &PyValue::new(obj)) {
                 Ok(s) => Ok(Some(s)),
                 Err(cbor4ii::serde::EncodeError::Core(_)) => {
                     Err(Error::UnexpectedError("serde error"))

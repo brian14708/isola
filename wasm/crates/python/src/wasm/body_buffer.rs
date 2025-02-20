@@ -5,9 +5,8 @@ use pyo3::{
     types::{PyBytes, PyList, PyString},
     Bound, IntoPyObject, PyAny, PyErr, PyResult, Python,
 };
-use serde::de::DeserializeSeed;
 
-use crate::serde::PyObjectDeserializer;
+use crate::serde::PyValue;
 
 pub trait BodyBuffer: Default {
     fn write(&mut self, data: Vec<u8>);
@@ -202,12 +201,13 @@ impl BodyBuffer for Json {
             return Ok(None);
         }
 
-        let obj = PyObjectDeserializer::new(py)
-            .deserialize(&mut serde_json::Deserializer::from_reader(
-                std::io::Cursor::new(std::mem::take(&mut self.buffer)),
-            ))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?
-            .into_bound(py);
+        let obj = PyValue::deserialize(
+            py,
+            &mut serde_json::Deserializer::from_reader(std::io::Cursor::new(std::mem::take(
+                &mut self.buffer,
+            ))),
+        )
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         Ok(Some(obj))
     }
 

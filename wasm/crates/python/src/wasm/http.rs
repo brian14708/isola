@@ -1,56 +1,47 @@
-use core::{panic, str};
-use std::io::Write;
-
-use super::wasi::{
-    http::{
-        outgoing_handler::{ErrorCode, FutureIncomingResponse},
-        types::{IncomingBody, IncomingResponse},
-    },
-    io::{
-        poll::Pollable,
-        streams::{InputStream, StreamError},
-    },
-};
-use pyo3::{
-    prelude::*,
-    types::{PyBytes, PyDict},
-};
-use serde::de::DeserializeSeed;
-use url::Url;
-
-use crate::{
-    serde::{PyObjectDeserializer, PyObjectSerializer},
-    wasm::body_buffer,
-};
-
-use super::{body_buffer::BodyBuffer, future::create_future, PyPollable};
-
-#[pymodule]
+#[pyo3::pymodule]
 #[pyo3(name = "_promptkit_http")]
 pub mod http_module {
     use std::borrow::Cow;
+    use std::io::{BufWriter, Write};
 
-    use super::super::wasi::http::{
-        outgoing_handler::{handle, OutgoingRequest, RequestOptions},
-        types::{Fields, Method, OutgoingBody, Scheme},
+    use pyo3::{
+        prelude::*,
+        types::{PyBytes, PyDict},
     };
-    #[allow(clippy::wildcard_imports)]
-    use super::*;
-    use pyo3::pyfunction;
+    use url::Url;
+
+    use crate::{
+        serde::PyValue,
+        wasm::{
+            body_buffer::{BodyBuffer, Buffer},
+            future::create_future,
+            wasi::{
+                http::{
+                    outgoing_handler::{
+                        handle, ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions,
+                    },
+                    types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
+                },
+                io::{
+                    poll::Pollable,
+                    streams::{InputStream, StreamError},
+                },
+            },
+            PyPollable,
+        },
+    };
 
     #[pyfunction]
-    fn new_buffer(kind: &str) -> Buffer {
-        Buffer {
-            inner: body_buffer::Buffer::new(kind),
+    fn new_buffer(kind: &str) -> ResponseBuffer {
+        ResponseBuffer {
+            inner: Buffer::new(kind),
         }
     }
 
     #[pyfunction]
     fn loads_json<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyAny>> {
-        Ok(PyObjectDeserializer::new(py)
-            .deserialize(&mut serde_json::Deserializer::from_str(s))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?
-            .into_bound(py))
+        PyValue::deserialize(py, &mut serde_json::Deserializer::from_str(s))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))
     }
 
     #[pyfunction]
@@ -175,9 +166,9 @@ pub mod http_module {
                     })?;
                 }
                 Body::Object(b) => {
-                    PyObjectSerializer::to_json_writer(&mut os, b).map_err(|_e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                    })?;
+                    serde_json::to_writer(BufWriter::new(&mut os), &PyValue::new(b)).map_err(
+                        |_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"),
+                    )?;
                 }
             }
 
@@ -189,150 +180,147 @@ pub mod http_module {
 
         Ok(PyFutureResponse::new(resp))
     }
-}
 
-create_future!(PyFutureResponse, FutureIncomingResponse, PyResponse);
+    create_future!(PyFutureResponse, FutureIncomingResponse, PyResponse);
 
-#[pyclass]
-struct PyResponse {
-    response: Option<IncomingResponse>,
-    body: Option<IncomingBody>,
-    stream: Option<InputStream>,
-}
+    #[pyclass]
+    struct PyResponse {
+        response: Option<IncomingResponse>,
+        body: Option<IncomingBody>,
+        stream: Option<InputStream>,
+    }
 
-impl TryFrom<Result<IncomingResponse, ErrorCode>> for PyResponse {
-    type Error = PyErr;
+    impl TryFrom<Result<IncomingResponse, ErrorCode>> for PyResponse {
+        type Error = PyErr;
 
-    fn try_from(value: Result<IncomingResponse, ErrorCode>) -> Result<Self, Self::Error> {
-        match value {
-            Ok(response) => Ok(Self {
-                response: Some(response),
-                body: None,
-                stream: None,
-            }),
-            Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                e.to_string(),
-            )),
+        fn try_from(value: Result<IncomingResponse, ErrorCode>) -> Result<Self, Self::Error> {
+            match value {
+                Ok(response) => Ok(Self {
+                    response: Some(response),
+                    body: None,
+                    stream: None,
+                }),
+                Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    e.to_string(),
+                )),
+            }
         }
     }
-}
 
-#[pymethods]
-impl PyResponse {
-    fn close(&mut self) {
-        self.stream.take();
-        self.body.take();
-        self.response.take();
-    }
-
-    fn status(&self) -> u16 {
-        self.response.as_ref().expect("response closed").status()
-    }
-
-    #[allow(clippy::needless_pass_by_value)]
-    fn headers(slf: PyRef<'_, Self>) -> PyResult<Bound<'_, PyDict>> {
-        let hdrs = slf.response.as_ref().expect("response closed").headers();
-        let d = PyDict::new(slf.py());
-        for (k, v) in hdrs.entries() {
-            d.set_item(
-                k,
-                str::from_utf8(&v).map_err(|_| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid header value")
-                })?,
-            )?;
+    #[pymethods]
+    impl PyResponse {
+        fn close(&mut self) {
+            self.stream.take();
+            self.body.take();
+            self.response.take();
         }
-        Ok(d)
-    }
 
-    fn read_into(&mut self, buf: &mut Buffer) -> PyResult<Option<PyPollable>> {
-        read_into(self, &mut buf.inner).map(|p| p.map(Into::into))
-    }
-
-    fn blocking_read<'py>(
-        &mut self,
-        py: Python<'py>,
-        kind: &str,
-    ) -> PyResult<Option<Bound<'py, PyAny>>> {
-        let mut buf = body_buffer::Buffer::new(kind);
-        while let Some(p) = read_into(self, &mut buf)? {
-            p.block();
+        fn status(&self) -> u16 {
+            self.response.as_ref().expect("response closed").status()
         }
-        buf.decode_all(py)
+
+        #[allow(clippy::needless_pass_by_value)]
+        fn headers(slf: PyRef<'_, Self>) -> PyResult<Bound<'_, PyDict>> {
+            let hdrs = slf.response.as_ref().expect("response closed").headers();
+            let d = PyDict::new(slf.py());
+            for (k, v) in hdrs.entries() {
+                d.set_item(
+                    k,
+                    std::str::from_utf8(&v).map_err(|_| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid header value")
+                    })?,
+                )?;
+            }
+            Ok(d)
+        }
+
+        fn read_into(&mut self, buf: &mut ResponseBuffer) -> PyResult<Option<PyPollable>> {
+            read_into(self, &mut buf.inner).map(|p| p.map(Into::into))
+        }
+
+        fn blocking_read<'py>(
+            &mut self,
+            py: Python<'py>,
+            kind: &str,
+        ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            let mut buf = Buffer::new(kind);
+            while let Some(p) = read_into(self, &mut buf)? {
+                p.block();
+            }
+            buf.decode_all(py)
+        }
     }
-}
 
-impl Drop for PyResponse {
-    fn drop(&mut self) {
-        self.stream.take();
-        self.body.take();
-        self.response.take();
+    impl Drop for PyResponse {
+        fn drop(&mut self) {
+            self.stream.take();
+            self.body.take();
+            self.response.take();
+        }
     }
-}
 
-fn read_into(
-    slf: &mut PyResponse,
-    buf: &mut impl body_buffer::BodyBuffer,
-) -> PyResult<Option<Pollable>> {
-    let stream = if let Some(b) = slf.stream.as_mut() {
-        b
-    } else {
-        slf.body = Some(
-            slf.response
-                .as_mut()
-                .expect("response closed")
-                .consume()
-                .expect("body already read"),
-        );
-        slf.stream = Some(
-            slf.body
-                .as_ref()
-                .unwrap()
-                .stream()
-                .expect("body already read"),
-        );
-        slf.stream.as_mut().unwrap()
-    };
+    fn read_into(slf: &mut PyResponse, buf: &mut impl BodyBuffer) -> PyResult<Option<Pollable>> {
+        let stream = if let Some(b) = slf.stream.as_mut() {
+            b
+        } else {
+            slf.body = Some(
+                slf.response
+                    .as_mut()
+                    .expect("response closed")
+                    .consume()
+                    .expect("body already read"),
+            );
+            slf.stream = Some(
+                slf.body
+                    .as_ref()
+                    .unwrap()
+                    .stream()
+                    .expect("body already read"),
+            );
+            slf.stream.as_mut().unwrap()
+        };
 
-    loop {
-        match InputStream::read(stream, 16384) {
-            Ok(v) => {
-                if !v.is_empty() {
-                    buf.write(v);
-                    continue;
+        loop {
+            match InputStream::read(stream, 16384) {
+                Ok(v) => {
+                    if !v.is_empty() {
+                        buf.write(v);
+                        continue;
+                    }
+
+                    let poll = stream.subscribe();
+                    return Ok(Some(poll));
                 }
-
-                let poll = stream.subscribe();
-                return Ok(Some(poll));
-            }
-            Err(StreamError::LastOperationFailed(e)) => {
-                slf.stream.take();
-                slf.body.take();
-                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    e.to_debug_string(),
-                ));
-            }
-            Err(StreamError::Closed) => {
-                buf.close();
-                slf.stream.take();
-                slf.body.take();
-                return Ok(None);
+                Err(StreamError::LastOperationFailed(e)) => {
+                    slf.stream.take();
+                    slf.body.take();
+                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        e.to_debug_string(),
+                    ));
+                }
+                Err(StreamError::Closed) => {
+                    buf.close();
+                    slf.stream.take();
+                    slf.body.take();
+                    return Ok(None);
+                }
             }
         }
     }
-}
 
-#[pyclass]
-struct Buffer {
-    inner: body_buffer::Buffer,
-}
-
-#[pymethods]
-impl Buffer {
-    fn next(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
-        self.inner.decode(py).map(|o| o.map(Into::into))
+    #[pyclass]
+    struct ResponseBuffer {
+        inner: Buffer,
     }
 
-    fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
-        self.inner.decode_all(py).map(|o| o.map(Into::into))
+    #[pymethods]
+    impl ResponseBuffer {
+        fn next(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+            self.inner.decode(py).map(|o| o.map(Into::into))
+        }
+
+        fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+            self.inner.decode_all(py).map(|o| o.map(Into::into))
+        }
     }
 }
