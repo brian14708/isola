@@ -3,11 +3,19 @@
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
   "packageRules": [
     {
+      "groupName": "opentelemetry",
+      "matchPackageNames": ["/^opentelemetry/", "/^tracing-opentelemetry/"],
+      "matchUpdateTypes": ["minor"]
+    },
+    {
+      "groupName": "wit",
+      "matchPackageNames": ["/^wit-bindgen/", "/^wit-component/"],
+      "matchUpdateTypes": ["minor"]
+    },
+    {
       "groupName": "wasmtime",
       "matchPackageNames": ["/^wasi-/", "/^wasmtime/"],
-      "matchUpdateTypes": [
-        "major"
-      ]
+      "matchUpdateTypes": ["major"]
     },
     {
       "matchUpdateTypes": ["minor"],
