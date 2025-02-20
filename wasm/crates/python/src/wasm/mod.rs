@@ -4,6 +4,7 @@ mod body_buffer;
 mod future;
 mod http;
 mod logging;
+mod protobuf;
 
 use std::cell::RefCell;
 
@@ -74,6 +75,8 @@ impl guest::Guest for Global {
                 use logging::logging_module;
                 append_to_inittab!(logging_module);
                 append_to_inittab!(sys_module);
+                use protobuf::protobuf_module;
+                append_to_inittab!(protobuf_module);
 
                 let v = Scope::new();
                 let code = include_str!("prelude.py");
