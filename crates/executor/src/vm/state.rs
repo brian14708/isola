@@ -7,8 +7,8 @@ use wasmtime::{
     Engine, Store,
 };
 use wasmtime_wasi::{
-    bindings::io::streams::StreamError, DirPerms, FilePerms, Pollable, WasiCtx, WasiCtxBuilder,
-    WasiView,
+    bindings::io::streams::StreamError, DirPerms, DynPollable, FilePerms, IoView, WasiCtx,
+    WasiCtxBuilder, WasiView,
 };
 use wasmtime_wasi_http::{
     bindings::http::outgoing_handler::ErrorCode,
@@ -80,11 +80,13 @@ impl<E: Env + Send> VmState<E> {
     }
 }
 
-impl<E: Send> WasiView for VmState<E> {
+impl<E: Send> IoView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
+}
 
+impl<E: Send> WasiView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }
@@ -120,7 +122,7 @@ impl<E: Send> HostValueIterator for VmState<E> {
     async fn subscribe(
         &mut self,
         resource: wasmtime::component::Resource<ValueIterator>,
-    ) -> wasmtime::Result<wasmtime::component::Resource<Pollable>> {
+    ) -> wasmtime::Result<wasmtime::component::Resource<DynPollable>> {
         wasmtime_wasi::subscribe(self.table(), resource)
     }
 
@@ -136,10 +138,6 @@ impl<E: Send> HostValueIterator for VmState<E> {
 impl<E: Env + Send> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
-    }
-
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
     }
 
     fn send_request(

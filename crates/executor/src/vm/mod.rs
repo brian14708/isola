@@ -10,7 +10,7 @@ pub use state::VmState;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use wasmtime::{component::ResourceTableError, Store};
-use wasmtime_wasi::WasiView;
+use wasmtime_wasi::IoView;
 
 use crate::{vm::run::VmRun, Env, ExecStreamItem};
 

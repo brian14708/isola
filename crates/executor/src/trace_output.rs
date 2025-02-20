@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use smallvec::SmallVec;
 use tracing::event;
-use wasmtime_wasi::{HostOutputStream, StdoutStream, StreamResult, Subscribe};
+use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
 
 pub struct TraceOutput {
     group: &'static str,
@@ -14,7 +14,7 @@ impl TraceOutput {
 }
 
 impl StdoutStream for TraceOutput {
-    fn stream(&self) -> Box<dyn HostOutputStream> {
+    fn stream(&self) -> Box<dyn OutputStream> {
         Box::new(TraceOutputStream {
             group: self.group,
             buffer: SmallVec::new(),
@@ -70,11 +70,11 @@ impl TraceOutputStream {
 }
 
 #[async_trait::async_trait]
-impl Subscribe for TraceOutputStream {
+impl Pollable for TraceOutputStream {
     async fn ready(&mut self) {}
 }
 
-impl HostOutputStream for TraceOutputStream {
+impl OutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
         if bytes.len() + self.buffer.len() < MIN_BUFFER {
             self.buffer.extend_from_slice(&bytes);

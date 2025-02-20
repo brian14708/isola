@@ -17,7 +17,7 @@ pub mod host {
 
     use futures_util::{FutureExt, StreamExt};
     use tokio_stream::Stream;
-    use wasmtime_wasi::{bindings::io::streams::StreamError, Subscribe};
+    use wasmtime_wasi::{bindings::io::streams::StreamError, Pollable};
 
     pub use super::promptkit::script::host::*;
 
@@ -54,7 +54,7 @@ pub mod host {
     }
 
     #[async_trait::async_trait]
-    impl Subscribe for ValueIterator {
+    impl Pollable for ValueIterator {
         async fn ready(&mut self) {
             if self.peek.is_none() {
                 self.peek = match self.stream.next().await {

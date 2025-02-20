@@ -29,9 +29,9 @@ thiserror = "2.0.0"
 tokio = { version = "1.37.0", features = ["fs"] }
 tokio-stream = "0.1.15"
 tracing = "0.1.40"
-wasmtime = { version = "29.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation", "gc-drc"] }
-wasmtime-wasi = "29.0.0"
-wasmtime-wasi-http = "29.0.0"
+wasmtime = { version = "30.0.0", default-features = false, features = ["cranelift", "async", "parallel-compilation", "gc-drc"] }
+wasmtime-wasi = "30.0.0"
+wasmtime-wasi-http = "30.0.0"
 
 [dev-dependencies]
 http = "1.1.0"
