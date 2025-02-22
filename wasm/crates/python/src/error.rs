@@ -1,4 +1,4 @@
-use pyo3::{prelude::PyTracebackMethods, PyErr, Python};
+use pyo3::{PyErr, Python, prelude::PyTracebackMethods};
 use thiserror::Error;
 
 use crate::wasm::exports::{

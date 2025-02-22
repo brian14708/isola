@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use parking_lot::Mutex;
 use rand::Rng;
 
-use crate::{vm::Vm, Env};
+use crate::{Env, vm::Vm};
 
 pub struct VmCache<E> {
     caches: Mutex<HashMap<[u8; 32], Vec<Vm<E>>>>,

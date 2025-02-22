@@ -16,7 +16,7 @@ thread_local! {
 #[pymodule]
 #[pyo3(name = "_promptkit_logging")]
 pub mod logging_module {
-    use crate::wasm::wasi::logging::logging::{log, Level};
+    use crate::wasm::wasi::logging::logging::{Level, log};
 
     #[allow(clippy::wildcard_imports)]
     use super::*;

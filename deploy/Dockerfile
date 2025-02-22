@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM cgr.dev/chainguard/rust:latest-dev AS server-build
+FROM docker.io/chainguard/rust:latest-dev AS server-build
 USER root
 RUN apk add --no-cache protobuf-dev cmake glibc-dev
 COPY crates crates
@@ -54,7 +54,7 @@ RUN find /src/wasm/target/wasm32-wasip1/wasi-deps/usr/ -type f -name "*.so" -exe
 RUN python -m compileall /src/wasm/target/wasm32-wasip1/wasi-deps/usr/
 
 
-FROM cgr.dev/chainguard/glibc-dynamic:latest AS staging
+FROM docker.io/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app
 COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit_server .
 COPY --from=ui-build --chown=nonroot:nonroot /src/build ui/build
@@ -62,7 +62,7 @@ COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit_server", "build"]
 
-FROM cgr.dev/chainguard/glibc-dynamic:latest
+FROM docker.io/chainguard/glibc-dynamic:latest
 WORKDIR /app
 COPY --from=staging /app .
 EXPOSE 3000/tcp

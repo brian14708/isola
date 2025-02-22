@@ -13,12 +13,13 @@ pub mod http_module {
     use crate::{
         serde::PyValue,
         wasm::{
+            PyPollable,
             body_buffer::{BodyBuffer, Buffer},
             future::create_future,
             wasi::{
                 http::{
                     outgoing_handler::{
-                        handle, ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions,
+                        ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
                     },
                     types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
                 },
@@ -27,7 +28,6 @@ pub mod http_module {
                     streams::{InputStream, StreamError},
                 },
             },
-            PyPollable,
         },
     };
 

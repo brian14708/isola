@@ -4,9 +4,8 @@ use tokio::sync::mpsc;
 use wasmtime::Store;
 
 use super::{
-    exports,
+    Vm, exports,
     state::{VmRunState, VmState},
-    Vm,
 };
 use crate::{Env, ExecStreamItem};
 

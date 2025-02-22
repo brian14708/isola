@@ -1,4 +1,8 @@
-#![allow(clippy::missing_safety_doc, clippy::module_name_repetitions)]
+#![allow(
+    clippy::missing_safety_doc,
+    clippy::module_name_repetitions,
+    unsafe_op_in_unsafe_fn
+)]
 
 mod body_buffer;
 mod future;
@@ -89,14 +93,14 @@ impl guest::Guest for Global {
         // https://github.com/bytecodealliance/componentize-py/blob/72348e0ebd74ef1027c52528409a289765ed5c4c/runtime/src/lib.rs#L377
         if preinit {
             #[link(wasm_import_module = "wasi_snapshot_preview1")]
-            extern "C" {
+            unsafe extern "C" {
                 #[cfg_attr(target_arch = "wasm32", link_name = "reset_adapter_state")]
                 fn reset_adapter_state();
             }
 
             // This tells wasi-libc to reset its preopen state, forcing re-initialization at runtime.
             #[link(wasm_import_module = "env")]
-            extern "C" {
+            unsafe extern "C" {
                 #[cfg_attr(target_arch = "wasm32", link_name = "__wasilibc_reset_preopens")]
                 fn wasilibc_reset_preopens();
             }
@@ -274,7 +278,7 @@ impl std::io::Write for wasi::io::streams::OutputStream {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::Other,
                         e.to_debug_string(),
-                    ))
+                    ));
                 }
             }
         };

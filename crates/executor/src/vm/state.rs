@@ -3,23 +3,23 @@ use std::path::Path;
 use futures_util::StreamExt;
 use tokio::{sync::mpsc, time::timeout};
 use wasmtime::{
-    component::{Linker, ResourceTable},
     Engine, Store,
+    component::{Linker, ResourceTable},
 };
 use wasmtime_wasi::{
-    bindings::io::streams::StreamError, DirPerms, DynPollable, FilePerms, IoView, WasiCtx,
-    WasiCtxBuilder, WasiView,
+    DirPerms, DynPollable, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView,
+    bindings::io::streams::StreamError,
 };
 use wasmtime_wasi_http::{
+    HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
     body::{HyperIncomingBody, HyperOutgoingBody},
     types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
-    HttpResult, WasiHttpCtx, WasiHttpView,
 };
 
-use crate::{resource::MemoryLimiter, trace_output::TraceOutput, Env, ExecStreamItem};
+use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
 
-use super::bindgen::host::{add_to_linker, Host, HostValueIterator, Value, ValueIterator};
+use super::bindgen::host::{Host, HostValueIterator, Value, ValueIterator, add_to_linker};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -94,11 +94,12 @@ impl<E: Send> WasiView for VmState<E> {
 
 impl<E: Send> Host for VmState<E> {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
-        if let Some(run) = &self.run {
-            run.output.send(ExecStreamItem::Data(data)).await?;
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("output channel missing"))
+        match &self.run {
+            Some(run) => {
+                run.output.send(ExecStreamItem::Data(data)).await?;
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("output channel missing")),
         }
     }
 }
@@ -157,7 +158,7 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
                 Ok(Err(e)) => {
                     return Ok(Err(ErrorCode::InternalError(Some(format!(
                         "request error: {e}"
-                    )))))
+                    )))));
                 }
                 Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
             }

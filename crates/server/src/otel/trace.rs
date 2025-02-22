@@ -8,7 +8,7 @@ use tower_http::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
     trace::{OnFailure, OnResponse},
 };
-use tracing::{field::Empty, Span};
+use tracing::{Span, field::Empty};
 
 pub fn grpc_server_tracing_layer() -> tower_http::trace::TraceLayer<
     SharedClassifier<GrpcErrorsAsFailures>,

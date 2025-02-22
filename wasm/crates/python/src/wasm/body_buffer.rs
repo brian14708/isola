@@ -2,8 +2,8 @@ use std::{collections::VecDeque, io::Read};
 
 use eventsource::event::parse_event_line;
 use pyo3::{
-    types::{PyBytes, PyList, PyString},
     Bound, IntoPyObject, PyAny, PyErr, PyResult, Python,
+    types::{PyBytes, PyList, PyString},
 };
 
 use crate::serde::PyValue;

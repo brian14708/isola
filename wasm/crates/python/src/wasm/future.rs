@@ -1,4 +1,4 @@
-use pyo3::{pyclass, pymethods, Bound};
+use pyo3::{Bound, pyclass, pymethods};
 
 use super::wasi;
 

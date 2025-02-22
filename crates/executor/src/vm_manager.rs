@@ -11,26 +11,26 @@ use anyhow::anyhow;
 use component_init::Invoker;
 use futures_util::FutureExt;
 use pin_project_lite::pin_project;
-use rc_zip_tokio::{rc_zip::parse::EntryKind, ReadZip};
+use rc_zip_tokio::{ReadZip, rc_zip::parse::EntryKind};
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::{wrappers::ReceiverStream, Stream, StreamExt};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
-    component::{Component, Instance},
     Config, Engine, Store,
+    component::{Component, Instance},
 };
 
 use crate::{
+    Env,
     error::{Error, Result},
     vm::{
-        exports::{Argument, Value},
         SandboxPre, Vm, VmState,
+        exports::{Argument, Value},
     },
     vm_cache::VmCache,
     wasm::logging::bindings::logging::Level,
-    Env,
 };
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
@@ -214,16 +214,15 @@ where
 
     fn exec_impl(
         &self,
-        func: &str,
+        func: String,
         args: SmallVec<[Argument; 2]>,
         vm: Vm<E>,
         level: LevelFilter,
-    ) -> impl Stream<Item = ExecStreamItem> + Send {
+    ) -> impl Stream<Item = ExecStreamItem> + Send + use<E> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
         let mut run = vm.run(tx.clone());
-        let func = func.to_string();
         let exec = Box::pin(async move {
             let ret = run
                 .exec(|vm, mut store| async move {
@@ -262,11 +261,11 @@ where
     pub async fn exec(
         &self,
         script: ExecSource,
-        func: &str,
-        args: impl IntoIterator<Item = ExecArgument>,
+        func: String,
+        args: Vec<ExecArgument>,
         env: &E,
         level: LevelFilter,
-    ) -> Result<impl Stream<Item = ExecStreamItem> + Send> {
+    ) -> Result<impl Stream<Item = ExecStreamItem> + Send + use<E>> {
         let mut hasher = Sha256::new();
         match &script {
             ExecSource::Script(p, s) => {
@@ -481,7 +480,7 @@ impl Env for MockEnv {
             Self::Error,
         >,
     > + Send
-           + 'static
+    + 'static
     where
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,

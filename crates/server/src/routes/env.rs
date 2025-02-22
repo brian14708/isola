@@ -13,7 +13,7 @@ use http::{HeaderName, HeaderValue};
 use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project::pin_project;
-use tracing::{field::Empty, Instrument};
+use tracing::{Instrument, field::Empty};
 
 use promptkit_executor::Env;
 
@@ -107,7 +107,7 @@ impl Env for VmEnv {
             >,
         >,
     > + Send
-           + 'static
+    + 'static
     where
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,

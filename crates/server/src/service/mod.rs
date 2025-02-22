@@ -7,14 +7,14 @@ use reqwest::Client;
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{once, wrappers::UnboundedReceiverStream};
 use tonic::{Response, Status};
-use tracing::{level_filters::LevelFilter, span, Instrument, Span};
+use tracing::{Instrument, Span, level_filters::LevelFilter, span};
 
 use crate::{
     otel::RequestSpanExt,
     proto::script::v1::{
-        self as script, analyze_response, argument::Marker, execute_client_stream_request,
-        execute_stream_request, result, script_service_server::ScriptService, ContentType,
-        ErrorCode, Trace,
+        self as script, ContentType, ErrorCode, Trace, analyze_response, argument::Marker,
+        execute_client_stream_request, execute_stream_request, result,
+        script_service_server::ScriptService,
     },
     routes::{AppState, VmEnv},
     service::prost_serde::{argument, parse_source},
@@ -111,8 +111,8 @@ impl ScriptService for ScriptServer {
                     .vm
                     .exec(
                         script,
-                        "$analyze",
-                        [ExecArgument {
+                        "$analyze".to_string(),
+                        vec![ExecArgument {
                             name: None,
                             value: ExecArgumentValue::Cbor(req),
                         }],
@@ -179,7 +179,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, &method, args, env.as_ref(), log_level)
+                    .exec(script, method, args, env.as_ref(), log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -244,7 +244,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, &method, args, env.as_ref(), log_level)
+                    .exec(script, method, args, env.as_ref(), log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -325,7 +325,7 @@ impl ScriptService for ScriptServer {
             timeout,
             self.state
                 .vm
-                .exec(script, &method, args, env.as_ref(), log_level),
+                .exec(script, method, args, env.as_ref(), log_level),
         )
         .instrument(span.clone())
         .await
@@ -370,21 +370,22 @@ impl ScriptService for ScriptServer {
                 metadata: None,
             }),
         );
-        if let Some(tracer_events) = trace_events {
-            let trace_async = UnboundedReceiverStream::new(tracer_events)
-                .ready_chunks(4)
-                .map(|traces| {
-                    Ok(script::ExecuteServerStreamResponse {
-                        result: None,
-                        metadata: Some(script::ExecutionStreamMetadata { traces }),
-                    })
-                });
-            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
-                stream,
-                trace_async,
-            ))))
-        } else {
-            Ok(Response::new(Box::pin(stream)))
+        match trace_events {
+            Some(tracer_events) => {
+                let trace_async = UnboundedReceiverStream::new(tracer_events)
+                    .ready_chunks(4)
+                    .map(|traces| {
+                        Ok(script::ExecuteServerStreamResponse {
+                            result: None,
+                            metadata: Some(script::ExecutionStreamMetadata { traces }),
+                        })
+                    });
+                Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
+                    stream,
+                    trace_async,
+                ))))
+            }
+            _ => Ok(Response::new(Box::pin(stream))),
         }
     }
 
@@ -417,7 +418,7 @@ impl ScriptService for ScriptServer {
             timeout,
             self.state
                 .vm
-                .exec(script, &method, args, env.as_ref(), log_level),
+                .exec(script, method, args, env.as_ref(), log_level),
         )
         .instrument(span.clone())
         .await
@@ -488,21 +489,22 @@ impl ScriptService for ScriptServer {
                 metadata: None,
             }),
         );
-        if let Some(tracer_events) = trace_events {
-            let trace_async = UnboundedReceiverStream::new(tracer_events)
-                .ready_chunks(4)
-                .map(|traces| {
-                    Ok(script::ExecuteStreamResponse {
-                        result: None,
-                        metadata: Some(script::ExecutionStreamMetadata { traces }),
-                    })
-                });
-            Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
-                stream,
-                trace_async,
-            ))))
-        } else {
-            Ok(Response::new(Box::pin(stream)))
+        match trace_events {
+            Some(tracer_events) => {
+                let trace_async = UnboundedReceiverStream::new(tracer_events)
+                    .ready_chunks(4)
+                    .map(|traces| {
+                        Ok(script::ExecuteStreamResponse {
+                            result: None,
+                            metadata: Some(script::ExecutionStreamMetadata { traces }),
+                        })
+                    });
+                Ok(Response::new(Box::pin(tokio_stream::StreamExt::merge(
+                    stream,
+                    trace_async,
+                ))))
+            }
+            _ => Ok(Response::new(Box::pin(stream))),
         }
     }
 }
@@ -604,10 +606,9 @@ fn parse_spec<'a>(
         let (span, trace, log_level) = match script::TraceLevel::try_from(spec.trace_level) {
             Ok(script::TraceLevel::All) => {
                 let s = span!(tracing::Level::TRACE, "trace span", promptkit.user = true);
-                if let Some(t) = s.enable_tracing(LevelFilter::DEBUG) {
-                    (s, Some(t), LevelFilter::DEBUG)
-                } else {
-                    (Span::none(), None, LevelFilter::DEBUG)
+                match s.enable_tracing(LevelFilter::DEBUG) {
+                    Some(t) => (s, Some(t), LevelFilter::DEBUG),
+                    _ => (Span::none(), None, LevelFilter::DEBUG),
                 }
             }
             Ok(script::TraceLevel::None) => (Span::none(), None, LevelFilter::OFF),

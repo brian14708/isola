@@ -5,21 +5,21 @@ use std::{env::args, path::PathBuf};
 
 use anyhow::anyhow;
 use opentelemetry::{
-    global, propagation::TextMapCompositePropagator, trace::TracerProvider, KeyValue,
+    KeyValue, global, propagation::TextMapCompositePropagator, trace::TracerProvider,
 };
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
+    Resource,
     propagation::{BaggagePropagator, TraceContextPropagator},
     trace::{RandomIdGenerator, Sampler},
-    Resource,
 };
 use opentelemetry_semantic_conventions::resource;
 use otel::{grpc_server_tracing_layer, request_tracing_layer};
 use promptkit_executor::VmManager;
 use proto::script::v1::script_service_server::ScriptServiceServer;
 use tonic::codec::CompressionEncoding;
-use tracing::{level_filters::LevelFilter, Level};
-use tracing_subscriber::{filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt, Layer};
+use tracing::{Level, level_filters::LevelFilter};
+use tracing_subscriber::{Layer, filter::FilterFn, layer::SubscriberExt, util::SubscriberInitExt};
 
 mod otel;
 mod proto;

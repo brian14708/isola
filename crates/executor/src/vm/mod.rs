@@ -5,14 +5,14 @@ mod state;
 use std::pin::Pin;
 
 use bindgen::host::{Value, ValueIterator};
-pub use bindgen::{guest as exports, Sandbox, SandboxPre};
+pub use bindgen::{Sandbox, SandboxPre, guest as exports};
 pub use state::VmState;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-use wasmtime::{component::ResourceTableError, Store};
+use wasmtime::{Store, component::ResourceTableError};
 use wasmtime_wasi::IoView;
 
-use crate::{vm::run::VmRun, Env, ExecStreamItem};
+use crate::{Env, ExecStreamItem, vm::run::VmRun};
 
 pub struct Vm<E> {
     pub(crate) hash: [u8; 32],

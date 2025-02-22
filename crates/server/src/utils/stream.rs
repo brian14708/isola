@@ -1,10 +1,10 @@
 use std::{future::Future, pin::Pin, task::Poll, time::Duration};
 
 use axum::{
-    http::{header::CONTENT_TYPE, HeaderValue},
+    http::{HeaderValue, header::CONTENT_TYPE},
     response::{
-        sse::{Event, KeepAlive},
         IntoResponse, Response, Sse,
+        sse::{Event, KeepAlive},
     },
 };
 use serde_json::json;

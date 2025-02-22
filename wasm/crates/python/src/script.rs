@@ -2,6 +2,7 @@ use std::{borrow::Cow, vec};
 
 use cbor4ii::core::utils::SliceReader;
 use pyo3::{
+    PyTypeInfo,
     exceptions::PyNameError,
     intern,
     prelude::*,
@@ -11,7 +12,6 @@ use pyo3::{
         PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyMemoryView, PyString,
         PyTuple,
     },
-    PyTypeInfo,
 };
 
 use crate::{
@@ -231,7 +231,7 @@ impl Scope {
                 match cbor4ii::serde::to_vec(vec![], &PyValue::new(obj)) {
                     Ok(s) => return Ok(Some(s)),
                     Err(cbor4ii::serde::EncodeError::Core(_)) => {
-                        return Err(Error::UnexpectedError("serde error"))
+                        return Err(Error::UnexpectedError("serde error"));
                     }
                     Err(cbor4ii::serde::EncodeError::Custom(s)) => {
                         return Err(Error::PythonError {
@@ -286,7 +286,7 @@ impl Scope {
                             )
                             .map_err(|_| Error::UnexpectedError("serde error"))?,
                             InputValue::Iter(_) => {
-                                return Err(Error::UnexpectedError("unsupported"))
+                                return Err(Error::UnexpectedError("unsupported"));
                             }
                             InputValue::Cbor(v) => {
                                 let c = SliceReader::new(v.as_ref());

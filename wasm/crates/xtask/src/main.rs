@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Result;
-use xshell::{cmd, Shell};
+use xshell::{Shell, cmd};
 
 fn main() -> Result<()> {
     let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR"))

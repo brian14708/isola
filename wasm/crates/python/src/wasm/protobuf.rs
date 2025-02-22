@@ -2,10 +2,10 @@
 #[pyo3(name = "_promptkit_protobuf")]
 pub mod protobuf_module {
     use prost_reflect::{
-        prost::Message, prost_types::FileDescriptorSet, DescriptorPool, DeserializeOptions,
-        DynamicMessage, SerializeOptions,
+        DescriptorPool, DeserializeOptions, DynamicMessage, SerializeOptions, prost::Message,
+        prost_types::FileDescriptorSet,
     };
-    use pyo3::{pyclass, pyfunction, pymethods, Bound, PyAny, PyErr, Python};
+    use pyo3::{Bound, PyAny, PyErr, Python, pyclass, pyfunction, pymethods};
     use serde::de::IntoDeserializer;
 
     use crate::serde::PyValue;

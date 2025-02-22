@@ -17,7 +17,7 @@ pub mod host {
 
     use futures_util::{FutureExt, StreamExt};
     use tokio_stream::Stream;
-    use wasmtime_wasi::{bindings::io::streams::StreamError, Pollable};
+    use wasmtime_wasi::{Pollable, bindings::io::streams::StreamError};
 
     pub use super::promptkit::script::host::*;
 

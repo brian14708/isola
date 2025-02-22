@@ -1,17 +1,17 @@
 use pyo3::{
-    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
     Bound, IntoPyObject, PyAny, PyTypeInfo, Python,
+    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
 };
 use serde::{
+    Deserializer, Serialize, Serializer,
     de::{
-        value::{MapAccessDeserializer, MapDeserializer, SeqDeserializer},
         DeserializeSeed, Expected, IntoDeserializer, Unexpected, Visitor,
+        value::{MapAccessDeserializer, MapDeserializer, SeqDeserializer},
     },
     ser::{
         SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
         SerializeTupleStruct, SerializeTupleVariant,
     },
-    Deserializer, Serialize, Serializer,
 };
 
 const MAX_DEPTH: usize = 128;

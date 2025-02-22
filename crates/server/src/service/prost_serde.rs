@@ -3,14 +3,14 @@ use std::borrow::Cow;
 use cbor4ii::core::utils::SliceReader;
 use promptkit_executor::ExecSource;
 use serde::{
+    Deserialize, Serialize,
     de::Visitor,
     ser::{SerializeMap, SerializeSeq},
-    Deserialize, Serialize,
 };
 use tonic::Status;
 
 use crate::proto::script::v1::{
-    self as script, argument::Marker, result, source::SourceType, ContentType, Source,
+    self as script, ContentType, Source, argument::Marker, result, source::SourceType,
 };
 
 pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> {

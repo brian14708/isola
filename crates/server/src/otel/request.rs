@@ -3,18 +3,18 @@ use std::{
     marker::PhantomData,
     ops::Add,
     sync::{
-        atomic::{AtomicI32, Ordering},
         Arc,
+        atomic::{AtomicI32, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use coarsetime::Instant;
 use tokio::sync::mpsc;
-use tracing::{level_filters::LevelFilter, span, Metadata, Subscriber};
-use tracing_subscriber::{filter::FilterFn, registry::LookupSpan, Layer, Registry};
+use tracing::{Metadata, Subscriber, level_filters::LevelFilter, span};
+use tracing_subscriber::{Layer, Registry, filter::FilterFn, registry::LookupSpan};
 
-use crate::proto::script::v1::{trace, Trace};
+use crate::proto::script::v1::{Trace, trace};
 
 use super::visit::{FieldVisitor, StringVisitor, VisitExt};
 
@@ -187,12 +187,13 @@ impl RequestSpanExt for tracing::Span {
     fn enable_tracing(&self, level: LevelFilter) -> Option<mpsc::UnboundedReceiver<Trace>> {
         self.with_subscriber(|(id, subscriber)| {
             if let Some(registry) = subscriber.downcast_ref::<Registry>() {
-                if let Some(span) = registry.span(id) {
-                    let (tx, rx) = mpsc::unbounded_channel();
-                    span.extensions_mut().insert(MemoryTracer::new(tx, level));
-                    Some(rx)
-                } else {
-                    None
+                match registry.span(id) {
+                    Some(span) => {
+                        let (tx, rx) = mpsc::unbounded_channel();
+                        span.extensions_mut().insert(MemoryTracer::new(tx, level));
+                        Some(rx)
+                    }
+                    _ => None,
                 }
             } else {
                 None
