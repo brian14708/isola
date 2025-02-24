@@ -1,5 +1,5 @@
 use tracing::event;
-use wasmtime_wasi::WasiView;
+use wasmtime_wasi::{WasiImpl, WasiView};
 
 wasmtime::component::bindgen!({
     path: "../../apis/wit/deps/logging",
@@ -13,15 +13,15 @@ pub fn add_to_linker<T: WasiView>(
 ) -> wasmtime::Result<()> {
     fn type_annotate<T, F>(val: F) -> F
     where
-        F: Fn(&mut T) -> &mut dyn WasiView,
+        F: Fn(&mut T) -> WasiImpl<&mut T>,
     {
         val
     }
-    let closure = type_annotate::<T, _>(|t| t);
+    let closure = type_annotate::<T, _>(|t| WasiImpl(wasmtime_wasi::IoImpl(t)));
     bindings::logging::add_to_linker_get_host(linker, closure)
 }
 
-impl bindings::logging::Host for dyn WasiView + '_ {
+impl<T: WasiView> bindings::logging::Host for WasiImpl<T> {
     fn log(
         &mut self,
         log_level: bindings::logging::Level,

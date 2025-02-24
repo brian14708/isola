@@ -6,10 +6,7 @@ use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
 };
-use wasmtime_wasi::{
-    DirPerms, DynPollable, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView,
-    bindings::io::streams::StreamError,
-};
+use wasmtime_wasi::{DirPerms, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView};
 use wasmtime_wasi_http::{
     HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
@@ -19,7 +16,7 @@ use wasmtime_wasi_http::{
 
 use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
 
-use super::bindgen::host::{Host, HostValueIterator, Value, ValueIterator, add_to_linker};
+use super::bindgen::{HostView, add_to_linker};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,
@@ -40,7 +37,7 @@ impl<E: Env + Send> VmState<E> {
         wasmtime_wasi::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::logging::add_to_linker(&mut linker)?;
-        add_to_linker(&mut linker, |s| s)?;
+        add_to_linker(&mut linker)?;
         Ok(linker)
     }
 
@@ -92,50 +89,6 @@ impl<E: Send> WasiView for VmState<E> {
     }
 }
 
-impl<E: Send> Host for VmState<E> {
-    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
-        match &self.run {
-            Some(run) => {
-                run.output.send(ExecStreamItem::Data(data)).await?;
-                Ok(())
-            }
-            _ => Err(anyhow::anyhow!("output channel missing")),
-        }
-    }
-}
-
-impl<E: Send> HostValueIterator for VmState<E> {
-    async fn read(
-        &mut self,
-        resource: wasmtime::component::Resource<ValueIterator>,
-    ) -> wasmtime::Result<Option<Result<Value, StreamError>>> {
-        Ok(self.table().get_mut(&resource)?.try_next())
-    }
-
-    async fn blocking_read(
-        &mut self,
-        resource: wasmtime::component::Resource<ValueIterator>,
-    ) -> wasmtime::Result<Result<Value, StreamError>> {
-        let response = self.table().get_mut(&resource)?;
-        Ok(response.next().await)
-    }
-
-    async fn subscribe(
-        &mut self,
-        resource: wasmtime::component::Resource<ValueIterator>,
-    ) -> wasmtime::Result<wasmtime::component::Resource<DynPollable>> {
-        wasmtime_wasi::subscribe(self.table(), resource)
-    }
-
-    async fn drop(
-        &mut self,
-        rep: wasmtime::component::Resource<ValueIterator>,
-    ) -> wasmtime::Result<()> {
-        self.table().delete(rep)?;
-        Ok(())
-    }
-}
-
 impl<E: Env + Send> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
@@ -146,7 +99,6 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
         request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        // let request = hyper_to_reqwest(request)?;
         let resp = timeout(
             config.first_byte_timeout,
             self.env.send_request_http(request),
@@ -179,5 +131,23 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
             }))
         });
         Ok(HostFutureIncomingResponse::pending(handle))
+    }
+}
+
+impl<E: Send + Env> HostView for VmState<E> {
+    type Env = E;
+
+    fn env(&mut self) -> &mut Self::Env {
+        &mut self.env
+    }
+
+    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
+        match &self.run {
+            Some(run) => {
+                run.output.send(ExecStreamItem::Data(data)).await?;
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!("output channel missing")),
+        }
     }
 }
