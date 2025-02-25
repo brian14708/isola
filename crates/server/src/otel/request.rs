@@ -122,37 +122,31 @@ where
                 }
 
                 let mut trace = tracer.make_event(event.metadata());
-                match event.fields().find_map(|f| match f.name() {
-                    "promptkit.log.output" => Some(trace::TraceType::Log(trace::Log {
+                if event.fields().any(|f| f.name() == "promptkit.log.output") {
+                    let mut data = trace::Log {
                         content: String::new(),
-                    })),
-                    "promptkit.event.kind" => Some(trace::TraceType::Event(trace::Event {
-                        kind: String::new(),
+                    };
+                    event.record(&mut FieldVisitor::new(
+                        "promptkit.log.output",
+                        &mut data.content,
+                    ));
+                    trace.trace_type = Some(trace::TraceType::Log(data));
+                    tracer.send(trace);
+                } else {
+                    let mut data = trace::Event {
+                        kind: event.metadata().name().into(),
                         parent_id: tracer.id,
                         data: HashMap::new(),
-                    })),
-                    _ => None,
-                }) {
-                    Some(trace::TraceType::Log(mut data)) => {
-                        event.record(&mut FieldVisitor::new(
-                            "promptkit.log.output",
-                            &mut data.content,
-                        ));
-                        trace.trace_type = Some(trace::TraceType::Log(data));
-                        tracer.send(trace);
-                    }
-                    Some(trace::TraceType::Event(mut data)) => {
-                        event.record(
-                            &mut FieldVisitor::new("promptkit.event.kind", &mut data.kind).chain(
-                                StringVisitor::new(|name, value| {
-                                    data.data.insert(name.to_string(), value);
-                                }),
-                            ),
-                        );
-                        trace.trace_type = Some(trace::TraceType::Event(data));
-                        tracer.send(trace);
-                    }
-                    _ => (),
+                    };
+                    event.record(
+                        &mut FieldVisitor::new("promptkit.event.kind", &mut data.kind).chain(
+                            StringVisitor::new(|name, value| {
+                                data.data.insert(name.to_string(), value);
+                            }),
+                        ),
+                    );
+                    trace.trace_type = Some(trace::TraceType::Event(data));
+                    tracer.send(trace);
                 }
             }
         }

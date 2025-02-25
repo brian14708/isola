@@ -24,6 +24,7 @@ use wasmtime::{
 
 use crate::{
     Env,
+    env::{RpcConnect, RpcPayload},
     error::{Error, Result},
     vm::{
         SandboxPre, Vm, VmState,
@@ -485,6 +486,17 @@ impl Env for MockEnv {
         B: http_body::Body + Send + Sync + 'static,
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send,
+    {
+        async { todo!() }
+    }
+
+    #[allow(clippy::manual_async_fn)]
+    fn connect_rpc(
+        &self,
+        _connect: RpcConnect,
+        _req: tokio::sync::mpsc::Receiver<RpcPayload>,
+        _resp: tokio::sync::mpsc::Sender<RpcPayload>,
+    ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
     {
         async { todo!() }
     }

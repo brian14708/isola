@@ -1,5 +1,3 @@
-package promptkit:script;
-
 interface guest {
     use host.{value};
     use wasi:logging/logging@0.1.0-draft.{level};

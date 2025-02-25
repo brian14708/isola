@@ -1,0 +1,52 @@
+interface outgoing-rpc {
+    use wasi:io/poll@0.2.4.{pollable};
+    use wasi:clocks/monotonic-clock@0.2.4.{duration};
+
+    variant error-code {
+        timeout,
+        internal-error(option<string>)
+    }
+
+    variant stream-error {
+        last-operation-failed(error-code),
+        closed
+    }
+
+    type metadata = list<tuple<string, list<u8>>>;
+
+    resource payload {
+        constructor(data: list<u8>);
+        content-type: func() -> option<string>;
+        set-content-type: func(content-type: string);
+        data: func() -> list<u8>;
+        set-data: func(data: list<u8>);
+    }
+
+    resource connect-request {
+        constructor(url: string, metadata: option<metadata>);
+        set-connect-timeout: func(duration: option<duration>) -> result;
+    }
+
+    resource request-stream {
+        subscribe: func() -> pollable;
+        check-write: func(content: borrow<payload>) -> result<bool, stream-error>;
+        write: func(content: payload) -> result<_, stream-error>;
+        finish: static func(this: request-stream) -> result<_, error-code>;
+    }
+
+    resource response-stream {
+        subscribe: func() -> pollable;
+        read: func() -> option<result<payload, stream-error>>;
+    }
+
+    resource connection {
+        streams: func() -> result<tuple<request-stream, response-stream>>;
+    }
+
+    resource future-connection {
+        subscribe: func() -> pollable;
+        get: func() -> option<result<result<connection, error-code>>>;
+    }
+
+    connect: func(connect: connect-request) -> future-connection;
+}

@@ -1,0 +1,162 @@
+#[pyo3::pymodule]
+#[pyo3(name = "_promptkit_rpc")]
+pub mod rpc_module {
+    use pyo3::{
+        prelude::*,
+        types::{PyBytes, PyDict, PyString},
+        PyAny,
+    };
+
+    use crate::wasm::{
+        future::{create_future, PyPollable},
+        promptkit::script::outgoing_rpc::{
+            self, ConnectRequest, Connection, ErrorCode, FutureConnection, Payload, RequestStream,
+            ResponseStream, StreamError,
+        },
+    };
+
+    #[pyfunction]
+    #[pyo3(signature = (url, metadata, timeout))]
+    fn connect(
+        url: &str,
+        metadata: Option<&Bound<'_, PyDict>>,
+        timeout: Option<f64>,
+    ) -> PyResult<PyFutureConnection> {
+        let mut md = vec![];
+        if let Some(metadata) = metadata {
+            for (k, v) in metadata {
+                let k: String = k.extract()?;
+                let v: &str = v.extract()?;
+                let v = v.as_bytes().to_vec();
+                md.push((k, v));
+            }
+        }
+        let req = ConnectRequest::new(url, Some(&md));
+        if let Some(timeout) = timeout {
+            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+            req.set_connect_timeout(Some((timeout * 1_000_000_000.0) as u64))
+                .map_err(|()| {
+                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+                })?;
+        }
+        let c = outgoing_rpc::connect(req);
+        Ok(PyFutureConnection::new(c))
+    }
+
+    create_future!(PyFutureConnection, FutureConnection, PyConnection);
+
+    #[pyclass]
+    struct PyConnection {
+        request: Option<RequestStream>,
+        response: Option<ResponseStream>,
+        connection: Option<Connection>,
+    }
+
+    impl TryFrom<Result<Connection, ErrorCode>> for PyConnection {
+        type Error = PyErr;
+
+        fn try_from(result: Result<Connection, ErrorCode>) -> Result<Self, Self::Error> {
+            match result {
+                Ok(connection) => {
+                    let (request, response) = connection.streams().unwrap();
+                    Ok(Self {
+                        connection: Some(connection),
+                        request: Some(request),
+                        response: Some(response),
+                    })
+                }
+                Err(error) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    error.to_string(),
+                )),
+            }
+        }
+    }
+
+    #[pymethods]
+    impl PyConnection {
+        fn recv<'py>(
+            &mut self,
+            py: Python<'py>,
+        ) -> PyResult<(bool, Option<Bound<'py, PyAny>>, Option<PyPollable>)> {
+            if let Some(response) = &self.response {
+                match response.read() {
+                    Some(Ok(data)) => {
+                        if data.content_type().is_some_and(|t| t.starts_with("text/")) {
+                            let data = PyString::new(py, std::str::from_utf8(&data.data())?);
+                            Ok((true, Some(data.into_any()), None))
+                        } else {
+                            let data = PyBytes::new(py, &data.data());
+                            Ok((true, Some(data.into_any()), None))
+                        }
+                    }
+                    None => Ok((true, None, Some(PyPollable::from(response.subscribe())))),
+                    Some(Err(StreamError::Closed)) => {
+                        self.response.take();
+                        Ok((false, None, None))
+                    }
+                    Some(Err(error)) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        error.to_string(),
+                    )),
+                }
+            } else {
+                Ok((false, None, None))
+            }
+        }
+
+        #[allow(clippy::needless_pass_by_value)]
+        fn send(&mut self, obj: Bound<'_, PyAny>) -> PyResult<(bool, Option<PyPollable>)> {
+            let payload = if let Ok(s) = obj.extract::<&str>() {
+                let p = Payload::new(s.as_bytes());
+                p.set_content_type("text/plain");
+                p
+            } else if let Ok(b) = obj.extract::<&[u8]>() {
+                Payload::new(b)
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "unsupported type".to_string(),
+                ));
+            };
+
+            if let Some(request) = &self.request {
+                match request.check_write(&payload) {
+                    Ok(true) => {
+                        request.write(payload).map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                        })?;
+                        Ok((true, None))
+                    }
+                    Ok(false) => Ok((false, Some(PyPollable::from(request.subscribe())))),
+                    Err(StreamError::Closed) => {
+                        self.request.take();
+                        Ok((false, None))
+                    }
+                    Err(error) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                        error.to_string(),
+                    )),
+                }
+            } else {
+                Ok((false, None))
+            }
+        }
+
+        fn close(&mut self) -> PyResult<()> {
+            if let Some(r) = self.request.take() {
+                return RequestStream::finish(r)
+                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
+            }
+            Ok(())
+        }
+
+        fn shutdown(&mut self) {
+            self.request.take();
+            self.response.take();
+            self.connection.take();
+        }
+    }
+
+    impl Drop for PyConnection {
+        fn drop(&mut self) {
+            self.shutdown();
+        }
+    }
+}

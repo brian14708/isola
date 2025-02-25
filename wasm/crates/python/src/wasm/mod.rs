@@ -9,6 +9,7 @@ mod future;
 mod http;
 mod logging;
 mod protobuf;
+mod rpc;
 
 use std::cell::RefCell;
 
@@ -81,6 +82,8 @@ impl guest::Guest for Global {
                 append_to_inittab!(sys_module);
                 use protobuf::protobuf_module;
                 append_to_inittab!(protobuf_module);
+                use rpc::rpc_module;
+                append_to_inittab!(rpc_module);
 
                 let v = Scope::new();
                 let code = include_str!("prelude.py");
@@ -223,38 +226,36 @@ impl ArgIter {
             .call1((slf,))
     }
 
-    fn read(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<PyObject>, Option<PyPollable>)> {
         match self.iter.read() {
             Some(Ok(a)) => match a {
                 host::Value::Cbor(c) => {
                     let c = SliceReader::new(&c);
-                    Ok(Some(
-                        PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                            })?
-                            .into_pyobject(py)
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
-                            })?
-                            .into(),
+                    Ok((
+                        true,
+                        Some(
+                            PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
+                                .map_err(|_| {
+                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
+                                })?
+                                .into_pyobject(py)
+                                .map_err(|_| {
+                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
+                                })?
+                                .into(),
+                        ),
+                        None,
                     ))
                 }
                 host::Value::Iterator(_) => todo!(),
             },
-            Some(Err(StreamError::Closed)) => Ok(None),
+            Some(Err(StreamError::Closed)) => Ok((false, None, None)),
             Some(Err(StreamError::LastOperationFailed(e))) => {
                 Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                     e.to_debug_string(),
                 ))
             }
-            None => Ok(Some(
-                PyPollable::from(self.iter.subscribe())
-                    .into_pyobject(py)
-                    .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error"))?
-                    .into_any()
-                    .into(),
-            )),
+            None => Ok((true, None, Some(PyPollable::from(self.iter.subscribe())))),
         }
     }
 }

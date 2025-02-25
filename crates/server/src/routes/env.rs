@@ -6,16 +6,29 @@ use std::{
     task::{Context, Poll},
 };
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use futures_core::Stream;
-use futures_util::StreamExt;
-use http::{HeaderName, HeaderValue};
+use futures_util::{StreamExt, TryFutureExt, TryStreamExt, stream};
+use http::{HeaderName, HeaderValue, Uri};
 use http_body_util::BodyExt;
+use http_cache_reqwest::CacheMode;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project::pin_project;
-use tracing::{Instrument, field::Empty};
+use reqwest_middleware::ClientWithMiddleware;
+use tokio::task::JoinHandle;
+use tracing::{Instrument, event, field::Empty};
 
-use promptkit_executor::Env;
+use promptkit_executor::{
+    Env,
+    env::{RpcConnect, RpcPayload},
+};
+use tokio_tungstenite::tungstenite::{
+    self, ClientRequestBuilder,
+    client::IntoClientRequest,
+    protocol::{CloseFrame, frame::coding::CloseCode},
+};
+use url::Url;
 
 #[derive(Clone)]
 pub struct VmEnv {
@@ -118,6 +131,7 @@ impl Env for VmEnv {
             tracing::Level::INFO,
             "http::fetch",
             promptkit.user = true,
+            otel.kind = "client",
             http.response.body_size = Empty,
             { trace::OTEL_STATUS_CODE } = Empty,
         );
@@ -171,6 +185,43 @@ impl Env for VmEnv {
         }
         .instrument(span.clone())
     }
+
+    fn connect_rpc(
+        &self,
+        connect: RpcConnect,
+        req: tokio::sync::mpsc::Receiver<RpcPayload>,
+        resp: tokio::sync::mpsc::Sender<RpcPayload>,
+    ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
+    {
+        let url = Url::parse(&connect.url).unwrap();
+        let span = tracing::span!(
+            target: "promptkit::rpc",
+            tracing::Level::INFO,
+            "rpc::connect",
+            promptkit.user = true,
+            otel.kind = "client",
+            { trace::OTEL_STATUS_CODE } = Empty,
+        );
+        let s = span.clone();
+
+        let http = self.http.clone();
+        async move {
+            let timeout = connect.timeout;
+            if url.scheme() == "ws" || url.scheme() == "wss" {
+                let fut = websocket(s, http, connect, req, resp);
+                if let Some(d) = timeout {
+                    tokio::time::timeout(d, fut)
+                        .await
+                        .unwrap_or_else(|_| Err(anyhow!("timeout")))
+                } else {
+                    fut.await
+                }
+            } else {
+                Err(anyhow!("unsupported protocol"))
+            }
+        }
+        .instrument(span)
+    }
 }
 
 #[pin_project]
@@ -211,4 +262,168 @@ impl<S: Stream<Item = Result<http_body::Frame<Bytes>, E>>, E> Stream for Instrum
             Poll::Pending => Poll::Pending,
         }
     }
+}
+
+#[allow(clippy::too_many_lines)]
+async fn websocket(
+    span: tracing::Span,
+    http: ClientWithMiddleware,
+    connect: RpcConnect,
+    req: tokio::sync::mpsc::Receiver<RpcPayload>,
+    resp: tokio::sync::mpsc::Sender<RpcPayload>,
+) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+    let mut u = Url::parse(&connect.url)?;
+    if u.scheme() == "ws" {
+        u.set_scheme("http").unwrap();
+    } else if u.scheme() == "wss" {
+        u.set_scheme("https").unwrap();
+    }
+
+    let ws: anyhow::Result<_> = async {
+        let span = tracing::span!(
+            target: "promptkit::rpc",
+            tracing::Level::INFO,
+            "rpc::websocket::request_send",
+            promptkit.user = true,
+            otel.kind = "client",
+            { trace::HTTP_REQUEST_METHOD } = "GET",
+            { trace::SERVER_ADDRESS } = u.host_str().unwrap_or_default(),
+            { trace::SERVER_PORT } = u.port_or_known_default().unwrap_or_default(),
+            { trace::URL_FULL } = u.to_string(),
+            { trace::HTTP_RESPONSE_STATUS_CODE } = Empty,
+            { trace::OTEL_STATUS_CODE } = Empty,
+        );
+
+        let mut r = ClientRequestBuilder::new(u.to_string().parse::<Uri>().unwrap())
+            .into_client_request()?;
+        opentelemetry::global::get_text_map_propagator(|injector| {
+            use tracing_opentelemetry::OpenTelemetrySpanExt;
+            struct RequestCarrier<'a> {
+                request: &'a mut http::Request<()>,
+            }
+            impl opentelemetry::propagation::Injector for RequestCarrier<'_> {
+                fn set(&mut self, key: &str, value: String) {
+                    let header_name = HeaderName::from_str(key).expect("Must be header name");
+                    let header_value =
+                        HeaderValue::from_str(&value).expect("Must be a header value");
+                    self.request.headers_mut().insert(header_name, header_value);
+                }
+            }
+
+            let context = span.context();
+            injector.inject_context(&context, &mut RequestCarrier { request: &mut r });
+        });
+        let conn = http
+            .get(u)
+            .headers(r.headers().clone())
+            .with_extension(CacheMode::NoStore)
+            .send()
+            .and_then(|resp| async {
+                span.record("http.response.status_code", resp.status().as_u16());
+                Ok(resp.upgrade().await?)
+            })
+            .and_then(|response| async {
+                Ok(tokio_tungstenite::WebSocketStream::from_raw_socket(
+                    response,
+                    tungstenite::protocol::Role::Client,
+                    None,
+                )
+                .await)
+            })
+            .await;
+        span.record(
+            trace::OTEL_STATUS_CODE,
+            if conn.is_ok() { "OK" } else { "ERROR" },
+        );
+        Ok(conn?)
+    }
+    .instrument(span.clone())
+    .await;
+    let (tx, rx) = ws?.split();
+
+    let s = span.clone();
+    Ok(tokio::spawn(
+        (async move {
+            let write_task = tokio_stream::wrappers::ReceiverStream::new(req)
+                .enumerate()
+                .map(|(idx, msg)| {
+                    event!(
+                        name: "rpc.message",
+                        target: "promptkit::rpc",
+                        parent: &s,
+                        tracing::Level::DEBUG,
+                        promptkit.user = true,
+                        { trace::RPC_MESSAGE_TYPE } = "SENT",
+                        { trace::RPC_MESSAGE_UNCOMPRESSED_SIZE } = msg.data.len(),
+                        { trace::RPC_MESSAGE_ID } = idx + 1,
+                    );
+                    Ok(if msg.content_type.is_some_and(|t| t.starts_with("text")) {
+                        tungstenite::Message::Text(String::from_utf8(msg.data).unwrap().into())
+                    } else {
+                        tungstenite::Message::Binary(msg.data.into())
+                    })
+                })
+                .chain(stream::iter([Ok(tungstenite::Message::Close(Some(
+                    CloseFrame {
+                        code: CloseCode::Normal,
+                        reason: "".into(),
+                    },
+                )))]))
+                .forward(tx)
+                .map_err(anyhow::Error::new);
+
+            let read_task = tokio_stream::StreamExt::map(rx.enumerate(), |(idx, msg)| match msg {
+                Ok(tungstenite::Message::Text(t)) => Ok(Some((
+                    idx,
+                    RpcPayload {
+                        content_type: Some("text/plain".into()),
+                        data: t.to_string().into_bytes(),
+                    },
+                ))),
+                Ok(tungstenite::Message::Binary(b)) => Ok(Some((
+                    idx,
+                    RpcPayload {
+                        content_type: None,
+                        data: b.to_vec(),
+                    },
+                ))),
+                Ok(
+                    tungstenite::Message::Close(_)
+                    | tungstenite::Message::Ping(_)
+                    | tungstenite::Message::Pong(_)
+                    | tungstenite::Message::Frame(_),
+                ) => Ok(None),
+                Err(_) => Err(anyhow!("Error recv message")),
+            })
+            .then(|msg| {
+                let resp = resp.clone();
+                let s = s.clone();
+                async move {
+                    match msg {
+                        Ok(Some((idx, t))) => {
+                            event!(
+                                name: "rpc.message",
+                                target: "promptkit::rpc",
+                                parent: &s,
+                                tracing::Level::DEBUG,
+                                promptkit.user = true,
+                                { trace::RPC_MESSAGE_TYPE } = "RECEIVED",
+                                { trace::RPC_MESSAGE_UNCOMPRESSED_SIZE } = t.data.len(),
+                                { trace::RPC_MESSAGE_ID } = (idx + 1),
+                            );
+                            Ok(resp.send(t).await?)
+                        }
+                        Ok(None) => Ok(()),
+                        Err(e) => Err(e),
+                    }
+                }
+            })
+            .try_collect::<()>();
+
+            futures_util::future::try_join(read_task, write_task).await?;
+            s.record(trace::OTEL_STATUS_CODE, "OK");
+            Ok(())
+        })
+        .instrument(span),
+    ))
 }

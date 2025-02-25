@@ -7,6 +7,12 @@ wasmtime::component::bindgen!({
         "wasi:io": wasmtime_wasi::bindings::io,
         "wasi:logging": crate::wasm::logging::bindings,
         "promptkit:script/host/value-iterator": host::ValueIterator,
+        "promptkit:script/outgoing-rpc/connection": outgoing_rpc::Connection,
+        "promptkit:script/outgoing-rpc/future-connection": outgoing_rpc::FutureConnection,
+        "promptkit:script/outgoing-rpc/connect-request": outgoing_rpc::ConnectRequest,
+        "promptkit:script/outgoing-rpc/payload": outgoing_rpc::Payload,
+        "promptkit:script/outgoing-rpc/request-stream": outgoing_rpc::RequestStream,
+        "promptkit:script/outgoing-rpc/response-stream": outgoing_rpc::ResponseStream,
     },
 });
 
@@ -36,6 +42,7 @@ impl<T: ?Sized + HostView> HostView for &mut T {
 struct HostImpl<T>(T);
 
 pub mod host;
+pub mod outgoing_rpc;
 
 pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
     fn type_annotate<T, F>(val: F) -> F
@@ -46,5 +53,6 @@ pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
     }
     let closure = type_annotate::<T, _>(|t| HostImpl(t));
     promptkit::script::host::add_to_linker_get_host(l, closure)?;
+    promptkit::script::outgoing_rpc::add_to_linker_get_host(l, closure)?;
     Ok(())
 }

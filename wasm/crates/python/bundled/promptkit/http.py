@@ -1,6 +1,7 @@
 import asyncio
 
 import _promptkit_http as _http
+import _promptkit_rpc as _rpc
 from promptkit.asyncio import subscribe, run as asyncio_run
 
 
@@ -157,8 +158,100 @@ class Response:
             yield ServerSentEvent(id, event, data)
 
 
+class WebSocketRequest:
+    __slots__ = ("url", "headers", "conn", "timeout")
+
+    def __init__(self, url, headers, timeout):
+        self.url = url
+        self.headers = headers
+        self.timeout = timeout
+        self.conn = None
+
+    def _conn(self):
+        req = _rpc.connect(self.url, self.headers, self.timeout)
+        return req
+
+    async def __aenter__(self):
+        self.conn = Websocket(await subscribe(self._conn()))
+        return self.conn
+
+    async def __aexit__(self, _type, _value, _trace):
+        self.conn.shutdown()
+
+    def __enter__(self):
+        self.conn = Websocket(self._conn().wait())
+        return self.conn
+
+    def __exit__(self, _type, _value, _trace):
+        self.conn.shutdown()
+
+
+class Websocket:
+    __slots__ = ("conn",)
+
+    def __init__(self, conn):
+        self.conn = conn
+
+    def shutdown(self):
+        self.conn.shutdown()
+
+    def close(self):
+        self.conn.close()
+
+    async def arecv(self):
+        while True:
+            ok, value, poll = self.conn.recv()
+            if not ok:
+                return None
+            elif poll is not None:
+                await subscribe(poll)
+            else:
+                return value
+
+    async def arecv_streaming(self):
+        while True:
+            value = await self.arecv()
+            if value is None:
+                return
+            yield value
+
+    def recv(self):
+        while True:
+            ok, value, poll = self.conn.recv()
+            if not ok:
+                return None
+            elif poll is not None:
+                poll.wait()
+            else:
+                return value
+
+    def recv_streaming(self):
+        while (value := self.recv()) is not None:
+            yield value
+
+    async def asend(self, value):
+        while True:
+            ok, poll = self.conn.send(value)
+            if poll is not None:
+                await subscribe(poll)
+            else:
+                return ok
+
+    def send(self, value):
+        while True:
+            ok, poll = self.conn.send(value)
+            if poll is not None:
+                poll.wait()
+            else:
+                return ok
+
+
 def fetch(method, url, *, params=None, headers=None, body=None, timeout=None):
     return Request(method, url, params, headers, body, timeout)
+
+
+def ws_connect(url, *, headers=None, timeout=None):
+    return WebSocketRequest(url, headers, timeout)
 
 
 ### Legacy API

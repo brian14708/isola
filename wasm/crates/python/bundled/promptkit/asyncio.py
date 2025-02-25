@@ -174,8 +174,11 @@ def run(main):
 
 
 async def _aiter_arg(args):
-    while (result := args.read()) is not None:
-        if type(result) is _promptkit_sys.PyPollable:
-            await subscribe(result)
+    while True:
+        ok, result, poll = args.read()
+        if not ok:
+            break
+        elif poll is not None:
+            await subscribe(poll)
         else:
             yield result

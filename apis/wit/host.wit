@@ -1,5 +1,3 @@
-package promptkit:script;
-
 interface host {
     use wasi:io/poll@0.2.4.{pollable};
     use wasi:io/streams@0.2.4.{stream-error};

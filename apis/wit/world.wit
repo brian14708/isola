@@ -4,5 +4,6 @@ world sandbox {
     import wasi:http/outgoing-handler@0.2.4;
     import wasi:logging/logging@0.1.0-draft;
     import host;
+    import outgoing-rpc;
     export guest;
 }

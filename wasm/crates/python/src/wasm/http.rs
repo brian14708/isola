@@ -185,9 +185,9 @@ pub mod http_module {
 
     #[pyclass]
     struct PyResponse {
-        response: Option<IncomingResponse>,
-        body: Option<IncomingBody>,
         stream: Option<InputStream>,
+        body: Option<IncomingBody>,
+        response: Option<IncomingResponse>,
     }
 
     impl TryFrom<Result<IncomingResponse, ErrorCode>> for PyResponse {

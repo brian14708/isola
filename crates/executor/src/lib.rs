@@ -2,7 +2,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::module_name_repetitions)]
 
-mod env;
+pub mod env;
 pub mod error;
 mod resource;
 mod trace_output;
