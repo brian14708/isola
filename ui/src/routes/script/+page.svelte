@@ -365,7 +365,7 @@
 				{:else}
 					<div class="space-y-2 p-2">
 						<div class="font-bold">Result</div>
-						{#each result.data as d}
+						{#each result.data as d, i (i)}
 							{#if d.startsWith('"data:image/')}
 								<img src={JSON.parse(d)} alt="result" />
 							{:else}
@@ -373,7 +373,7 @@
 							{/if}
 						{/each}
 						<div class="font-bold">Traces</div>
-						{#each result.traces as trace}
+						{#each result.traces as trace, i (i)}
 							<pre class="text-sm">{trace}</pre>
 						{/each}
 					</div>
