@@ -122,14 +122,13 @@ where
                 }
 
                 let mut trace = tracer.make_event(event.metadata());
-                if event.fields().any(|f| f.name() == "promptkit.log.output") {
-                    let mut data = trace::Log {
-                        content: String::new(),
-                    };
-                    event.record(&mut FieldVisitor::new(
-                        "promptkit.log.output",
-                        &mut data.content,
-                    ));
+                if event.metadata().name() == "promptkit.log" {
+                    let mut data = trace::Log::default();
+                    event.record(
+                        &mut FieldVisitor::new("promptkit.log.output", &mut data.content).chain(
+                            FieldVisitor::new("promptkit.log.context", &mut data.context),
+                        ),
+                    );
                     trace.trace_type = Some(trace::TraceType::Log(data));
                     tracer.send(trace);
                 } else {
@@ -156,7 +155,7 @@ where
         let span = ctx.span(&id).expect("Span not found, this is a bug");
         let mut ext = span.extensions_mut();
         if let Some(mut tracer) = ext.remove::<MemoryTracer>() {
-            if *span.metadata().level() > tracer.request.level_filter {
+            if *span.metadata().level() > tracer.request.level_filter || tracer.id == 0 {
                 return;
             }
             let mut trace = tracer.make_event(span.metadata());

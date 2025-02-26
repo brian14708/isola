@@ -57,7 +57,7 @@ impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
             .map_or(request.uri().host(), |h| h.to_str().ok())
             .unwrap_or("");
         let span = tracing::info_span!(
-            "gRPC request",
+            "promptkit::server",
             { trace::RPC_SYSTEM } = "grpc",
             { trace::RPC_SERVICE } = service,
             { trace::RPC_METHOD } = method,

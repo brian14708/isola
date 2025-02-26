@@ -11,7 +11,8 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
     Resource,
     propagation::{BaggagePropagator, TraceContextPropagator},
-    trace::{RandomIdGenerator, Sampler},
+    runtime,
+    trace::{RandomIdGenerator, Sampler, span_processor_with_async_runtime::BatchSpanProcessor},
 };
 use opentelemetry_semantic_conventions::resource;
 use otel::{grpc_server_tracing_layer, request_tracing_layer};
@@ -108,11 +109,15 @@ fn init_tracing() -> anyhow::Result<ProviderGuard> {
         };
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_batch_exporter(
-                opentelemetry_otlp::SpanExporter::builder()
-                    .with_http()
-                    .with_endpoint(e)
-                    .build()?,
+            .with_span_processor(
+                BatchSpanProcessor::builder(
+                    opentelemetry_otlp::SpanExporter::builder()
+                        .with_http()
+                        .with_endpoint(e)
+                        .build()?,
+                    runtime::Tokio,
+                )
+                .build(),
             )
             .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
             .with_id_generator(RandomIdGenerator::default())

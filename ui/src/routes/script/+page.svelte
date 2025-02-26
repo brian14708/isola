@@ -44,6 +44,7 @@
 	let result = $state<
 		| undefined
 		| {
+				traceId: string;
 				loading: boolean;
 				data: string[];
 				traces: string[];
@@ -80,8 +81,20 @@
 		cli = client(ScriptService);
 	});
 
+	function generateRandomHex(bytes: number): string {
+		let hexString = "";
+		for (let i = 0; i < bytes; i++) {
+			const byte = Math.floor(Math.random() * 256);
+			hexString += byte.toString(16).padStart(2, "0");
+		}
+		return hexString;
+	}
+
 	let runId = 0;
 	async function run() {
+		const traceId = generateRandomHex(16);
+		const traceParent = `00-${traceId}-${generateRandomHex(8)}-01`;
+
 		const d = save();
 		const currentId = ++runId;
 		result = {
@@ -130,6 +143,7 @@
 		};
 		try {
 			result = {
+				traceId,
 				loading: false,
 				data: [],
 				traces: [],
@@ -167,13 +181,21 @@
 			};
 
 			if (d.stream) {
-				for await (const ret of cli.executeServerStream(req)) {
+				for await (const ret of cli.executeServerStream(req, {
+					headers: {
+						traceparent: traceParent,
+					},
+				})) {
 					if (!append(ret)) {
 						return;
 					}
 				}
 			} else {
-				const ret = await cli.execute(req);
+				const ret = await cli.execute(req, {
+					headers: {
+						traceparent: traceParent,
+					},
+				});
 				if (!append(ret)) {
 					return;
 				}
@@ -372,7 +394,10 @@
 								<pre>{d}</pre>
 							{/if}
 						{/each}
-						<div class="font-bold">Traces</div>
+						<div>
+							<span class="mr-2 font-bold">Traces</span>
+							<pre class="font-sm inline">{result.traceId}</pre>
+						</div>
 						{#each result.traces as trace, i (i)}
 							<pre class="text-sm">{trace}</pre>
 						{/each}

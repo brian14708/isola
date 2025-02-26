@@ -605,7 +605,11 @@ fn parse_spec<'a>(
 
         let (span, trace, log_level) = match script::TraceLevel::try_from(spec.trace_level) {
             Ok(script::TraceLevel::All) => {
-                let s = span!(tracing::Level::TRACE, "trace span", promptkit.user = true);
+                let s = span!(
+                    tracing::Level::INFO,
+                    "promptkit::script",
+                    "promptkit.user" = true
+                );
                 match s.enable_tracing(LevelFilter::DEBUG) {
                     Some(t) => (s, Some(t), LevelFilter::DEBUG),
                     _ => (Span::none(), None, LevelFilter::DEBUG),

@@ -4,19 +4,19 @@ use tracing::event;
 use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
 
 pub struct TraceOutput {
-    group: &'static str,
+    context: &'static str,
 }
 
 impl TraceOutput {
-    pub const fn new(group: &'static str) -> Self {
-        Self { group }
+    pub const fn new(context: &'static str) -> Self {
+        Self { context }
     }
 }
 
 impl StdoutStream for TraceOutput {
     fn stream(&self) -> Box<dyn OutputStream> {
         Box::new(TraceOutputStream {
-            group: self.group,
+            context: self.context,
             buffer: SmallVec::new(),
         })
     }
@@ -27,7 +27,7 @@ impl StdoutStream for TraceOutput {
 }
 
 pub struct TraceOutputStream {
-    group: &'static str,
+    context: &'static str,
     buffer: SmallVec<[u8; MAX_BUFFER + MAX_UTF8_BYTES]>,
 }
 
@@ -37,31 +37,34 @@ const MAX_UTF8_BYTES: usize = 4;
 
 impl TraceOutputStream {
     fn record(&self, s: &str) {
-        match self.group {
+        match self.context {
             "stderr" => {
                 event!(
-                    target: "promptkit::stderr",
+                    name: "promptkit.log",
+                    target: "promptkit::log",
                     tracing::Level::DEBUG,
                     promptkit.user = true,
-                    promptkit.log.group = "stderr",
+                    promptkit.log.context = "stderr",
                     promptkit.log.output = s,
                 );
             }
             "stdout" => {
                 event!(
-                    target: "promptkit::stdout",
+                    name: "promptkit.log",
+                    target: "promptkit::log",
                     tracing::Level::DEBUG,
                     promptkit.user = true,
-                    promptkit.log.group = "stdout",
+                    promptkit.log.context = "stdout",
                     promptkit.log.output = s,
                 );
             }
             v => {
                 event!(
+                    name: "promptkit.log",
                     target: "promptkit::log",
                     tracing::Level::DEBUG,
                     promptkit.user = true,
-                    promptkit.log.group = v,
+                    promptkit.log.context = v,
                     promptkit.log.output = s,
                 );
             }

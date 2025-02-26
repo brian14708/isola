@@ -2352,7 +2352,7 @@ dependencies = [
  "prost",
  "reqwest",
  "thiserror 2.0.11",
- "tracing",
+ "tokio",
 ]
 
 [[package]]

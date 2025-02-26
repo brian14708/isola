@@ -12,6 +12,7 @@ enum TraceLevel {
 message Trace {
   message Log {
     string content = 1;
+    string context = 2;
   }
   message Event {
     string kind = 1;
