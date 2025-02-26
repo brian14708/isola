@@ -43,6 +43,6 @@ pub trait Env {
         &self,
         connect: RpcConnect,
         req: tokio::sync::mpsc::Receiver<RpcPayload>,
-        resp: tokio::sync::mpsc::Sender<RpcPayload>,
+        resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
     ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static;
 }

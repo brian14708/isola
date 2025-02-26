@@ -495,7 +495,7 @@ impl Env for MockEnv {
         &self,
         _connect: RpcConnect,
         _req: tokio::sync::mpsc::Receiver<RpcPayload>,
-        _resp: tokio::sync::mpsc::Sender<RpcPayload>,
+        _resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
     ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
     {
         async { todo!() }

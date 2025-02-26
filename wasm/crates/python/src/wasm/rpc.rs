@@ -2,13 +2,13 @@
 #[pyo3(name = "_promptkit_rpc")]
 pub mod rpc_module {
     use pyo3::{
+        PyAny,
         prelude::*,
         types::{PyBytes, PyDict, PyString},
-        PyAny,
     };
 
     use crate::wasm::{
-        future::{create_future, PyPollable},
+        future::{PyPollable, create_future},
         promptkit::script::outgoing_rpc::{
             self, ConnectRequest, Connection, ErrorCode, FutureConnection, Payload, RequestStream,
             ResponseStream, StreamError,
@@ -104,7 +104,7 @@ pub mod rpc_module {
         }
 
         #[allow(clippy::needless_pass_by_value)]
-        fn send(&mut self, obj: Bound<'_, PyAny>) -> PyResult<(bool, Option<PyPollable>)> {
+        fn send(&mut self, obj: Bound<'_, PyAny>) -> PyResult<Option<PyPollable>> {
             let payload = if let Ok(s) = obj.extract::<&str>() {
                 let p = Payload::new(s.as_bytes());
                 p.set_content_type("text/plain");
@@ -123,19 +123,23 @@ pub mod rpc_module {
                         request.write(payload).map_err(|e| {
                             PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
                         })?;
-                        Ok((true, None))
+                        Ok(None)
                     }
-                    Ok(false) => Ok((false, Some(PyPollable::from(request.subscribe())))),
+                    Ok(false) => Ok(Some(PyPollable::from(request.subscribe()))),
                     Err(StreamError::Closed) => {
                         self.request.take();
-                        Ok((false, None))
+                        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                            "connection closed".to_string(),
+                        ))
                     }
                     Err(error) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
                         error.to_string(),
                     )),
                 }
             } else {
-                Ok((false, None))
+                Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "connection closed".to_string(),
+                ))
             }
         }
 

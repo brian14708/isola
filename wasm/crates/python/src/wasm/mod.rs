@@ -6,9 +6,9 @@
 
 mod body_buffer;
 mod future;
+mod grpc;
 mod http;
 mod logging;
-mod protobuf;
 mod rpc;
 
 use std::cell::RefCell;
@@ -80,8 +80,8 @@ impl guest::Guest for Global {
                 use logging::logging_module;
                 append_to_inittab!(logging_module);
                 append_to_inittab!(sys_module);
-                use protobuf::protobuf_module;
-                append_to_inittab!(protobuf_module);
+                use grpc::grpc_module;
+                append_to_inittab!(grpc_module);
                 use rpc::rpc_module;
                 append_to_inittab!(rpc_module);
 

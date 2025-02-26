@@ -116,8 +116,8 @@ impl<T: HostView> HostConnectRequest for HostImpl<T> {
 }
 
 pub struct ResponseStream {
-    stream: tokio::sync::mpsc::Receiver<RpcPayload>,
-    peek: Option<Result<RpcPayload, StreamError>>,
+    stream: tokio::sync::mpsc::Receiver<anyhow::Result<RpcPayload>>,
+    peek: Option<Result<anyhow::Result<RpcPayload>, StreamError>>,
 }
 
 #[async_trait::async_trait]
@@ -146,10 +146,16 @@ impl<T: HostView> HostResponseStream for HostImpl<T> {
     ) -> wasmtime::Result<Option<Result<Resource<Payload>, StreamError>>> {
         let response = self.0.table().get_mut(&self_)?;
         match response.peek.take() {
-            Some(Ok(v)) => Ok(Some(Ok(self.0.table().push(Payload(v))?))),
+            Some(Ok(Ok(v))) => Ok(Some(Ok(self.0.table().push(Payload(v))?))),
+            Some(Ok(Err(err))) => Ok(Some(Err(StreamError::LastOperationFailed(
+                ErrorCode::InternalError(Some(err.to_string())),
+            )))),
             Some(Err(e)) => Ok(Some(Err(e))),
             None => match response.stream.try_recv() {
-                Ok(v) => Ok(Some(Ok(self.0.table().push(Payload(v))?))),
+                Ok(Ok(v)) => Ok(Some(Ok(self.0.table().push(Payload(v))?))),
+                Ok(Err(err)) => Ok(Some(Err(StreamError::LastOperationFailed(
+                    ErrorCode::InternalError(Some(err.to_string())),
+                )))),
                 Err(TryRecvError::Empty) => Ok(None),
                 Err(TryRecvError::Disconnected) => Ok(Some(Err(StreamError::Closed))),
             },

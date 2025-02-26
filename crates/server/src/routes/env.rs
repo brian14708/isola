@@ -7,16 +7,23 @@ use std::{
 };
 
 use anyhow::anyhow;
-use bytes::Bytes;
+use bytes::{Buf, BufMut, Bytes};
 use futures_core::Stream;
 use futures_util::{StreamExt, TryFutureExt, TryStreamExt, stream};
-use http::{HeaderName, HeaderValue, Uri};
+use http::{HeaderName, HeaderValue, Uri, uri::PathAndQuery};
 use http_body_util::BodyExt;
 use http_cache_reqwest::CacheMode;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project::pin_project;
 use reqwest_middleware::ClientWithMiddleware;
 use tokio::task::JoinHandle;
+use tonic::{
+    Request,
+    client::Grpc,
+    codec::{BufferSettings, Codec, Decoder, EncodeBuf, Encoder},
+    metadata::{MetadataKey, MetadataMap},
+    transport::Endpoint,
+};
 use tracing::{Instrument, field::Empty};
 
 use promptkit_executor::{
@@ -178,7 +185,7 @@ impl Env for VmEnv {
         &self,
         connect: RpcConnect,
         req: tokio::sync::mpsc::Receiver<RpcPayload>,
-        resp: tokio::sync::mpsc::Sender<RpcPayload>,
+        resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
     ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
     {
         let url = Url::parse(&connect.url).unwrap();
@@ -194,6 +201,8 @@ impl Env for VmEnv {
                 } else {
                     fut.await
                 }
+            } else if url.scheme() == "grpc" || url.scheme() == "grpcs" {
+                grpc(connect, req, resp).await
             } else {
                 Err(anyhow!("unsupported protocol"))
             }
@@ -247,7 +256,7 @@ async fn websocket(
     http: ClientWithMiddleware,
     connect: RpcConnect,
     req: tokio::sync::mpsc::Receiver<RpcPayload>,
-    resp: tokio::sync::mpsc::Sender<RpcPayload>,
+    resp: tokio::sync::mpsc::Sender<Result<RpcPayload, anyhow::Error>>,
 ) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
     let mut u = Url::parse(&connect.url)?;
     if u.scheme() == "ws" {
@@ -358,9 +367,9 @@ async fn websocket(
                 let resp = resp.clone();
                 async move {
                     match msg {
-                        Ok(Some(t)) => Ok(resp.send(t).await?),
+                        Ok(Some(t)) => Ok(resp.send(Ok(t)).await?),
                         Ok(None) => Ok(()),
-                        Err(e) => Err(e),
+                        Err(e) => Ok(resp.send(Err(e)).await?),
                     }
                 }
             })
@@ -372,4 +381,163 @@ async fn websocket(
         })
         .instrument(span),
     ))
+}
+
+#[allow(clippy::too_many_lines)]
+async fn grpc(
+    connect: RpcConnect,
+    req: tokio::sync::mpsc::Receiver<RpcPayload>,
+    resp: tokio::sync::mpsc::Sender<Result<RpcPayload, anyhow::Error>>,
+) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
+    let u = Url::parse(&("http".to_owned() + &connect.url[4..]))?;
+    let uri = Uri::builder()
+        .scheme(u.scheme())
+        .authority(
+            u.host_str().unwrap_or_default().to_owned() + ":" + &u.port().unwrap_or(80).to_string(),
+        )
+        .path_and_query("")
+        .build()?;
+    let mut seg = u.path_segments().unwrap();
+    let service = seg.next().unwrap_or_default();
+    let method = seg.next().unwrap_or_default();
+    let mut endpoint = Endpoint::from(uri)
+        .tls_config(tonic::transport::ClientTlsConfig::new().with_enabled_roots())?;
+    let span = tracing::span!(
+        target: "promptkit::rpc",
+        tracing::Level::INFO,
+        "rpc::grpc::connect",
+        promptkit.user = true,
+        otel.kind = "client",
+        { trace::RPC_SYSTEM } = "grpc",
+        { trace::SERVER_ADDRESS } = u.host_str().unwrap_or_default(),
+        { trace::SERVER_PORT } = u.port_or_known_default().unwrap_or_default(),
+        { trace::RPC_METHOD } = method,
+        { trace::RPC_SERVICE } = service,
+        { trace::RPC_GRPC_STATUS_CODE } = Empty,
+        { trace::OTEL_STATUS_CODE } = Empty,
+    );
+    if let Some(t) = connect.timeout {
+        endpoint = endpoint.connect_timeout(t);
+    }
+    let mut req = Request::new(tokio_stream::wrappers::ReceiverStream::new(req).map(|e| e.data));
+    opentelemetry::global::get_text_map_propagator(|injector| {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        struct RequestCarrier<'a> {
+            md: &'a mut MetadataMap,
+        }
+        impl opentelemetry::propagation::Injector for RequestCarrier<'_> {
+            fn set(&mut self, key: &str, value: String) {
+                self.md.insert(
+                    MetadataKey::from_str(key).expect("Must be a header name"),
+                    value.try_into().expect("Must be a header value"),
+                );
+            }
+        }
+
+        let context = span.context();
+        injector.inject_context(
+            &context,
+            &mut RequestCarrier {
+                md: req.metadata_mut(),
+            },
+        );
+    });
+    if let Some(t) = connect.metadata {
+        for (k, v) in t {
+            req.metadata_mut()
+                .insert(MetadataKey::from_str(&k)?, v.try_into()?);
+        }
+    }
+
+    let ch = endpoint.connect().instrument(span.clone()).await?;
+    let mut client = Grpc::new(ch);
+    client.ready().instrument(span.clone()).await?;
+
+    let s = span.clone();
+    Ok(tokio::task::spawn(
+        async move {
+            let r = client
+                .streaming(req, PathAndQuery::from_str(u.path())?, RawCodec)
+                .await?
+                .into_inner();
+            async move {
+                r.map(|msg| match msg {
+                    Ok(v) => Ok(Some(RpcPayload {
+                        content_type: None,
+                        data: v,
+                    })),
+                    Err(v) => {
+                        s.record(trace::RPC_GRPC_STATUS_CODE, v.code() as u32);
+                        if v.code() == tonic::Code::Ok {
+                            s.record(trace::OTEL_STATUS_CODE, "OK");
+                            Ok(None)
+                        } else {
+                            s.record(trace::OTEL_STATUS_CODE, "ERROR");
+                            Err(anyhow!("{}", v.message()))
+                        }
+                    }
+                })
+                .then(|msg| {
+                    let resp = resp.clone();
+                    async move {
+                        match msg {
+                            Ok(Some(t)) => Ok(resp.send(Ok(t)).await?),
+                            Ok(None) => Ok(()),
+                            Err(e) => Ok(resp.send(Err(e)).await?),
+                        }
+                    }
+                })
+                .try_collect::<()>()
+                .await
+            }
+            .await
+        }
+        .instrument(span),
+    ))
+}
+
+struct RawCodec;
+impl Codec for RawCodec {
+    type Encode = Vec<u8>;
+    type Decode = Vec<u8>;
+
+    type Encoder = RawEncoder;
+    type Decoder = RawDecoder;
+
+    fn encoder(&mut self) -> Self::Encoder {
+        RawEncoder
+    }
+
+    fn decoder(&mut self) -> Self::Decoder {
+        RawDecoder
+    }
+}
+
+struct RawEncoder;
+struct RawDecoder;
+
+impl Encoder for RawEncoder {
+    type Item = Vec<u8>;
+    type Error = tonic::Status;
+
+    fn encode(&mut self, item: Self::Item, buf: &mut EncodeBuf<'_>) -> Result<(), Self::Error> {
+        buf.put_slice(&item);
+        Ok(())
+    }
+
+    fn buffer_settings(&self) -> BufferSettings {
+        BufferSettings::default()
+    }
+}
+
+impl Decoder for RawDecoder {
+    type Item = Vec<u8>;
+    type Error = tonic::Status;
+
+    fn decode(
+        &mut self,
+        src: &mut tonic::codec::DecodeBuf<'_>,
+    ) -> Result<Option<Self::Item>, Self::Error> {
+        Ok(Some(src.copy_to_bytes(src.remaining()).to_vec()))
+    }
 }

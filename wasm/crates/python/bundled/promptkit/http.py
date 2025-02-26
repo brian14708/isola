@@ -1,7 +1,7 @@
 import asyncio
 
 import _promptkit_http as _http
-import _promptkit_rpc as _rpc
+import _promptkit_rpc
 from promptkit.asyncio import subscribe, run as asyncio_run
 
 
@@ -168,7 +168,7 @@ class WebSocketRequest:
         self.conn = None
 
     def _conn(self):
-        req = _rpc.connect(self.url, self.headers, self.timeout)
+        req = _promptkit_rpc.connect(self.url, self.headers, self.timeout)
         return req
 
     async def __aenter__(self):
@@ -231,19 +231,19 @@ class Websocket:
 
     async def asend(self, value):
         while True:
-            ok, poll = self.conn.send(value)
+            poll = self.conn.send(value)
             if poll is not None:
                 await subscribe(poll)
             else:
-                return ok
+                break
 
     def send(self, value):
         while True:
-            ok, poll = self.conn.send(value)
+            poll = self.conn.send(value)
             if poll is not None:
                 poll.wait()
             else:
-                return ok
+                break
 
 
 def fetch(method, url, *, params=None, headers=None, body=None, timeout=None):
