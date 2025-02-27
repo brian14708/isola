@@ -154,6 +154,11 @@ pub mod grpc_module {
         RequestStream::finish(tx)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
 
+        // recv eof
+        while rx.read().is_none() {
+            rx.subscribe().block()
+        }
+
         let mut d = DescriptorPool::new();
         d.add_file_descriptor_set(FileDescriptorSet { file: files })
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;

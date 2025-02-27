@@ -1,6 +1,6 @@
 use anyhow::anyhow;
+use futures_util::FutureExt;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
-use tokio::task::JoinHandle;
 use wasmtime::component::Resource;
 use wasmtime_wasi::bindings::clocks::monotonic_clock::Duration;
 use wasmtime_wasi::runtime::AbortOnDropJoinHandle;
@@ -34,7 +34,7 @@ impl<T: HostView> Host for HostImpl<T> {
                 .await
                 .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
             Ok(Connection {
-                handle: join,
+                handle: join.into(),
                 streams: Some((response, request)),
             })
         });
@@ -275,7 +275,7 @@ impl<T: HostView> HostRequestStream for HostImpl<T> {
 }
 
 pub struct Connection {
-    handle: JoinHandle<anyhow::Result<()>>,
+    handle: AbortOnDropJoinHandle<anyhow::Result<()>>,
     streams: Option<(RequestStream, ResponseStream)>,
 }
 
@@ -296,7 +296,7 @@ impl<T: HostView> HostConnection for HostImpl<T> {
 
     async fn drop(&mut self, rep: Resource<Connection>) -> wasmtime::Result<()> {
         let m = self.0.table().delete(rep)?;
-        m.handle.abort();
+        m.handle.now_or_never();
         Ok(())
     }
 }
