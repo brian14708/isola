@@ -15,6 +15,7 @@ use http_body_util::BodyExt;
 use http_cache_reqwest::CacheMode;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project::pin_project;
+use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use reqwest_middleware::ClientWithMiddleware;
 use tokio::task::JoinHandle;
 use tonic::{
@@ -54,11 +55,9 @@ impl VmEnv {
         Output = reqwest_middleware::Result<(tracing::Span, reqwest::Response)>,
     > + Send
     + 'static {
-        let span = tracing::span!(
-            target: "promptkit::http",
-            tracing::Level::INFO,
-            "http::fetch",
-            promptkit.user = true,
+        let span = tracing::info_span!(
+            target: TRACE_TARGET_SCRIPT,
+            "http.request",
             otel.kind = "client",
             { trace::HTTP_REQUEST_METHOD } = req.method().as_str(),
             { trace::SERVER_ADDRESS } = req.url().host_str().unwrap_or_default(),
@@ -266,11 +265,9 @@ async fn websocket(
     }
 
     let (span, ws) = async {
-        let span = tracing::span!(
-            target: "promptkit::rpc",
-            tracing::Level::INFO,
-            "rpc::websocket::connect",
-            promptkit.user = true,
+        let span = tracing::info_span!(
+            target: TRACE_TARGET_SCRIPT,
+            "websocket.connect",
             otel.kind = "client",
             { trace::HTTP_REQUEST_METHOD } = "GET",
             { trace::SERVER_ADDRESS } = u.host_str().unwrap_or_default(),
@@ -402,11 +399,9 @@ async fn grpc(
     let method = seg.next().unwrap_or_default();
     let mut endpoint = Endpoint::from(uri)
         .tls_config(tonic::transport::ClientTlsConfig::new().with_enabled_roots())?;
-    let span = tracing::span!(
-        target: "promptkit::rpc",
-        tracing::Level::INFO,
-        "rpc::grpc::connect",
-        promptkit.user = true,
+    let span = tracing::info_span!(
+        target: TRACE_TARGET_SCRIPT,
+        "grpc.request",
         otel.kind = "client",
         { trace::RPC_SYSTEM } = "grpc",
         { trace::SERVER_ADDRESS } = u.host_str().unwrap_or_default(),

@@ -1,3 +1,4 @@
+use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use tracing::event;
 use wasmtime_wasi::{WasiImpl, WasiView};
 
@@ -30,52 +31,46 @@ impl<T: WasiView> bindings::logging::Host for WasiImpl<T> {
     ) -> wasmtime::Result<()> {
         match log_level {
             bindings::logging::Level::Trace => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::TRACE,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
             bindings::logging::Level::Debug => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::DEBUG,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
             bindings::logging::Level::Info => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::INFO,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
             bindings::logging::Level::Warn => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::WARN,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
             bindings::logging::Level::Error => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::ERROR,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
             bindings::logging::Level::Critical => event!(
-                name: "promptkit.log",
-                target: "promptkit::log",
+                name: "log",
+                target: TRACE_TARGET_SCRIPT,
                 tracing::Level::ERROR,
-                promptkit.log.output = &message,
-                promptkit.log.context = &context,
-                promptkit.user = true,
+                log.output = &message,
+                log.context = &context,
             ),
         }
         Ok(())

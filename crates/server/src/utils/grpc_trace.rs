@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use http::{Response, Uri};
-use opentelemetry::trace::{TraceContextExt, TraceId};
-use opentelemetry_sdk::trace::RandomIdGenerator;
 use opentelemetry_semantic_conventions::attribute as trace;
+use promptkit_trace::consts::TRACE_TARGET_OTEL;
 use tower_http::{
     classify::{GrpcErrorsAsFailures, GrpcFailureClass, SharedClassifier},
     trace::{OnFailure, OnResponse},
@@ -44,20 +43,19 @@ impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
             }
         }
         let extractor = HeaderExtractor(request.headers());
-        let (remote_context, _) =
-            create_context_with_trace(opentelemetry::global::get_text_map_propagator(
-                |propagator| propagator.extract(&extractor),
-            ));
+        let remote_context = opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.extract(&extractor)
+        });
 
         let (service, method) = extract_service_method(request.uri());
-
         let server_addr = request
             .headers()
             .get(http::header::HOST)
             .map_or(request.uri().host(), |h| h.to_str().ok())
             .unwrap_or("");
         let span = tracing::info_span!(
-            "promptkit::server",
+            target: TRACE_TARGET_OTEL,
+            "grpc.server",
             { trace::RPC_SYSTEM } = "grpc",
             { trace::RPC_SERVICE } = service,
             { trace::RPC_METHOD } = method,
@@ -67,37 +65,9 @@ impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
             { trace::OTEL_STATUS_CODE } = Empty,
             { trace::OTEL_STATUS_DESCRIPTION } = Empty,
             otel.kind = "server",
-            promptkit.user = true,
         );
         tracing_opentelemetry::OpenTelemetrySpanExt::set_parent(&span, remote_context);
         span
-    }
-}
-
-fn create_context_with_trace(
-    remote_context: opentelemetry::Context,
-) -> (opentelemetry::Context, TraceId) {
-    if remote_context.span().span_context().is_valid() {
-        let remote_span = remote_context.span();
-        let span_context = remote_span.span_context();
-        let trace_id = span_context.trace_id();
-        (remote_context, trace_id)
-    } else {
-        // create a fake remote context but with a fresh new trace_id
-        use opentelemetry::trace::{SpanContext, SpanId};
-        use opentelemetry_sdk::trace::IdGenerator;
-        let trace_id = RandomIdGenerator::default().new_trace_id();
-        let new_span_context = SpanContext::new(
-            trace_id,
-            SpanId::INVALID,
-            remote_context.span().span_context().trace_flags(),
-            false,
-            remote_context.span().span_context().trace_state().clone(),
-        );
-        (
-            remote_context.with_remote_span_context(new_span_context),
-            trace_id,
-        )
     }
 }
 

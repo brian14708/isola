@@ -1,4 +1,5 @@
 use bytes::Bytes;
+use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use smallvec::SmallVec;
 use tracing::event;
 use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
@@ -40,32 +41,29 @@ impl TraceOutputStream {
         match self.context {
             "stderr" => {
                 event!(
-                    name: "promptkit.log",
-                    target: "promptkit::log",
+                    name: "log",
+                    target: TRACE_TARGET_SCRIPT,
                     tracing::Level::DEBUG,
-                    promptkit.user = true,
-                    promptkit.log.context = "stderr",
-                    promptkit.log.output = s,
+                    log.context = "stderr",
+                    log.output = s,
                 );
             }
             "stdout" => {
                 event!(
-                    name: "promptkit.log",
-                    target: "promptkit::log",
+                    name: "log",
+                    target: TRACE_TARGET_SCRIPT,
                     tracing::Level::DEBUG,
-                    promptkit.user = true,
-                    promptkit.log.context = "stdout",
-                    promptkit.log.output = s,
+                    log.context = "stdout",
+                    log.output = s,
                 );
             }
             v => {
                 event!(
-                    name: "promptkit.log",
-                    target: "promptkit::log",
+                    name: "log",
+                    target: TRACE_TARGET_SCRIPT,
                     tracing::Level::DEBUG,
-                    promptkit.user = true,
-                    promptkit.log.context = v,
-                    promptkit.log.output = s,
+                    log.context = v,
+                    log.output = s,
                 );
             }
         }

@@ -2,6 +2,7 @@ use std::path::Path;
 
 use futures_util::StreamExt;
 use tokio::{sync::mpsc, time::timeout};
+use tracing::Instrument;
 use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
@@ -104,32 +105,35 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
             self.env.send_request_http(request),
         );
 
-        let handle = wasmtime_wasi::runtime::spawn(async move {
-            let (part, body) = match resp.await {
-                Ok(Ok(r)) => r,
-                Ok(Err(e)) => {
-                    return Ok(Err(ErrorCode::InternalError(Some(format!(
-                        "request error: {e}"
-                    )))));
+        let handle = wasmtime_wasi::runtime::spawn(
+            async move {
+                let (part, body) = match resp.await {
+                    Ok(Ok(r)) => r,
+                    Ok(Err(e)) => {
+                        return Ok(Err(ErrorCode::InternalError(Some(format!(
+                            "request error: {e}"
+                        )))));
+                    }
+                    Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
                 }
-                Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
-            }
-            .map(|b| {
-                http_body_util::StreamBody::new(b.map(|e| match e {
-                    Ok(e) => Ok(e),
-                    Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
+                .map(|b| {
+                    http_body_util::StreamBody::new(b.map(|e| match e {
+                        Ok(e) => Ok(e),
+                        Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
+                    }))
+                })
+                .into_parts();
+                Ok(Ok(IncomingResponse {
+                    resp: hyper::Response::<HyperIncomingBody>::from_parts(
+                        part,
+                        HyperIncomingBody::new(body),
+                    ),
+                    worker: None,
+                    between_bytes_timeout: config.between_bytes_timeout,
                 }))
-            })
-            .into_parts();
-            Ok(Ok(IncomingResponse {
-                resp: hyper::Response::<HyperIncomingBody>::from_parts(
-                    part,
-                    HyperIncomingBody::new(body),
-                ),
-                worker: None,
-                between_bytes_timeout: config.between_bytes_timeout,
-            }))
-        });
+            }
+            .in_current_span(),
+        );
         Ok(HostFutureIncomingResponse::pending(handle))
     }
 }

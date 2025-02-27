@@ -3,14 +3,14 @@ use std::{borrow::Cow, collections::HashMap, pin::Pin, time::Duration};
 use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
+use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
 use reqwest::Client;
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{once, wrappers::UnboundedReceiverStream};
 use tonic::{Response, Status};
-use tracing::{Instrument, Span, level_filters::LevelFilter, span};
+use tracing::{Instrument, Span, info_span, level_filters::LevelFilter};
 
 use crate::{
-    otel::RequestSpanExt,
     proto::script::v1::{
         self as script, ContentType, ErrorCode, Trace, analyze_response, argument::Marker,
         execute_client_stream_request, execute_stream_request, result,
@@ -18,7 +18,10 @@ use crate::{
     },
     routes::{AppState, VmEnv},
     service::prost_serde::{argument, parse_source},
-    utils::stream::{join_with, stream_until},
+    utils::{
+        stream::{join_with, stream_until},
+        trace::TraceCollector,
+    },
 };
 
 mod cache;
@@ -605,14 +608,18 @@ fn parse_spec<'a>(
 
         let (span, trace, log_level) = match script::TraceLevel::try_from(spec.trace_level) {
             Ok(script::TraceLevel::All) => {
-                let s = span!(
-                    tracing::Level::INFO,
-                    "promptkit::script",
-                    "promptkit.user" = true
+                let (collector, rx) = TraceCollector::new();
+                let s = info_span!(
+                    target: TRACE_TARGET_SCRIPT,
+                    parent: Span::current(),
+                    "script.exec"
                 );
-                match s.enable_tracing(LevelFilter::DEBUG) {
-                    Some(t) => (s, Some(t), LevelFilter::DEBUG),
-                    _ => (Span::none(), None, LevelFilter::DEBUG),
+                if s.collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
+                    .is_some()
+                {
+                    (s, Some(rx), LevelFilter::DEBUG)
+                } else {
+                    (Span::none(), None, LevelFilter::DEBUG)
                 }
             }
             Ok(script::TraceLevel::None) => (Span::none(), None, LevelFilter::OFF),
