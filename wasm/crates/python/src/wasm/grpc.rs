@@ -156,7 +156,7 @@ pub mod grpc_module {
 
         // recv eof
         while rx.read().is_none() {
-            rx.subscribe().block()
+            rx.subscribe().block();
         }
 
         let mut d = DescriptorPool::new();

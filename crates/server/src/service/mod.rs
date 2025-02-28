@@ -4,7 +4,6 @@ use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
 use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
-use reqwest::Client;
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{once, wrappers::UnboundedReceiverStream};
 use tonic::{Response, Status};
@@ -24,7 +23,6 @@ use crate::{
     },
 };
 
-mod cache;
 mod ipc;
 mod prost_serde;
 
@@ -36,26 +34,9 @@ pub struct ScriptServer {
 }
 
 impl ScriptServer {
-    pub async fn new(state: AppState) -> Self {
-        use http_cache_reqwest::{Cache, CacheMode, HttpCache, HttpCacheOptions};
-        use reqwest_middleware::ClientBuilder;
-
+    pub fn new(state: AppState) -> Self {
         let base_env = VmEnv {
-            http: ClientBuilder::new(
-                Client::builder()
-                    .gzip(true)
-                    .brotli(true)
-                    .zstd(true)
-                    .user_agent("PromptKit/1.0")
-                    .build()
-                    .unwrap(),
-            )
-            .with(Cache(HttpCache {
-                mode: CacheMode::Default,
-                manager: cache::FoyerCache::new("/tmp/http-cache").await.unwrap(),
-                options: HttpCacheOptions::default(),
-            }))
-            .build(),
+            client: promptkit_request::Client::new(),
         };
         Self { state, base_env }
     }

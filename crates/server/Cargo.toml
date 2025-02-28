@@ -8,14 +8,10 @@ anyhow = "1.0.82"
 axum = { version = "0.7.5", features = ["http2"] }
 bytes = "1.7.1"
 cbor4ii = { version = "1.0.0", features = ["serde1"] }
-foyer = "0.14.0"
 futures-core = "0.3.30"
 futures-util = "0.3.30"
 http = "1.1.0"
 http-body = "1.0.1"
-http-body-util = "0.1.2"
-http-cache-reqwest = { version = "0.15.0", default-features = false }
-http-cache-semantics = "2.1.0"
 metrics = "0.24.1"
 metrics-exporter-prometheus = { version = "0.16.1", default-features = false }
 mimalloc = { version = "0.1.41", default-features = false }
@@ -25,18 +21,17 @@ opentelemetry-semantic-conventions = { version = "0.28.0", features = ["semconv_
 opentelemetry_sdk = { version = "0.28.0", features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
 pin-project = "1.1.5"
 promptkit_executor = { path = "../executor" }
+promptkit_request = { version = "0.1.0", path = "../request" }
 promptkit_trace = { path = "../trace" }
 prost = "0.13.0"
 prost-types = "0.13.0"
-reqwest = { version = "0.12.4", features = ["rustls-tls-webpki-roots", "gzip", "stream", "brotli", "zstd"], default-features = false }
-reqwest-middleware = "0.4.0"
 serde = { version = "1.0.199", features = ["derive"] }
 serde-transcode = "1.1.1"
 serde_json = "1.0.116"
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = { version = "0.26.2", default-features = false, features = ["handshake"] }
-tonic = { version = "0.12.0", features = ["gzip", "tls-webpki-roots", "zstd"] }
+tonic = { version = "0.12.0", features = ["gzip", "tls-webpki-roots"] }
 tonic-reflection = "0.12.0"
 tonic-web = "0.12.0"
 tower-http = { version = "0.6.0", features = ["fs", "trace"] }

@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
 
             let grpc = tonic::service::Routes::default()
                 .add_service(tonic_web::enable(
-                    ScriptServiceServer::new(service::ScriptServer::new(state).await)
+                    ScriptServiceServer::new(service::ScriptServer::new(state))
                         .send_compressed(CompressionEncoding::Gzip)
                         .accept_compressed(CompressionEncoding::Gzip),
                 ))
