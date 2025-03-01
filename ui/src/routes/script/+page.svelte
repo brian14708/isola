@@ -44,7 +44,7 @@
 	let result = $state<
 		| undefined
 		| {
-				traceId: string;
+				traceId?: string;
 				loading: boolean;
 				data: string[];
 				traces: string[];
