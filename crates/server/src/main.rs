@@ -46,12 +46,6 @@ async fn main() -> anyhow::Result<()> {
                         .build_v1()
                         .unwrap(),
                 )
-                .add_service(
-                    tonic_reflection::server::Builder::configure()
-                        .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
-                        .build_v1alpha()
-                        .unwrap(),
-                )
                 .prepare()
                 .into_axum_router()
                 .layer(grpc_server_tracing_layer());
