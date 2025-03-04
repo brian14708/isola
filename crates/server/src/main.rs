@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use promptkit_executor::VmManager;
 use proto::script::v1::script_service_server::ScriptServiceServer;
 use tonic::codec::CompressionEncoding;
+use tonic::service::LayerExt;
 use utils::{grpc_trace::grpc_server_tracing_layer, otel::init_tracing};
 
 mod proto;
@@ -32,11 +33,13 @@ async fn main() -> anyhow::Result<()> {
             let app = routes::router(&state);
 
             let grpc = tonic::service::Routes::default()
-                .add_service(tonic_web::enable(
-                    ScriptServiceServer::new(service::ScriptServer::new(state))
-                        .send_compressed(CompressionEncoding::Gzip)
-                        .accept_compressed(CompressionEncoding::Gzip),
-                ))
+                .add_service(
+                    tonic_web::GrpcWebLayer::new().named_layer(
+                        ScriptServiceServer::new(service::ScriptServer::new(state))
+                            .send_compressed(CompressionEncoding::Gzip)
+                            .accept_compressed(CompressionEncoding::Gzip),
+                    ),
+                )
                 .add_service(
                     tonic_reflection::server::Builder::configure()
                         .register_encoded_file_descriptor_set(proto::FILE_DESCRIPTOR_SET)
