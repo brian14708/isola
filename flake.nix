@@ -52,6 +52,7 @@
               };
             })
               {
+                LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath ([ ]);
                 buildInputs =
                   with pkgs;
                   [
@@ -77,7 +78,6 @@
                     buf
                     protobuf_28
                     pkg-config
-                    gcc
                     rust-analyzer
                     rust-toolchain
                   ]
