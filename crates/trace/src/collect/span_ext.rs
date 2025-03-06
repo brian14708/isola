@@ -68,9 +68,10 @@ mod tests {
     #[derive(Clone)]
     struct VecCollector(Arc<Mutex<(Vec<SpanRecord>, Vec<EventRecord>)>>);
     impl Collector for VecCollector {
-        fn collect_span(&self, v: SpanRecord) {
+        fn collect_span_start(&self, v: SpanRecord) {
             self.0.lock().unwrap().0.push(v);
         }
+        fn collect_span_end(&self, _v: SpanRecord) {}
         fn collect_event(&self, v: EventRecord) {
             self.0.lock().unwrap().1.push(v);
         }
