@@ -30,7 +30,12 @@ add_library(wasi INTERFACE)
 target_link_libraries(
   wasi
   INTERFACE
-    ${WASI_SDK_PATH}/lib/clang/18/lib/wasip1/libclang_rt.builtins-wasm32.a)
+    ${WASI_SDK_PATH}/lib/clang/18/lib/wasip1/libclang_rt.builtins-wasm32.a
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-signal.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.so
+)
 
 install(
   FILES ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so

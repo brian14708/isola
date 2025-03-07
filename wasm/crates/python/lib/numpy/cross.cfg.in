@@ -4,7 +4,7 @@ wasi_sysroot = wasi_sdk_path + '/share/wasi-sysroot'
 cross_prefix = '@WASMLIB_SYSROOT@/usr/local'
 wasi_target = 'wasm32-wasi'
 wasi_args = ['--sysroot=' + wasi_sysroot, '--target=' + wasi_target, '-D__EMSCRIPTEN__=1', '-DNPY_NO_SIGNAL']
-wasi_link_args = []
+wasi_link_args = [ '@CMAKE_BINARY_DIR@/libpython3.13.so' ]
 
 [binaries]
 exe_wrapper = 'wasmtime'
