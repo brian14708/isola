@@ -234,17 +234,22 @@ pub mod http_module {
             Ok(d)
         }
 
-        fn read_into(&mut self, buf: &mut ResponseBuffer) -> PyResult<Option<PyPollable>> {
-            read_into(self, &mut buf.inner).map(|p| p.map(Into::into))
+        fn read_into(
+            &mut self,
+            buf: &mut ResponseBuffer,
+            size: i64,
+        ) -> PyResult<Option<PyPollable>> {
+            read_into(self, &mut buf.inner, size).map(|p| p.map(Into::into))
         }
 
         fn blocking_read<'py>(
             &mut self,
             py: Python<'py>,
             kind: &str,
+            size: i64,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
             let mut buf = Buffer::new(kind);
-            while let Some(p) = read_into(self, &mut buf)? {
+            while let Some(p) = read_into(self, &mut buf, size)? {
                 p.block();
             }
             buf.decode_all(py)
@@ -259,7 +264,11 @@ pub mod http_module {
         }
     }
 
-    fn read_into(slf: &mut PyResponse, buf: &mut impl BodyBuffer) -> PyResult<Option<Pollable>> {
+    fn read_into(
+        slf: &mut PyResponse,
+        buf: &mut impl BodyBuffer,
+        size: i64,
+    ) -> PyResult<Option<Pollable>> {
         let stream = if let Some(b) = slf.stream.as_mut() {
             b
         } else {
@@ -281,11 +290,15 @@ pub mod http_module {
         };
 
         loop {
-            match InputStream::read(stream, 16384) {
+            #[allow(clippy::cast_sign_loss)]
+            match InputStream::read(stream, if size < 0 { 16384 } else { size as _ }) {
                 Ok(v) => {
                     if !v.is_empty() {
                         buf.write(v);
-                        continue;
+                        if size < 0 {
+                            continue;
+                        }
+                        return Ok(None);
                     }
 
                     let poll = stream.subscribe();

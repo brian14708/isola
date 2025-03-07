@@ -79,31 +79,32 @@ class Response:
         return self._headers
 
     def close(self):
-        self.resp.close()
-        self.resp = None
+        if self.resp:
+            self.resp.close()
+            self.resp = None
 
     # async read methods
 
-    async def _aread(self, encoding):
+    async def _aread(self, encoding, size):
         buf = _http.new_buffer(encoding)
-        while (poll := self.resp.read_into(buf)) is not None:
+        while (poll := self.resp.read_into(buf, size)) is not None:
             await subscribe(poll)
         return buf.read_all()
 
     async def ajson(self):
-        return await self._aread("json")
+        return await self._aread("json", -1)
 
     async def atext(self):
-        return await self._aread("text")
+        return await self._aread("text", -1)
 
-    async def aread(self):
-        return await self._aread("bytes")
+    async def aread(self, size=-1):
+        return await self._aread("bytes", size)
 
     # async iterator methods
 
     async def _aiter(self, encoding):
         buf = _http.new_buffer(encoding)
-        while (poll := self.resp.read_into(buf)) is not None:
+        while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
                 yield data
             await subscribe(poll)
@@ -124,23 +125,23 @@ class Response:
 
     # sync read methods
 
-    def _read(self, encoding):
-        return self.resp.blocking_read(encoding)
+    def _read(self, encoding, size):
+        return self.resp.blocking_read(encoding, size)
 
-    def read(self):
-        return self._read("bytes")
+    def read(self, size=-1):
+        return self._read("bytes", size)
 
     def json(self):
-        return self._read("json")
+        return self._read("json", -1)
 
     def text(self):
-        return self._read("text")
+        return self._read("text", -1)
 
     # sync iterator methods
 
     def _iter(self, encoding):
         buf = _http.new_buffer(encoding)
-        while (poll := self.resp.read_into(buf)) is not None:
+        while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
                 yield data
             poll.wait()
