@@ -26,6 +26,7 @@ ExternalProject_Add(
       PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.13
       _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
       ZLIB_ROOT=${WASMLIB_SYSROOT}
+      FREETYPE_ROOT=${WASMLIB_SYSROOT}
       JPEG_ROOT=${WASMLIB_SYSROOT}
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
       CFLAGS=-fPIC\ -I${WASMLIB_SYSROOT}/usr/local/include/python3.13\ -I${WASMLIB_SYSROOT}/include/wasm32-wasip1
@@ -34,6 +35,6 @@ ExternalProject_Add(
     ${Python3_EXECUTABLE} <SOURCE_DIR>/setup.py
       install --prefix=${CMAKE_BINARY_DIR}/pythonpkgs
       --single-version-externally-managed --root=/
-  DEPENDS python zlib jpeg)
+  DEPENDS python zlib jpeg freetype)
 
 install(DIRECTORY ${CMAKE_BINARY_DIR}/pythonpkgs/ DESTINATION usr/local)

@@ -1,0 +1,66 @@
+diff --git a/include/freetype/config/ftstdlib.h b/include/freetype/config/ftstdlib.h
+index e17aa7b..ffa9d49 100644
+--- a/include/freetype/config/ftstdlib.h
++++ b/include/freetype/config/ftstdlib.h
+@@ -163,14 +163,22 @@
+    */
+ 
+ 
+-#include <setjmp.h>
+-
+-#define ft_jmp_buf     jmp_buf  /* note: this cannot be a typedef since  */
++#define ft_jmp_buf     void*  /* note: this cannot be a typedef since  */
+                                 /*       `jmp_buf` is defined as a macro */
+                                 /*       on certain platforms            */
+ 
+-#define ft_longjmp     longjmp
+-#define ft_setjmp( b ) setjmp( *(ft_jmp_buf*) &(b) ) /* same thing here */
++static int ft_setjmp(ft_jmp_buf jmp) {
++    (void)jmp;
++    return 0;
++}
++
++static void ft_longjmp(ft_jmp_buf jmp, int x) {
++    (void)jmp;
++    (void)x;
++    fprintf(stderr, "FATAL: unimplemented longjmp called -> aborting.\n");
++    fflush(stderr);
++    abort();
++}
+ 
+ 
+   /* The following is only used for debugging purposes, i.e., if   */
+diff --git a/src/smooth/ftgrays.c b/src/smooth/ftgrays.c
+index b7c0632..a1856f4 100644
+--- a/src/smooth/ftgrays.c
++++ b/src/smooth/ftgrays.c
+@@ -142,7 +142,6 @@
+ 
+ #include <stddef.h>
+ #include <string.h>
+-#include <setjmp.h>
+ #include <limits.h>
+ #define FT_CHAR_BIT   CHAR_BIT
+ #define FT_UINT_MAX   UINT_MAX
+@@ -157,9 +156,18 @@
+ 
+ #define ft_memset   memset
+ 
+-#define ft_setjmp   setjmp
+-#define ft_longjmp  longjmp
+-#define ft_jmp_buf  jmp_buf
++#define ft_jmp_buf  void*
++static int ft_setjmp(ft_jmp_buf jmp) {
++    (void)jmp;
++    return 0;
++}
++static void ft_longjmp(ft_jmp_buf jmp, int x) {
++    (void)jmp;
++    (void)x;
++    fprintf(stderr, "FATAL: unimplemented longjmp called -> aborting.\n");
++    fflush(stderr);
++    abort();
++}
+ 
+ typedef ptrdiff_t  FT_PtrDist;
+ 
