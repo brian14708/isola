@@ -52,7 +52,7 @@
 		"svelte-check": "^4.1.4",
 		"sveltekit-superforms": "^2.23.1",
 		"tailwind-merge": "^3.0.1",
-		"tailwind-variants": "^0.3.1",
+		"tailwind-variants": "^1.0.0",
 		"tailwindcss": "^4.0.7",
 		"tailwindcss-animate": "^1.0.7",
 		"typescript": "^5.7.3",
