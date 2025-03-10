@@ -25,7 +25,7 @@ pub mod logging_module {
     #[pyo3(signature = (msg, *args, **kwds))]
     fn debug(
         msg: &Bound<'_, PyString>,
-        args: &Bound<'_, PyTuple>,
+        args: Bound<'_, PyTuple>,
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
@@ -47,7 +47,7 @@ pub mod logging_module {
     #[pyo3(signature = (msg, *args, **kwds))]
     fn info(
         msg: &Bound<'_, PyString>,
-        args: &Bound<'_, PyTuple>,
+        args: Bound<'_, PyTuple>,
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
@@ -69,7 +69,7 @@ pub mod logging_module {
     #[pyo3(signature = (msg, *args, **kwds))]
     fn warning(
         msg: &Bound<'_, PyString>,
-        args: &Bound<'_, PyTuple>,
+        args: Bound<'_, PyTuple>,
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
@@ -91,7 +91,7 @@ pub mod logging_module {
     #[pyo3(signature = (msg, *args, **kwds))]
     fn error(
         msg: &Bound<'_, PyString>,
-        args: &Bound<'_, PyTuple>,
+        args: Bound<'_, PyTuple>,
         kwds: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<()> {
         GLOBAL_LOGGING.with_borrow(|l| {
