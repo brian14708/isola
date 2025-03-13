@@ -298,7 +298,6 @@ pub mod http_module {
                         if size < 0 {
                             continue;
                         }
-                        return Ok(None);
                     }
 
                     let poll = stream.subscribe();

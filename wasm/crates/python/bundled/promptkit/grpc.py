@@ -2,6 +2,10 @@ import _promptkit_grpc
 import _promptkit_rpc
 from promptkit.asyncio import subscribe
 
+__all__ = [
+    "client",
+]
+
 
 class GRPCRequest:
     __slots__ = (
@@ -135,3 +139,7 @@ class Service:
             await r.asend(req)
             r.close()
             return await r.arecv()
+
+
+def client(url, service, metadata=None, timeout=None):
+    return Service(url, service, metadata, timeout)
