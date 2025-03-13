@@ -38,8 +38,9 @@ class Session:
             "jsonrpc": "2.0",
             "id": id,
             "method": method,
-            "params": params,
         }
+        if params:
+            request["params"] = params
         async with fetch("POST", self.url, headers=self.headers, body=request) as resp:
             if not 200 <= resp.status < 300:
                 raise RuntimeError(f"http status check failed, status={resp.status}")
@@ -56,8 +57,9 @@ class Session:
         request = {
             "jsonrpc": "2.0",
             "method": method,
-            "params": params,
         }
+        if params:
+            request["params"] = params
         async with fetch("POST", self.url, headers=self.headers, body=request) as resp:
             if not 200 <= resp.status < 300:
                 raise RuntimeError(f"http status check failed, status={resp.status}")
@@ -75,7 +77,7 @@ class Session:
 
 
 @contextlib.asynccontextmanager
-async def connect(url, *, headers=None, timeout=None):
+async def sse_connect(url, *, headers=None, timeout=None):
     async with fetch("GET", url, headers=headers, timeout=timeout) as resp:
         if not 200 <= resp.status < 300:
             raise RuntimeError(f"http status check failed, status={resp.status}")
