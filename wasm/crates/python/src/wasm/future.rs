@@ -25,9 +25,13 @@ impl PyPollable {
 
 #[pymethods]
 impl PyPollable {
-    fn subscribe(mut slf: PyRefMut<'_, PyPollable>) -> PyRefMut<'_, PyPollable> {
-        slf.refcnt += 1;
-        slf
+    fn subscribe(mut slf: PyRefMut<'_, PyPollable>) -> Option<PyRefMut<'_, PyPollable>> {
+        if slf.inner.is_some() {
+            slf.refcnt += 1;
+            Some(slf)
+        } else {
+            None
+        }
     }
 
     #[allow(clippy::unused_self)]
@@ -74,10 +78,10 @@ macro_rules! create_future {
                 }
             }
 
-            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> crate::wasm::future::PyPollable {
+            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
                 match slf.inner.as_ref() {
-                    Some(f) => f.subscribe().into(),
-                    _ => panic!("invalid state"),
+                    Some(f) => Some(f.subscribe().into()),
+                    _ => None,
                 }
             }
 
@@ -117,10 +121,10 @@ macro_rules! create_future {
                 }
             }
 
-            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> crate::wasm::future::PyPollable {
+            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
                 match slf.inner.as_ref() {
-                    Some(f) => f.subscribe().into(),
-                    _ => panic!("invalid state"),
+                    Some(f) => Some(f.subscribe().into()),
+                    _ => None,
                 }
             }
 

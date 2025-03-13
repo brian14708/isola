@@ -67,19 +67,36 @@ pub mod sys_module {
     #[allow(clippy::needless_pass_by_value)]
     fn poll(poll: Bound<'_, PyList>) -> PyResult<Bound<'_, PySet>> {
         let py = poll.py();
-        let mut refs = poll
-            .iter()
-            .map(|p| {
-                let p = p.downcast_exact::<PyTuple>()?;
-                let p = p.get_item(0)?;
-                let p = p.call_method0(intern!(py, "subscribe"))?;
+        let mut refs = vec![];
+        let mut result = vec![];
+        for (i, p) in poll.iter().enumerate() {
+            let p = p.downcast_exact::<PyTuple>()?;
+            let p = p.get_item(0)?;
+            let p = p.call_method0(intern!(py, "subscribe"))?;
+            if p.is_none() {
+                result.push(i);
+            } else {
                 let p = p.downcast_exact::<PyPollable>()?;
-                Ok(p.borrow_mut())
-            })
-            .collect::<PyResult<Vec<_>>>()?;
-        let handles = refs.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
-        let result = PySet::new(py, host_poll(&handles)).unwrap();
-        refs.iter_mut().for_each(|p| p.release());
+                refs.push((i, p.borrow_mut()));
+            }
+        }
+
+        let handles = refs
+            .iter()
+            .map(|(_, p)| p.get_pollable())
+            .collect::<Vec<_>>();
+        let result = PySet::new(
+            py,
+            host_poll(&handles)
+                .into_iter()
+                .map(|idx| {
+                    let (i, _) = refs[idx as usize];
+                    i
+                })
+                .chain(result.into_iter()),
+        )
+        .unwrap();
+        refs.iter_mut().for_each(|(_, p)| p.release());
         Ok(result)
     }
 }
