@@ -1,15 +1,19 @@
-use pyo3::{Bound, pyclass, pymethods};
+use pyo3::{PyRefMut, pyclass, pymethods};
 
 use super::wasi;
 
 #[pyclass]
 pub struct PyPollable {
     inner: Option<wasi::io::poll::Pollable>,
+    refcnt: usize,
 }
 
 impl From<wasi::io::poll::Pollable> for PyPollable {
     fn from(p: wasi::io::poll::Pollable) -> Self {
-        Self { inner: Some(p) }
+        Self {
+            inner: Some(p),
+            refcnt: 1,
+        }
     }
 }
 
@@ -21,14 +25,19 @@ impl PyPollable {
 
 #[pymethods]
 impl PyPollable {
-    fn subscribe(slf: Bound<'_, Self>) -> Bound<'_, Self> {
+    fn subscribe(mut slf: PyRefMut<'_, PyPollable>) -> PyRefMut<'_, PyPollable> {
+        slf.refcnt += 1;
         slf
     }
 
     #[allow(clippy::unused_self)]
     fn get(&self) {}
 
-    fn release(&mut self) {
+    pub(crate) fn release(&mut self) {
+        if self.refcnt > 1 {
+            self.refcnt -= 1;
+            return;
+        }
         self.inner.take();
     }
 

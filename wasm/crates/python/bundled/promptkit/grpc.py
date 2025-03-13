@@ -40,7 +40,8 @@ class GRPCRequest:
         return self.conn
 
     async def __aexit__(self, _type, _value, _trace):
-        self.conn.shutdown()
+        if self.conn:
+            self.conn.shutdown()
 
     def __enter__(self):
         self.conn = GRPCClient(

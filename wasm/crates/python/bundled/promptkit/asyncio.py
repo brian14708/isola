@@ -13,7 +13,7 @@ async def subscribe(fut):
     loop = asyncio.get_running_loop()
     waker = loop.create_future()
     try:
-        loop.wakers.append((fut.subscribe(), waker))
+        loop.wakers.append((fut, waker))
         await waker
         return fut.get()
     finally:
@@ -68,8 +68,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                     handle._run()
 
             if self.wakers and len(handles) == 0:
-                pollables = [p for p, _ in self.wakers]
-                ready_indices_set = _promptkit_sys.poll(pollables)
+                ready_indices_set = _promptkit_sys.poll(self.wakers)
 
                 new_wakers = []
                 for i, (pollable, waker) in enumerate(self.wakers):
@@ -78,7 +77,6 @@ class PollLoop(asyncio.AbstractEventLoop):
                             self.handles.append(waker)
                         elif not waker.cancelled():
                             waker.set_result(None)
-                        pollable.release()
                     else:
                         new_wakers.append((pollable, waker))
 

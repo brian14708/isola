@@ -39,7 +39,8 @@ class Request:
         return self.resp
 
     async def __aexit__(self, _type, _value, _trace):
-        self.resp.close()
+        if self.resp:
+            self.resp.close()
 
     def __enter__(self):
         self.resp = Response(self._fetch().wait())
@@ -177,7 +178,8 @@ class WebSocketRequest:
         return self.conn
 
     async def __aexit__(self, _type, _value, _trace):
-        self.conn.shutdown()
+        if self.conn:
+            self.conn.shutdown()
 
     def __enter__(self):
         self.conn = Websocket(self._conn().wait())

@@ -39,6 +39,11 @@ wit_bindgen::generate!({
 #[pymodule]
 #[pyo3(name = "_promptkit_sys")]
 pub mod sys_module {
+    use pyo3::{
+        intern,
+        types::{PyList, PyTuple, PyTupleMethods},
+    };
+
     #[allow(clippy::wildcard_imports)]
     use super::*;
 
@@ -60,9 +65,22 @@ pub mod sys_module {
     #[pyfunction]
     #[pyo3(signature = (poll))]
     #[allow(clippy::needless_pass_by_value)]
-    fn poll<'py>(py: Python<'py>, poll: Vec<PyRef<'_, PyPollable>>) -> Bound<'py, PySet> {
-        let p = poll.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
-        PySet::new(py, host_poll(&p)).unwrap()
+    fn poll(poll: Bound<'_, PyList>) -> PyResult<Bound<'_, PySet>> {
+        let py = poll.py();
+        let mut refs = poll
+            .iter()
+            .map(|p| {
+                let p = p.downcast_exact::<PyTuple>()?;
+                let p = p.get_item(0)?;
+                let p = p.call_method0(intern!(py, "subscribe"))?;
+                let p = p.downcast_exact::<PyPollable>()?;
+                Ok(p.borrow_mut())
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        let handles = refs.iter().map(|p| p.get_pollable()).collect::<Vec<_>>();
+        let result = PySet::new(py, host_poll(&handles)).unwrap();
+        refs.iter_mut().for_each(|p| p.release());
+        Ok(result)
     }
 }
 
