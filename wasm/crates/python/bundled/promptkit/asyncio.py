@@ -1,7 +1,9 @@
 import asyncio
-import time
 
-import _promptkit_sys
+try:
+    import _promptkit_sys
+except ImportError:
+    pass
 
 __all__ = [
     "run",
@@ -11,9 +13,8 @@ __all__ = [
 
 async def subscribe(fut):
     loop = asyncio.get_running_loop()
-    waker = loop.create_future()
+    waker = loop.add_waker(fut)
     try:
-        loop.wakers.append((fut, waker))
         await waker
         return fut.get()
     finally:
@@ -26,6 +27,11 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.running = False
         self.closed = False
         self.handles = []
+
+    def add_waker(self, pollable):
+        waker = self.create_future()
+        self.wakers.append((pollable, waker))
+        return waker
 
     def run_until_complete(self, future):
         try:
@@ -135,7 +141,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                 break
 
     def time(self):
-        return time.monotonic()
+        return _promptkit_sys.monotonic()
 
     def create_task(self, coro, *, name=None, context=None):
         return asyncio.Task(coro, loop=self, name=name, context=context)
@@ -153,6 +159,22 @@ class PollLoop(asyncio.AbstractEventLoop):
         pass
 
 
+class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
+    def __init__(self):
+        self._loop = None
+
+    def get_event_loop(self):
+        if self._loop is None:
+            self.set_event_loop(self.new_event_loop())
+        return self._loop
+
+    def set_event_loop(self, loop):
+        self._loop = loop
+
+    def new_event_loop(self):
+        return PollLoop()
+
+
 def _iter(runner, it):
     try:
         loop = runner.get_loop()
@@ -163,7 +185,7 @@ def _iter(runner, it):
 
 
 def run(main):
-    runner = asyncio.Runner(loop_factory=PollLoop)
+    runner = asyncio.Runner()
     if hasattr(main, "__aiter__"):
         return _iter(runner, main)
     else:

@@ -60,20 +60,20 @@ fn build_python(sh: &Shell) -> Result<()> {
     .run()?;
 
     run_if_changed(
-        vec!["crates/python/bundled/requirements.txt".to_string()],
+        vec!["crates/python/requirements.txt".to_string()],
         format!("target/{TARGET}/python-deps/setuptools/__init__.py"),
         |_, _| {
             let _ = remove_dir_all("target/{TARGET}/python-deps");
 
             let r = cmd!(
                 sh,
-                "uv pip install -U -r crates/python/bundled/requirements.txt --no-deps --target target/{TARGET}/python-deps"
+                "uv pip install -U -r crates/python/requirements.txt --no-deps --target target/{TARGET}/python-deps"
             ).run();
 
             if r.is_err() {
                 cmd!(
                 sh,
-                "pip install -U -r crates/python/bundled/requirements.txt --no-deps --target target/{TARGET}/python-deps"
+                "pip install -U -r crates/python/requirements.txt --no-deps --target target/{TARGET}/python-deps"
             ).run()?;
             }
 

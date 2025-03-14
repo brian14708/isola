@@ -63,6 +63,11 @@ pub mod sys_module {
     }
 
     #[pyfunction]
+    fn monotonic() -> f64 {
+        wasi::clocks::monotonic_clock::now() as f64 / 1_000_000_000.0
+    }
+
+    #[pyfunction]
     #[pyo3(signature = (poll))]
     #[allow(clippy::needless_pass_by_value)]
     fn poll(poll: Bound<'_, PyList>) -> PyResult<Bound<'_, PySet>> {

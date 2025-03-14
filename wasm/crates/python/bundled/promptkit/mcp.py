@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import urllib.parse
 import json
+
 from promptkit.http import fetch
 
 __all__ = ["connect"]
