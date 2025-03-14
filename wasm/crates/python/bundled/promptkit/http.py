@@ -363,7 +363,7 @@ async def _fetch(r, ignore_error):
         async with r as resp:
             if r.extra.get("validate"):
                 _validate_status(resp)
-            return await resp._aread(extra.get("type", "json"))
+            return await resp._aread(extra.get("type", "json"), -1)
     except Exception as e:
         if ignore_error:
             return e
