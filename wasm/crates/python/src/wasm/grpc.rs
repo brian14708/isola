@@ -65,11 +65,13 @@ pub mod grpc_module {
             metadata,
         );
         if let Some(timeout) = timeout {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            req.set_connect_timeout(Some((timeout * 1_000_000_000.0) as u64))
-                .map_err(|()| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
-                })?;
+            req.set_connect_timeout(Some(
+                u64::try_from(std::time::Duration::from_secs_f64(timeout).as_nanos())
+                    .expect("duration is too large"),
+            ))
+            .map_err(|()| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+            })?;
         }
 
         let c = outgoing_rpc::connect(req);

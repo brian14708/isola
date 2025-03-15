@@ -1,8 +1,4 @@
-#![allow(
-    clippy::missing_safety_doc,
-    clippy::module_name_repetitions,
-    unsafe_op_in_unsafe_fn
-)]
+#![allow(clippy::missing_safety_doc, clippy::module_name_repetitions)]
 
 mod body_buffer;
 mod future;
@@ -13,14 +9,11 @@ mod rpc;
 
 use std::cell::RefCell;
 
+use self::wasi::io::streams::StreamError;
 use self::wasi::logging::logging::Level;
-use self::wasi::{
-    clocks::monotonic_clock::subscribe_duration,
-    io::{poll::poll as host_poll, streams::StreamError},
-};
 use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
-use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell, types::PySet};
+use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
 
 use crate::{
     error::Error,
@@ -39,13 +32,17 @@ wit_bindgen::generate!({
 #[pymodule]
 #[pyo3(name = "_promptkit_sys")]
 pub mod sys_module {
+    use std::time::Duration;
+
     use pyo3::{
-        intern,
-        types::{PyList, PyTuple, PyTupleMethods},
+        Bound, PyResult, intern, pyfunction,
+        types::{PyAnyMethods, PyList, PyListMethods, PySet, PyTuple, PyTupleMethods},
     };
 
-    #[allow(clippy::wildcard_imports)]
-    use super::*;
+    use super::wasi::{
+        clocks::monotonic_clock::{now, subscribe_duration},
+        io::poll::poll as host_poll,
+    };
 
     #[pymodule_export]
     use super::PyPollable;
@@ -54,23 +51,20 @@ pub mod sys_module {
     #[pyo3(signature = (duration))]
     fn sleep(duration: f64) -> PyPollable {
         let poll = subscribe_duration(
-            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            {
-                (duration * 1_000_000_000.0) as u64
-            },
+            u64::try_from(Duration::from_secs_f64(duration).as_nanos())
+                .expect("duration is too large"),
         );
         poll.into()
     }
 
     #[pyfunction]
     fn monotonic() -> f64 {
-        wasi::clocks::monotonic_clock::now() as f64 / 1_000_000_000.0
+        Duration::from_nanos(now()).as_secs_f64()
     }
 
     #[pyfunction]
     #[pyo3(signature = (poll))]
-    #[allow(clippy::needless_pass_by_value)]
-    fn poll(poll: Bound<'_, PyList>) -> PyResult<Bound<'_, PySet>> {
+    fn poll<'py>(poll: &Bound<'py, PyList>) -> PyResult<Bound<'py, PySet>> {
         let py = poll.py();
         let mut refs = vec![];
         let mut result = vec![];
@@ -98,7 +92,7 @@ pub mod sys_module {
                     let (i, _) = refs[idx as usize];
                     i
                 })
-                .chain(result.into_iter()),
+                .chain(result),
         )
         .unwrap();
         refs.iter_mut().for_each(|(_, p)| p.release());
@@ -115,14 +109,15 @@ impl guest::Guest for Global {
         GLOBAL_SCOPE.with(|scope| {
             let mut scope = scope.borrow_mut();
             if scope.is_none() {
+                use grpc::grpc_module;
                 use http::http_module;
-                append_to_inittab!(http_module);
                 use logging::logging_module;
+                use rpc::rpc_module;
+
+                append_to_inittab!(http_module);
                 append_to_inittab!(logging_module);
                 append_to_inittab!(sys_module);
-                use grpc::grpc_module;
                 append_to_inittab!(grpc_module);
-                use rpc::rpc_module;
                 append_to_inittab!(rpc_module);
 
                 let v = Scope::new();
@@ -316,8 +311,7 @@ impl std::io::Write for wasi::io::streams::OutputStream {
                 }
                 Err(StreamError::Closed) => return Ok(0),
                 Err(StreamError::LastOperationFailed(e)) => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(std::io::Error::other(
                         e.to_debug_string(),
                     ));
                 }
@@ -326,12 +320,12 @@ impl std::io::Write for wasi::io::streams::OutputStream {
         let n = n
             .get()
             .try_into()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            .map_err(std::io::Error::other)?;
         let n = buf.len().min(n);
         wasi::io::streams::OutputStream::write(self, &buf[..n]).map_err(|e| match e {
             StreamError::Closed => std::io::ErrorKind::UnexpectedEof.into(),
             StreamError::LastOperationFailed(e) => {
-                std::io::Error::new(std::io::ErrorKind::Other, e.to_debug_string())
+                std::io::Error::other(e.to_debug_string())
             }
         })?;
         Ok(n)
@@ -339,6 +333,6 @@ impl std::io::Write for wasi::io::streams::OutputStream {
 
     fn flush(&mut self) -> std::io::Result<()> {
         self.blocking_flush()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .map_err(std::io::Error::other)
     }
 }

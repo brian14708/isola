@@ -1,11 +1,6 @@
 use std::cell::RefCell;
 
-use pyo3::{
-    prelude::*,
-    types::{PyDict, PyString, PyTuple},
-};
-
-use crate::serde::PyLogDict;
+use pyo3::prelude::*;
 
 use super::wasi::logging::logging::Level;
 
@@ -16,10 +11,17 @@ thread_local! {
 #[pymodule]
 #[pyo3(name = "_promptkit_logging")]
 pub mod logging_module {
-    use crate::wasm::wasi::logging::logging::{Level, log};
+    use pyo3::{
+        Bound, PyErr, PyResult, pyfunction,
+        types::{PyAnyMethods, PyDict, PyString, PyTuple, PyTupleMethods},
+    };
 
-    #[allow(clippy::wildcard_imports)]
-    use super::*;
+    use crate::{
+        serde::PyLogDict,
+        wasm::wasi::logging::logging::{Level, log},
+    };
+
+    use super::{GLOBAL_LOGGING, loglevel_to_i32};
 
     #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]

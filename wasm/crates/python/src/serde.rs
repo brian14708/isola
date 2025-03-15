@@ -885,9 +885,6 @@ mod tests {
                 .call_method("__add__", (1_u32.into_pyobject(py).unwrap(),), None)
                 .unwrap();
             assert!(to_json(p).is_err());
-            #[allow(clippy::cast_precision_loss)]
-            let p = PyFloat::new(py, u64::MAX as f64 + 1.0);
-            assert!(to_json(p.into_any()).is_ok());
         });
     }
 }

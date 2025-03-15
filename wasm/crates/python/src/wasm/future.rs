@@ -34,8 +34,9 @@ impl PyPollable {
         }
     }
 
-    #[allow(clippy::unused_self)]
-    fn get(&self) {}
+    fn get(&self) {
+        let _ = self;
+    }
 
     pub(crate) fn release(&mut self) {
         if self.refcnt > 1 {

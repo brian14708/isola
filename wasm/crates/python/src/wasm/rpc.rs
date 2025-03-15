@@ -33,11 +33,13 @@ pub mod rpc_module {
         }
         let req = ConnectRequest::new(url, Some(&md));
         if let Some(timeout) = timeout {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            req.set_connect_timeout(Some((timeout * 1_000_000_000.0) as u64))
-                .map_err(|()| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
-                })?;
+            req.set_connect_timeout(Some(
+                u64::try_from(std::time::Duration::from_secs_f64(timeout).as_nanos())
+                    .expect("duration is too large"),
+            ))
+            .map_err(|()| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+            })?;
         }
         let c = outgoing_rpc::connect(req);
         Ok(PyFutureConnection::new(c))
@@ -103,8 +105,7 @@ pub mod rpc_module {
             }
         }
 
-        #[allow(clippy::needless_pass_by_value)]
-        fn send(&mut self, obj: Bound<'_, PyAny>) -> PyResult<Option<PyPollable>> {
+        fn send(&mut self, obj: &Bound<'_, PyAny>) -> PyResult<Option<PyPollable>> {
             let payload = if let Ok(s) = obj.extract::<&str>() {
                 let p = Payload::new(s.as_bytes());
                 p.set_content_type("text/plain");

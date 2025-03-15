@@ -32,9 +32,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::type_complexity)]
-const TASKS: &[(&str, fn(&Shell) -> Result<()>)] =
-    &[("build-all", build_all), ("build-python", build_python)];
+type Task = fn(&Shell) -> Result<()>;
+const TASKS: &[(&str, Task)] = &[("build-all", build_all), ("build-python", build_python)];
 
 fn print_help(_sh: &Shell) -> Result<()> {
     println!("Tasks:");

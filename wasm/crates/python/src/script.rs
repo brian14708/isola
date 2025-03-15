@@ -25,10 +25,7 @@ pub struct Scope {
     stdio: Option<(PyObject, PyObject)>,
 }
 
-#[allow(dead_code)]
 pub enum InputValue<'a> {
-    Json(serde_json::Value),
-    JsonStr(Cow<'a, str>),
     Cbor(Cow<'a, [u8]>),
     Iter(ArgIter),
 }
@@ -145,13 +142,6 @@ impl Scope {
                     positional
                         .into_iter()
                         .map(|v| match v {
-                            InputValue::Json(v) => Ok(PyValue::deserialize(py, v)
-                                .map_err(|_| Error::UnexpectedError("serde error"))?),
-                            InputValue::JsonStr(v) => Ok(PyValue::deserialize(
-                                py,
-                                &mut serde_json::Deserializer::from_str(&v),
-                            )
-                            .map_err(|_| Error::UnexpectedError("serde error"))?),
                             InputValue::Iter(it) => Ok(it.into_pyobject(py).unwrap().into_any()),
                             InputValue::Cbor(v) => {
                                 let c = SliceReader::new(v.as_ref());
@@ -168,27 +158,6 @@ impl Scope {
                 let kwargs = PyDict::new(py);
                 for (k, v) in named {
                     match v {
-                        InputValue::Json(v) => {
-                            kwargs
-                                .set_item(
-                                    k,
-                                    PyValue::deserialize(py, v)
-                                        .map_err(|_| Error::UnexpectedError("serde error"))?,
-                                )
-                                .map_err(|e| Error::from_pyerr(py, e))?;
-                        }
-                        InputValue::JsonStr(v) => {
-                            kwargs
-                                .set_item(
-                                    k,
-                                    PyValue::deserialize(
-                                        py,
-                                        &mut serde_json::Deserializer::from_str(&v),
-                                    )
-                                    .map_err(|_| Error::UnexpectedError("serde error"))?,
-                                )
-                                .map_err(|e| Error::from_pyerr(py, e))?;
-                        }
                         InputValue::Cbor(v) => {
                             let c = SliceReader::new(v.as_ref());
                             kwargs
@@ -278,13 +247,6 @@ impl Scope {
                     (
                         dict,
                         match request {
-                            InputValue::Json(v) => PyValue::deserialize(py, v)
-                                .map_err(|_| Error::UnexpectedError("serde error"))?,
-                            InputValue::JsonStr(v) => PyValue::deserialize(
-                                py,
-                                &mut serde_json::Deserializer::from_str(&v),
-                            )
-                            .map_err(|_| Error::UnexpectedError("serde error"))?,
                             InputValue::Iter(_) => {
                                 return Err(Error::UnexpectedError("unsupported"));
                             }
@@ -314,8 +276,6 @@ impl Scope {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
-
     use super::*;
 
     #[test]
@@ -340,7 +300,14 @@ def gen():
         let s = Scope::new();
         s.load_script(content).unwrap();
         let x = s
-            .run("hello", [InputValue::Json(json!(32))], [], |_| {})
+            .run(
+                "hello",
+                [InputValue::Cbor(
+                    cbor4ii::serde::to_vec(vec![], &32).unwrap().into(),
+                )],
+                [],
+                |_| {},
+            )
             .unwrap();
         assert_eq!(
             x.unwrap(),

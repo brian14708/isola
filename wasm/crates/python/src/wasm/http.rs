@@ -46,6 +46,7 @@ pub mod http_module {
 
     #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
+    #[allow(clippy::too_many_lines)]
     fn fetch(
         py: Python<'_>,
         method: &str,
@@ -135,11 +136,13 @@ pub mod http_module {
 
         let opt = RequestOptions::new();
         if let Some(timeout) = timeout {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            opt.set_first_byte_timeout(Some((timeout * 1_000_000_000.0) as u64))
-                .map_err(|()| {
-                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
-                })?;
+            opt.set_first_byte_timeout(Some(
+                u64::try_from(std::time::Duration::from_secs_f64(timeout).as_nanos())
+                    .expect("duration is too large"),
+            ))
+            .map_err(|()| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+            })?;
         }
 
         let ob = if matches!(body, Body::None) {
@@ -219,9 +222,13 @@ pub mod http_module {
             self.response.as_ref().expect("response closed").status()
         }
 
-        #[allow(clippy::needless_pass_by_value)]
-        fn headers(slf: PyRef<'_, Self>) -> PyResult<Bound<'_, PyDict>> {
-            let hdrs = slf.response.as_ref().expect("response closed").headers();
+        fn headers<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
+            let hdrs = slf
+                .borrow()
+                .response
+                .as_ref()
+                .expect("response closed")
+                .headers();
             let d = PyDict::new(slf.py());
             for (k, v) in hdrs.entries() {
                 d.set_item(
@@ -289,9 +296,13 @@ pub mod http_module {
             slf.stream.as_mut().unwrap()
         };
 
+        let read_size = if size < 0 {
+            16384
+        } else {
+            u64::try_from(size).expect("size is too large")
+        };
         loop {
-            #[allow(clippy::cast_sign_loss)]
-            match InputStream::read(stream, if size < 0 { 16384 } else { size as _ }) {
+            match InputStream::read(stream, read_size) {
                 Ok(v) => {
                     if !v.is_empty() {
                         buf.write(v);
