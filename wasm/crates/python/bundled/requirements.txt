@@ -1,4 +1,4 @@
-setuptools==76.0.0
+setuptools==76.1.0
 typing-extensions==4.12.2
 annotated-types==0.7.0
 pydantic==2.10.6
