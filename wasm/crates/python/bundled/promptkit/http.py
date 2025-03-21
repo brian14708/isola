@@ -276,7 +276,7 @@ def get(
     with Request("GET", url, params, headers, None, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response)
+        return resp._read(response, -1)
 
 
 def get_async(
@@ -328,7 +328,7 @@ def post(
     with Request("POST", url, None, headers, data, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response)
+        return resp._read(response, -1)
 
 
 def post_async(
