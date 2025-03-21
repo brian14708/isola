@@ -12,7 +12,10 @@ ExternalProject_Add(
   PATCH_COMMAND
     patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/freetype.patch
   CONFIGURE_COMMAND
-    ${CMAKE_COMMAND} <SOURCE_DIR> -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE} -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DENABLE_SHARED=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    cmake -E env
+      CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
+      CFLAGS=-fPIC\ -I${WASMLIB_SYSROOT}/include/wasm32-wasip1
+      <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --host=wasm32-wasi --with-brotli=no --with-bzip2=no --with-zlib=no --with-png=no --with-harfbuzz=no
 )
 
 add_library(freetype STATIC IMPORTED GLOBAL)
