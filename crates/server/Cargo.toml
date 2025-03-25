@@ -31,9 +31,9 @@ serde_json = "1.0.116"
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = { version = "0.26.2", default-features = false, features = ["handshake"] }
-tonic = { version = "0.13.0", features = ["gzip", "tls-webpki-roots"], git = "https://github.com/hyperium/tonic.git" }
-tonic-reflection = { git = "https://github.com/hyperium/tonic.git", version = "0.13.0" }
-tonic-web = { git = "https://github.com/hyperium/tonic.git", version = "0.13.0" }
+tonic = { version = "0.13.0", features = ["gzip", "tls-webpki-roots"] }
+tonic-reflection = "0.13.0"
+tonic-web = "0.13.0"
 tower-http = { version = "0.6.0", features = ["fs", "trace"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.30.0"
@@ -41,4 +41,4 @@ tracing-subscriber = { version = "0.3.18", features = ["env-filter", "parking_lo
 url = "2.5.1"
 
 [build-dependencies]
-tonic-build = { git = "https://github.com/hyperium/tonic.git", version = "0.13.0" }
+tonic-build = "0.13.0"
