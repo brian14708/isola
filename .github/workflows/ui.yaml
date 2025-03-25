@@ -19,7 +19,7 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v4
       - name: Install pnpm
-        uses: pnpm/action-setup@v2
+        uses: pnpm/action-setup@v4
         with:
           package_json_file: ui/package.json
       - name: Setup Node.js environment
