@@ -1,4 +1,6 @@
 import asyncio
+import uuid
+from typing import IO
 
 import _promptkit_http as _http
 import _promptkit_rpc
@@ -251,12 +253,52 @@ class Websocket:
                 break
 
 
-def fetch(method, url, *, params=None, headers=None, body=None, timeout=None):
+def fetch(
+    method, url, *, params=None, headers=None, files=None, body=None, timeout=None
+):
+    if files:
+        if body is not None:
+            raise ValueError("Cannot specify both files and body")
+        body, ty = _encode_multipart_formdata(files)
+        if headers is None:
+            headers = {}
+        headers["Content-Type"] = ty
     return Request(method, url, params, headers, body, timeout)
 
 
 def ws_connect(url, *, headers=None, timeout=None):
     return WebSocketRequest(url, headers, timeout)
+
+
+def _encode_multipart_formdata(
+    fields: dict[str, bytes | IO[bytes] | tuple[str, bytes | IO[bytes], str]],
+):
+    boundary = uuid.uuid4().hex
+    b_boundary = b"--" + boundary.encode("utf-8")
+    parts: list[bytes] = []
+
+    for field, value in fields.items():
+        if isinstance(value, tuple):
+            filename, fileobj, mime = value
+        else:
+            filename, fileobj, mime = field, value, "application/octet-stream"
+
+        content_disposition = (
+            f'Content-Disposition: form-data; name="{field}"; filename="{filename}"'
+        )
+        parts.extend(
+            (
+                b_boundary,
+                content_disposition.encode(),
+                f"Content-Type: {mime}".encode(),
+                b"",
+                fileobj if isinstance(fileobj, bytes) else fileobj.read(),
+            )
+        )
+
+    parts.extend((b_boundary + b"--", b""))
+    body = b"\r\n".join(parts)
+    return body, f"multipart/form-data; boundary={boundary}"
 
 
 ### Legacy API

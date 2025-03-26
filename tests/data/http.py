@@ -1,3 +1,4 @@
+import io
 import time
 
 import promptkit.http as http
@@ -31,6 +32,20 @@ def error(httpbin_url: str) -> None:
     except Exception as e:
         exc = str(e)
     assert "500" in exc
+
+
+async def multipart(httpbin_url: str) -> None:
+    async with http.fetch(
+        "POST",
+        httpbin_url + "/post",
+        files={
+            "file": b"test",
+            "file2": ("a.txt", io.BytesIO(b"test2"), "text/plain"),
+        },
+    ) as r:
+        result = await r.ajson()
+        assert result["files"]["file"] == "test"
+        assert result["files"]["file2"] == "test2"
 
 
 async def read_twice(httpbin_url: str) -> None:

@@ -10,6 +10,7 @@ import stub.promptkit.script.v1 as pb
 all_tests = [
     "simple",
     "error",
+    "multipart",
     "read_twice",
 ]
 

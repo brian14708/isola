@@ -7,7 +7,9 @@ import httpx
 class Request:
     __slots__ = ("request", "client", "response", "extra")
 
-    def __init__(self, method, url, params, headers, body, timeout, extra=None):
+    def __init__(
+        self, method, url, params, headers, body, timeout, files=None, extra=None
+    ):
         self.client = None
         self.response = None
         self.request = httpx.Request(
@@ -17,6 +19,7 @@ class Request:
             headers=headers,
             content=body if isinstance(body, bytes) else None,
             json=body if not isinstance(body, bytes) else None,
+            files=files,
         )
         self.extra = extra
 
@@ -163,8 +166,10 @@ class SSEDecoder:
         return None
 
 
-def fetch(method, url, *, params=None, headers=None, body=None, timeout=None):
-    return Request(method, url, params, headers, body, timeout)
+def fetch(
+    method, url, *, params=None, headers=None, files=None, body=None, timeout=None
+):
+    return Request(method, url, params, headers, body, timeout, files=files)
 
 
 ### Legacy API
