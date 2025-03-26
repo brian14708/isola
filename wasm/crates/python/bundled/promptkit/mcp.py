@@ -1,7 +1,7 @@
 import asyncio
 import contextlib
-import urllib.parse
 import json
+import urllib.parse
 
 from promptkit.http import fetch
 
@@ -15,7 +15,9 @@ class Session:
         self.headers = headers
         self.id = 1
 
-    async def initialize(self, *, capabilities={}):
+    async def initialize(self, *, capabilities=None):
+        if capabilities is None:
+            capabilities = {}
         endpoint = await self._recv("endpoint")
         self.url = urllib.parse.urljoin(self.url, endpoint)
 
@@ -89,7 +91,5 @@ async def sse_connect(url, *, headers=None, timeout=None):
             yield session
         finally:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass

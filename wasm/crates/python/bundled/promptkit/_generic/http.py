@@ -1,6 +1,7 @@
-import httpx
-import json
 import asyncio
+import json
+
+import httpx
 
 
 class Request:
@@ -41,6 +42,7 @@ class Request:
 class Response:
     def __init__(self, response):
         self.response = response
+        self.consumed = False
 
     def close(self):
         self.response.close()
@@ -57,22 +59,30 @@ class Response:
         return self.response.headers
 
     async def aread(self):
-        return await self.response.aread()
+        if self.consumed:
+            raise RuntimeError("Response already read")
+        content = await self.response.aread()
+        self.consumed = True
+        return content
 
     def read(self):
-        return self.response.read()
+        if self.consumed:
+            raise RuntimeError("Response already read")
+        content = self.response.read()
+        self.consumed = True
+        return content
 
     async def atext(self):
-        return (await self.response.aread()).decode()
+        return (await self.aread()).decode()
 
     def text(self):
-        return self.response.read().decode()
+        return self.read().decode()
 
     async def ajson(self):
-        return json.loads(await self.response.aread())
+        return json.loads(await self.aread())
 
     def json(self):
-        return json.loads(self.response.read())
+        return json.loads(self.read())
 
     async def aiter_sse(self):
         decoder = SSEDecoder()
@@ -91,16 +101,14 @@ class Response:
             yield line
 
     def iter_lines(self):
-        for line in self.response.iter_lines():
-            yield line
+        yield from self.response.iter_lines()
 
     async def aiter_bytes(self):
         async for data in self.response.aiter_bytes():
             yield data
 
     def iter_bytes(self):
-        for data in self.response.iter_bytes():
-            yield data
+        yield from self.response.iter_bytes()
 
 
 class ServerSentEvent:

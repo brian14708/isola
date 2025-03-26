@@ -1,9 +1,13 @@
 import asyncio
+import contextlib
+from typing import TYPE_CHECKING
 
-try:
+if TYPE_CHECKING:
     import _promptkit_sys
-except ImportError:
-    pass
+
+with contextlib.suppress(ImportError):
+    import _promptkit_sys
+
 
 __all__ = [
     "run",
@@ -178,8 +182,7 @@ class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
 def _iter(runner, it):
     try:
         loop = runner.get_loop()
-        for v in loop.run_async_generator(it):
-            yield v
+        yield from loop.run_async_generator(it)
     finally:
         runner.close()
 

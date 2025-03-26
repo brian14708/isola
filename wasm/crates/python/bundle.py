@@ -1,6 +1,6 @@
-import zipfile
-import sys
 import os
+import sys
+import zipfile
 
 if __name__ == "__main__":
     with zipfile.PyZipFile(sys.argv[1], "w") as z:

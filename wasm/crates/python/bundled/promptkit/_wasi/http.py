@@ -2,7 +2,9 @@ import asyncio
 
 import _promptkit_http as _http
 import _promptkit_rpc
-from promptkit.asyncio import subscribe, run as asyncio_run
+
+from promptkit.asyncio import run as asyncio_run
+from promptkit.asyncio import subscribe
 
 
 class Request:

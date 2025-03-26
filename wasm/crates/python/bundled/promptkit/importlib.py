@@ -67,18 +67,13 @@ class HttpImporter:
 
     def get_source(self, fullname):
         if self._find_module(fullname) is not self:
-            raise ImportError(
-                "Module '{}' cannot be loaded from '{}'".format(fullname, self.url)
-            )
+            raise ImportError(f"Module '{fullname}' cannot be loaded from '{self.url}'")
         return self.modules[fullname]["content"]
 
     def create_module(self, spec):
         fullname = spec.name
-        if fullname not in self.modules:
-            if self._find_module(fullname) is not self:
-                raise ImportError(
-                    "Module '{}' cannot be loaded from '{}'".format(fullname, self.url)
-                )
+        if fullname not in self.modules and self._find_module(fullname) is not self:
+            raise ImportError(f"Module '{fullname}' cannot be loaded from '{self.url}'")
         data = self.modules[fullname]
 
         mod = _module_type(fullname)

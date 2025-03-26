@@ -1,6 +1,6 @@
-import typing
 import inspect
 import json
+import typing
 
 from pydantic import TypeAdapter
 
@@ -42,7 +42,7 @@ def analyze_function(fn):
 
 
 def type_to_schema(typ):
-    if isinstance(typ, typing.Iterable) or isinstance(typ, typing.AsyncIterable):
+    if isinstance(typ, typing.Iterable | typing.AsyncIterable):
         schema = TypeAdapter(typ.__args__[0]).json_schema()
         schema["promptkit"] = {"stream": True}
     else:

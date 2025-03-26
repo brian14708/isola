@@ -284,15 +284,13 @@ pub mod http_module {
                     .as_mut()
                     .expect("response closed")
                     .consume()
-                    .expect("body already read"),
+                    .map_err(|()| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("Response already read")
+                    })?,
             );
-            slf.stream = Some(
-                slf.body
-                    .as_ref()
-                    .unwrap()
-                    .stream()
-                    .expect("body already read"),
-            );
+            slf.stream = Some(slf.body.as_ref().unwrap().stream().map_err(|()| {
+                PyErr::new::<pyo3::exceptions::PyTypeError, _>("Response already read")
+            })?);
             slf.stream.as_mut().unwrap()
         };
 
