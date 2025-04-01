@@ -6,6 +6,6 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0.83"
 wasi-preview1-component-adapter-provider = "31.0.0"
-wit-component = "0.227.0"
+wit-component = "0.228.0"
 glob = "0.3.2"
 xshell = "0.2.6"
