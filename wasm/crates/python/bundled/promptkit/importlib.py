@@ -44,8 +44,8 @@ class HttpImporter:
         for path in paths:
             if self.archive is None:
                 url = self.url + "/" + path
-                with fetch("GET", url) as r:
-                    if r.status >= 400:
+                with fetch("GET", url) as resp:
+                    if resp.status >= 400:
                         continue
                     self.modules[fullname] = {
                         "content": resp.read(),
@@ -99,7 +99,7 @@ class HttpImporter:
             del sys.modules[fullname]
             raise
 
-    def files():
+    def files(self):
         if self.archive is None:
             raise NotImplementedError
         return self.archive

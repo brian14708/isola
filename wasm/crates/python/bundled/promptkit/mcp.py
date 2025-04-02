@@ -5,7 +5,7 @@ import json
 
 from promptkit.http import fetch
 
-__all__ = ["connect"]
+__all__ = ["sse_connect"]
 
 
 class Session:

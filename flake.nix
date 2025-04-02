@@ -70,6 +70,7 @@
                         wheel
                       ]
                     ))
+                    pyright
 
                     binaryen
                     cmake

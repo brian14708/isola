@@ -14,8 +14,8 @@ class Request:
             url,
             params=params,
             headers=headers,
-            content=body if type(body) == bytes else None,
-            json=body if type(body) != bytes else None,
+            content=body if isinstance(body, bytes) else None,
+            json=body if not isinstance(body, bytes) else None,
         )
         self.extra = extra
 
@@ -73,14 +73,6 @@ class Response:
 
     def json(self):
         return json.loads(self.response.read())
-
-    async def aiter_lines(self):
-        async for line in self.response.aiter_lines():
-            yield line
-
-    def iter_lines(self):
-        for line in self.response.iter_lines():
-            yield line
 
     async def aiter_sse(self):
         decoder = SSEDecoder()
@@ -238,7 +230,7 @@ def get_sse(
         for event in resp.iter_sse():
             if event.data == "[DONE]":
                 break
-            yield _http.loads_json(event.data)
+            yield json.loads(event.data)
 
 
 def post(
@@ -273,7 +265,7 @@ def post_sse(url, data=None, headers=None, timeout=None):
         for event in resp.iter_sse():
             if event.data.startswith("[DONE]"):
                 break
-            yield _http.loads_json(event.data)
+            yield json.loads(event.data)
 
 
 async def _fetch(r, ignore_error):

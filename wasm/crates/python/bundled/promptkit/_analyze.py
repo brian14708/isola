@@ -6,9 +6,6 @@ from pydantic import TypeAdapter
 
 
 def analyze(ctx, dict):
-    import time
-
-    s = time.time()
     ret = {"method_infos": []}
     for m in dict["methods"]:
         fn = ctx.get(m)
@@ -45,12 +42,9 @@ def analyze_function(fn):
 
 
 def type_to_schema(typ):
-    try:
-        if isinstance(typ, typing.Iterable) or isinstance(typ, typing.AsyncIterable):
-            schema = TypeAdapter(typ.__args__[0]).json_schema()
-            schema["promptkit"] = {"stream": True}
-        else:
-            schema = TypeAdapter(typ).json_schema()
-        return json.dumps(schema)
-    except:
-        return None
+    if isinstance(typ, typing.Iterable) or isinstance(typ, typing.AsyncIterable):
+        schema = TypeAdapter(typ.__args__[0]).json_schema()
+        schema["promptkit"] = {"stream": True}
+    else:
+        schema = TypeAdapter(typ).json_schema()
+    return json.dumps(schema)
