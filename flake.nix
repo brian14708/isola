@@ -56,10 +56,14 @@
                 buildInputs =
                   with pkgs;
                   [
+                    just
+
+                    # js
                     nodejs
                     pnpm
                     svelte-language-server
 
+                    # python
                     (python313.withPackages (
                       p: with p; [
                         cython
@@ -71,10 +75,11 @@
                       ]
                     ))
                     pyright
+                    maturin
 
+                    # rust / c++
                     binaryen
                     cmake
-                    maturin
                     ninja
                     buf
                     protobuf_28
