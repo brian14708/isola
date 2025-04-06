@@ -1,11 +1,13 @@
 import asyncio
-import pathlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from betterproto.lib.google.protobuf import NullValue, Value
 
 import stub.promptkit.script.v1 as pb
+
+if TYPE_CHECKING:
+    import pathlib
 
 all_tests = [
     "simple",
@@ -18,7 +20,7 @@ all_tests = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", all_tests)
 async def test_httpbin(
-    httpbin, client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
+    httpbin, client: pb.ScriptServiceStub, datadir: "pathlib.Path", method: str
 ) -> None:
     script_text = (datadir / "http.py").read_text()
     request = pb.ExecuteRequest(
@@ -34,7 +36,7 @@ async def test_httpbin(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", all_tests)
-async def test_httpbin_local(httpbin, datadir: pathlib.Path, method: str) -> None:
+async def test_httpbin_local(httpbin, datadir: "pathlib.Path", method: str) -> None:
     scope: dict[str, Any] = {}
     exec((datadir / "http.py").read_text(), scope)
     fn = scope[method]

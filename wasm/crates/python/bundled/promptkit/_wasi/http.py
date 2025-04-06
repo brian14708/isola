@@ -1,12 +1,21 @@
 import asyncio
-import uuid
-from typing import IO
+import binascii
+import os
+from typing import IO, TYPE_CHECKING, Any, Literal
 
 import _promptkit_http as _http
 import _promptkit_rpc
 
 from promptkit.asyncio import run as asyncio_run
 from promptkit.asyncio import subscribe
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Generator
+
+_FileType = bytes | IO[bytes] | tuple[str, bytes | IO[bytes], str]
+_MethodType = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+_ResponseType = Literal["json", "text", "bytes"]
+_IterResponseType = Literal["lines", "bytes", "sse"]
 
 
 class Request:
@@ -21,7 +30,16 @@ class Request:
         "resp",
     )
 
-    def __init__(self, method, url, params, headers, body, timeout, extra=None):
+    def __init__(
+        self,
+        method: _MethodType,
+        url: str,
+        params: dict[str, str] | None,
+        headers: dict[str, str] | None,
+        body: Any | bytes | None,
+        timeout: float | None,
+        extra: dict[str, Any] | None = None,
+    ):
         self.method = method
         self.url = url
         self.params = params
@@ -29,35 +47,36 @@ class Request:
         self.body = body
         self.timeout = timeout
         self.extra = extra
-        self.resp = None
+        self.resp: Response | None = None
 
-    def _fetch(self):
+    def _fetch(self) -> "_http.FutureResponse":
         req = _http.fetch(
             self.method, self.url, self.params, self.headers, self.body, self.timeout
         )
         self.body = None
         return req
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Response":
         self.resp = Response(await subscribe(self._fetch()))
         return self.resp
 
-    async def __aexit__(self, _type, _value, _trace):
+    async def __aexit__(self, *_: object) -> None:
         if self.resp:
             self.resp.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "Response":
         self.resp = Response(self._fetch().wait())
         return self.resp
 
-    def __exit__(self, _type, _value, _trace):
-        self.resp.close()
+    def __exit__(self, *_: object) -> None:
+        if self.resp:
+            self.resp.close()
 
 
 class ServerSentEvent:
     __slots__ = ("id", "event", "data")
 
-    def __init__(self, id, event, data):
+    def __init__(self, id: str | None, event: str | None, data: str):
         self.id = id
         self.event = event
         self.data = data
@@ -66,48 +85,56 @@ class ServerSentEvent:
 class Response:
     __slots__ = ("resp", "_status", "_headers")
 
-    def __init__(self, resp):
-        self.resp = resp
-        self._status = None
-        self._headers = None
+    def __init__(self, resp: "_http.Response"):
+        self.resp: _http.Response | None = resp
+        self._status: int | None = None
+        self._headers: dict[str, str] | None = None
 
     @property
-    def status(self):
+    def status(self) -> int:
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         if self._status is None:
             self._status = self.resp.status()
         return self._status
 
     @property
-    def headers(self):
+    def headers(self) -> dict[str, str]:
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         if self._headers is None:
             self._headers = self.resp.headers()
         return self._headers
 
-    def close(self):
+    def close(self) -> None:
         if self.resp:
             self.resp.close()
             self.resp = None
 
     # async read methods
 
-    async def _aread(self, encoding, size):
+    async def _aread(self, encoding: _ResponseType, size: int) -> Any:
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, size)) is not None:
             await subscribe(poll)
         return buf.read_all()
 
-    async def ajson(self):
+    async def ajson(self) -> Any:
         return await self._aread("json", -1)
 
-    async def atext(self):
-        return await self._aread("text", -1)
+    async def atext(self) -> str:
+        return str(await self._aread("text", -1))
 
-    async def aread(self, size=-1):
-        return await self._aread("bytes", size)
+    async def aread(self, size: int = -1) -> bytes:
+        return bytes(await self._aread("bytes", size))
 
     # async iterator methods
 
-    async def _aiter(self, encoding):
+    async def _aiter(self, encoding: _IterResponseType) -> "AsyncGenerator[Any]":
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
@@ -116,35 +143,39 @@ class Response:
         while (data := buf.next()) is not None:
             yield data
 
-    async def aiter_bytes(self):
+    async def aiter_bytes(self) -> "AsyncGenerator[bytes]":
         async for data in self._aiter("bytes"):
             yield data
 
-    async def aiter_lines(self):
+    async def aiter_lines(self) -> "AsyncGenerator[str]":
         async for line in self._aiter("lines"):
             yield line
 
-    async def aiter_sse(self):
+    async def aiter_sse(self) -> "AsyncGenerator[ServerSentEvent]":
         async for id, event, data in self._aiter("sse"):
             yield ServerSentEvent(id, event, data)
 
     # sync read methods
 
-    def _read(self, encoding, size):
+    def _read(self, encoding: _ResponseType, size: int) -> Any:
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         return self.resp.blocking_read(encoding, size)
 
-    def read(self, size=-1):
-        return self._read("bytes", size)
+    def read(self, size: int = -1) -> bytes:
+        return bytes(self._read("bytes", size))
 
-    def json(self):
+    def json(self) -> Any:
         return self._read("json", -1)
 
-    def text(self):
-        return self._read("text", -1)
+    def text(self) -> str:
+        return str(self._read("text", -1))
 
     # sync iterator methods
 
-    def _iter(self, encoding):
+    def _iter(self, encoding: _IterResponseType) -> "Generator[Any]":
+        if self.resp is None:
+            raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
@@ -153,13 +184,13 @@ class Response:
         while (data := buf.next()) is not None:
             yield data
 
-    def iter_bytes(self):
+    def iter_bytes(self) -> "Generator[bytes]":
         return self._iter("bytes")
 
-    def iter_lines(self):
+    def iter_lines(self) -> "Generator[str]":
         return self._iter("lines")
 
-    def iter_sse(self):
+    def iter_sse(self) -> "Generator[ServerSentEvent]":
         for id, event, data in self._iter("sse"):
             yield ServerSentEvent(id, event, data)
 
@@ -167,76 +198,76 @@ class Response:
 class WebSocketRequest:
     __slots__ = ("url", "headers", "conn", "timeout")
 
-    def __init__(self, url, headers, timeout):
+    def __init__(self, url: str, headers: dict[str, str] | None, timeout: float | None):
         self.url = url
         self.headers = headers
         self.timeout = timeout
-        self.conn = None
+        self.conn: Websocket | None = None
 
-    def _conn(self):
-        req = _promptkit_rpc.connect(self.url, self.headers, self.timeout)
-        return req
+    def _conn(self) -> "_promptkit_rpc.FutureConnection":
+        return _promptkit_rpc.connect(self.url, self.headers, self.timeout)
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "Websocket":
         self.conn = Websocket(await subscribe(self._conn()))
         return self.conn
 
-    async def __aexit__(self, _type, _value, _trace):
+    async def __aexit__(self, *_: object) -> None:
         if self.conn:
             self.conn.shutdown()
 
-    def __enter__(self):
+    def __enter__(self) -> "Websocket":
         self.conn = Websocket(self._conn().wait())
         return self.conn
 
-    def __exit__(self, _type, _value, _trace):
-        self.conn.shutdown()
+    def __exit__(self, *_: object) -> None:
+        if self.conn:
+            self.conn.shutdown()
 
 
 class Websocket:
     __slots__ = ("conn",)
 
-    def __init__(self, conn):
+    def __init__(self, conn: "_promptkit_rpc.Connection"):
         self.conn = conn
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         self.conn.shutdown()
 
-    def close(self):
+    def close(self) -> None:
         self.conn.close()
 
-    async def arecv(self):
+    async def arecv(self) -> bytes | str | None:
         while True:
             ok, value, poll = self.conn.recv()
             if not ok:
                 return None
-            elif poll is not None:
+            if poll is not None:
                 await subscribe(poll)
             else:
                 return value
 
-    async def arecv_streaming(self):
+    async def arecv_streaming(self) -> "AsyncGenerator[bytes | str]":
         while True:
             value = await self.arecv()
             if value is None:
                 return
             yield value
 
-    def recv(self):
+    def recv(self) -> bytes | str | None:
         while True:
             ok, value, poll = self.conn.recv()
             if not ok:
                 return None
-            elif poll is not None:
+            if poll is not None:
                 poll.wait()
             else:
                 return value
 
-    def recv_streaming(self):
+    def recv_streaming(self) -> "Generator[bytes | str]":
         while (value := self.recv()) is not None:
             yield value
 
-    async def asend(self, value):
+    async def asend(self, value: bytes | str) -> None:
         while True:
             poll = self.conn.send(value)
             if poll is not None:
@@ -244,7 +275,7 @@ class Websocket:
             else:
                 break
 
-    def send(self, value):
+    def send(self, value: bytes | str) -> None:
         while True:
             poll = self.conn.send(value)
             if poll is not None:
@@ -254,27 +285,35 @@ class Websocket:
 
 
 def fetch(
-    method, url, *, params=None, headers=None, files=None, body=None, timeout=None
-):
+    method: _MethodType,
+    url: str,
+    *,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    files: dict[str, _FileType] | None = None,
+    body: Any | bytes | None = None,
+    timeout: float | None = None,
+) -> Request:
     if files:
-        if body is not None:
+        if body:
             raise ValueError("Cannot specify both files and body")
         body, ty = _encode_multipart_formdata(files)
-        if headers is None:
+        if not headers:
             headers = {}
         headers["Content-Type"] = ty
     return Request(method, url, params, headers, body, timeout)
 
 
-def ws_connect(url, *, headers=None, timeout=None):
+def ws_connect(
+    url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
+) -> WebSocketRequest:
     return WebSocketRequest(url, headers, timeout)
 
 
-def _encode_multipart_formdata(
-    fields: dict[str, bytes | IO[bytes] | tuple[str, bytes | IO[bytes], str]],
-):
-    boundary = uuid.uuid4().hex
-    b_boundary = b"--" + boundary.encode("utf-8")
+def _encode_multipart_formdata(fields: dict[str, _FileType]) -> tuple[bytes, str]:
+    b_boundary = binascii.hexlify(os.urandom(16))
+    boundary = b_boundary.decode()
+    b_boundary = b"--" + b_boundary
     parts: list[bytes] = []
 
     for field, value in fields.items():
@@ -304,19 +343,19 @@ def _encode_multipart_formdata(
 ### Legacy API
 
 
-def _validate_status(resp):
+def _validate_status(resp: Response) -> None:
     if not 200 <= resp.status < 300:
         raise RuntimeError(f"http status check failed, status={resp.status}")
 
 
 def get(
-    url,
-    params=None,
-    headers=None,
-    timeout=None,
-    response="json",
-    validate_status=True,
-):
+    url: str,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+    response: _ResponseType = "json",
+    validate_status: bool = True,
+) -> Any:
     with Request("GET", url, params, headers, None, timeout) as resp:
         if validate_status:
             _validate_status(resp)
@@ -324,13 +363,13 @@ def get(
 
 
 def get_async(
-    url,
-    params=None,
-    headers=None,
-    timeout=None,
-    response="json",
-    validate_status=True,
-):
+    url: str,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+    response: _ResponseType = "json",
+    validate_status: bool = True,
+) -> Request:
     return Request(
         "GET",
         url,
@@ -346,11 +385,11 @@ def get_async(
 
 
 def get_sse(
-    url,
-    params=None,
-    headers=None,
-    timeout=None,
-):
+    url: str,
+    params: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> "Generator[Any]":
     with Request(
         "GET",
         url,
@@ -367,8 +406,13 @@ def get_sse(
 
 
 def post(
-    url, data=None, headers=None, timeout=None, response="json", validate_status=True
-):
+    url: str,
+    data: Any | bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+    response: _ResponseType = "json",
+    validate_status: bool = True,
+) -> Any:
     with Request("POST", url, None, headers, data, timeout) as resp:
         if validate_status:
             _validate_status(resp)
@@ -376,8 +420,13 @@ def post(
 
 
 def post_async(
-    url, data=None, headers=None, timeout=None, response="json", validate_status=True
-):
+    url: str,
+    data: Any | bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+    response: _ResponseType = "json",
+    validate_status: bool = True,
+) -> Request:
     return Request(
         "POST",
         url,
@@ -392,7 +441,12 @@ def post_async(
     )
 
 
-def post_sse(url, data=None, headers=None, timeout=None):
+def post_sse(
+    url: str,
+    data: Any | bytes | None = None,
+    headers: dict[str, str] | None = None,
+    timeout: float | None = None,
+) -> "Generator[Any]":
     with Request("POST", url, None, headers, data, timeout) as resp:
         _validate_status(resp)
         for event in resp.iter_sse():
@@ -401,11 +455,11 @@ def post_sse(url, data=None, headers=None, timeout=None):
             yield _http.loads_json(event.data)
 
 
-async def _fetch(r, ignore_error):
+async def _fetch(r: Request, ignore_error: bool) -> Any | Exception:
     extra = r.extra or {}
     try:
         async with r as resp:
-            if r.extra.get("validate"):
+            if extra.get("validate"):
                 _validate_status(resp)
             return await resp._aread(extra.get("type", "json"), -1)
     except Exception as e:
@@ -414,9 +468,13 @@ async def _fetch(r, ignore_error):
         raise e
 
 
-async def _fetch_all(requests, ignore_error):
+async def _fetch_all(
+    requests: list[Request], ignore_error: bool
+) -> list[Any | Exception]:
     return await asyncio.gather(*[_fetch(r, ignore_error) for r in requests])
 
 
-def fetch_all(requests, ignore_error=False):
+def fetch_all(
+    requests: list[Request], ignore_error: bool = False
+) -> list[Any | Exception]:
     return asyncio_run(_fetch_all(requests, ignore_error))

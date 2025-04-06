@@ -1,7 +1,7 @@
 import io
 import time
 
-import promptkit.http as http
+from promptkit import http
 
 
 def simple(httpbin_url: str) -> None:

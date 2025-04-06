@@ -183,10 +183,9 @@ def _validate_status(resp):
 def _read(resp, typ):
     if typ == "json":
         return resp.json()
-    elif typ == "text":
+    if typ == "text":
         return resp.text()
-    else:
-        return resp.read()
+    return resp.read()
 
 
 def get(
@@ -290,10 +289,9 @@ async def _fetch(r, ignore_error):
             typ = extra.get("type", "json")
             if typ == "json":
                 return await resp.ajson()
-            elif typ == "text":
+            if typ == "text":
                 return await resp.atext()
-            else:
-                return await resp.aread()
+            return await resp.aread()
     except Exception as e:
         if ignore_error:
             return e

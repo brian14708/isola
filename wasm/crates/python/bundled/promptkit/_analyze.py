@@ -5,9 +5,9 @@ import typing
 from pydantic import TypeAdapter
 
 
-def analyze(ctx, dict):
+def analyze(ctx, req):
     ret = {"method_infos": []}
-    for m in dict["methods"]:
+    for m in req["methods"]:
         fn = ctx.get(m)
         if not fn or not callable(fn):
             continue

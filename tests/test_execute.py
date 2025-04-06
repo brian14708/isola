@@ -1,15 +1,18 @@
 import datetime
 import json
-import pathlib
+from typing import TYPE_CHECKING
 
 import pytest
 from betterproto.lib.google.protobuf import Value
 
 import stub.promptkit.script.v1 as pb
 
+if TYPE_CHECKING:
+    import pathlib
+
 
 @pytest.mark.asyncio
-async def test_simple(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_simple(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.execute(
         pb.ExecuteRequest(
             source=pb.Source(
@@ -28,7 +31,7 @@ async def test_simple(client: pb.ScriptServiceStub, datadir: pathlib.Path):
 
 
 @pytest.mark.asyncio
-async def test_named_argument(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_named_argument(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.execute(
         pb.ExecuteRequest(
             source=pb.Source(
@@ -48,7 +51,7 @@ async def test_named_argument(client: pb.ScriptServiceStub, datadir: pathlib.Pat
 
 
 @pytest.mark.asyncio
-async def test_async(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_async(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.execute(
         pb.ExecuteRequest(
             source=pb.Source(
@@ -67,7 +70,7 @@ async def test_async(client: pb.ScriptServiceStub, datadir: pathlib.Path):
 
 
 @pytest.mark.asyncio
-async def test_error(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_error(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.execute(
         pb.ExecuteRequest(
             source=pb.Source(
@@ -84,7 +87,7 @@ async def test_error(client: pb.ScriptServiceStub, datadir: pathlib.Path):
 
 
 @pytest.mark.asyncio
-async def test_timeout(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_timeout(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.execute(
         pb.ExecuteRequest(
             source=pb.Source(
@@ -100,7 +103,7 @@ async def test_timeout(client: pb.ScriptServiceStub, datadir: pathlib.Path):
 
 
 @pytest.mark.asyncio
-async def test_analyze(client: pb.ScriptServiceStub, datadir: pathlib.Path):
+async def test_analyze(client: pb.ScriptServiceStub, datadir: "pathlib.Path"):
     response = await client.analyze(
         pb.AnalyzeRequest(
             source=pb.Source(

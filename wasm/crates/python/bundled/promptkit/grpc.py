@@ -74,7 +74,7 @@ class GRPCClient:
             ok, value, poll = self.conn.recv()
             if not ok:
                 return None
-            elif poll is not None:
+            if poll is not None:
                 await subscribe(poll)
             else:
                 return self.pool.decode(self.response_type, value)
@@ -88,7 +88,7 @@ class GRPCClient:
             ok, value, poll = self.conn.recv()
             if not ok:
                 return None
-            elif poll is not None:
+            if poll is not None:
                 poll.wait()
             else:
                 return self.pool.decode(self.response_type, value)

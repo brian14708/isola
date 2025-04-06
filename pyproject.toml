@@ -35,7 +35,11 @@ select = [
     "B",
     "SIM",
     "I",
+    "TC",
 ]
+
+[tool.ruff.lint.flake8-type-checking]
+quote-annotations = true
 
 [[tool.mypy.overrides]]
 module = ["stub.promptkit.script.v1"]
