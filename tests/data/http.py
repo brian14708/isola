@@ -1,19 +1,22 @@
 import io
 import time
+from typing import Any, cast
 
 from promptkit import http
 
 
 def simple(httpbin_url: str) -> None:
     k = str(time.time())
-    result = http.get(
-        httpbin_url + "/get", params={"value": k}, headers={"x-my-test": k}
+    result = cast(
+        "Any",
+        http.get(httpbin_url + "/get", params={"value": k}, headers={"x-my-test": k}),
     )
     assert result["args"]["value"] == k
     assert result["headers"]["X-My-Test"] == k
 
-    result = http.post(
-        httpbin_url + "/post", data={"value": k}, headers={"x-my-test": k}
+    result = cast(
+        "Any",
+        http.post(httpbin_url + "/post", data={"value": k}, headers={"x-my-test": k}),
     )
     assert result["headers"]["X-My-Test"] == k
     assert result["json"]["value"] == k
@@ -43,7 +46,7 @@ async def multipart(httpbin_url: str) -> None:
             "file2": ("a.txt", io.BytesIO(b"test2"), "text/plain"),
         },
     ) as r:
-        result = await r.ajson()
+        result = cast("Any", await r.ajson())
         assert result["files"]["file"] == "test"
         assert result["files"]["file2"] == "test2"
 

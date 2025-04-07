@@ -42,7 +42,7 @@ select = [
 quote-annotations = true
 
 [[tool.mypy.overrides]]
-module = ["stub.promptkit.script.v1"]
+module = ["tests.stub.promptkit.script.v1"]
 disable_error_code = ["arg-type"]
 
 [tool.pyright]

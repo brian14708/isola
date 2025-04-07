@@ -1,6 +1,6 @@
 import pytest
 
-import stub.promptkit.script.v1 as pb
+from .stub.promptkit.script import v1 as pb
 
 
 @pytest.mark.asyncio
