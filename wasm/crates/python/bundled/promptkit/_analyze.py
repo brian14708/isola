@@ -1,21 +1,24 @@
 import inspect
 import json
 import typing
+from collections.abc import AsyncIterable, Iterable
 
 from pydantic import TypeAdapter
 
 
-def analyze(ctx, req):
-    ret = {"method_infos": []}
+def analyze(ctx: dict[str, object], req: dict[str, str]) -> dict[str, object]:
+    method_infos: list[dict[str, object]] = []
     for m in req["methods"]:
         fn = ctx.get(m)
         if not fn or not callable(fn):
             continue
-        ret["method_infos"].append(analyze_function(fn))
-    return ret
+        method_infos.append(analyze_function(fn))
+    return {
+        "method_infos": method_infos,
+    }
 
 
-def analyze_function(fn):
+def analyze_function[T](fn: typing.Callable[..., T]) -> dict[str, object]:
     sig = inspect.signature(fn)
     return {
         "name": fn.__name__,
@@ -41,9 +44,9 @@ def analyze_function(fn):
     }
 
 
-def type_to_schema(typ):
-    if isinstance(typ, typing.Iterable | typing.AsyncIterable):
-        schema = TypeAdapter(typ.__args__[0]).json_schema()
+def type_to_schema(typ: object) -> str:
+    if isinstance(typ, Iterable | AsyncIterable):
+        schema = TypeAdapter(typing.cast("type", typing.get_args(typ)[0])).json_schema()
         schema["promptkit"] = {"stream": True}
     else:
         schema = TypeAdapter(typ).json_schema()

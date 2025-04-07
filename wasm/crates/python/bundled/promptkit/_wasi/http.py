@@ -1,7 +1,7 @@
 import asyncio
 import binascii
 import os
-from typing import IO, TYPE_CHECKING, Any, Literal, final, overload
+from typing import IO, TYPE_CHECKING, Literal, cast, final, overload
 
 import _promptkit_http as _http
 import _promptkit_rpc
@@ -39,9 +39,9 @@ class Request:
         url: str,
         params: dict[str, str] | None,
         headers: dict[str, str] | None,
-        body: Any | bytes | None,
+        body: object | bytes | None,
         timeout: float | None,
-        extra: dict[str, Any] | None = None,
+        extra: dict[str, object] | None = None,
     ):
         self.method = method
         self.url = url
@@ -119,12 +119,12 @@ class Response:
     # async read methods
 
     @overload
-    async def _aread(self, encoding: Literal["json"], size: int) -> Any: ...
+    async def _aread(self, encoding: Literal["json"], size: int) -> object: ...
     @overload
     async def _aread(self, encoding: Literal["text"], size: int) -> str: ...
     @overload
     async def _aread(self, encoding: Literal["bytes"], size: int) -> bytes: ...
-    async def _aread(self, encoding: _ResponseType, size: int) -> Any:
+    async def _aread(self, encoding: _ResponseType, size: int) -> object | str | bytes:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
@@ -132,7 +132,7 @@ class Response:
             await subscribe(poll)
         return buf.read_all()
 
-    async def ajson(self) -> Any:
+    async def ajson(self) -> object:
         return await self._aread("json", -1)
 
     async def atext(self) -> str:
@@ -143,7 +143,7 @@ class Response:
 
     # async iterator methods
 
-    async def _aiter(self, encoding: _IterResponseType) -> "AsyncGenerator[Any]":
+    async def _aiter(self, encoding: _IterResponseType) -> "AsyncGenerator[object]":
         if self.resp is None:
             raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
@@ -155,26 +155,28 @@ class Response:
             yield data
 
     async def aiter_bytes(self) -> "AsyncGenerator[bytes]":
-        async for data in self._aiter("bytes"):
+        async for data in cast("AsyncGenerator[bytes]", self._aiter("bytes")):
             yield data
 
     async def aiter_lines(self) -> "AsyncGenerator[str]":
-        async for line in self._aiter("lines"):
+        async for line in cast("AsyncGenerator[str]", self._aiter("lines")):
             yield line
 
     async def aiter_sse(self) -> "AsyncGenerator[ServerSentEvent]":
-        async for id, event, data in self._aiter("sse"):
+        async for id, event, data in cast(
+            "AsyncGenerator[tuple[str,str,str]]", self._aiter("sse")
+        ):
             yield ServerSentEvent(id, event, data)
 
     # sync read methods
 
     @overload
-    def _read(self, encoding: Literal["json"], size: int) -> Any: ...
+    def _read(self, encoding: Literal["json"], size: int) -> object: ...
     @overload
     def _read(self, encoding: Literal["text"], size: int) -> str: ...
     @overload
     def _read(self, encoding: Literal["bytes"], size: int) -> bytes: ...
-    def _read(self, encoding: _ResponseType, size: int) -> Any:
+    def _read(self, encoding: _ResponseType, size: int) -> object | str | bytes:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         return self.resp.blocking_read(encoding, size)
@@ -182,7 +184,7 @@ class Response:
     def read(self, size: int = -1) -> bytes:
         return self._read("bytes", size)
 
-    def json(self) -> Any:
+    def json(self) -> object:
         return self._read("json", -1)
 
     def text(self) -> str:
@@ -190,7 +192,7 @@ class Response:
 
     # sync iterator methods
 
-    def _iter(self, encoding: _IterResponseType) -> "Generator[Any]":
+    def _iter(self, encoding: _IterResponseType) -> "Generator[object]":
         if self.resp is None:
             raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
@@ -202,13 +204,13 @@ class Response:
             yield data
 
     def iter_bytes(self) -> "Generator[bytes]":
-        return self._iter("bytes")
+        return cast("Generator[bytes]", self._iter("bytes"))
 
     def iter_lines(self) -> "Generator[str]":
-        return self._iter("lines")
+        return cast("Generator[str]", self._iter("lines"))
 
     def iter_sse(self) -> "Generator[ServerSentEvent]":
-        for id, event, data in self._iter("sse"):
+        for id, event, data in cast("Generator[tuple[str,str,str]]", self._iter("sse")):
             yield ServerSentEvent(id, event, data)
 
 
@@ -310,7 +312,7 @@ def fetch(
     params: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
     files: dict[str, _FileType] | None = None,
-    body: Any | bytes | None = None,
+    body: object | bytes | None = None,
     timeout: float | None = None,
 ) -> Request:
     if files:
@@ -374,7 +376,7 @@ def get(
     timeout: float | None = None,
     response: _ResponseType = "json",
     validate_status: bool = True,
-) -> Any:
+) -> object:
     with Request("GET", url, params, headers, None, timeout) as resp:
         if validate_status:
             _validate_status(resp)
@@ -408,7 +410,7 @@ def get_sse(
     params: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
-) -> "Generator[Any]":
+) -> "Generator[object]":
     with Request(
         "GET",
         url,
@@ -426,12 +428,12 @@ def get_sse(
 
 def post(
     url: str,
-    data: Any | bytes | None = None,
+    data: object | bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
     validate_status: bool = True,
-) -> Any:
+) -> object:
     with Request("POST", url, None, headers, data, timeout) as resp:
         if validate_status:
             _validate_status(resp)
@@ -440,7 +442,7 @@ def post(
 
 def post_async(
     url: str,
-    data: Any | bytes | None = None,
+    data: object | bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
@@ -462,10 +464,10 @@ def post_async(
 
 def post_sse(
     url: str,
-    data: Any | bytes | None = None,
+    data: object | bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
-) -> "Generator[Any]":
+) -> "Generator[object]":
     with Request("POST", url, None, headers, data, timeout) as resp:
         _validate_status(resp)
         for event in resp.iter_sse():
@@ -474,13 +476,15 @@ def post_sse(
             yield _http.loads_json(event.data)
 
 
-async def _fetch(r: Request, ignore_error: bool) -> Any | Exception:
+async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Exception:
     extra = r.extra or {}
     try:
         async with r as resp:
             if extra.get("validate"):
                 _validate_status(resp)
-            return await resp._aread(extra.get("type", "json"), -1)
+            return await resp._aread(
+                cast("_ResponseType", extra.get("type", "json")), -1
+            )
     except Exception as e:
         if ignore_error:
             return e
@@ -489,11 +493,11 @@ async def _fetch(r: Request, ignore_error: bool) -> Any | Exception:
 
 async def _fetch_all(
     requests: list[Request], ignore_error: bool
-) -> list[Any | Exception]:
+) -> list[object | Exception]:
     return await asyncio.gather(*[_fetch(r, ignore_error) for r in requests])
 
 
 def fetch_all(
     requests: list[Request], ignore_error: bool = False
-) -> list[Any | Exception]:
+) -> list[object | Exception]:
     return asyncio_run(_fetch_all(requests, ignore_error))

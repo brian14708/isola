@@ -6,6 +6,7 @@ from typing import (
     Unpack,
     cast,
     overload,
+    override,
 )
 
 if TYPE_CHECKING:
@@ -20,6 +21,8 @@ if TYPE_CHECKING:
 
     import _promptkit_sys
 
+    type _Coroutine[T] = Coroutine[Any, Any, T]
+
 __all__ = [
     "run",
     "subscribe",
@@ -28,37 +31,41 @@ __all__ = [
 with contextlib.suppress(ImportError):
     import _promptkit_sys
 
-    async def subscribe[T](
-        fut: "_promptkit_sys.Pollable[T]",
-    ) -> T:
-        loop = asyncio.get_running_loop()
-        if isinstance(loop, PollLoop):
-            waker = loop.add_waker(fut)
-            try:
-                await waker
-                return fut.get()
-            finally:
-                fut.release()
-        else:
-            raise RuntimeError("subscribe() must be called from a PollLoop context")
+
+async def subscribe[T](
+    fut: "_promptkit_sys.Pollable[T]",
+) -> T:
+    loop = asyncio.get_running_loop()
+    if isinstance(loop, PollLoop):
+        waker = loop.add_waker(fut)
+        try:
+            await waker
+            return fut.get()
+        finally:
+            fut.release()
+    else:
+        raise RuntimeError("subscribe() must be called from a PollLoop context")
 
 
 class PollLoop(asyncio.AbstractEventLoop):
     def __init__(self) -> None:
         self.wakers: list[
-            tuple[_promptkit_sys.Pollable[Any], asyncio.Future[None] | asyncio.Handle]
+            tuple[
+                _promptkit_sys.Pollable[object], asyncio.Future[object] | asyncio.Handle
+            ]
         ] = []
         self.running: bool = False
         self.closed: bool = False
         self.handles: list[asyncio.Handle] = []
 
     def add_waker(
-        self, pollable: "_promptkit_sys.Pollable[Any]"
-    ) -> asyncio.Future[None]:
+        self, pollable: "_promptkit_sys.Pollable[object]"
+    ) -> asyncio.Future[object]:
         waker = self.create_future()
         self.wakers.append((pollable, waker))
         return waker
 
+    @override
     def run_until_complete[T](self, future: "Awaitable[T]") -> T:
         try:
             self.running = True
@@ -99,19 +106,17 @@ class PollLoop(asyncio.AbstractEventLoop):
                     handle._run()
 
             if self.wakers and len(handles) == 0:
-                ready_indices_set = _promptkit_sys.poll(self.wakers)
-
-                new_wakers = []
-                for i, (pollable, waker) in enumerate(self.wakers):
+                wakers = self.wakers
+                self.wakers = []
+                ready_indices_set = _promptkit_sys.poll(wakers)
+                for i, (pollable, waker) in enumerate(wakers):
                     if i in ready_indices_set:
                         if isinstance(waker, asyncio.Handle):
                             self.handles.append(waker)
                         elif not waker.cancelled():
                             waker.set_result(None)
                     else:
-                        new_wakers.append((pollable, waker))
-
-                self.wakers = new_wakers
+                        self.wakers.append((pollable, waker))
         return future
 
     def _cleanup(self) -> None:
@@ -125,25 +130,31 @@ class PollLoop(asyncio.AbstractEventLoop):
             wakers = self.wakers
             self.wakers = []
             for pollable, waker in wakers:
-                waker.cancel()
+                _ = waker.cancel()
                 pollable.release()
 
+    @override
     def is_running(self) -> bool:
         return self.running
 
+    @override
     def is_closed(self) -> bool:
         return self.closed
 
+    @override
     def stop(self) -> None:
         self.running = False
 
+    @override
     def close(self) -> None:
         self.running = False
         self.closed = True
 
-    def call_exception_handler(self, _: dict[str, Any]) -> None:
+    @override
+    def call_exception_handler(self, context: dict[str, object]) -> None:
         pass
 
+    @override
     def call_soon[*Ts](
         self,
         callback: "Callable[[Unpack[Ts]], object]",
@@ -154,6 +165,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.handles.append(handle)
         return handle
 
+    @override
     def call_later[*Ts](
         self,
         delay: float,
@@ -166,6 +178,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         self.wakers.append((fut, handle))
         return handle
 
+    @override
     def call_at[*Ts](
         self,
         when: float,
@@ -178,31 +191,37 @@ class PollLoop(asyncio.AbstractEventLoop):
     def _timer_handle_cancelled(self, handle: asyncio.TimerHandle) -> None:
         for i, (pollable, waker) in enumerate(self.wakers):
             if waker == handle:
-                self.wakers.pop(i)
+                _ = self.wakers.pop(i)
                 pollable.release()
                 break
 
+    @override
     def time(self) -> float:
         return _promptkit_sys.monotonic()
 
+    @override
     def create_task[T](
         self,
-        coro: "Coroutine[Any, Any, T]",
+        coro: "_Coroutine[T]",
         *,
         name: str | None = None,
         context: "Context | None" = None,
     ) -> asyncio.Task[T]:
         return asyncio.Task(coro, loop=self, name=name, context=context)
 
-    def create_future(self) -> asyncio.Future[Any]:
-        return asyncio.Future[None](loop=self)
+    @override
+    def create_future(self) -> asyncio.Future[object]:
+        return asyncio.Future(loop=self)
 
+    @override
     def get_debug(self) -> bool:
         return False
 
+    @override
     async def shutdown_asyncgens(self) -> None:
         pass
 
+    @override
     async def shutdown_default_executor(self, timeout: float | None = None) -> None:
         pass
 
@@ -211,14 +230,17 @@ class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
     def __init__(self) -> None:
         self._loop: asyncio.AbstractEventLoop | None = None
 
+    @override
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None:
             self._loop = self.new_event_loop()
         return self._loop
 
+    @override
     def set_event_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
         self._loop = loop
 
+    @override
     def new_event_loop(self) -> asyncio.AbstractEventLoop:
         return PollLoop()  # type: ignore[abstract]
 
@@ -234,10 +256,10 @@ def _iter[T](runner: asyncio.Runner, it: "AsyncGenerator[T]") -> "Generator[T]":
 
 
 @overload
-def run[T](main: "Coroutine[Any, Any, T]") -> T: ...
+def run[T](main: "_Coroutine[T]") -> T: ...
 @overload
-def run[T](main: "AsyncGenerator[T, None]") -> "Generator[T]": ...
-def run[T](main: "Coroutine[Any, Any, T] | AsyncGenerator[T]") -> "T | Generator[T]":
+def run[T](main: "AsyncGenerator[T]") -> "Generator[T]": ...
+def run[T](main: "_Coroutine[T] | AsyncGenerator[T]") -> "T | Generator[T]":
     runner = asyncio.Runner()
     if hasattr(main, "__aiter__"):
         return _iter(runner, cast("AsyncGenerator[T]", main))
@@ -245,7 +267,7 @@ def run[T](main: "Coroutine[Any, Any, T] | AsyncGenerator[T]") -> "T | Generator
         return runner.run(cast("Coroutine[None, None, T]", main))
 
 
-async def _aiter_arg(args: "_promptkit_sys.ArgIter") -> "AsyncGenerator[Any]":
+async def _aiter_arg(args: "_promptkit_sys.ArgIter") -> "AsyncGenerator[object]":
     while True:
         ok, result, poll = args.read()
         if not ok:
