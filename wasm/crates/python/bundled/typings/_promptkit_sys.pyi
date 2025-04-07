@@ -1,8 +1,6 @@
-from typing import Any, Generic, TypeVar
+from typing import Any
 
-T = TypeVar("T")
-
-class Pollable(Generic[T]):
+class Pollable[T]:
     def release(self) -> None: ...
     def get(self) -> T: ...
     def wait(self) -> T: ...

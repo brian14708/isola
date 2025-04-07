@@ -1,7 +1,7 @@
 import asyncio
 import binascii
 import os
-from typing import IO, TYPE_CHECKING, Any, Literal
+from typing import IO, TYPE_CHECKING, Any, Literal, final, overload
 
 import _promptkit_http as _http
 import _promptkit_rpc
@@ -12,12 +12,15 @@ from promptkit.asyncio import subscribe
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator, Generator
 
-_FileType = bytes | IO[bytes] | tuple[str, bytes | IO[bytes], str]
-_MethodType = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
-_ResponseType = Literal["json", "text", "bytes"]
-_IterResponseType = Literal["lines", "bytes", "sse"]
+    import _promptkit_sys
+
+type _FileType = bytes | IO[bytes] | tuple[str, bytes | IO[bytes], str]
+type _MethodType = Literal["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"]
+type _ResponseType = Literal["json", "text", "bytes"]
+type _IterResponseType = Literal["lines", "bytes", "sse"]
 
 
+@final
 class Request:
     __slots__ = (
         "method",
@@ -49,7 +52,7 @@ class Request:
         self.extra = extra
         self.resp: Response | None = None
 
-    def _fetch(self) -> "_http.FutureResponse":
+    def _fetch(self) -> "_promptkit_sys.Pollable[_http.Response]":
         req = _http.fetch(
             self.method, self.url, self.params, self.headers, self.body, self.timeout
         )
@@ -73,6 +76,7 @@ class Request:
             self.resp.close()
 
 
+@final
 class ServerSentEvent:
     __slots__ = ("id", "event", "data")
 
@@ -82,6 +86,7 @@ class ServerSentEvent:
         self.data = data
 
 
+@final
 class Response:
     __slots__ = ("resp", "_status", "_headers")
 
@@ -113,6 +118,12 @@ class Response:
 
     # async read methods
 
+    @overload
+    async def _aread(self, encoding: Literal["json"], size: int) -> Any: ...
+    @overload
+    async def _aread(self, encoding: Literal["text"], size: int) -> str: ...
+    @overload
+    async def _aread(self, encoding: Literal["bytes"], size: int) -> bytes: ...
     async def _aread(self, encoding: _ResponseType, size: int) -> Any:
         if self.resp is None:
             raise RuntimeError("Response is closed")
@@ -125,10 +136,10 @@ class Response:
         return await self._aread("json", -1)
 
     async def atext(self) -> str:
-        return str(await self._aread("text", -1))
+        return await self._aread("text", -1)
 
     async def aread(self, size: int = -1) -> bytes:
-        return bytes(await self._aread("bytes", size))
+        return await self._aread("bytes", size)
 
     # async iterator methods
 
@@ -157,19 +168,25 @@ class Response:
 
     # sync read methods
 
+    @overload
+    def _read(self, encoding: Literal["json"], size: int) -> Any: ...
+    @overload
+    def _read(self, encoding: Literal["text"], size: int) -> str: ...
+    @overload
+    def _read(self, encoding: Literal["bytes"], size: int) -> bytes: ...
     def _read(self, encoding: _ResponseType, size: int) -> Any:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         return self.resp.blocking_read(encoding, size)
 
     def read(self, size: int = -1) -> bytes:
-        return bytes(self._read("bytes", size))
+        return self._read("bytes", size)
 
     def json(self) -> Any:
         return self._read("json", -1)
 
     def text(self) -> str:
-        return str(self._read("text", -1))
+        return self._read("text", -1)
 
     # sync iterator methods
 
@@ -195,6 +212,7 @@ class Response:
             yield ServerSentEvent(id, event, data)
 
 
+@final
 class WebSocketRequest:
     __slots__ = ("url", "headers", "conn", "timeout")
 
@@ -204,7 +222,7 @@ class WebSocketRequest:
         self.timeout = timeout
         self.conn: Websocket | None = None
 
-    def _conn(self) -> "_promptkit_rpc.FutureConnection":
+    def _conn(self) -> "_promptkit_sys.Pollable[_promptkit_rpc.Connection]":
         return _promptkit_rpc.connect(self.url, self.headers, self.timeout)
 
     async def __aenter__(self) -> "Websocket":
@@ -224,6 +242,7 @@ class WebSocketRequest:
             self.conn.shutdown()
 
 
+@final
 class Websocket:
     __slots__ = ("conn",)
 

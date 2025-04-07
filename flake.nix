@@ -60,7 +60,7 @@
                       wheel
                     ]
                   ))
-                  pyright
+                  basedpyright
                   maturin
 
                   # rust / c++
