@@ -28,7 +28,7 @@ RUN rustup target add wasm32-wasip1
 RUN apt-get update && \
     apt-get install -y cmake ninja-build && \
     rm -rf /var/lib/apt/lists/*
-RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_122/binaryen-version_122-$(uname -m)-linux.tar.gz" && \
+RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binaryen/releases/download/version_123/binaryen-version_123-$(uname -m)-linux.tar.gz" && \
     tar -xzf /usr/local/binaryen.tar.gz --strip-component 1 -C /usr/local/ && \
     rm /usr/local/binaryen.tar.gz
 ENV PYENV_ROOT=/root/.pyenv \
