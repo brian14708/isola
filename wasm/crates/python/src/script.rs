@@ -16,6 +16,7 @@ use pyo3::{
 
 use crate::{
     error::{Error, Result},
+    pymeta,
     serde::PyValue,
     wasm::ArgIter,
 };
@@ -84,7 +85,17 @@ impl Scope {
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
+        static INIT: GILOnceCell<PyObject> = GILOnceCell::new();
+
         Python::with_gil(|py| {
+            if let Some(meta) = pymeta::parse_pep723(code.as_bytes()) {
+                if let Ok(init) = PyValue::deserialize(py, toml::Deserializer::new(&meta)) {
+                    INIT.import(py, "promptkit.importlib", "_initialize_pep723")
+                        .expect("failed to import promptkit.importlib")
+                        .call1((init,))
+                        .map_err(|e| Error::from_pyerr(py, e))?;
+                }
+            }
             let code = std::ffi::CString::new(code).unwrap();
             py.run(
                 &code,

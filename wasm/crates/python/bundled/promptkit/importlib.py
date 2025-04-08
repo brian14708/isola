@@ -2,6 +2,7 @@ import importlib
 import importlib.abc
 import importlib.util
 import io
+import re
 import sys
 import zipfile
 from dataclasses import dataclass
@@ -149,3 +150,51 @@ class RepoGuard[T: importlib.abc.MetaPathFinder, **P]:
 
 def http(*args: Any, **kwargs: Any) -> RepoGuard[HttpImporter, ...]:
     return RepoGuard(HttpImporter, *args, **kwargs)
+
+
+def _parse_dependency(dep: str) -> dict:
+    result: dict[str, str | None] = {
+        "name": None,
+        "version": None,
+        "url": None,
+        "extras": None,
+        "marker": None,
+    }
+
+    if ";" in dep:
+        dep, marker = dep.split(";", 1)
+        result["marker"] = marker.strip()
+
+    if "@" in dep:
+        name, url = dep.split("@", 1)
+        result["name"] = name.strip()
+        result["url"] = url.strip()
+        return result
+
+    extras_match = re.match(r"^([\w\-]+)(\[[^\]]+\])?(.*)$", dep.strip())
+    if extras_match:
+        result["name"] = extras_match.group(1)
+        if extras_match.group(2):
+            result["extras"] = extras_match.group(2)[1:-1]
+        if extras_match.group(3):
+            result["version"] = extras_match.group(3).strip() or None
+
+    return result
+
+
+def _initialize_pep723(script: dict) -> None:
+    blacklist = set(
+        ["xmltodict", "pydantic", "setuptools", "promptkit-py", "numpy", "pillow"]
+    )
+
+    importers = []
+    for dep in script.get("dependencies", []):
+        dep_info = _parse_dependency(dep)
+        if dep_info["name"].lower() in blacklist:
+            continue
+        if not dep_info["url"]:
+            raise ImportError("Only URL-based dependencies are supported.")
+
+        importers.append(HttpImporter(dep_info["url"]))
+
+    sys.meta_path.extend(importers)
