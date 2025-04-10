@@ -7,7 +7,7 @@ exclude = ["/bundled", "bundle.py"]
 [dependencies]
 cbor4ii = { version = "1.0.0", features = ["serde1"] }
 eventsource = { version = "0.5.0", default-features = false }
-prost-reflect = { version = "0.14.6", features = ["serde"] }
+prost-reflect = { version = "0.15.0", features = ["serde"] }
 pyo3 = { version = "0.24.1", features = ["abi3"], git = "https://github.com/brian14708/pyo3.git", branch = "wasi" }
 serde = "1.0.199"
 serde_json = "1.0.116"
