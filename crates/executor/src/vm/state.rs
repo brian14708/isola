@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use futures_util::StreamExt;
+use http::header::HOST;
 use tokio::{sync::mpsc, time::timeout};
 use tracing::Instrument;
 use wasmtime::{
@@ -97,9 +98,10 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
 
     fn send_request(
         &mut self,
-        request: hyper::Request<HyperOutgoingBody>,
+        mut request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
+        request.headers_mut().remove(HOST);
         let resp = timeout(
             config.first_byte_timeout,
             self.env.send_request_http(request),
