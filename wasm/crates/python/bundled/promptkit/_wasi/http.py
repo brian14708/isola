@@ -176,7 +176,7 @@ class Response:
     def _read(self, encoding: Literal["text"], size: int) -> str: ...
     @overload
     def _read(self, encoding: Literal["bytes"], size: int) -> bytes: ...
-    def _read(self, encoding: _ResponseType, size: int) -> object | str | bytes:
+    def _read(self, encoding: _ResponseType, size: int = -1) -> object | str | bytes:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         return self.resp.blocking_read(encoding, size)
