@@ -16,7 +16,7 @@ use crate::WebsocketMessage;
 
 pub async fn http_impl<B>(
     span: Span,
-    client: reqwest::Client,
+    client: Result<reqwest::Client, Error>,
     mut request: http::Request<B>,
 ) -> Result<
     http::Response<
@@ -29,7 +29,7 @@ where
     B::Error: std::error::Error + Send + Sync,
     B::Data: Send,
 {
-    let r = client
+    let r = client?
         .request(
             std::mem::take(request.method_mut()),
             reqwest::Url::parse(request.uri().to_string().as_str())?,

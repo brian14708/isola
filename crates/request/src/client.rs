@@ -21,9 +21,11 @@ impl Default for Client {
     }
 }
 
+const USER_AGENT: &str = "PromptKit/1.0";
+
 impl Client {
     pub fn new() -> Self {
-        let cli = reqwest::Client::builder().user_agent("PromptKit/1.0");
+        let cli = reqwest::Client::builder().user_agent(USER_AGENT);
         Self {
             http: cli.build().unwrap(),
             grpc: GrpcPool::new(),
@@ -53,7 +55,19 @@ impl Client {
         let span = options.context.make_span(&TraceRequest::Http(&parts));
         let mut request = http::Request::from_parts(parts, body);
         inject_headers(&span, &mut request);
-        crate::http::http_impl(span, self.http.clone(), request)
+        let http = if let Some(p) = request.headers_mut().remove("x-promptkit-proxy") {
+            reqwest::Proxy::all(p.to_str().unwrap_or_default())
+                .and_then(|p| {
+                    reqwest::Client::builder()
+                        .user_agent(USER_AGENT)
+                        .proxy(p)
+                        .build()
+                })
+                .map_err(|e| e.into())
+        } else {
+            Ok(self.http.clone())
+        };
+        crate::http::http_impl(span, http, request)
     }
 
     pub fn websocket<C: RequestContext>(

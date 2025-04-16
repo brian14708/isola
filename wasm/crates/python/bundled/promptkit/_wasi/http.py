@@ -314,6 +314,7 @@ def fetch(
     files: dict[str, _FileType] | None = None,
     body: object | bytes | None = None,
     timeout: float | None = None,
+    proxy: str | None = None,
 ) -> Request:
     if files:
         if body:
@@ -322,6 +323,10 @@ def fetch(
         if not headers:
             headers = {}
         headers["Content-Type"] = ty
+    if proxy:
+        if not headers:
+            headers = {}
+        headers["x-promptkit-proxy"] = proxy
     return Request(method, url, params, headers, body, timeout)
 
 
