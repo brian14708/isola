@@ -5,7 +5,7 @@ import httpx
 
 
 class Request:
-    __slots__ = ("request", "client", "response", "extra")
+    __slots__ = ("request", "client", "response", "extra", "timeout")
 
     def __init__(
         self, method, url, params, headers, body, timeout, files=None, extra=None
@@ -21,10 +21,14 @@ class Request:
             json=body if not isinstance(body, bytes) else None,
             files=files,
         )
+        if timeout is None:
+            self.timeout = httpx.Timeout(600)
+        else:
+            self.timeout = httpx.Timeout(timeout)
         self.extra = extra
 
     async def __aenter__(self):
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(timeout=self.timeout)
         self.response = Response(await self.client.send(self.request, stream=True))
         return self.response
 
@@ -33,7 +37,7 @@ class Request:
         await self.client.aclose()
 
     def __enter__(self):
-        self.client = httpx.Client()
+        self.client = httpx.Client(timeout=self.timeout)
         self.response = Response(self.client.send(self.request, stream=True))
         return self.response
 
