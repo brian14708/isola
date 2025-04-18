@@ -549,6 +549,7 @@ struct ParsedSpec<'a> {
     env: Cow<'a, VmEnv>,
 }
 
+#[allow(clippy::result_large_err)]
 fn parse_spec<'a>(
     spec: Option<&mut script::ExecutionSpec>,
     base_env: &'a VmEnv,
