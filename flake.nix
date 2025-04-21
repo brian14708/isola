@@ -59,7 +59,7 @@
 
           # js
           nodejs
-          pnpm
+          bun
 
           # python
           (python313.withPackages (

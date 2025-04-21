@@ -18,16 +18,14 @@ RUN --mount=type=cache,target=/work/target/release-lto \
 ############################
 # Stage 2: UI build
 ############################
-FROM --platform=$BUILDPLATFORM docker.io/library/node:latest AS ui-build
+FROM --platform=$BUILDPLATFORM docker.io/oven/bun:latest AS ui-build
 WORKDIR /src
-COPY ui/package.json .
-RUN npm install -g $(cat package.json | grep -o 'pnpm@[0-9.]\+')
-COPY ui/pnpm-lock.yaml .
-RUN --mount=type=cache,target=/root/.cache/pnpm/store \
-    pnpm install --frozen-lockfile
+COPY ui/package.json ui/bun.lock .
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    bun install --frozen-lockfile
 COPY ui .
 COPY apis ../apis
-RUN pnpm run build
+RUN bun run build
 
 ############################
 # Stage 3: Wasm build
@@ -71,7 +69,7 @@ RUN python -m compileall /src/wasm/target/wasm32-wasip1/wasi-deps/usr/
 FROM docker.io/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app
 COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit-server .
-COPY --from=ui-build --chown=nonroot:nonroot /src/build ui/build
+COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
 RUN ["./promptkit-server", "build"]

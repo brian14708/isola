@@ -3,7 +3,7 @@ mod state;
 
 use std::{future::ready, time::Duration};
 
-use axum::{http::StatusCode, routing::get};
+use axum::{http::StatusCode, response::Redirect, routing::get};
 pub use env::VmEnv;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 pub use state::AppState;
@@ -17,12 +17,13 @@ pub fn router(state: &AppState) -> axum::Router {
     ));
 
     axum::Router::new()
+        .route("/", get(|| ready(Redirect::temporary("/ui"))))
         .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
         .route("/debug/metrics", get(move || ready(prometheus.render())))
         .with_state(state.clone())
         .nest_service(
             "/ui",
-            ServeDir::new("ui/build").fallback(ServeFile::new("ui/build/404.html")),
+            ServeDir::new("ui/dist").fallback(ServeFile::new("ui/dist/index.html")),
         )
 }
 
