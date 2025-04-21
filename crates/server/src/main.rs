@@ -37,7 +37,8 @@ async fn main() -> anyhow::Result<()> {
                     tonic_web::GrpcWebLayer::new().named_layer(
                         ScriptServiceServer::new(service::ScriptServer::new(state))
                             .send_compressed(CompressionEncoding::Gzip)
-                            .accept_compressed(CompressionEncoding::Gzip),
+                            .accept_compressed(CompressionEncoding::Gzip)
+                            .max_decoding_message_size(usize::MAX),
                     ),
                 )
                 .add_service(
