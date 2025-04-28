@@ -570,7 +570,7 @@ fn parse_spec<'a>(
                         value: ExecArgumentValue::Cbor(a),
                     }),
                     Ok(Err(Marker::Stream)) => {
-                        let (tx, rx) = mpsc::channel(4);
+                        let (tx, rx) = mpsc::channel(64);
                         let key = name.as_ref().map_or("", |v| v);
                         if streams.contains_key(key) {
                             Err(Status::invalid_argument("invalid marker arguments"))
