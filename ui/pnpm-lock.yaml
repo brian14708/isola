@@ -84,8 +84,8 @@ importers:
         specifier: ^2.2.3
         version: 2.2.3
       lucide-svelte:
-        specifier: ^0.503.0
-        version: 0.503.0(svelte@5.28.0)
+        specifier: ^0.507.0
+        version: 0.507.0(svelte@5.28.0)
       mode-watcher:
         specifier: ^1.0.0
         version: 1.0.6(svelte@5.28.0)
@@ -1654,8 +1654,8 @@ packages:
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
-  lucide-svelte@0.503.0:
-    resolution: {integrity: sha512-oT1idMbgJKCCLWI4U7bdUYUZqxS78fiTGJuKGZ5u0NJNyuiUErDu3G7sXkYpfDwwspeid7gZSjrlJbTINEfErw==}
+  lucide-svelte@0.507.0:
+    resolution: {integrity: sha512-qJRbz1dWyTzV05VaXIKhPeQ6mGBTIbKI05YNymym6QZSsn/mt7P154qr4SfKl+SEJlOmYPbHVjK1D1qZwa3r3w==}
     peerDependencies:
       svelte: ^3 || ^4 || ^5.0.0-next.42
 
@@ -3758,7 +3758,7 @@ snapshots:
 
   lodash.merge@4.6.2: {}
 
-  lucide-svelte@0.503.0(svelte@5.28.0):
+  lucide-svelte@0.507.0(svelte@5.28.0):
     dependencies:
       svelte: 5.28.0
 
