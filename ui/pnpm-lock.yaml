@@ -13,10 +13,10 @@ importers:
         version: 1.53.0
       '@bufbuild/protobuf':
         specifier: ^2.2.5
-        version: 2.2.5
+        version: 2.3.0
       '@bufbuild/protoc-gen-es':
         specifier: ^2.2.5
-        version: 2.2.5(@bufbuild/protobuf@2.2.5)
+        version: 2.3.0(@bufbuild/protobuf@2.3.0)
       '@codemirror/commands':
         specifier: ^6.8.1
         version: 6.8.1
@@ -34,10 +34,10 @@ importers:
         version: 6.36.7
       '@connectrpc/connect':
         specifier: 2.0.2
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)
+        version: 2.0.2(@bufbuild/protobuf@2.3.0)
       '@connectrpc/connect-web':
         specifier: 2.0.2
-        version: 2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))
+        version: 2.0.2(@bufbuild/protobuf@2.3.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.3.0))
       '@eslint/js':
         specifier: ^9.24.0
         version: 9.26.0
@@ -195,21 +195,21 @@ packages:
     engines: {node: '>=12'}
     hasBin: true
 
-  '@bufbuild/protobuf@2.2.5':
-    resolution: {integrity: sha512-/g5EzJifw5GF8aren8wZ/G5oMuPoGeS6MQD3ca8ddcvdXR5UELUfdTZITCGNhNXynY/AYl3Z4plmxdj/tRl/hQ==}
+  '@bufbuild/protobuf@2.3.0':
+    resolution: {integrity: sha512-WK6zH4MtBp/uesX8KGCnwDDRVnEVHUvwjsigKXcSR57Oo8Oyv1vRS9qyUlSP+6KWRl5z8tNAU5qpf3QodeVYxA==}
 
-  '@bufbuild/protoc-gen-es@2.2.5':
-    resolution: {integrity: sha512-81dI1PLMQXUkvCUH1fKJEZsx+G69LvU/0BOFeqxotFpCFEC/jTu1Ka1ViIEGT5U1r51udRs20kHZTlkR9zwfAA==}
+  '@bufbuild/protoc-gen-es@2.3.0':
+    resolution: {integrity: sha512-EwhtlphFL8zZkbaV+DUZ38aJEiGcM2kNsMZ8wKyjoXH+iXyrnpZcM9xj9HPBYQw5+dw6lES/Ey45Rp24ejBq6w==}
     engines: {node: '>=14'}
     hasBin: true
     peerDependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.3.0
     peerDependenciesMeta:
       '@bufbuild/protobuf':
         optional: true
 
-  '@bufbuild/protoplugin@2.2.5':
-    resolution: {integrity: sha512-Z68KTDLiidUYoJ8kjs6YfhK8r58W93pOFIfGqlnK1RZQTQRtbH6WRWjSqtuiy4WjJpJZ5qE0lKtFGR+bHU8Vaw==}
+  '@bufbuild/protoplugin@2.3.0':
+    resolution: {integrity: sha512-s70jh5kYmZkyJr6n0UTrXsnWDCbGzxpiRCp6gaSjk5H8l/UXnG7k/yBw1XVZK39QTJCsR26KrLNBHbjkLVsqXQ==}
 
   '@codemirror/autocomplete@6.18.6':
     resolution: {integrity: sha512-PHHBXFomUs5DF+9tCOM/UoW6XQ4R44lLNNhRaW9PKPTU0D7lIjRg3ElxaJnTwsl/oHiR93WSXDBrekhoUGCPtg==}
@@ -2353,19 +2353,19 @@ snapshots:
       '@bufbuild/buf-win32-arm64': 1.53.0
       '@bufbuild/buf-win32-x64': 1.53.0
 
-  '@bufbuild/protobuf@2.2.5': {}
+  '@bufbuild/protobuf@2.3.0': {}
 
-  '@bufbuild/protoc-gen-es@2.2.5(@bufbuild/protobuf@2.2.5)':
+  '@bufbuild/protoc-gen-es@2.3.0(@bufbuild/protobuf@2.3.0)':
     dependencies:
-      '@bufbuild/protoplugin': 2.2.5
+      '@bufbuild/protoplugin': 2.3.0
     optionalDependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.3.0
     transitivePeerDependencies:
       - supports-color
 
-  '@bufbuild/protoplugin@2.2.5':
+  '@bufbuild/protoplugin@2.3.0':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.3.0
       '@typescript/vfs': 1.6.1(typescript@5.4.5)
       typescript: 5.4.5
     transitivePeerDependencies:
@@ -2424,14 +2424,14 @@ snapshots:
       style-mod: 4.1.2
       w3c-keyname: 2.2.8
 
-  '@connectrpc/connect-web@2.0.2(@bufbuild/protobuf@2.2.5)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5))':
+  '@connectrpc/connect-web@2.0.2(@bufbuild/protobuf@2.3.0)(@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.3.0))':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
-      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.2.5)
+      '@bufbuild/protobuf': 2.3.0
+      '@connectrpc/connect': 2.0.2(@bufbuild/protobuf@2.3.0)
 
-  '@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.2.5)':
+  '@connectrpc/connect@2.0.2(@bufbuild/protobuf@2.3.0)':
     dependencies:
-      '@bufbuild/protobuf': 2.2.5
+      '@bufbuild/protobuf': 2.3.0
 
   '@esbuild/aix-ppc64@0.25.2':
     optional: true
