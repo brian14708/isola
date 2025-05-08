@@ -206,6 +206,7 @@ impl ScriptService for ScriptServer {
         let Some(script::ExecuteClientStreamRequest {
             request_type:
                 Some(execute_client_stream_request::RequestType::InitialRequest(mut initial)),
+            timeout: _,
         }) = request.get_mut().message().await?
         else {
             return Err(Status::invalid_argument("initial request not found"));
@@ -270,7 +271,16 @@ impl ScriptService for ScriptServer {
                                 let tx = tx.get_mut(&name).ok_or_else(|| {
                                     Status::invalid_argument("invalid marker arguments")
                                 })?;
-                                let _ = tx.send(arg).await;
+                                match msg.timeout.and_then(|t| t.try_into().ok()) {
+                                    Some(timeout) => {
+                                        tx.send_timeout(arg, timeout).await.map_err(|_| {
+                                            Status::deadline_exceeded("stream argument timeout")
+                                        })?;
+                                    }
+                                    None => tx.send(arg).await.map_err(|_| {
+                                        Status::internal("failed to send stream argument")
+                                    })?,
+                                }
                             }
                         }
                     }
@@ -380,6 +390,7 @@ impl ScriptService for ScriptServer {
     ) -> Result<tonic::Response<Self::ExecuteStreamStream>, Status> {
         let Some(script::ExecuteStreamRequest {
             request_type: Some(execute_stream_request::RequestType::InitialRequest(mut initial)),
+            timeout: _,
         }) = request.get_mut().message().await?
         else {
             return Err(Status::invalid_argument("initial request not found"));
@@ -438,7 +449,16 @@ impl ScriptService for ScriptServer {
                                 let tx = tx.get_mut(&name).ok_or_else(|| {
                                     Status::invalid_argument("invalid marker arguments")
                                 })?;
-                                let _ = tx.send(arg).await;
+                                match msg.timeout.and_then(|t| t.try_into().ok()) {
+                                    Some(timeout) => {
+                                        tx.send_timeout(arg, timeout).await.map_err(|_| {
+                                            Status::deadline_exceeded("stream argument timeout")
+                                        })?;
+                                    }
+                                    None => tx.send(arg).await.map_err(|_| {
+                                        Status::internal("failed to send stream argument")
+                                    })?,
+                                }
                             }
                         }
                     }
