@@ -16,9 +16,8 @@ use wasmtime_wasi_http::{
     types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
 };
 
-use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
-
 use super::bindgen::{HostView, add_to_linker};
+use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
 
 pub struct VmRunState {
     pub(crate) output: mpsc::Sender<ExecStreamItem>,

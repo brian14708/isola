@@ -5,9 +5,11 @@ use tokio_stream::Stream;
 use wasmtime::component::Resource;
 use wasmtime_wasi::{DynPollable, Pollable, bindings::io::streams::StreamError};
 
-use super::HostView;
 pub use super::promptkit::script::host::Value;
-use super::promptkit::script::host::{Host, HostValueIterator};
+use super::{
+    HostView,
+    promptkit::script::host::{Host, HostValueIterator},
+};
 
 pub struct ValueIterator {
     pub(crate) stream: Pin<Box<dyn Stream<Item = Value> + Send>>,

@@ -6,8 +6,10 @@ use http::{HeaderName, HeaderValue};
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tracing::Span;
 
-use crate::{Error, RequestOptions, grpc::GrpcPool, options::RequestContext};
-use crate::{WebsocketMessage, trace::TraceRequest};
+use crate::{
+    Error, RequestOptions, WebsocketMessage, grpc::GrpcPool, options::RequestContext,
+    trace::TraceRequest,
+};
 
 #[derive(Clone)]
 pub struct Client {

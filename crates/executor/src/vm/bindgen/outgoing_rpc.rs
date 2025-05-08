@@ -2,18 +2,22 @@ use anyhow::anyhow;
 use futures_util::FutureExt;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use wasmtime::component::Resource;
-use wasmtime_wasi::bindings::clocks::monotonic_clock::Duration;
-use wasmtime_wasi::runtime::AbortOnDropJoinHandle;
-use wasmtime_wasi::{DynPollable, Pollable};
-
-use crate::Env;
-use crate::env::{RpcConnect, RpcPayload};
-
-use super::promptkit::script::outgoing_rpc::{
-    ErrorCode, Host, HostConnectRequest, HostConnection, HostFutureConnection, HostPayload,
-    HostRequestStream, HostResponseStream, Metadata, StreamError,
+use wasmtime_wasi::{
+    DynPollable, Pollable, bindings::clocks::monotonic_clock::Duration,
+    runtime::AbortOnDropJoinHandle,
 };
-use super::{HostImpl, HostView};
+
+use super::{
+    HostImpl, HostView,
+    promptkit::script::outgoing_rpc::{
+        ErrorCode, Host, HostConnectRequest, HostConnection, HostFutureConnection, HostPayload,
+        HostRequestStream, HostResponseStream, Metadata, StreamError,
+    },
+};
+use crate::{
+    Env,
+    env::{RpcConnect, RpcPayload},
+};
 
 impl<T: HostView> Host for HostImpl<T> {
     async fn connect(

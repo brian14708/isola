@@ -1,10 +1,9 @@
 #![warn(clippy::pedantic)]
 
-use super::collector::Collector;
-use super::tracer::Tracer;
-
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{Registry, registry::LookupSpan};
+
+use super::{collector::Collector, tracer::Tracer};
 
 pub trait CollectorSpanExt {
     #[must_use]
@@ -55,11 +54,13 @@ mod tests {
     use tracing::{info, info_span};
     use tracing_subscriber::{Registry, layer::SubscriberExt};
 
-    use super::super::{
-        collector::{EventRecord, SpanRecord},
-        layer::CollectorLayer,
+    use super::{
+        super::{
+            collector::{EventRecord, SpanRecord},
+            layer::CollectorLayer,
+        },
+        *,
     };
-    use super::*;
 
     fn with_layer<T>(f: impl FnOnce() -> T) -> T {
         tracing::subscriber::with_default(Registry::default().with(CollectorLayer::default()), f)

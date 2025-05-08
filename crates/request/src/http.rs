@@ -11,8 +11,7 @@ use pin_project_lite::pin_project;
 use tokio_tungstenite::tungstenite;
 use tracing::{Instrument, Span};
 
-use crate::Error;
-use crate::WebsocketMessage;
+use crate::{Error, WebsocketMessage};
 
 pub async fn http_impl<B>(
     span: Span,

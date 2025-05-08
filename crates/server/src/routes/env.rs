@@ -3,18 +3,17 @@ use std::{borrow::Cow, future::Future, pin::Pin};
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
+use promptkit_executor::{
+    Env,
+    env::{RpcConnect, RpcPayload},
+};
 use promptkit_request::{
     RequestContext, RequestOptions, TraceRequest, WebsocketMessage, request_span,
 };
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use tokio::{sync::mpsc::error::SendError, task::JoinHandle};
-use tracing::{Instrument, field::Empty};
-
-use promptkit_executor::{
-    Env,
-    env::{RpcConnect, RpcPayload},
-};
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
+use tracing::{Instrument, field::Empty};
 use url::Url;
 
 #[derive(Clone)]

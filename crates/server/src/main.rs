@@ -5,8 +5,7 @@ use std::{env::args, path::PathBuf};
 use anyhow::anyhow;
 use promptkit_executor::VmManager;
 use proto::script::v1::script_service_server::ScriptServiceServer;
-use tonic::codec::CompressionEncoding;
-use tonic::service::LayerExt;
+use tonic::{codec::CompressionEncoding, service::LayerExt};
 use utils::{grpc_trace::grpc_server_tracing_layer, otel::init_tracing};
 
 mod proto;
