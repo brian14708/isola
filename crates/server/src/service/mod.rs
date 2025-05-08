@@ -94,6 +94,7 @@ impl ScriptService for ScriptServer {
                     .state
                     .vm
                     .exec(
+                        "",
                         script,
                         "$analyze".to_string(),
                         vec![ExecArgument {
@@ -163,7 +164,14 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, method, args, env.as_ref(), log_level)
+                    .exec(
+                        &request.get_ref().namespace,
+                        script,
+                        method,
+                        args,
+                        env.as_ref(),
+                        log_level,
+                    )
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -229,7 +237,14 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(script, method, args, env.as_ref(), log_level)
+                    .exec(
+                        &initial.namespace,
+                        script,
+                        method,
+                        args,
+                        env.as_ref(),
+                        log_level,
+                    )
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -317,9 +332,14 @@ impl ScriptService for ScriptServer {
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(script, method, args, env.as_ref(), log_level),
+            self.state.vm.exec(
+                &request.get_ref().namespace,
+                script,
+                method,
+                args,
+                env.as_ref(),
+                log_level,
+            ),
         )
         .instrument(span.clone())
         .await
@@ -411,9 +431,14 @@ impl ScriptService for ScriptServer {
         let deadline = std::time::Instant::now() + timeout;
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(script, method, args, env.as_ref(), log_level),
+            self.state.vm.exec(
+                &initial.namespace,
+                script,
+                method,
+                args,
+                env.as_ref(),
+                log_level,
+            ),
         )
         .instrument(span.clone())
         .await

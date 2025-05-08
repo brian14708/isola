@@ -261,6 +261,7 @@ where
 
     pub async fn exec(
         &self,
+        id: &str,
         script: ExecSource,
         func: String,
         args: Vec<ExecArgument>,
@@ -268,6 +269,7 @@ where
         level: LevelFilter,
     ) -> Result<impl Stream<Item = ExecStreamItem> + Send + use<E>> {
         let mut hasher = Sha256::new();
+        hasher.update(id);
         match &script {
             ExecSource::Script(p, s) => {
                 hasher.update(p);
