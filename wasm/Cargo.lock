@@ -692,10 +692,9 @@ dependencies = [
 
 [[package]]
 name = "pyo3"
-version = "0.24.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi#bb5b35423a550090438a45aa0d20fc8fa00deec5"
+version = "0.25.0"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
 dependencies = [
- "cfg-if",
  "indoc",
  "libc",
  "memoffset",
@@ -709,8 +708,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-build-config"
-version = "0.24.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi#bb5b35423a550090438a45aa0d20fc8fa00deec5"
+version = "0.25.0"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
 dependencies = [
  "once_cell",
  "target-lexicon",
@@ -718,8 +717,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-ffi"
-version = "0.24.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi#bb5b35423a550090438a45aa0d20fc8fa00deec5"
+version = "0.25.0"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
 dependencies = [
  "libc",
  "pyo3-build-config",
@@ -727,8 +726,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros"
-version = "0.24.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi#bb5b35423a550090438a45aa0d20fc8fa00deec5"
+version = "0.25.0"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
 dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
@@ -738,8 +737,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros-backend"
-version = "0.24.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi#bb5b35423a550090438a45aa0d20fc8fa00deec5"
+version = "0.25.0"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
 dependencies = [
  "heck",
  "proc-macro2",
