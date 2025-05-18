@@ -158,20 +158,18 @@ impl ScriptService for ScriptServer {
             return Err(Status::invalid_argument("unexpected stream marker"));
         };
         let script = parse_source(request.get_mut().source.take())?;
+        let ns = request
+            .metadata()
+            .get("x-app-id")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
 
         let result = async {
             let run = async {
                 let stream = self
                     .state
                     .vm
-                    .exec(
-                        &request.get_ref().namespace,
-                        script,
-                        method,
-                        args,
-                        env.as_ref(),
-                        log_level,
-                    )
+                    .exec(ns, script, method, args, env.as_ref(), log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -232,19 +230,17 @@ impl ScriptService for ScriptServer {
             env,
         } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
+        let (md, _, mut body) = request.into_parts();
+        let ns = md
+            .get("x-app-id")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
         let result = async {
             let run = async {
                 let stream = self
                     .state
                     .vm
-                    .exec(
-                        &initial.namespace,
-                        script,
-                        method,
-                        args,
-                        env.as_ref(),
-                        log_level,
-                    )
+                    .exec(ns, script, method, args, env.as_ref(), log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -269,7 +265,7 @@ impl ScriptService for ScriptServer {
             Ok::<_, Status>(metadata)
         };
         let mover = async move {
-            while let Some(msg) = request.get_mut().message().await? {
+            while let Some(msg) = body.message().await? {
                 if let Some(tx) = tx.as_mut() {
                     if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
@@ -330,16 +326,18 @@ impl ScriptService for ScriptServer {
         };
         let script = parse_source(request.get_mut().source.take())?;
         let deadline = std::time::Instant::now() + timeout;
+
+        let ns = request
+            .metadata()
+            .get("x-app-id")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
+
         let stream = match tokio::time::timeout(
             timeout,
-            self.state.vm.exec(
-                &request.get_ref().namespace,
-                script,
-                method,
-                args,
-                env.as_ref(),
-                log_level,
-            ),
+            self.state
+                .vm
+                .exec(ns, script, method, args, env.as_ref(), log_level),
         )
         .instrument(span.clone())
         .await
@@ -429,16 +427,16 @@ impl ScriptService for ScriptServer {
         } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
         let deadline = std::time::Instant::now() + timeout;
+        let ns = request
+            .metadata()
+            .get("x-app-id")
+            .and_then(|s| s.to_str().ok())
+            .unwrap_or("");
         let stream = match tokio::time::timeout(
             timeout,
-            self.state.vm.exec(
-                &initial.namespace,
-                script,
-                method,
-                args,
-                env.as_ref(),
-                log_level,
-            ),
+            self.state
+                .vm
+                .exec(ns, script, method, args, env.as_ref(), log_level),
         )
         .instrument(span.clone())
         .await
