@@ -14,6 +14,11 @@
       "matchUpdateTypes": ["major"]
     },
     {
+      "groupName": "wit",
+      "matchPackageNames": ["/^wit-/"],
+      "matchUpdateTypes": ["minor"]
+    },
+    {
       "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
