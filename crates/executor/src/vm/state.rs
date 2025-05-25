@@ -8,7 +8,10 @@ use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
 };
-use wasmtime_wasi::{DirPerms, FilePerms, IoView, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{
+    DirPerms, FilePerms,
+    p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView},
+};
 use wasmtime_wasi_http::{
     HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
@@ -35,7 +38,7 @@ pub struct VmState<E> {
 impl<E: Env + Send> VmState<E> {
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
-        wasmtime_wasi::add_to_linker_async(&mut linker)?;
+        wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
         crate::wasm::logging::add_to_linker(&mut linker)?;
         add_to_linker(&mut linker)?;

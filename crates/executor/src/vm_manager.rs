@@ -107,11 +107,11 @@ impl<E> VmManager<E> {
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
-                let (_, idx) = component
-                    .export_index(None, "promptkit:script/guest")
+                let idx = component
+                    .get_export_index(None, "promptkit:script/guest")
                     .ok_or_else(|| anyhow!("missing promptkit:script/guest"))?;
-                let (_, idx) = component
-                    .export_index(Some(&idx), "initialize")
+                let idx = component
+                    .get_export_index(Some(&idx), "initialize")
                     .ok_or_else(|| anyhow!("missing promptkit:script/guest.initialize"))?;
                 let func = binding.get_typed_func::<(bool,), ()>(&mut store, idx)?;
                 func.call_async(&mut store, (true,)).await?;

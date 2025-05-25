@@ -1,6 +1,6 @@
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use tracing::event;
-use wasmtime_wasi::{WasiImpl, WasiView};
+use wasmtime_wasi::p2::{IoImpl, WasiImpl, WasiView};
 
 wasmtime::component::bindgen!({
     path: "../../apis/wit/deps/logging",
@@ -18,7 +18,7 @@ pub fn add_to_linker<T: WasiView>(
     {
         val
     }
-    let closure = type_annotate::<T, _>(|t| WasiImpl(wasmtime_wasi::IoImpl(t)));
+    let closure = type_annotate::<T, _>(|t| WasiImpl(IoImpl(t)));
     bindings::logging::add_to_linker_get_host(linker, closure)
 }
 

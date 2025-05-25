@@ -2,7 +2,7 @@ use bytes::Bytes;
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use smallvec::SmallVec;
 use tracing::event;
-use wasmtime_wasi::{OutputStream, Pollable, StdoutStream, StreamResult};
+use wasmtime_wasi::p2::{OutputStream, Pollable, StdoutStream, StreamResult};
 
 pub struct TraceOutput {
     context: &'static str,
