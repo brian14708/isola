@@ -4,7 +4,7 @@ wasmtime::component::bindgen!({
     async: true,
     trappable_imports: true,
     with: {
-        "wasi:io": wasmtime_wasi::bindings::io,
+        "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::wasm::logging::bindings,
         "promptkit:script/host/value-iterator": host::ValueIterator,
         "promptkit:script/outgoing-rpc/connection": outgoing_rpc::Connection,
@@ -20,7 +20,7 @@ use std::future::Future;
 
 pub use exports::promptkit::script::guest;
 use wasmtime::component::Linker;
-use wasmtime_wasi::IoView;
+use wasmtime_wasi::p2::IoView;
 
 pub trait HostView: IoView + Send {
     type Env: crate::Env + Send;

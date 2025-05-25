@@ -3,7 +3,7 @@ use std::pin::Pin;
 use futures_util::{FutureExt, StreamExt};
 use tokio_stream::Stream;
 use wasmtime::component::Resource;
-use wasmtime_wasi::{DynPollable, Pollable, bindings::io::streams::StreamError};
+use wasmtime_wasi::p2::{DynPollable, Pollable, bindings::io::streams::StreamError};
 
 pub use super::promptkit::script::host::Value;
 use super::{
@@ -81,7 +81,7 @@ impl<T: HostView> HostValueIterator for super::HostImpl<T> {
         &mut self,
         resource: Resource<ValueIterator>,
     ) -> wasmtime::Result<Resource<DynPollable>> {
-        wasmtime_wasi::subscribe(self.0.table(), resource)
+        wasmtime_wasi::p2::subscribe(self.0.table(), resource)
     }
 
     async fn drop(&mut self, rep: Resource<ValueIterator>) -> wasmtime::Result<()> {

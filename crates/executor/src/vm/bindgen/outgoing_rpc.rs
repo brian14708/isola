@@ -3,7 +3,7 @@ use futures_util::FutureExt;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
 use wasmtime::component::Resource;
 use wasmtime_wasi::{
-    DynPollable, Pollable, bindings::clocks::monotonic_clock::Duration,
+    p2::{DynPollable, Pollable, bindings::clocks::monotonic_clock::Duration},
     runtime::AbortOnDropJoinHandle,
 };
 
@@ -141,7 +141,7 @@ impl<T: HostView> HostResponseStream for HostImpl<T> {
         &mut self,
         self_: Resource<ResponseStream>,
     ) -> wasmtime::Result<Resource<DynPollable>> {
-        wasmtime_wasi::subscribe(self.0.table(), self_)
+        wasmtime_wasi::p2::subscribe(self.0.table(), self_)
     }
 
     async fn read(
@@ -212,7 +212,7 @@ impl<T: HostView> HostRequestStream for HostImpl<T> {
         &mut self,
         self_: Resource<RequestStream>,
     ) -> wasmtime::Result<Resource<DynPollable>> {
-        wasmtime_wasi::subscribe(self.0.table(), self_)
+        wasmtime_wasi::p2::subscribe(self.0.table(), self_)
     }
 
     async fn check_write(
@@ -325,7 +325,7 @@ impl<T: HostView> HostFutureConnection for HostImpl<T> {
         &mut self,
         self_: Resource<FutureConnection>,
     ) -> wasmtime::Result<Resource<DynPollable>> {
-        wasmtime_wasi::subscribe(self.0.table(), self_)
+        wasmtime_wasi::p2::subscribe(self.0.table(), self_)
     }
 
     async fn get(
