@@ -27,6 +27,7 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain (
           p:
           p.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" ];
             targets = [ "wasm32-wasip1" ];
           }
         );
@@ -47,7 +48,6 @@
                   # js
                   nodejs
                   pnpm
-                  svelte-language-server
 
                   # python
                   (python313.withPackages (
@@ -60,7 +60,6 @@
                       wheel
                     ]
                   ))
-                  basedpyright
                   maturin
 
                   # rust / c++
@@ -70,7 +69,6 @@
                   buf
                   protobuf_28
                   pkg-config
-                  rust-analyzer
                 ]
                 ++ lib.optional stdenv.isDarwin [
                   darwin.apple_sdk.frameworks.Security
