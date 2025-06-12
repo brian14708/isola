@@ -371,7 +371,13 @@ def _encode_multipart_formdata(fields: dict[str, _FileType]) -> tuple[bytes, str
 
 def _validate_status(resp: Response) -> None:
     if not 200 <= resp.status < 300:
-        raise RuntimeError(f"http status check failed, status={resp.status}")
+        try:
+            content = resp.read(size=1024 * 128).decode("utf-8", "replace")
+        except Exception:
+            content = "<unable to read response content>"
+        raise RuntimeError(
+            f"http status check failed, status={resp.status}, content={repr(content)}"
+        )
 
 
 def get(
