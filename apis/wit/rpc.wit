@@ -1,6 +1,6 @@
 interface outgoing-rpc {
-    use wasi:io/poll@0.2.4.{pollable};
-    use wasi:clocks/monotonic-clock@0.2.4.{duration};
+    use wasi:io/poll@0.2.6.{pollable};
+    use wasi:clocks/monotonic-clock@0.2.6.{duration};
 
     variant error-code {
         timeout,
