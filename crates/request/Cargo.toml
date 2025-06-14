@@ -14,7 +14,7 @@ opentelemetry = "0.30.0"
 opentelemetry-semantic-conventions = { version = "0.30.0", features = ["semconv_experimental"] }
 pin-project-lite = "0.2.16"
 reqwest = { version = "0.12.12", default-features = false, features = ["http2", "stream", "socks"] }
-tokio-tungstenite = { version = "0.26.2", default-features = false, features = ["handshake"] }
+tokio-tungstenite = { version = "0.27.0", default-features = false, features = ["handshake"] }
 tonic = { version = "0.13.0", default-features = false, features = ["channel"] }
 tracing = "0.1.40"
 tracing-opentelemetry = "0.31.0"
