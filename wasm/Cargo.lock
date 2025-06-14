@@ -631,17 +631,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2796faa41db3ec313a31f7624d9286acf277b52de526150b7e69f3debf891ee5"
 dependencies = [
  "bytes",
- "prost-derive 0.13.5",
-]
-
-[[package]]
-name = "prost"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbe28332295ca4451b7d779aff2749b144cabe5e6e05fe86f31337831d7df232"
-dependencies = [
- "bytes",
- "prost-derive 0.14.0",
+ "prost-derive",
 ]
 
 [[package]]
@@ -658,26 +648,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-derive"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ac3e3c6b0e1c219e61ceda600eaad26d7195ecc9b5c027925c904091374ab5"
-dependencies = [
- "anyhow",
- "itertools",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "prost-reflect"
-version = "0.16.0"
+version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e6b545c556471033fc1099868fca468bff8cf034f7bb9153b445f24d00aa28d"
+checksum = "37587d5a8a1b3dc9863403d084fc2254b91ab75a702207098837950767e2260b"
 dependencies = [
  "base64",
- "prost 0.14.0",
+ "prost",
  "prost-types",
  "serde",
  "serde-value",
@@ -685,11 +662,11 @@ dependencies = [
 
 [[package]]
 name = "prost-types"
-version = "0.14.0"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2bfff0dbd11dbadf180fea466aa146cdf20aed230e1c42b8bae192df8f0469a"
+checksum = "52c2c1bf36ddb1a1c396b3601a3cec27c2462e45f07c386894ec3ccf5332bd16"
 dependencies = [
- "prost 0.14.0",
+ "prost",
 ]
 
 [[package]]
@@ -982,7 +959,7 @@ dependencies = [
  "http-body-util",
  "percent-encoding",
  "pin-project",
- "prost 0.13.5",
+ "prost",
  "tokio-stream",
  "tower-layer",
  "tower-service",
@@ -995,7 +972,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9687bd5bfeafebdded2356950f278bba8226f0b32109537c4253406e09aafe1"
 dependencies = [
- "prost 0.13.5",
+ "prost",
  "tonic",
 ]
 
