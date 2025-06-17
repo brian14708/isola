@@ -455,9 +455,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "libc"
-version = "0.2.172"
+version = "0.2.173"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d750af042f7ef4f724306de029d18836c26c1765a54a6a3f094cbd23a7267ffa"
+checksum = "d8cfeafaffdbc32176b64fb251369d52ea9f0a8fbc6f8759edffef7b525d64bb"
 
 [[package]]
 name = "litemap"
@@ -671,8 +671,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3"
-version = "0.25.0"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
+version = "0.25.1"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
 dependencies = [
  "indoc",
  "libc",
@@ -687,8 +687,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-build-config"
-version = "0.25.0"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
+version = "0.25.1"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
 dependencies = [
  "once_cell",
  "target-lexicon",
@@ -696,8 +696,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-ffi"
-version = "0.25.0"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
+version = "0.25.1"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
 dependencies = [
  "libc",
  "pyo3-build-config",
@@ -705,8 +705,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros"
-version = "0.25.0"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
+version = "0.25.1"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
 dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
@@ -716,8 +716,8 @@ dependencies = [
 
 [[package]]
 name = "pyo3-macros-backend"
-version = "0.25.0"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#9a7ad8d4882ad084c35f87c4d918ae077515725a"
+version = "0.25.1"
+source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -806,12 +806,9 @@ dependencies = [
 
 [[package]]
 name = "slab"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
-dependencies = [
- "autocfg",
-]
+checksum = "04dc19736151f35336d325007ac991178d504a119863a2fcb3758cdb5e52c50d"
 
 [[package]]
 name = "smallvec"
@@ -1001,9 +998,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-attributes"
-version = "0.1.29"
+version = "0.1.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b1ffbcf9c6f6b99d386e7444eb608ba646ae452a36b39737deb9663b610f662"
+checksum = "81383ab64e72a7a8b8e13130c49e3dab29def6d0c7d76a03087b3cf71c5c6903"
 dependencies = [
  "proc-macro2",
  "quote",
