@@ -5,13 +5,13 @@ use rand::Rng;
 
 use crate::{Env, vm::Vm};
 
-pub struct VmCache<E> {
+pub struct VmCache<E: 'static> {
     caches: Mutex<HashMap<[u8; 32], Vec<Vm<E>>>>,
 }
 
 impl<E> VmCache<E>
 where
-    E: Env + Send + Sync,
+    E: Env + Send + Sync + 'static,
 {
     pub fn new() -> Self {
         Self {
