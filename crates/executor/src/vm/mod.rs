@@ -14,7 +14,7 @@ use wasmtime_wasi::p2::IoView;
 
 use crate::{Env, ExecStreamItem, vm::run::VmRun};
 
-pub struct Vm<E> {
+pub struct Vm<E: 'static> {
     pub(crate) hash: [u8; 32],
     pub(crate) store: Store<VmState<E>>,
     pub(crate) sandbox: Sandbox,
@@ -23,7 +23,7 @@ pub struct Vm<E> {
 
 impl<E> Vm<E>
 where
-    E: Env + Send,
+    E: Env + Send + 'static,
 {
     pub fn run(self, sender: mpsc::Sender<ExecStreamItem>) -> VmRun<E> {
         VmRun::new(self, sender)

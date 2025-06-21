@@ -1,5 +1,6 @@
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use tracing::event;
+use wasmtime::component::HasData;
 use wasmtime_wasi::p2::{IoImpl, WasiImpl, WasiView};
 
 wasmtime::component::bindgen!({
@@ -12,14 +13,11 @@ pub use wasi::logging as bindings;
 pub fn add_to_linker<T: WasiView>(
     linker: &mut wasmtime::component::Linker<T>,
 ) -> wasmtime::Result<()> {
-    fn type_annotate<T, F>(val: F) -> F
-    where
-        F: Fn(&mut T) -> WasiImpl<&mut T>,
-    {
-        val
+    struct HasWasi<T>(T);
+    impl<T: 'static> HasData for HasWasi<T> {
+        type Data<'a> = WasiImpl<&'a mut T>;
     }
-    let closure = type_annotate::<T, _>(|t| WasiImpl(IoImpl(t)));
-    bindings::logging::add_to_linker_get_host(linker, closure)
+    bindings::logging::add_to_linker::<_, HasWasi<T>>(linker, |t| WasiImpl(IoImpl(t)))
 }
 
 impl<T: WasiView> bindings::logging::Host for WasiImpl<T> {

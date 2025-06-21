@@ -19,7 +19,7 @@ wasmtime::component::bindgen!({
 use std::future::Future;
 
 pub use exports::promptkit::script::guest;
-use wasmtime::component::Linker;
+use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::IoView;
 
 pub trait HostView: IoView + Send {
@@ -45,14 +45,11 @@ pub mod host;
 pub mod outgoing_rpc;
 
 pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
-    fn type_annotate<T, F>(val: F) -> F
-    where
-        F: Fn(&mut T) -> HostImpl<&mut T>,
-    {
-        val
+    struct Host<T>(T);
+    impl<T: 'static> HasData for Host<T> {
+        type Data<'a> = HostImpl<&'a mut T>;
     }
-    let closure = type_annotate::<T, _>(|t| HostImpl(t));
-    promptkit::script::host::add_to_linker_get_host(l, closure)?;
-    promptkit::script::outgoing_rpc::add_to_linker_get_host(l, closure)?;
+    promptkit::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
+    promptkit::script::outgoing_rpc::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
     Ok(())
 }

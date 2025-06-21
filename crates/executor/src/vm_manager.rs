@@ -36,7 +36,7 @@ use crate::{
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
-pub struct VmManager<E> {
+pub struct VmManager<E: 'static> {
     engine: Engine,
     instance_pre: SandboxPre<VmState<E>>,
     cache: Arc<VmCache<E>>,
@@ -138,7 +138,7 @@ impl<E> VmManager<E> {
 
 impl<E> VmManager<E>
 where
-    E: Env + Send + Sync + Clone,
+    E: Env + Send + Sync + Clone + 'static,
 {
     pub fn new(path: &Path) -> Result<Self> {
         let config = Self::cfg();
@@ -403,7 +403,7 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
     }
 }
 
-struct MyInvoker<S> {
+struct MyInvoker<S: 'static> {
     store: Store<VmState<S>>,
     instance: Instance,
 }

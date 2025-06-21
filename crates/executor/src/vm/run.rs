@@ -9,13 +9,13 @@ use super::{
 };
 use crate::{Env, ExecStreamItem};
 
-pub struct VmRun<E: Env> {
+pub struct VmRun<E: Env + 'static> {
     vm: Option<Vm<E>>,
 }
 
 impl<E> VmRun<E>
 where
-    E: Env,
+    E: Env + 'static,
 {
     pub fn new(mut vm: Vm<E>, sender: mpsc::Sender<ExecStreamItem>) -> Self {
         let o: &mut VmState<_> = vm.store.data_mut();
