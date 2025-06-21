@@ -31,6 +31,8 @@ ExternalProject_Add(
     --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
     --with-pymalloc --with-computed-gotos --with-lto=thin
+  PATCH_COMMAND
+    patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/python.patch
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
   DEPENDS zlib)
 ExternalProject_Add_Step(
