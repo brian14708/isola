@@ -26,6 +26,7 @@ ExternalProject_Add(
   CONFIGURE_COMMAND
     CFLAGS=-fPIC CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env
+    cmake -E env PKG_CONFIG_SYSROOT_DIR= --
     <SOURCE_DIR>/configure --prefix=/usr/local --host=wasm32-wasi
     --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules

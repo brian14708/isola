@@ -25,9 +25,7 @@ ExternalProject_Add(
     cmake -E env
       PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.13
       _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
-      ZLIB_ROOT=${WASMLIB_SYSROOT}
-      FREETYPE_ROOT=${WASMLIB_SYSROOT}
-      JPEG_ROOT=${WASMLIB_SYSROOT}
+      PKG_CONFIG_LIBDIR=${WASMLIB_SYSROOT}/lib/pkgconfig
       CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
       CFLAGS=-fPIC\ -I${WASMLIB_SYSROOT}/usr/local/include/python3.13\ -I${WASMLIB_SYSROOT}/include/wasm32-wasip1
       LDFLAGS=-L${WASMLIB_SYSROOT}/lib/wasm32-wasip1\ ${CMAKE_BINARY_DIR}/libpython3.13.so\ -ldl
