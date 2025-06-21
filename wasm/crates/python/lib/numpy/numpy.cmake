@@ -5,9 +5,9 @@ find_package(Python3 ${PYTHON_VERSION})
 
 FetchContent_Declare(
   numpy-src
-  URL "https://github.com/numpy/numpy/releases/download/v2.2.2/numpy-2.2.2.tar.gz"
+  URL "https://github.com/numpy/numpy/releases/download/v2.3.0/numpy-2.3.0.tar.gz"
   URL_HASH
-    SHA256=ed6906f61834d687738d25988ae117683705636936cc605be0bb208b23df4d8f
+    SHA256=581f87f9e9e9db2cba2141400e160e9dd644ee248788d6f90636eeb8fd9260a6
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   PATCH_COMMAND
     patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/patch.diff

@@ -1,29 +1,88 @@
 diff --git a/numpy/_core/src/common/npy_hashtable.cpp b/numpy/_core/src/common/npy_hashtable.cpp
-index a4244fa..fd1c5c3 100644
+index ffd67d4..6d5e58b 100644
 --- a/numpy/_core/src/common/npy_hashtable.cpp
 +++ b/numpy/_core/src/common/npy_hashtable.cpp
-@@ -13,7 +13,6 @@
-  */
+@@ -15,7 +15,6 @@
+ #include "npy_hashtable.h"
  
  #include <mutex>
 -#include <shared_mutex>
  
  #include "templ_common.h"
- #include "npy_hashtable.h"
+ #include <new>
+diff --git a/numpy/_core/src/multiarray/unique.cpp b/numpy/_core/src/multiarray/unique.cpp
+index f36acfd..3776565 100644
+--- a/numpy/_core/src/multiarray/unique.cpp
++++ b/numpy/_core/src/multiarray/unique.cpp
+@@ -3,7 +3,8 @@
+ 
+ #include <Python.h>
+ 
+-#include <unordered_set>
++#include <map>
++#include <set>
+ #include <functional>
+ 
+ #include <numpy/npy_common.h>
+@@ -39,7 +40,7 @@ unique(PyArrayObject *self)
+     custom or complicated dtypes or string values.
+     */
+     NPY_ALLOW_C_API_DEF;
+-    std::unordered_set<T> hashset;
++    std::set<T> hashset;
+ 
+     NpyIter *iter = NpyIter_New(self, NPY_ITER_READONLY |
+                                       NPY_ITER_EXTERNAL_LOOP |
+@@ -120,7 +121,7 @@ unique(PyArrayObject *self)
+ 
+ // this map contains the functions used for each item size.
+ typedef std::function<PyObject *(PyArrayObject *)> function_type;
+-std::unordered_map<int, function_type> unique_funcs = {
++std::map<int, function_type> unique_funcs = {
+     {NPY_BYTE, unique<npy_byte>},
+     {NPY_UBYTE, unique<npy_ubyte>},
+     {NPY_SHORT, unique<npy_short>},
+@@ -163,21 +164,10 @@ array__unique_hash(PyObject *NPY_UNUSED(module), PyObject *arr_obj)
+     }
+     PyArrayObject *arr = (PyArrayObject *)arr_obj;
+ 
+-    try {
+-        auto type = PyArray_TYPE(arr);
+-        // we only support data types present in our unique_funcs map
+-        if (unique_funcs.find(type) == unique_funcs.end()) {
+-            Py_RETURN_NOTIMPLEMENTED;
+-        }
+-
+-        return unique_funcs[type](arr);
+-    }
+-    catch (const std::bad_alloc &e) {
+-        PyErr_NoMemory();
+-        return NULL;
+-    }
+-    catch (const std::exception &e) {
+-        PyErr_SetString(PyExc_RuntimeError, e.what());
+-        return NULL;
++    auto type = PyArray_TYPE(arr);
++    auto it = unique_funcs.find(type);
++    if (it == unique_funcs.end()) {
++        Py_RETURN_NOTIMPLEMENTED;
+     }
++    return (it->second)(arr);
+ }
 diff --git a/numpy/_core/src/umath/dispatching.cpp b/numpy/_core/src/umath/dispatching.cpp
-index 87b16cc..4af6a5a 100644
+index ba98a9b..0c0d467 100644
 --- a/numpy/_core/src/umath/dispatching.cpp
 +++ b/numpy/_core/src/umath/dispatching.cpp
-@@ -39,7 +39,6 @@
- #define _UMATHMODULE
+@@ -43,7 +43,6 @@
+ #include <convert_datatype.h>
  
  #include <mutex>
 -#include <shared_mutex>
  
- #define PY_SSIZE_T_CLEAN
- #include <Python.h>
+ #include "numpy/ndarraytypes.h"
+ #include "numpy/npy_3kcompat.h"
 diff --git a/numpy/fft/_pocketfft_umath.cpp b/numpy/fft/_pocketfft_umath.cpp
-index 8488887..0ba86c5 100644
+index 525b5e5..787437b 100644
 --- a/numpy/fft/_pocketfft_umath.cpp
 +++ b/numpy/fft/_pocketfft_umath.cpp
 @@ -35,19 +35,7 @@ wrap_legacy_cpp_ufunc(char **args, npy_intp const *dimensions,
@@ -238,7 +297,7 @@ index 66eea06..f1e1171 100644
    util::sanity_check(shape, stride_in, stride_out, data_in==data_out, axes);
    cndarr<T> ain(data_in, shape, stride_in);
 diff --git a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
-index 174104b..57c99ea 100644
+index f0515a9..38b4041 100644
 --- a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
 +++ b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
 @@ -84,10 +84,10 @@ def to_native(self, copy: bool = False) -> T.List[str]:

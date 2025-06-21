@@ -1,6 +1,6 @@
-setuptools==78.1.0
-typing-extensions==4.13.0
+setuptools==80.9.0
+typing-extensions==4.14.0
 annotated-types==0.7.0
-typing-inspection==0.4.0
-pydantic==2.11.2
+typing-inspection==0.4.1
 xmltodict==0.14.2
+pydantic==2.11.2

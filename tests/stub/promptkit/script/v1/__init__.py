@@ -187,6 +187,7 @@ class ExecuteClientStreamRequest(betterproto.Message):
         1, group="request_type"
     )
     stream_value: "Argument" = betterproto.message_field(2, group="request_type")
+    timeout: timedelta = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)
@@ -195,6 +196,7 @@ class ExecuteStreamRequest(betterproto.Message):
         1, group="request_type"
     )
     stream_value: "Argument" = betterproto.message_field(2, group="request_type")
+    timeout: timedelta = betterproto.message_field(3)
 
 
 @dataclass(eq=False, repr=False)

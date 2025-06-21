@@ -34,10 +34,10 @@ RUN curl -L -o /usr/local/binaryen.tar.gz "https://github.com/WebAssembly/binary
     rm /usr/local/binaryen.tar.gz
 ENV PYENV_ROOT=/root/.pyenv \
     PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH \
-    PYENV_GIT_TAG=v2.5.5
+    PYENV_GIT_TAG=v2.6.3
 RUN curl https://pyenv.run | bash
 RUN eval "$(pyenv init -)"
-RUN pyenv install 3.13.3 && pyenv global 3.13.3
+RUN pyenv install 3.13.5 && pyenv global 3.13.5
 RUN pip install --root-user-action=ignore \
     cython wheel typing-extensions maturin setuptools
 
