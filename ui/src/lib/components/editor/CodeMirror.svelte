@@ -12,7 +12,7 @@
 	let editor: EditorView;
 
 	// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-	void EditorView,
+	(void EditorView,
 		basicSetup,
 		keymap,
 		python,
@@ -20,7 +20,7 @@
 		indentWithTab,
 		Compartment,
 		githubLight,
-		githubDark;
+		githubDark);
 
 	export function content() {
 		return editor.state.doc.toString();
