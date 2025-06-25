@@ -22,61 +22,85 @@
         pkgs = import nixpkgs {
           inherit system;
           overlays = [ rust-overlay.overlays.default ];
+          config = {
+            allowUnfree = true;
+            android_sdk.accept_license = true;
+          };
         };
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain (
+        rustToolchain = (
           p:
           p.rust-bin.stable.latest.default.override {
-            extensions = [ "rust-src" ];
             targets = [ "wasm32-wasip1" ];
           }
         );
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
+        craneLibFull = (crane.mkLib pkgs).overrideToolchain (
+          p:
+          p.rust-bin.stable.latest.default.override {
+            extensions = [ "rust-src" ];
+            targets = [
+              "wasm32-wasip1"
+              "aarch64-linux-android"
+            ];
+          }
+        );
+        deps = with pkgs; [
+          just
+
+          # js
+          nodejs
+          pnpm
+
+          # python
+          (python313.withPackages (
+            p: with p; [
+              cython
+              setuptools
+              uv
+              typing-extensions
+              pip
+              wheel
+            ]
+          ))
+          maturin
+
+          # rust / c++
+          binaryen
+          cmake
+          ninja
+          buf
+          protobuf
+          pkg-config
+        ];
+
+        mkShell = pkgs.mkShell.override {
+          stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
+        };
       in
       {
-        devShells.default =
-          (craneLib.devShell.override {
-            mkShell = pkgs.mkShell.override {
-              stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
-            };
-          })
-            {
-              buildInputs =
-                with pkgs;
-                [
-                  just
+        devShells = {
+          default = (craneLib.devShell.override { inherit mkShell; }) { buildInputs = deps; };
 
-                  # js
-                  nodejs
-                  pnpm
+          full = (craneLibFull.devShell.override { inherit mkShell; }) (
+            let
+              androidComposition = pkgs.androidenv.composeAndroidPackages {
+                abiVersions = [ "arm64-v8a" ];
+                includeNDK = true;
+                platformVersions = [ "30" ];
+              };
+            in
+            rec {
+              buildInputs = deps ++ [ pkgs.android-tools ];
 
-                  # python
-                  (python313.withPackages (
-                    p: with p; [
-                      cython
-                      setuptools
-                      uv
-                      typing-extensions
-                      pip
-                      wheel
-                    ]
-                  ))
-                  maturin
+              ANDROID_SDK_ROOT = "${androidComposition.androidsdk}/libexec/android-sdk";
+              ANDROID_NDK_ROOT = "${ANDROID_SDK_ROOT}/ndk-bundle";
+              CC_aarch64_linux_android = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
+              CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
+            }
+          );
+        };
 
-                  # rust / c++
-                  binaryen
-                  cmake
-                  ninja
-                  buf
-                  protobuf
-                  pkg-config
-                ]
-                ++ lib.optional stdenv.isDarwin [
-                  darwin.apple_sdk.frameworks.Security
-                  darwin.apple_sdk.frameworks.CoreFoundation
-                  darwin.apple_sdk.frameworks.SystemConfiguration
-                  libiconv
-                ];
-            };
       }
     );
 
