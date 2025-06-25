@@ -16,4 +16,4 @@ thiserror = "2.0.0"
 toml = "0.8.20"
 tonic-reflection = { version = "0.13.0", default-features = false }
 url = "2.5.0"
-wit-bindgen = "0.42.0"
+wit-bindgen = "0.43.0"
