@@ -311,28 +311,20 @@ impl std::io::Write for wasi::io::streams::OutputStream {
                 }
                 Err(StreamError::Closed) => return Ok(0),
                 Err(StreamError::LastOperationFailed(e)) => {
-                    return Err(std::io::Error::other(
-                        e.to_debug_string(),
-                    ));
+                    return Err(std::io::Error::other(e.to_debug_string()));
                 }
             }
         };
-        let n = n
-            .get()
-            .try_into()
-            .map_err(std::io::Error::other)?;
+        let n = n.get().try_into().map_err(std::io::Error::other)?;
         let n = buf.len().min(n);
         wasi::io::streams::OutputStream::write(self, &buf[..n]).map_err(|e| match e {
             StreamError::Closed => std::io::ErrorKind::UnexpectedEof.into(),
-            StreamError::LastOperationFailed(e) => {
-                std::io::Error::other(e.to_debug_string())
-            }
+            StreamError::LastOperationFailed(e) => std::io::Error::other(e.to_debug_string()),
         })?;
         Ok(n)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        self.blocking_flush()
-            .map_err(std::io::Error::other)
+        self.blocking_flush().map_err(std::io::Error::other)
     }
 }

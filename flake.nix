@@ -7,6 +7,10 @@
       url = "github:oxalica/rust-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
   outputs =
     {
@@ -15,6 +19,7 @@
       nixpkgs,
       crane,
       rust-overlay,
+      treefmt-nix,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
@@ -45,6 +50,20 @@
             ];
           }
         );
+
+        treefmtEval = treefmt-nix.lib.evalModule pkgs {
+          projectRootFile = "flake.nix";
+          programs = {
+            nixfmt.enable = true;
+            gofumpt.enable = true;
+            rustfmt = {
+              enable = true;
+              package = rustToolchain pkgs;
+            };
+            buf.enable = true;
+          };
+        };
+
         deps = with pkgs; [
           just
 
@@ -101,6 +120,8 @@
           );
         };
 
+        formatter = treefmtEval.config.build.wrapper;
+        checks.formatting = treefmtEval.config.build.check self;
       }
     );
 
