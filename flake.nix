@@ -67,7 +67,7 @@
                   cmake
                   ninja
                   buf
-                  protobuf_28
+                  protobuf
                   pkg-config
                 ]
                 ++ lib.optional stdenv.isDarwin [
