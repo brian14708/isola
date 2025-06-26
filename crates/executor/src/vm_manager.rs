@@ -143,6 +143,7 @@ where
     pub fn new(path: &Path) -> Result<Self> {
         let config = Self::cfg();
         let engine = Engine::new(&config)?;
+        Engine::tls_eager_initialize();
 
         info!("Loading module...");
         let component = {
