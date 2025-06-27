@@ -5,4 +5,4 @@ plugins:
   - local: ['uv', 'run', 'protoc-gen-python_betterproto']
     out: stub
 inputs:
-  - directory: ../apis/proto
+  - directory: ../../apis/proto

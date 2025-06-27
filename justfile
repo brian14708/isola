@@ -1,7 +1,7 @@
 default: check
 
 run: build
-    cargo run --release
+    cargo run --release -p promptkit_server
 
 check: lint test
 
@@ -10,11 +10,11 @@ integration:
 
 generate:
     cd ui && pnpm install && pnpm run generate
-    cd tests && buf generate
+    cd tests/rpc && buf generate
 
 build: build-wasm build-ui
-    cargo build --release
-    cargo run --release build
+    cargo build --release -p promptkit_server
+    cargo run --release -p promptkit_server build
 
 [working-directory('wasm')]
 build-wasm:
@@ -35,8 +35,7 @@ test-wasm:
 lint: lint-wasm lint-ui lint-proto
     cargo clippy -- --deny warnings
     uv run ruff check
-    uv run ruff format --check
-    uv run mypy tests
+    uv run mypy tests/rpc
 
 [working-directory('wasm')]
 lint-wasm:
@@ -51,4 +50,8 @@ lint-ui:
 [working-directory('apis/proto')]
 lint-proto:
     buf lint
-    buf format --exit-code --diff
+
+integration-c:
+    cmake -B target/c -G Ninja tests/c
+    cmake --build target/c
+    cmake --build target/c --target test

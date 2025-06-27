@@ -52,26 +52,7 @@
           }
         );
 
-        treefmtEval = treefmt-nix.lib.evalModule pkgs {
-          projectRootFile = "flake.nix";
-          programs = {
-            nixfmt.enable = true;
-            rustfmt = {
-              enable = true;
-              package = rustToolchain pkgs;
-            };
-            buf.enable = true;
-            cmake-format.enable = true;
-          };
-          settings.formatter = {
-            cmake-format = {
-              includes = [
-                "*.cmake"
-                "*/CMakeLists.txt"
-              ];
-            };
-          };
-        };
+        treefmtEval = treefmt-nix.lib.evalModule pkgs ./treefmt.nix;
 
         deps = with pkgs; [
           just

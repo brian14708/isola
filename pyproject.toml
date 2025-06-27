@@ -19,13 +19,12 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/rpc"]
 asyncio_default_fixture_loop_scope = "module"
 asyncio_default_test_loop_scope = "module"
 
 [tool.ruff]
-exclude = ["tests/stub/*"]
-src = ["tests"]
+exclude = ["tests/rpc/stub/*"]
 
 [tool.ruff.lint]
 select = [
@@ -42,7 +41,7 @@ select = [
 quote-annotations = true
 
 [[tool.mypy.overrides]]
-module = ["tests.stub.promptkit.script.v1"]
+module = ["rpc.stub.promptkit.script.v1"]
 disable_error_code = ["arg-type"]
 
 [tool.pyright]
