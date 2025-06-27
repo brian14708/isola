@@ -30,10 +30,11 @@ ExternalProject_Add(
     <SOURCE_DIR>/configure --prefix=/usr/local --host=wasm32-wasi
     --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
-    --with-pymalloc --with-computed-gotos --with-lto=thin
+    --enable-big-digits=30
   PATCH_COMMAND
     patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/python.patch
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
+  BUILD_IN_SOURCE TRUE
   DEPENDS zlib)
 ExternalProject_Add_Step(
   python-build assets
@@ -71,8 +72,3 @@ target_link_libraries(
 install(TARGETS python DESTINATION lib)
 install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
         DESTINATION include)
-add_custom_command(
-  TARGET python
-  POST_BUILD
-  COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}> ARGS --strip-all
-          $<TARGET_FILE:python>)

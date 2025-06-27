@@ -28,6 +28,7 @@ target_link_libraries(
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so
 )
 
 install(

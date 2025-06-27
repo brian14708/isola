@@ -56,6 +56,8 @@ impl<E: Env + Send> VmState<E> {
             .unwrap()
             .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
             .unwrap()
+            .allow_tcp(false)
+            .allow_udp(false)
             .stdout(TraceOutput::new("stdout"))
             .stderr(TraceOutput::new("stderr"))
             .build();
