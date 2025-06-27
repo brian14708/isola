@@ -1,6 +1,7 @@
 use std::{
     future::Future,
-    path::Path,
+    hash::{DefaultHasher, Hash, Hasher},
+    path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -72,7 +73,8 @@ struct Manifest {
 }
 
 impl<E> VmManager<E> {
-    fn cfg() -> Config {
+    fn cfg() -> (Config, String) {
+        let mut hash = String::new();
         let mut config = Config::new();
         config
             .wasm_component_model(true)
@@ -80,7 +82,15 @@ impl<E> VmManager<E> {
             .epoch_interruption(true)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
 
-        config
+        if std::env::var("DISABLE_EPOCH_INTERRUPTION")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
+            config.epoch_interruption(false);
+            hash.push_str("no_epoch_interruption");
+        }
+
+        (config, hash)
     }
 
     fn get_max_memory() -> usize {
@@ -90,11 +100,11 @@ impl<E> VmManager<E> {
             .unwrap_or(64 * 1024 * 1024)
     }
 
-    pub async fn compile(path: &Path) -> anyhow::Result<()> {
+    pub async fn compile(path: &Path) -> anyhow::Result<PathBuf> {
         let data = std::fs::read(path)?;
         let data = component_init_transform::initialize(&data, |instrumented| {
             async move {
-                let mut config = Self::cfg();
+                let (mut config, _) = Self::cfg();
                 config
                     .epoch_interruption(false)
                     .cranelift_opt_level(wasmtime::OptLevel::None);
@@ -126,13 +136,41 @@ impl<E> VmManager<E> {
         })
         .await?;
 
-        let config = Self::cfg();
+        let (config, hash) = Self::cfg();
         let engine = Engine::new(&config)?;
         let component = Component::new(&engine, &data)?;
         println!("Serializing...");
         let data = component.serialize()?;
-        std::fs::write(path.with_extension("wasm.cache"), data)?;
-        Ok(())
+        let exts = Self::ext(&engine, &hash);
+        let compiled_path = path.with_extension(&exts[0]);
+        std::fs::write(&compiled_path, data)?;
+        #[cfg(unix)]
+        {
+            if let Some(name) = compiled_path.file_name() {
+                for ext in &exts[1..] {
+                    let symlink_path = path.with_extension(ext);
+                    _ = std::fs::remove_file(&symlink_path);
+                    _ = std::os::unix::fs::symlink(name, &symlink_path);
+                }
+            }
+        }
+        Ok(compiled_path)
+    }
+
+    fn ext(engine: &Engine, feature: &str) -> Vec<String> {
+        vec![
+            {
+                let mut hasher = DefaultHasher::new();
+                engine.precompile_compatibility_hash().hash(&mut hasher);
+                feature.hash(&mut hasher);
+                format!("{:x}.cwasm", hasher.finish())
+            },
+            {
+                let mut hasher = DefaultHasher::new();
+                feature.hash(&mut hasher);
+                format!("{:x}.cwasm", hasher.finish())
+            },
+        ]
     }
 }
 
@@ -140,44 +178,44 @@ impl<E> VmManager<E>
 where
     E: Env + Send + Sync + Clone + 'static,
 {
-    pub fn new(path: &Path) -> Result<Self> {
-        let config = Self::cfg();
+    pub async fn new(path: &Path) -> Result<Self> {
+        let (config, feature_hash) = Self::cfg();
         let engine = Engine::new(&config)?;
-        Engine::tls_eager_initialize();
 
         info!("Loading module...");
-        let component = {
-            let cache_path = path.with_extension("wasm.cache");
-
+        let component = (async {
             let mod_time = std::fs::metadata(path)
                 .map_err(anyhow::Error::from)?
                 .modified()
                 .map_err(anyhow::Error::from)?;
-            let cache = std::fs::metadata(&cache_path)
-                .map_err(anyhow::Error::from)
-                .and_then(|v| {
-                    if mod_time <= v.modified()? {
-                        Ok(unsafe { Component::deserialize_file(&engine, &cache_path)? })
-                    } else {
-                        Err(anyhow!("cache is outdated"))
-                    }
-                });
+            for cache_path in Self::ext(&engine, &feature_hash)
+                .into_iter()
+                .map(|v| path.with_extension(v))
+            {
+                let cache = std::fs::metadata(&cache_path)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|v| {
+                        if mod_time <= v.modified()? {
+                            Ok::<_, anyhow::Error>(unsafe {
+                                Component::deserialize_file(&engine, cache_path)?
+                            })
+                        } else {
+                            Err(anyhow!("cache is outdated"))
+                        }
+                    });
 
-            if let Ok(c) = cache {
-                c
-            } else {
-                let component = Component::from_file(&engine, path)?;
-                #[cfg(debug_assertions)]
-                {
-                    let data = component.serialize()?;
-                    std::fs::write(cache_path, data).map_err(anyhow::Error::from)?;
+                if let Ok(c) = cache {
+                    return Ok(c);
                 }
-                component
             }
-        };
+            let cache_path = Self::compile(path).await?;
+            unsafe { Component::deserialize_file(&engine, &cache_path) }
+        })
+        .await?;
 
         let linker = VmState::new_linker(&engine)?;
         let instance_pre = linker.instantiate_pre(&component)?;
+        Engine::tls_eager_initialize();
 
         info!("Loaded module!");
 

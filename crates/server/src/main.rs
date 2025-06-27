@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         None | Some("serve") => {
-            let state = routes::AppState::new("wasm/target/promptkit_python.wasm")?;
+            let state = routes::AppState::new("wasm/target/promptkit_python.wasm").await?;
             let app = routes::router(&state);
 
             let grpc = tonic::service::Routes::default()
