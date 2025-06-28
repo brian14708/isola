@@ -88,7 +88,7 @@ importers:
         version: 0.511.0(svelte@5.34.1)
       mode-watcher:
         specifier: ^1.0.7
-        version: 1.0.7(svelte@5.34.1)
+        version: 1.1.0(svelte@5.34.1)
       prettier:
         specifier: ^3.5.3
         version: 3.6.0
@@ -1419,8 +1419,8 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  mode-watcher@1.0.7:
-    resolution: {integrity: sha512-ZGA7ZGdOvBJeTQkzdBOnXSgTkO6U6iIFWJoyGCTt6oHNg9XP9NBvS26De+V4W2aqI+B0yYXUskFG2VnEo3zyMQ==}
+  mode-watcher@1.1.0:
+    resolution: {integrity: sha512-mUT9RRGPDYenk59qJauN1rhsIMKBmWA3xMF+uRwE8MW/tjhaDSCCARqkSuDTq8vr4/2KcAxIGVjACxTjdk5C3g==}
     peerDependencies:
       svelte: ^5.27.0
 
@@ -1671,6 +1671,9 @@ packages:
 
   style-to-object@1.0.8:
     resolution: {integrity: sha512-xT47I/Eo0rwJmaXC4oilDGDWLohVhR6o/xAQcPQN8q6QBuZVL8qMYL85kLmST5cPjAorwvqIA4qXTRQoYHaL6g==}
+
+  style-to-object@1.0.9:
+    resolution: {integrity: sha512-G4qppLgKu/k6FwRpHiGiKPaPTFcG3g4wNVX/Qsfu+RqQM30E7Tyu/TEgxcL9PNLF5pdRLwQdE3YKKf+KF2Dzlw==}
 
   superstruct@2.0.2:
     resolution: {integrity: sha512-uV+TFRZdXsqXTL2pRvujROjdZQ4RAlBUS5BTh9IGm+jTqQntYThciG/qu57Gs69yjnVUSqdxF9YLmSnpupBW9A==}
@@ -3168,7 +3171,7 @@ snapshots:
 
   mkdirp@3.0.1: {}
 
-  mode-watcher@1.0.7(svelte@5.34.1):
+  mode-watcher@1.1.0(svelte@5.34.1):
     dependencies:
       runed: 0.25.0(svelte@5.34.1)
       svelte: 5.34.1
@@ -3354,6 +3357,10 @@ snapshots:
     dependencies:
       inline-style-parser: 0.2.4
 
+  style-to-object@1.0.9:
+    dependencies:
+      inline-style-parser: 0.2.4
+
   superstruct@2.0.2: {}
 
   supports-color@7.2.0:
@@ -3393,7 +3400,7 @@ snapshots:
     dependencies:
       clsx: 2.1.1
       runed: 0.23.4(svelte@5.34.1)
-      style-to-object: 1.0.8
+      style-to-object: 1.0.9
       svelte: 5.34.1
 
   svelte@5.34.1:
