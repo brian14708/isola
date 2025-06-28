@@ -21,7 +21,7 @@ fn main() {
             .wait()
             .unwrap();
         if !e.success() {
-            panic!("Failed to run cmake {:?}", e);
+            panic!("Failed to run cmake {e:?}");
         }
         let e = Command::new(&cmd)
             .arg("--build")
@@ -36,7 +36,7 @@ fn main() {
             .wait()
             .unwrap();
         if !e.success() {
-            panic!("Failed to run cmake {:?}", e);
+            panic!("Failed to run cmake {e:?}");
         }
 
         println!("cargo:rustc-link-arg=-shared");

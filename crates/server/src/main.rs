@@ -1,4 +1,5 @@
 #![warn(clippy::pedantic)]
+#![allow(clippy::collapsible_if)]
 
 use std::{env::args, path::PathBuf};
 

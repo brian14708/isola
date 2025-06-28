@@ -95,7 +95,9 @@ pub mod sys_module {
                 .chain(result),
         )
         .unwrap();
-        refs.iter_mut().for_each(|(_, p)| p.release());
+        for (_, p) in &mut refs {
+            p.release();
+        }
         Ok(result)
     }
 }
