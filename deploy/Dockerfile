@@ -23,7 +23,8 @@ COPY apis ../apis
 RUN pnpm run build
 
 FROM --platform=$BUILDPLATFORM docker.io/library/rust:latest AS wasm-build
-RUN rustup target add wasm32-wasip1
+COPY wasm/rust-toolchain.toml .
+RUN rustup show
 
 RUN apt-get update && \
     apt-get install -y cmake ninja-build && \

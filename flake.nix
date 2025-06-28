@@ -35,14 +35,15 @@
 
         rustToolchain = (
           p:
-          p.rust-bin.stable.latest.default.override {
+          p.rust-bin.nightly.latest.default.override {
+            extensions = [ "rust-src" ];
             targets = [ "wasm32-wasip1" ];
           }
         );
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
         craneLibFull = (crane.mkLib pkgs).overrideToolchain (
           p:
-          p.rust-bin.stable.latest.default.override {
+          p.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" ];
             targets = [
               "wasm32-wasip1"
