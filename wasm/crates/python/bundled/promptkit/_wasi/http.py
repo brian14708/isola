@@ -5,6 +5,7 @@ from typing import IO, TYPE_CHECKING, Literal, cast, final, overload
 
 import _promptkit_http as _http
 import _promptkit_rpc
+import _promptkit_serde
 
 from promptkit.asyncio import run as asyncio_run
 from promptkit.asyncio import subscribe
@@ -434,7 +435,7 @@ def get_sse(
         for event in resp.iter_sse():
             if event.data == "[DONE]":
                 break
-            yield _http.loads_json(event.data)
+            yield _promptkit_serde.json_loads(event.data)
 
 
 def post(
@@ -484,7 +485,7 @@ def post_sse(
         for event in resp.iter_sse():
             if event.data.startswith("[DONE]"):
                 break
-            yield _http.loads_json(event.data)
+            yield _promptkit_serde.json_loads(event.data)
 
 
 async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Exception:

@@ -39,12 +39,6 @@ pub mod http_module {
     }
 
     #[pyfunction]
-    fn loads_json<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyAny>> {
-        PyValue::deserialize(py, &mut serde_json::Deserializer::from_str(s))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))
-    }
-
-    #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
     #[allow(clippy::too_many_lines)]
     fn fetch(
