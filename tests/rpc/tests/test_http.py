@@ -3,8 +3,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 from betterproto.lib.google.protobuf import NullValue, Value
-
-from .stub.promptkit.script import v1 as pb
+from stub.promptkit.script import v1 as pb
 
 if TYPE_CHECKING:
     import pathlib

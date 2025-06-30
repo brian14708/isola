@@ -4,8 +4,7 @@ import pathlib
 import pytest
 import pytest_asyncio
 from grpclib.client import Channel
-
-from .stub.promptkit.script.v1 import ScriptServiceStub
+from stub.promptkit.script.v1 import ScriptServiceStub
 
 
 @pytest_asyncio.fixture

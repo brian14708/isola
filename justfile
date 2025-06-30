@@ -6,7 +6,7 @@ run: build
 check: lint test
 
 integration:
-    uv run pytest
+    uv run --directory tests/rpc pytest
 
 generate:
     cd ui && pnpm install && pnpm run generate
@@ -37,10 +37,9 @@ lint: lint-wasm lint-ui lint-proto
     uv run ruff check
     uv run mypy tests/rpc
 
-[working-directory('wasm')]
 lint-wasm:
-    cargo clippy -- --deny warnings
-    cd crates/python/bundled && uv run mypy .
+    cd wasm && cargo clippy -- --deny warnings
+    uv run mypy wasm/crates/python/bundled
 
 [working-directory('ui')]
 lint-ui:
