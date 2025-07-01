@@ -9,7 +9,7 @@ edition.workspace = true
 anyhow = "1.0.82"
 async-trait = "0.1.80"
 bytes = "1.6.0"
-component-init = { git = "https://github.com/dicej/component-init", version = "0.1.0" }
+component-init-transform = { git = "https://github.com/dicej/component-init", version = "0.1.0" }
 futures-core = "0.3.30"
 futures-util = "0.3.30"
 http = "1.1.0"

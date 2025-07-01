@@ -8,7 +8,7 @@ use std::{
 };
 
 use anyhow::anyhow;
-use component_init::Invoker;
+use component_init_transform::Invoker;
 use futures_util::FutureExt;
 use pin_project_lite::pin_project;
 use rc_zip_tokio::{ReadZip, rc_zip::parse::EntryKind};
@@ -92,7 +92,7 @@ impl<E> VmManager<E> {
 
     pub async fn compile(path: &Path) -> anyhow::Result<()> {
         let data = std::fs::read(path)?;
-        let data = component_init::initialize(&data, |instrumented| {
+        let data = component_init_transform::initialize(&data, |instrumented| {
             async move {
                 let mut config = Self::cfg();
                 config
