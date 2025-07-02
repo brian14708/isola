@@ -9,12 +9,11 @@ FetchContent_Declare(
   URL_HASH
     SHA256=581f87f9e9e9db2cba2141400e160e9dd644ee248788d6f90636eeb8fd9260a6
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
-  PATCH_COMMAND
-    patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/patch.diff
-)
+  PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/patch.diff)
 FetchContent_MakeAvailable(numpy-src)
 
-configure_file(${CMAKE_CURRENT_LIST_DIR}/cross.cfg.in ${numpy-src_SOURCE_DIR}/cross.cfg @ONLY)
+configure_file(${CMAKE_CURRENT_LIST_DIR}/cross.cfg.in
+               ${numpy-src_SOURCE_DIR}/cross.cfg @ONLY)
 
 ExternalProject_Add(
   numpy-build
@@ -24,14 +23,13 @@ ExternalProject_Add(
     PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.13
     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
     ${Python3_EXECUTABLE} <SOURCE_DIR>/vendored-meson/meson/meson.py setup
-      --prefix ${CMAKE_BINARY_DIR}/pythonpkgs
-      --cross-file=${numpy-src_SOURCE_DIR}/cross.cfg
-      --buildtype release
-      <BINARY_DIR> <SOURCE_DIR>
+    --prefix ${CMAKE_BINARY_DIR}/pythonpkgs
+    --cross-file=${numpy-src_SOURCE_DIR}/cross.cfg --buildtype release
+    <BINARY_DIR> <SOURCE_DIR>
   BUILD_COMMAND ninja
   INSTALL_COMMAND
     ${Python3_EXECUTABLE} <SOURCE_DIR>/vendored-meson/meson/meson.py install
-      --no-rebuild --tags=runtime,python-runtime,devel
+    --no-rebuild --tags=runtime,python-runtime,devel
   DEPENDS python)
 
 install(DIRECTORY ${CMAKE_BINARY_DIR}/pythonpkgs/ DESTINATION usr/local)

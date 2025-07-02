@@ -2,7 +2,8 @@ include(FetchContent)
 
 set(WASI_SDK_VERSION 25)
 set(WASI_HOST_OS "x86_64-linux")
-set(WASI_SHA256 "52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c")
+set(WASI_SHA256
+    "52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c")
 
 FetchContent_Declare(
   wasi-sdk
@@ -28,8 +29,7 @@ target_link_libraries(
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.so
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so
-)
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so)
 
 install(
   FILES ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so
