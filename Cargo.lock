@@ -2121,7 +2121,15 @@ dependencies = [
 name = "promptkit_c_api"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "bytes",
  "cbindgen",
+ "futures-util",
+ "http",
+ "http-body",
+ "promptkit_executor",
+ "promptkit_request",
+ "promptkit_transcode",
  "thiserror 2.0.12",
  "tokio",
 ]

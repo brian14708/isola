@@ -84,7 +84,11 @@
         ];
 
         mkShell = pkgs.mkShell.override {
-          stdenv = pkgs.stdenvAdapters.useMoldLinker pkgs.clangStdenv;
+          stdenv =
+            if pkgs.stdenv.isDarwin then
+              pkgs.llvmPackages.libcxxStdenv
+            else
+              pkgs.stdenvAdapters.useMoldLinker pkgs.llvmPackages.libcxxStdenv;
         };
       in
       {

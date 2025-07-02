@@ -3,7 +3,7 @@ use std::{future::Future, pin::Pin};
 use bytes::Bytes;
 use tokio::task::JoinHandle;
 
-type HttpResponse<E> = http::Response<
+pub type HttpResponse<E> = http::Response<
     Pin<
         Box<
             dyn futures_core::Stream<Item = Result<http_body::Frame<Bytes>, E>>

@@ -20,12 +20,12 @@ use wasmtime_wasi_http::{
 };
 
 use super::bindgen::{HostView, add_to_linker};
-use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
+use crate::{Env, resource::MemoryLimiter, trace_output::TraceOutput};
 
 pub trait OutputCallback: Send + 'static {
-    fn emit(
+    fn on_result(
         &mut self,
-        item: ExecStreamItem,
+        item: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
 }
 
@@ -52,14 +52,15 @@ impl<E: Env + Send> VmState<E> {
         Ok(linker)
     }
 
-    pub fn new(engine: &Engine, workdir: &Path, max_memory: usize, env: E) -> Store<Self> {
+    pub fn new(
+        engine: &Engine,
+        base_dir: &Path,
+        workdir: &Path,
+        max_memory: usize,
+        env: E,
+    ) -> Store<Self> {
         let wasi = WasiCtxBuilder::new()
-            .preopened_dir(
-                "./wasm/target/wasm32-wasip1/wasi-deps/usr",
-                "/usr",
-                DirPerms::READ,
-                FilePerms::READ,
-            )
+            .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
             .unwrap()
             .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
             .unwrap()
@@ -161,7 +162,7 @@ impl<E: Send + Env> HostView for VmState<E> {
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
         match &mut self.run {
             Some(run) => {
-                run.output.emit(ExecStreamItem::Data(data)).await?;
+                run.output.on_result(data).await?;
                 Ok(())
             }
             _ => Err(anyhow::anyhow!("output channel missing")),

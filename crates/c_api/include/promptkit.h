@@ -9,6 +9,18 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+typedef enum promptkit_argument_type {
+  PROMPTKIT_ARGUMENT_TYPE_JSON = 0,
+} promptkit_argument_type;
+
+typedef enum promptkit_callback_event {
+  PROMPTKIT_CALLBACK_EVENT_RESULT_JSON = 0,
+  PROMPTKIT_CALLBACK_EVENT_END_JSON = 4,
+  PROMPTKIT_CALLBACK_EVENT_STDOUT = 1,
+  PROMPTKIT_CALLBACK_EVENT_STDERR = 2,
+  PROMPTKIT_CALLBACK_EVENT_ERROR = 3,
+} promptkit_callback_event;
+
 typedef enum promptkit_error_code {
   PROMPTKIT_ERROR_CODE_OK = 0,
   PROMPTKIT_ERROR_CODE_INVALID_ARGUMENT = 1,
@@ -17,6 +29,15 @@ typedef enum promptkit_error_code {
 
 typedef struct promptkit_context_handle promptkit_context_handle;
 
+typedef struct promptkit_vm_handle promptkit_vm_handle;
+
+typedef struct promptkit_argument {
+  enum promptkit_argument_type type;
+  const char *name;
+  const uint8_t *value;
+  size_t len;
+} promptkit_argument;
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -24,14 +45,42 @@ extern "C" {
 enum promptkit_error_code promptkit_context_create(size_t nr_thread,
                                                    struct promptkit_context_handle **out_context);
 
-enum promptkit_error_code promptkit_context_initialize(const struct promptkit_context_handle *ctx,
+enum promptkit_error_code promptkit_context_initialize(struct promptkit_context_handle *ctx,
                                                        const char *path);
 
-enum promptkit_error_code promptkit_context_config_set(const struct promptkit_context_handle *ctx,
+enum promptkit_error_code promptkit_context_config_set(struct promptkit_context_handle *ctx,
                                                        const char *key,
                                                        const char *value);
 
 void promptkit_context_destroy(struct promptkit_context_handle *_ctx);
+
+enum promptkit_error_code promptkit_vm_create(struct promptkit_context_handle *ctx,
+                                              struct promptkit_vm_handle **out_vm);
+
+void promptkit_vm_destroy(struct promptkit_vm_handle *_vm);
+
+enum promptkit_error_code promptkit_vm_set_config(struct promptkit_vm_handle *vm,
+                                                  const char *key,
+                                                  const char *value);
+
+enum promptkit_error_code promptkit_vm_set_callback(struct promptkit_vm_handle *vm,
+                                                    void (*callback)(enum promptkit_callback_event,
+                                                                     const uint8_t*,
+                                                                     size_t,
+                                                                     void*),
+                                                    void *user_data);
+
+enum promptkit_error_code promptkit_vm_start(struct promptkit_vm_handle *vm);
+
+enum promptkit_error_code promptkit_vm_load_script(struct promptkit_vm_handle *vm,
+                                                   const char *input,
+                                                   uint64_t timeout_in_ms);
+
+enum promptkit_error_code promptkit_vm_run(struct promptkit_vm_handle *vm,
+                                           const char *func,
+                                           const struct promptkit_argument *args,
+                                           size_t args_len,
+                                           uint64_t timeout_in_ms);
 
 const char *promptkit_last_error(void);
 

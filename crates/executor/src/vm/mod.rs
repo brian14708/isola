@@ -10,7 +10,7 @@ use tempfile::TempDir;
 use wasmtime::{Store, component::ResourceTableError};
 use wasmtime_wasi::p2::IoView;
 
-use crate::{Env, vm::run::VmRun};
+pub use crate::{Env, vm::run::VmRun};
 
 pub struct Vm<E: 'static> {
     pub(crate) hash: [u8; 32],
@@ -23,6 +23,7 @@ impl<E> Vm<E>
 where
     E: Env + Send + 'static,
 {
+    #[must_use]
     pub fn run(self, callback: impl OutputCallback) -> VmRun<E> {
         VmRun::new(self, callback)
     }

@@ -19,7 +19,6 @@ ranlib = wasi_sdk_path + '/bin/llvm-ranlib'
 strip = wasi_sdk_path + '/bin/llvm-strip'
 objcopy = wasi_sdk_path + '/bin/llvm-objcopy'
 objdump = wasi_sdk_path + '/bin/llvm-objdump'
-pkg-config = ['pkg-config', '--static']
 
 [built-in options]
 c_args = wasi_args

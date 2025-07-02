@@ -34,6 +34,7 @@ where
         f(self.vm.sandbox.promptkit_script_guest(), &mut self.vm.store).await
     }
 
+    #[must_use]
     pub fn reuse(mut self) -> Vm<E> {
         let o: &mut VmState<_> = self.vm.store.data_mut();
         o.run = None;

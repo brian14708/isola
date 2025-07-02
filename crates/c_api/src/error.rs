@@ -29,6 +29,12 @@ pub enum Error {
     C(ErrorCode, Cow<'static, CStr>),
 }
 
+impl From<anyhow::Error> for Error {
+    fn from(err: anyhow::Error) -> Self {
+        Error::Internal(err.to_string())
+    }
+}
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[repr(C)]
@@ -92,18 +98,4 @@ impl From<&Error> for ErrorCode {
             Error::C(code, _) => *code,
         }
     }
-}
-
-#[macro_export]
-macro_rules! c_try {
-    ($expr:expr) => {
-        match $expr {
-            Ok(val) => val,
-            Err(e) => {
-                let code = $crate::error::ErrorCode::from(&e);
-                $crate::error::set_last_error(e);
-                return code;
-            }
-        }
-    };
 }

@@ -42,6 +42,7 @@ pub struct VmManager<E: 'static> {
     instance_pre: SandboxPre<VmState<E>>,
     cache: Arc<VmCache<E>>,
     epoch_ticker: JoinHandle<()>,
+    base_dir: PathBuf,
     _env: std::marker::PhantomData<E>,
 }
 
@@ -56,20 +57,21 @@ pub struct MpscOutputCallback {
 }
 
 impl MpscOutputCallback {
+    #[must_use]
     pub fn new(sender: mpsc::Sender<ExecStreamItem>) -> Self {
         Self { sender }
     }
 }
 
 impl OutputCallback for MpscOutputCallback {
-    fn emit(
+    fn on_result(
         &mut self,
-        item: ExecStreamItem,
+        item: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>> {
         let sender = self.sender.clone();
         Box::pin(async move {
             sender
-                .send(item)
+                .send(ExecStreamItem::Data(item))
                 .await
                 .map_err(|e| anyhow!("Send error: {}", e))
         })
@@ -125,8 +127,18 @@ impl<E> VmManager<E> {
             .unwrap_or(64 * 1024 * 1024)
     }
 
+    fn base_dir(path: &Path) -> PathBuf {
+        let mut base_dir = path.to_owned();
+        base_dir.pop();
+        base_dir.push("wasm32-wasip1");
+        base_dir.push("wasi-deps");
+        base_dir.push("usr");
+        base_dir
+    }
+
     pub async fn compile(path: &Path) -> anyhow::Result<PathBuf> {
         let data = std::fs::read(path)?;
+        let base_dir = Self::base_dir(path);
         let data = component_init_transform::initialize(&data, |instrumented| {
             async move {
                 let (mut config, _) = Self::cfg();
@@ -137,8 +149,13 @@ impl<E> VmManager<E> {
                 let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
                 let component = Component::new(&engine, &instrumented)?;
                 let linker = VmState::new_linker(&engine)?;
-                let mut store =
-                    VmState::new(&engine, workdir.path(), Self::get_max_memory(), MockEnv {});
+                let mut store = VmState::new(
+                    &engine,
+                    &base_dir,
+                    workdir.path(),
+                    Self::get_max_memory(),
+                    MockEnv {},
+                );
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
@@ -244,6 +261,7 @@ where
 
         info!("Loaded module!");
 
+        let base_dir = Self::base_dir(path);
         Ok(Self {
             engine: engine.clone(),
             instance_pre: SandboxPre::new(instance_pre)?,
@@ -255,13 +273,20 @@ where
                     engine.increment_epoch();
                 }
             }),
+            base_dir,
             _env: std::marker::PhantomData,
         })
     }
 
     pub async fn create(&self, hash: [u8; 32], env: E) -> Result<Vm<E>> {
         let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
-        let mut store = VmState::new(&self.engine, workdir.path(), Self::get_max_memory(), env);
+        let mut store = VmState::new(
+            &self.engine,
+            &self.base_dir,
+            workdir.path(),
+            Self::get_max_memory(),
+            env,
+        );
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
