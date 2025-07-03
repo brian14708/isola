@@ -12,14 +12,18 @@ class Request:
     ):
         self.client = None
         self.response = None
+        kwargs = {
+            "params": params,
+            "headers": headers,
+            "content": body if isinstance(body, bytes) else None,
+            "json": body if not isinstance(body, bytes) else None,
+            "files": files,
+        }
+        kwargs = {k: v for k, v in kwargs.items() if v is not None}
         self.request = httpx.Request(
             method,
             url,
-            params=params,
-            headers=headers,
-            content=body if isinstance(body, bytes) else None,
-            json=body if not isinstance(body, bytes) else None,
-            files=files,
+            **kwargs,
         )
         if timeout is None:
             self.timeout = httpx.Timeout(600)
@@ -221,7 +225,7 @@ def get_async(
         headers,
         None,
         timeout,
-        {
+        extra={
             "type": response,
             "validate": validate_status,
         },
@@ -268,7 +272,7 @@ def post_async(
         headers,
         data,
         timeout,
-        {
+        extra={
             "type": response,
             "validate": validate_status,
         },
