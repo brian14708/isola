@@ -16,4 +16,16 @@ pub mod serde_module {
         serde_json::to_string(&PyValue::new(value))
             .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))
     }
+
+    #[pyfunction]
+    fn yaml_loads<'py>(py: Python<'py>, s: &str) -> PyResult<Bound<'py, PyAny>> {
+        PyValue::deserialize(py, serde_yaml::Deserializer::from_str(s))
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))
+    }
+
+    #[pyfunction]
+    fn yaml_dumps(value: Bound<'_, PyAny>) -> PyResult<String> {
+        serde_yaml::to_string(&PyValue::new(value))
+            .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))
+    }
 }

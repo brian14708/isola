@@ -5,6 +5,13 @@ requires-python = ">=3.12"
 dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.11.1",
+    "pyyaml>=6.0.2",
+]
+
+[dependency-groups]
+dev = [
+    "types-pyyaml>=6.0.12.20250516",
+    "mypy>=1.15.0",
 ]
 
 [build-system]
@@ -26,8 +33,3 @@ mypy_path = "typings"
 venvPath = "."
 venv = ".venv"
 stubPath = "typings"
-
-[dependency-groups]
-dev = [
-    "mypy>=1.15.0",
-]

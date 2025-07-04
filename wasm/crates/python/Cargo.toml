@@ -20,3 +20,4 @@ toml = "0.8.20"
 tonic-reflection = { version = "0.13.0", default-features = false }
 url = "2.5.0"
 wit-bindgen = { version = "0.43.0", default-features = false, features = ["macros"] }
+serde_yaml = "0.9.34"

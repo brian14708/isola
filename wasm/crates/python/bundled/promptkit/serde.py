@@ -1,11 +1,19 @@
-from typing import Any
+try:
+    from _promptkit_serde import json_dumps, json_loads, yaml_dumps, yaml_loads
+except ImportError:
+    import json
+    from typing import Any
 
-import _promptkit_serde as _serde
+    import yaml
+
+    json_dumps = json.dumps
+    json_loads = json.loads
+
+    def yaml_dumps(obj: Any) -> str:
+        return yaml.dump(obj)
+
+    def yaml_loads(s: str) -> Any:
+        return yaml.safe_load(s)
 
 
-def json_loads(data: str) -> Any:
-    return _serde.json_loads(data)
-
-
-def json_dumps(data: Any) -> str:
-    return _serde.json_dumps(data)
+__all__ = ["json_dumps", "json_loads", "yaml_dumps", "yaml_loads"]
