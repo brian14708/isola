@@ -435,7 +435,7 @@ def get_sse(
         for event in resp.iter_sse():
             if event.data == "[DONE]":
                 break
-            yield _promptkit_serde.json_loads(event.data)
+            yield _promptkit_serde.loads(event.data, "json")
 
 
 def post(
@@ -485,7 +485,7 @@ def post_sse(
         for event in resp.iter_sse():
             if event.data.startswith("[DONE]"):
                 break
-            yield _promptkit_serde.json_loads(event.data)
+            yield _promptkit_serde.loads(event.data, "json")
 
 
 async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Exception:

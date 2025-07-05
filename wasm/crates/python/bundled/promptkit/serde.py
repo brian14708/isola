@@ -1,19 +1,28 @@
 try:
-    from _promptkit_serde import json_dumps, json_loads, yaml_dumps, yaml_loads
+    from _promptkit_serde import dumps, loads
 except ImportError:
     import json
-    from typing import Any
+    from typing import Any, Literal
 
     import yaml
 
-    json_dumps = json.dumps
-    json_loads = json.loads
+    type Format = Literal["json", "yaml"]
 
-    def yaml_dumps(obj: Any) -> str:
-        return yaml.dump(obj)
+    def dumps(obj: Any, format: Format) -> str:
+        if format == "json":
+            return json.dumps(obj)
+        elif format == "yaml":
+            return yaml.dump(obj)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
 
-    def yaml_loads(s: str) -> Any:
-        return yaml.safe_load(s)
+    def loads(s: str, format: Format) -> Any:
+        if format == "json":
+            return json.loads(s)
+        elif format == "yaml":
+            return yaml.safe_load(s)
+        else:
+            raise ValueError(f"Unsupported format: {format}")
 
 
-__all__ = ["json_dumps", "json_loads", "yaml_dumps", "yaml_loads"]
+__all__ = ["dumps", "loads"]
