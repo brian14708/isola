@@ -12,8 +12,10 @@ pub mod serde_module {
                 .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")),
             "yaml" => serde_yaml::to_string(&PyValue::new(value))
                 .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")),
+            "toml" => toml::to_string(&PyValue::new(value))
+                .map_err(|_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")),
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "Unsupported format. Use 'json' or 'yaml'.",
+                "Unsupported format. Use 'json', 'toml' or 'yaml'.",
             )),
         }
     }
@@ -25,8 +27,15 @@ pub mod serde_module {
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
             "yaml" => PyValue::deserialize(py, serde_yaml::Deserializer::from_str(s))
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
+            "toml" => PyValue::deserialize(
+                py,
+                toml::Deserializer::parse(s).map_err(|_e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>("failed to parse TOML format")
+                })?,
+            )
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())),
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "Unsupported format. Use 'json' or 'yaml'.",
+                "Unsupported format. Use 'json', 'toml' or 'yaml'.",
             )),
         }
     }
