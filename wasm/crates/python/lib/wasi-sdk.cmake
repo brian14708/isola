@@ -1,14 +1,36 @@
 include(FetchContent)
 
+execute_process(
+  COMMAND uname -m
+  COMMAND tr -d '\n'
+  OUTPUT_VARIABLE ARCHITECTURE)
+
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+  if(ARCHITECTURE MATCHES "aarch64")
+    set(WASI_HOST_OS "arm64-linux")
+  elseif(ARCHITECTURE MATCHES "x86_64")
+    set(WASI_HOST_OS "x86_64-linux")
+  else()
+    message(
+      FATAL_ERROR "Unsupported Linux arch: ${CMAKE_HOST_SYSTEM_PROCESSOR}")
+  endif()
+elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  set(WASI_HOST_OS "arm64-macos")
+else()
+  message(FATAL_ERROR "Unsupported host OS: ${CMAKE_HOST_SYSTEM_NAME}")
+endif()
 set(WASI_SDK_VERSION 25)
-set(WASI_HOST_OS "x86_64-linux")
-set(WASI_SHA256
+set(WASI_SHA256_x86_64-linux
     "52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c")
+set(WASI_SHA256_arm64-linux
+    "47fccad8b2498f2239e05e1115c3ffc652bf37e7de2f88fb64b2d663c976ce2d")
+set(WASI_SHA256_arm64-macos
+    "e1e529ea226b1db0b430327809deae9246b580fa3cae32d31c82dfe770233587")
 
 FetchContent_Declare(
   wasi-sdk
   URL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_SDK_VERSION}/wasi-sdk-${WASI_SDK_VERSION}.0-${WASI_HOST_OS}.tar.gz"
-  URL_HASH SHA256=${WASI_SHA256}
+  URL_HASH SHA256=${WASI_SHA256_${WASI_HOST_OS}}
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   PATCH_COMMAND
     ${CMAKE_COMMAND} -E rename <SOURCE_DIR>/share/wasi-sysroot
