@@ -400,7 +400,7 @@ where
                         value: match a.value {
                             ExecArgumentValue::Cbor(a) => Value::Cbor(a),
                             ExecArgumentValue::CborStream(s) => Value::Iterator(
-                                vm.new_iter(Box::pin(ReceiverStream::new(s).map(Value::Cbor)))
+                                vm.new_iter(ReceiverStream::new(s).map(Value::Cbor))
                                     .map_err(anyhow::Error::from)?,
                             ),
                         },

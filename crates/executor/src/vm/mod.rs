@@ -2,10 +2,9 @@ mod bindgen;
 mod run;
 mod state;
 
-use std::pin::Pin;
-
 use bindgen::host::{Value, ValueIterator};
 pub use bindgen::{Sandbox, SandboxPre, guest as exports};
+use futures_core::Stream;
 pub use state::{OutputCallback, VmState};
 use tempfile::TempDir;
 use wasmtime::{Store, component::ResourceTableError};
@@ -30,7 +29,7 @@ where
 
     pub fn new_iter(
         &mut self,
-        stream: Pin<Box<dyn tokio_stream::Stream<Item = Value> + Send>>,
+        stream: impl Stream<Item = Value> + Send + 'static,
     ) -> wasmtime::Result<wasmtime::component::Resource<ValueIterator>, ResourceTableError> {
         self.store
             .data_mut()

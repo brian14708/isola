@@ -9,7 +9,7 @@ use super::{
 use crate::Env;
 
 pub struct VmRun<E: Env + 'static> {
-    vm: Option<Vm<E>>,
+    vm: Vm<E>,
 }
 
 impl<E> VmRun<E>
@@ -21,7 +21,7 @@ where
         o.run = Some(VmRunState {
             output: Box::new(callback),
         });
-        Self { vm: Some(vm) }
+        Self { vm }
     }
 
     pub async fn exec<'a, F, Output>(
@@ -31,28 +31,12 @@ where
     where
         F: Future<Output = Output> + Send,
     {
-        let vm = self.vm.as_mut().unwrap();
-        f(vm.sandbox.promptkit_script_guest(), &mut vm.store).await
-    }
-
-    fn cleanup(&mut self) {
-        if let Some(vm) = self.vm.as_mut() {
-            let o: &mut VmState<_> = vm.store.data_mut();
-            o.run = None;
-        }
+        f(self.vm.sandbox.promptkit_script_guest(), &mut self.vm.store).await
     }
 
     pub fn reuse(mut self) -> Vm<E> {
-        self.cleanup();
-        self.vm.take().unwrap()
-    }
-}
-
-impl<E> Drop for VmRun<E>
-where
-    E: Env,
-{
-    fn drop(&mut self) {
-        self.cleanup();
+        let o: &mut VmState<_> = self.vm.store.data_mut();
+        o.run = None;
+        self.vm
     }
 }

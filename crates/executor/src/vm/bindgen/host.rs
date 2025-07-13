@@ -17,8 +17,11 @@ pub struct ValueIterator {
 }
 
 impl ValueIterator {
-    pub fn new(stream: Pin<Box<dyn Stream<Item = Value> + Send>>) -> Self {
-        Self { stream, peek: None }
+    pub fn new(stream: impl Stream<Item = Value> + Send + 'static) -> Self {
+        Self {
+            stream: Box::pin(stream),
+            peek: None,
+        }
     }
 
     pub async fn next(&mut self) -> Result<Value, StreamError> {
