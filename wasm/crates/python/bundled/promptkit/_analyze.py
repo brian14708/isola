@@ -46,7 +46,8 @@ def analyze_function[T](fn: typing.Callable[..., T]) -> dict[str, object]:
 
 def type_to_schema(typ: object) -> str:
     if isinstance(typ, Iterable | AsyncIterable):
-        schema = TypeAdapter(typing.cast("type", typing.get_args(typ)[0])).json_schema()
+        atyp = t[0] if (t := typing.get_args(typ)) != () else typing.Any
+        schema = TypeAdapter(typing.cast("type", atyp)).json_schema()
         schema["promptkit"] = {"stream": True}
     else:
         schema = TypeAdapter(typ).json_schema()
