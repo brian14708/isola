@@ -1,8 +1,8 @@
-use std::path::Path;
+use std::{future::Future, path::Path, pin::Pin};
 
 use futures_util::StreamExt;
 use http::header::HOST;
-use tokio::{sync::mpsc, time::timeout};
+use tokio::time::timeout;
 use tracing::Instrument;
 use wasmtime::{
     Engine, Store,
@@ -22,8 +22,15 @@ use wasmtime_wasi_http::{
 use super::bindgen::{HostView, add_to_linker};
 use crate::{Env, ExecStreamItem, resource::MemoryLimiter, trace_output::TraceOutput};
 
+pub trait OutputCallback: Send + 'static {
+    fn emit(
+        &mut self,
+        item: ExecStreamItem,
+    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
+}
+
 pub struct VmRunState {
-    pub(crate) output: mpsc::Sender<ExecStreamItem>,
+    pub(crate) output: Box<dyn OutputCallback>,
 }
 
 pub struct VmState<E> {
@@ -152,9 +159,9 @@ impl<E: Send + Env> HostView for VmState<E> {
     }
 
     async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
-        match &self.run {
+        match &mut self.run {
             Some(run) => {
-                run.output.send(ExecStreamItem::Data(data)).await?;
+                run.output.emit(ExecStreamItem::Data(data)).await?;
                 Ok(())
             }
             _ => Err(anyhow::anyhow!("output channel missing")),

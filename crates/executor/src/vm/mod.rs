@@ -6,13 +6,12 @@ use std::pin::Pin;
 
 use bindgen::host::{Value, ValueIterator};
 pub use bindgen::{Sandbox, SandboxPre, guest as exports};
-pub use state::VmState;
+pub use state::{OutputCallback, VmState};
 use tempfile::TempDir;
-use tokio::sync::mpsc;
 use wasmtime::{Store, component::ResourceTableError};
 use wasmtime_wasi::p2::IoView;
 
-use crate::{Env, ExecStreamItem, vm::run::VmRun};
+use crate::{Env, vm::run::VmRun};
 
 pub struct Vm<E: 'static> {
     pub(crate) hash: [u8; 32],
@@ -25,8 +24,8 @@ impl<E> Vm<E>
 where
     E: Env + Send + 'static,
 {
-    pub fn run(self, sender: mpsc::Sender<ExecStreamItem>) -> VmRun<E> {
-        VmRun::new(self, sender)
+    pub fn run(self, callback: impl OutputCallback) -> VmRun<E> {
+        VmRun::new(self, callback)
     }
 
     pub fn new_iter(

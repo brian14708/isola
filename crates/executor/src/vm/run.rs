@@ -1,13 +1,12 @@
 use std::future::Future;
 
-use tokio::sync::mpsc;
 use wasmtime::Store;
 
 use super::{
     Vm, exports,
-    state::{VmRunState, VmState},
+    state::{OutputCallback, VmRunState, VmState},
 };
-use crate::{Env, ExecStreamItem};
+use crate::Env;
 
 pub struct VmRun<E: Env + 'static> {
     vm: Option<Vm<E>>,
@@ -17,9 +16,11 @@ impl<E> VmRun<E>
 where
     E: Env + 'static,
 {
-    pub fn new(mut vm: Vm<E>, sender: mpsc::Sender<ExecStreamItem>) -> Self {
+    pub fn new(mut vm: Vm<E>, callback: impl OutputCallback) -> Self {
         let o: &mut VmState<_> = vm.store.data_mut();
-        o.run = Some(VmRunState { output: sender });
+        o.run = Some(VmRunState {
+            output: Box::new(callback),
+        });
         Self { vm: Some(vm) }
     }
 

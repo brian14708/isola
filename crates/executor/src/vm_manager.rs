@@ -28,7 +28,7 @@ use crate::{
     env::{RpcConnect, RpcPayload},
     error::{Error, Result},
     vm::{
-        SandboxPre, Vm, VmState,
+        OutputCallback, SandboxPre, Vm, VmState,
         exports::{Argument, Value},
     },
     vm_cache::VmCache,
@@ -49,6 +49,31 @@ pub enum ExecStreamItem {
     Data(Vec<u8>),
     End(Option<Vec<u8>>),
     Error(Error),
+}
+
+pub struct MpscOutputCallback {
+    sender: mpsc::Sender<ExecStreamItem>,
+}
+
+impl MpscOutputCallback {
+    pub fn new(sender: mpsc::Sender<ExecStreamItem>) -> Self {
+        Self { sender }
+    }
+}
+
+impl OutputCallback for MpscOutputCallback {
+    fn emit(
+        &mut self,
+        item: ExecStreamItem,
+    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>> {
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            sender
+                .send(item)
+                .await
+                .map_err(|e| anyhow!("Send error: {}", e))
+        })
+    }
 }
 
 pub enum ExecArgumentValue {
@@ -262,7 +287,7 @@ where
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
-        let mut run = vm.run(tx.clone());
+        let mut run = vm.run(MpscOutputCallback::new(tx.clone()));
         let exec = Box::pin(async move {
             let ret = run
                 .exec(|vm, mut store| async move {
