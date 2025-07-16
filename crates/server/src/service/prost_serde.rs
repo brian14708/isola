@@ -2,13 +2,7 @@
 
 use std::borrow::Cow;
 
-use cbor4ii::core::utils::SliceReader;
 use promptkit_executor::ExecSource;
-use serde::{
-    Deserialize, Serialize,
-    de::Visitor,
-    ser::{SerializeMap, SerializeSeq},
-};
 use tonic::Status;
 
 use crate::proto::script::v1::{
@@ -19,19 +13,15 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
     match s.argument_type {
         None => Err(Status::invalid_argument("argument type is not specified")),
         Some(arg) => match arg {
-            script::argument::ArgumentType::Value(s) => Ok(Ok(cbor4ii::serde::to_vec(
-                vec![],
-                &ProstValueSerializer { value: &s },
+            script::argument::ArgumentType::Value(s) => Ok(Ok(promptkit_transcode::prost_to_cbor(
+                &s,
             )
-            .map_err(|_| Status::internal("failed to serialize argument to json"))?)),
-            script::argument::ArgumentType::Json(j) => Ok(Ok(cbor4ii::serde::to_vec(
-                vec![],
-                &JsonValueSerializer {
-                    value: &serde_json::from_str(&j)
-                        .map_err(|_| Status::internal("failed to deserialize argument to json"))?,
-                },
-            )
-            .map_err(|_| Status::internal("failed to serialize argument to json"))?)),
+            .map_err(|_| Status::internal("failed to serialize argument to cbor"))?)),
+            script::argument::ArgumentType::Json(j) => {
+                Ok(Ok(promptkit_transcode::json_to_cbor(&j).map_err(|_| {
+                    Status::internal("failed to serialize argument to cbor")
+                })?))
+            }
             script::argument::ArgumentType::Cbor(c) => Ok(Ok(c)),
             script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(m)
                 .map_err(|e| Status::invalid_argument(format!("invalid marker: {e}")))?)),
@@ -65,26 +55,18 @@ pub fn result_type(
         match c {
             ContentType::Unspecified => {}
             ContentType::Json => {
-                let mut s = SliceReader::new(s.as_ref());
-                let mut o = vec![];
-                serde_transcode::Transcoder::new(&mut cbor4ii::serde::Deserializer::new(&mut s))
-                    .serialize(&mut serde_json::Serializer::new(&mut o))
+                let v = promptkit_transcode::cbor_to_json(&s)
                     .map_err(|_| Status::internal("failed to serialize result to json"))?;
                 return Ok(script::Result {
-                    result_type: Some(result::ResultType::Json(String::from_utf8(o).unwrap())),
+                    result_type: Some(result::ResultType::Json(v)),
                 });
             }
             ContentType::ProtobufValue => {
-                return match ProstValueDeserializer::deserialize(
-                    &mut cbor4ii::serde::Deserializer::new(&mut SliceReader::new(s.as_ref())),
-                ) {
-                    Ok(ProstValueDeserializer(v)) => Ok(script::Result {
-                        result_type: Some(result::ResultType::Value(v)),
-                    }),
-                    Err(_) => Err(Status::invalid_argument(
-                        "failed to serialize result to struct",
-                    )),
-                };
+                let v = promptkit_transcode::cbor_to_prost(&s)
+                    .map_err(|_| Status::internal("failed to serialize result to struct"))?;
+                return Ok(script::Result {
+                    result_type: Some(result::ResultType::Value(v)),
+                });
             }
             ContentType::Cbor => {
                 return Ok(script::Result {
@@ -94,215 +76,4 @@ pub fn result_type(
         }
     }
     unreachable!()
-}
-
-struct ProstValueDeserializer(prost_types::Value);
-
-impl<'de> Deserialize<'de> for ProstValueDeserializer {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(Self(prost_types::Value { kind: None }))
-    }
-}
-
-impl<'de> Visitor<'de> for ProstValueDeserializer {
-    type Value = ProstValueDeserializer;
-
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a type that can deserialize in pb::Struct")
-    }
-
-    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::BoolValue(v)),
-        }))
-    }
-
-    fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-            kind: Some(prost_types::value::Kind::NumberValue(v as f64)),
-        }))
-    }
-
-    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-            kind: Some(prost_types::value::Kind::NumberValue(v as f64)),
-        }))
-    }
-
-    fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::NumberValue(v)),
-        }))
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::StringValue(v.to_owned())),
-        }))
-    }
-
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::StringValue(v)),
-        }))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::NullValue(
-                prost_types::NullValue::NullValue.into(),
-            )),
-        }))
-    }
-
-    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        serde::Deserialize::deserialize(deserializer)
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(ProstValueDeserializer(prost_types::Value { kind: None }))
-    }
-
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
-        let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(elem) = seq.next_element::<Self::Value>()? {
-            elems.push(elem.0);
-        }
-
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::ListValue(
-                prost_types::ListValue { values: elems },
-            )),
-        }))
-    }
-
-    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::MapAccess<'de>,
-    {
-        let mut fields = prost_types::Struct {
-            ..Default::default()
-        };
-        while let Some((key, value)) = map.next_entry::<_, Self::Value>()? {
-            fields.fields.insert(key, value.0);
-        }
-        Ok(ProstValueDeserializer(prost_types::Value {
-            kind: Some(prost_types::value::Kind::StructValue(fields)),
-        }))
-    }
-}
-
-struct ProstValueSerializer<'s> {
-    value: &'s prost_types::Value,
-}
-
-impl serde::Serialize for ProstValueSerializer<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match &self.value.kind {
-            Some(kind) => match kind {
-                prost_types::value::Kind::NullValue(_) => serializer.serialize_none(),
-                prost_types::value::Kind::NumberValue(n) => {
-                    if n.fract() == 0.0 {
-                        #[allow(clippy::cast_possible_truncation)]
-                        serializer.serialize_i64(*n as i64)
-                    } else {
-                        serializer.serialize_f64(*n)
-                    }
-                }
-                prost_types::value::Kind::StringValue(s) => serializer.serialize_str(s),
-                prost_types::value::Kind::BoolValue(b) => serializer.serialize_bool(*b),
-                prost_types::value::Kind::StructValue(s) => {
-                    let mut map = serializer.serialize_map(Some(s.fields.len()))?;
-                    for (key, value) in &s.fields {
-                        map.serialize_entry(&key, &Self { value })?;
-                    }
-                    map.end()
-                }
-                prost_types::value::Kind::ListValue(l) => {
-                    let mut seq = serializer.serialize_seq(Some(l.values.len()))?;
-                    for value in &l.values {
-                        seq.serialize_element(&Self { value })?;
-                    }
-                    seq.end()
-                }
-            },
-            None => serializer.serialize_unit(),
-        }
-    }
-}
-
-struct JsonValueSerializer<'s> {
-    value: &'s serde_json::Value,
-}
-
-impl serde::Serialize for JsonValueSerializer<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self.value {
-            serde_json::Value::Null => serializer.serialize_none(),
-            serde_json::Value::Bool(b) => serializer.serialize_bool(*b),
-            serde_json::Value::Number(n) => {
-                if let Some(i) = n.as_i64() {
-                    serializer.serialize_i64(i)
-                } else {
-                    serializer.serialize_f64(n.as_f64().unwrap())
-                }
-            }
-            serde_json::Value::String(s) => serializer.serialize_str(s),
-            serde_json::Value::Array(vec) => {
-                let mut seq = serializer.serialize_seq(Some(vec.len()))?;
-                for value in vec {
-                    seq.serialize_element(&Self { value })?;
-                }
-                seq.end()
-            }
-            serde_json::Value::Object(m) => {
-                let mut map = serializer.serialize_map(Some(m.len()))?;
-                for (key, value) in m {
-                    map.serialize_entry(&key, &Self { value })?;
-                }
-                map.end()
-            }
-        }
-    }
 }

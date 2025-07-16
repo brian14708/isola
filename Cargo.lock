@@ -1622,6 +1622,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "minicbor"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50699691433ccd88fbe1f11e9155691d71fc363595109f35a92b77be2e0158f6"
+dependencies = [
+ "minicbor-derive",
+]
+
+[[package]]
+name = "minicbor-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "512ce2c37128698ea15c99b3518936c78a8b112b92468e7b95b9fa045666ebd8"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "minicbor-serde"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a05d783cc8c3cdbde9f7ee9eeeef417810278e81fb6289634fdbc952d462fc23"
+dependencies = [
+ "minicbor",
+ "serde",
+]
+
+[[package]]
 name = "miniz_oxide"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2172,11 +2202,10 @@ dependencies = [
  "promptkit_executor",
  "promptkit_request",
  "promptkit_trace",
+ "promptkit_transcode",
  "prost",
  "prost-types",
  "serde",
- "serde-transcode",
- "serde_json",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite",
@@ -2199,6 +2228,17 @@ dependencies = [
  "rand 0.9.1",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "promptkit_transcode"
+version = "0.1.0"
+dependencies = [
+ "minicbor-serde",
+ "prost-types",
+ "serde",
+ "serde-transcode",
+ "serde_json",
 ]
 
 [[package]]

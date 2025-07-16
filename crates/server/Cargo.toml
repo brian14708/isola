@@ -21,17 +21,16 @@ opentelemetry-semantic-conventions = { version = "0.30.0", features = ["semconv_
 opentelemetry_sdk = { version = "0.30.0", features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
 pin-project = "1.1.5"
 promptkit_executor = { path = "../executor" }
-promptkit_request = { version = "0.1.0", path = "../request" }
+promptkit_request = { path = "../request" }
 promptkit_trace = { path = "../trace" }
+promptkit_transcode = { path = "../transcode", features = ["prost"] }
 prost = "0.13.0"
 prost-types = "0.13.0"
 serde = { version = "1.0.199", features = ["derive"] }
-serde-transcode = "1.1.1"
-serde_json = "1.0.116"
 tokio = { version = "1.37.0", features = ["full"] }
 tokio-stream = "0.1.15"
 tokio-tungstenite = { version = "0.27.0", default-features = false, features = ["handshake"] }
-tonic = { version = "0.13.0", features = ["gzip", "tls-webpki-roots"] }
+tonic = { version = "0.13.0", features = ["gzip", "router", "server", "tls-webpki-roots"] }
 tonic-reflection = "0.13.0"
 tonic-web = "0.13.0"
 tower-http = { version = "0.6.0", features = ["fs", "trace"] }

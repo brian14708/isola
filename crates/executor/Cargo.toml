@@ -18,7 +18,7 @@ http-body-util = "0.1.2"
 hyper = "1.4.1"
 parking_lot = "0.12.2"
 pin-project-lite = "0.2.14"
-promptkit_trace = { version = "0.1.0", path = "../trace" }
+promptkit_trace = { path = "../trace" }
 rand = "0.9.0"
 rc-zip-tokio = "4.2.3"
 serde = { version = "1.0.199", features = ["derive"] }

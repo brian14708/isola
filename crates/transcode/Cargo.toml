@@ -1,0 +1,14 @@
+[package]
+name = "promptkit_transcode"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+minicbor-serde = { version = "0.5.0", features = ["alloc"] }
+prost-types = { version = "0.13.0", optional = true }
+serde = "1.0.219"
+serde-transcode = "1.1.1"
+serde_json = "1.0.140"
+
+[features]
+prost = ["dep:prost-types"]

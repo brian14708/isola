@@ -26,19 +26,19 @@ build-ui:
     pnpm run build
 
 test: test-wasm
-    cargo test
+    cargo test --all-features
 
 [working-directory('wasm')]
 test-wasm:
-    cargo test
+    cargo test --all-features
 
 lint: lint-wasm lint-ui lint-proto
-    cargo clippy -- --deny warnings
+    cargo clippy --all-features -- --deny warnings
     uv run ruff check
     uv run mypy tests/rpc
 
 lint-wasm:
-    cd wasm && cargo clippy -- --deny warnings
+    cd wasm && cargo clippy --all-features -- --deny warnings
     uv run mypy wasm/crates/python/bundled
 
 [working-directory('ui')]
