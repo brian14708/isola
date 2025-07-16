@@ -44,7 +44,7 @@ pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[cfg(feature = "prost")]
     use prost_types::Value;
 
@@ -146,7 +146,7 @@ mod tests {
     fn test_invalid_inputs() {
         assert!(cbor_to_json(b"notcbor").is_err());
         assert!(json_to_cbor("{not json}").is_err());
-        
+
         #[cfg(feature = "prost")]
         {
             assert!(cbor_to_prost(b"notcbor").is_err());

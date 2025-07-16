@@ -5,7 +5,7 @@ run: build
 
 check: lint test
 
-integration:
+integration: init-py
     uv run --directory tests/rpc pytest
 
 generate:
@@ -32,14 +32,17 @@ test: test-wasm
 test-wasm:
     cargo test --all-features
 
-lint: lint-wasm lint-ui lint-proto
+lint: lint-wasm lint-ui lint-proto init-py
     cargo clippy --all-features -- --deny warnings
     uv run ruff check
     uv run mypy tests/rpc
 
-lint-wasm:
+lint-wasm: init-py
     cd wasm && cargo clippy --all-features -- --deny warnings
     uv run mypy wasm/crates/python/bundled
+
+init-py:
+    uv sync --all-packages
 
 [working-directory('ui')]
 lint-ui:

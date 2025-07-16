@@ -12,7 +12,6 @@ use std::cell::RefCell;
 
 use self::wasi::io::streams::StreamError;
 use self::wasi::logging::logging::Level;
-use cbor4ii::core::utils::SliceReader;
 use future::PyPollable;
 use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
 
@@ -239,16 +238,11 @@ impl ArgIter {
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         match self.iter.blocking_read() {
             Ok(a) => match a {
-                host::Value::Cbor(c) => {
-                    let c = SliceReader::new(&c);
-                    Ok(Some(
-                        PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                            })?
-                            .into(),
-                    ))
-                }
+                host::Value::Cbor(c) => Ok(Some(
+                    PyValue::deserialize(py, &mut minicbor_serde::Deserializer::new(&c))
+                        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
+                        .into(),
+                )),
                 host::Value::Iterator(_) => todo!(),
             },
             Err(StreamError::Closed) => Ok(None),
@@ -269,24 +263,21 @@ impl ArgIter {
     fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<PyObject>, Option<PyPollable>)> {
         match self.iter.read() {
             Some(Ok(a)) => match a {
-                host::Value::Cbor(c) => {
-                    let c = SliceReader::new(&c);
-                    Ok((
-                        true,
-                        Some(
-                            PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
-                                .map_err(|_| {
-                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                                })?
-                                .into_pyobject(py)
-                                .map_err(|_| {
-                                    PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
-                                })?
-                                .into(),
-                        ),
-                        None,
-                    ))
-                }
+                host::Value::Cbor(c) => Ok((
+                    true,
+                    Some(
+                        PyValue::deserialize(py, &mut minicbor_serde::Deserializer::new(&c))
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
+                            })?
+                            .into_pyobject(py)
+                            .map_err(|_| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
+                            })?
+                            .into(),
+                    ),
+                    None,
+                )),
                 host::Value::Iterator(_) => todo!(),
             },
             Some(Err(StreamError::Closed)) => Ok((false, None, None)),

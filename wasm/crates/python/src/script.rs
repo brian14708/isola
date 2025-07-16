@@ -1,6 +1,5 @@
-use std::{borrow::Cow, vec};
+use std::borrow::Cow;
 
-use cbor4ii::core::utils::SliceReader;
 use pyo3::{
     PyTypeInfo,
     exceptions::PyNameError,
@@ -158,14 +157,11 @@ impl Scope {
                         .into_iter()
                         .map(|v| match v {
                             InputValue::Iter(it) => Ok(it.into_pyobject(py).unwrap().into_any()),
-                            InputValue::Cbor(v) => {
-                                let c = SliceReader::new(v.as_ref());
-                                Ok(PyValue::deserialize(
-                                    py,
-                                    &mut cbor4ii::serde::Deserializer::new(c),
-                                )
-                                .map_err(|_| Error::UnexpectedError("serde error"))?)
-                            }
+                            InputValue::Cbor(v) => Ok(PyValue::deserialize(
+                                py,
+                                &mut minicbor_serde::Deserializer::new(v.as_ref()),
+                            )
+                            .map_err(|_| Error::UnexpectedError("serde error"))?),
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )
@@ -174,13 +170,12 @@ impl Scope {
                 for (k, v) in named {
                     match v {
                         InputValue::Cbor(v) => {
-                            let c = SliceReader::new(v.as_ref());
                             kwargs
                                 .set_item(
                                     k,
                                     PyValue::deserialize(
                                         py,
-                                        &mut cbor4ii::serde::Deserializer::new(c),
+                                        &mut minicbor_serde::Deserializer::new(v.as_ref()),
                                     )
                                     .map_err(|_| Error::UnexpectedError("serde error"))?,
                                 )
@@ -212,32 +207,23 @@ impl Scope {
             };
 
             if Self::is_serializable(&obj) {
-                match cbor4ii::serde::to_vec(vec![], &PyValue::new(obj)) {
+                match minicbor_serde::to_vec(PyValue::new(obj)) {
                     Ok(s) => return Ok(Some(s)),
-                    Err(cbor4ii::serde::EncodeError::Core(_)) => {
+                    Err(_) => {
                         return Err(Error::UnexpectedError("serde error"));
-                    }
-                    Err(cbor4ii::serde::EncodeError::Custom(s)) => {
-                        return Err(Error::PythonError {
-                            cause: s.to_string(),
-                            traceback: None,
-                        });
                     }
                 };
             }
 
-            let mut ret: Option<Vec<u8>> = None;
             if let Ok(iter) = obj.try_iter() {
                 for el in iter {
                     let mut tmp = {
-                        let v = std::mem::take(&mut ret).unwrap_or_default();
                         let object = el.map_err(|e| Error::from_pyerr(py, e))?;
-                        cbor4ii::serde::to_vec(v, &PyValue::new(object))
+                        minicbor_serde::to_vec(PyValue::new(object))
                     }
                     .map_err(|_| Error::UnexpectedError("serde error"))?;
                     callback(&tmp);
                     tmp.clear();
-                    ret = Some(tmp);
                 }
                 return Ok(None);
             }
@@ -265,25 +251,19 @@ impl Scope {
                             InputValue::Iter(_) => {
                                 return Err(Error::UnexpectedError("unsupported"));
                             }
-                            InputValue::Cbor(v) => {
-                                let c = SliceReader::new(v.as_ref());
-                                PyValue::deserialize(py, &mut cbor4ii::serde::Deserializer::new(c))
-                                    .map_err(|_| Error::UnexpectedError("serde error"))?
-                            }
+                            InputValue::Cbor(v) => PyValue::deserialize(
+                                py,
+                                &mut minicbor_serde::Deserializer::new(v.as_ref()),
+                            )
+                            .map_err(|_| Error::UnexpectedError("serde error"))?,
                         },
                     ),
                     None,
                 )
                 .map_err(|e| Error::from_pyerr(py, e))?;
-            match cbor4ii::serde::to_vec(vec![], &PyValue::new(obj)) {
+            match minicbor_serde::to_vec(PyValue::new(obj)) {
                 Ok(s) => Ok(Some(s)),
-                Err(cbor4ii::serde::EncodeError::Core(_)) => {
-                    Err(Error::UnexpectedError("serde error"))
-                }
-                Err(cbor4ii::serde::EncodeError::Custom(s)) => Err(Error::PythonError {
-                    cause: s.to_string(),
-                    traceback: None,
-                }),
+                Err(_) => Err(Error::UnexpectedError("serde error")),
             }
         })
     }
@@ -318,26 +298,23 @@ def gen():
             .run(
                 "hello",
                 [InputValue::Cbor(
-                    cbor4ii::serde::to_vec(vec![], &32).unwrap().into(),
+                    minicbor_serde::to_vec(&32).unwrap().into(),
                 )],
                 [],
                 |_| {},
             )
             .unwrap();
-        assert_eq!(
-            x.unwrap(),
-            cbor4ii::serde::to_vec(vec![], &"hello 54").unwrap()
-        );
+        assert_eq!(x.unwrap(), minicbor_serde::to_vec(&"hello 54").unwrap());
 
         let x = s.run("i", [], [], |_| {}).unwrap();
-        assert_eq!(x.unwrap(), cbor4ii::serde::to_vec(vec![], &22).unwrap());
+        assert_eq!(x.unwrap(), minicbor_serde::to_vec(&22).unwrap());
 
         let mut v = vec![];
         let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
         assert_eq!(x, None);
         assert_eq!(v.len(), 10);
         for (i, vv) in v.iter().enumerate() {
-            assert_eq!(*vv, cbor4ii::serde::to_vec(vec![], &i).unwrap());
+            assert_eq!(*vv, minicbor_serde::to_vec(&i).unwrap());
         }
     }
 }

@@ -8,7 +8,7 @@ exclude = ["/bundled", "bundle.py"]
 crate-type = ["cdylib"]
 
 [dependencies]
-cbor4ii = { version = "1.0.0", features = ["serde1"] }
+minicbor-serde = { version = "0.5.0", features = ["alloc"] }
 eventsource = { version = "0.5.0", default-features = false }
 prost-reflect = { version = "0.15.0", features = ["serde"] }
 pyo3 = { version = "0.25.1", features = ["abi3"], git = "https://github.com/brian14708/pyo3.git", branch = "wasi-0.25" }
