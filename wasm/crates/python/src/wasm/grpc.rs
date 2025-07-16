@@ -52,6 +52,7 @@ pub mod grpc_module {
         grpc_reflection_impl(py, url, "v1alpha", service, Some(&md), timeout)
     }
 
+    #[allow(clippy::too_many_lines)]
     pub fn grpc_reflection_impl<'py>(
         py: Python<'py>,
         url: &str,
@@ -70,17 +71,19 @@ pub mod grpc_module {
                     .expect("duration is too large"),
             ))
             .map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "Timeout value is too large or invalid",
+                )
             })?;
         }
 
         let c = outgoing_rpc::connect(req);
         c.subscribe().block();
-        let c = c
-            .get()
-            .unwrap()
-            .unwrap()
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        let c = c.get().unwrap().unwrap().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyConnectionError, _>(format!(
+                "gRPC connection failed: {e}"
+            ))
+        })?;
         let (tx, rx) = c.streams().unwrap();
         let resp = send_recv::<_, ServerReflectionResponse>(
             &tx,
@@ -96,8 +99,11 @@ pub mod grpc_module {
         let methods = PyDict::new(py);
         if let Some(MessageResponse::FileDescriptorResponse(l)) = resp.message_response {
             for proto in l.file_descriptor_proto.iter().map(|s| {
-                FileDescriptorProto::decode(s.as_slice())
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))
+                FileDescriptorProto::decode(s.as_slice()).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to decode file descriptor: {e}"
+                    ))
+                })
             }) {
                 let file = proto?;
                 for d in file.dependency.iter().cloned() {

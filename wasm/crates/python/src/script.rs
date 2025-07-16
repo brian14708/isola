@@ -90,8 +90,9 @@ impl Scope {
             if let Some(meta) = pymeta::parse_pep723(code.as_bytes()) {
                 if let Ok(init) = PyValue::deserialize(
                     py,
-                    toml::Deserializer::parse(&meta)
-                        .map_err(|_e| Error::UnexpectedError("fail to parse toml"))?,
+                    toml::Deserializer::parse(&meta).map_err(|_e| {
+                        Error::UnexpectedError("Failed to parse PEP 723 TOML metadata")
+                    })?,
                 ) {
                     INIT.import(py, "promptkit.importlib", "_initialize_pep723")
                         .expect("failed to import promptkit.importlib")
@@ -161,11 +162,13 @@ impl Scope {
                                 py,
                                 &mut minicbor_serde::Deserializer::new(v.as_ref()),
                             )
-                            .map_err(|_| Error::UnexpectedError("serde error"))?),
+                            .map_err(|_e| {
+                                Error::UnexpectedError("Failed to deserialize CBOR data")
+                            })?),
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )
-                .map_err(|_| Error::UnexpectedError("pyo3 error"))?;
+                .map_err(|_e| Error::UnexpectedError("Failed to create Python tuple"))?;
                 let kwargs = PyDict::new(py);
                 for (k, v) in named {
                     match v {
@@ -177,7 +180,11 @@ impl Scope {
                                         py,
                                         &mut minicbor_serde::Deserializer::new(v.as_ref()),
                                     )
-                                    .map_err(|_| Error::UnexpectedError("serde error"))?,
+                                    .map_err(|_e| {
+                                        Error::UnexpectedError(
+                                            "Failed to deserialize CBOR argument",
+                                        )
+                                    })?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
@@ -210,7 +217,9 @@ impl Scope {
                 match minicbor_serde::to_vec(PyValue::new(obj)) {
                     Ok(s) => return Ok(Some(s)),
                     Err(_) => {
-                        return Err(Error::UnexpectedError("serde error"));
+                        return Err(Error::UnexpectedError(
+                            "Failed to serialize return value to CBOR",
+                        ));
                     }
                 };
             }
@@ -221,14 +230,18 @@ impl Scope {
                         let object = el.map_err(|e| Error::from_pyerr(py, e))?;
                         minicbor_serde::to_vec(PyValue::new(object))
                     }
-                    .map_err(|_| Error::UnexpectedError("serde error"))?;
+                    .map_err(|_e| {
+                        Error::UnexpectedError("Failed to serialize Python object to CBOR")
+                    })?;
                     callback(&tmp);
                     tmp.clear();
                 }
                 return Ok(None);
             }
 
-            Err(Error::UnexpectedError("unsupported return type"))
+            Err(Error::UnexpectedError(
+                "Return type is not serializable or iterable",
+            ))
         })
     }
 
@@ -249,13 +262,17 @@ impl Scope {
                         dict,
                         match request {
                             InputValue::Iter(_) => {
-                                return Err(Error::UnexpectedError("unsupported"));
+                                return Err(Error::UnexpectedError(
+                                    "Iterator input not supported for analyze",
+                                ));
                             }
                             InputValue::Cbor(v) => PyValue::deserialize(
                                 py,
                                 &mut minicbor_serde::Deserializer::new(v.as_ref()),
                             )
-                            .map_err(|_| Error::UnexpectedError("serde error"))?,
+                            .map_err(|_e| {
+                                Error::UnexpectedError("Failed to deserialize CBOR request")
+                            })?,
                         },
                     ),
                     None,
@@ -263,7 +280,9 @@ impl Scope {
                 .map_err(|e| Error::from_pyerr(py, e))?;
             match minicbor_serde::to_vec(PyValue::new(obj)) {
                 Ok(s) => Ok(Some(s)),
-                Err(_) => Err(Error::UnexpectedError("serde error")),
+                Err(_e) => Err(Error::UnexpectedError(
+                    "Failed to serialize analyze result to CBOR",
+                )),
             }
         })
     }
@@ -297,24 +316,22 @@ def gen():
         let x = s
             .run(
                 "hello",
-                [InputValue::Cbor(
-                    minicbor_serde::to_vec(&32).unwrap().into(),
-                )],
+                [InputValue::Cbor(minicbor_serde::to_vec(32).unwrap().into())],
                 [],
                 |_| {},
             )
             .unwrap();
-        assert_eq!(x.unwrap(), minicbor_serde::to_vec(&"hello 54").unwrap());
+        assert_eq!(x.unwrap(), minicbor_serde::to_vec("hello 54").unwrap());
 
         let x = s.run("i", [], [], |_| {}).unwrap();
-        assert_eq!(x.unwrap(), minicbor_serde::to_vec(&22).unwrap());
+        assert_eq!(x.unwrap(), minicbor_serde::to_vec(22).unwrap());
 
         let mut v = vec![];
         let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
         assert_eq!(x, None);
         assert_eq!(v.len(), 10);
         for (i, vv) in v.iter().enumerate() {
-            assert_eq!(*vv, minicbor_serde::to_vec(&i).unwrap());
+            assert_eq!(*vv, minicbor_serde::to_vec(i).unwrap());
         }
     }
 }

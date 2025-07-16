@@ -38,7 +38,9 @@ pub mod rpc_module {
                     .expect("duration is too large"),
             ))
             .map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "Timeout value is too large or invalid",
+                )
             })?;
         }
         let c = outgoing_rpc::connect(req);
@@ -67,8 +69,8 @@ pub mod rpc_module {
                         response: Some(response),
                     })
                 }
-                Err(error) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    error.to_string(),
+                Err(error) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                    format!("RPC connection failed: {error}"),
                 )),
             }
         }
@@ -96,8 +98,8 @@ pub mod rpc_module {
                         self.response.take();
                         Ok((false, None, None))
                     }
-                    Some(Err(error)) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        error.to_string(),
+                    Some(Err(error)) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                        format!("RPC stream error: {error}"),
                     )),
                 }
             } else {
@@ -114,7 +116,7 @@ pub mod rpc_module {
                 Payload::new(b)
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "unsupported type".to_string(),
+                    "Unsupported type for RPC payload, expected str or bytes",
                 ));
             };
 
@@ -122,32 +124,37 @@ pub mod rpc_module {
                 match request.check_write(&payload) {
                     Ok(true) => {
                         request.write(payload).map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                            PyErr::new::<pyo3::exceptions::PyConnectionError, _>(format!(
+                                "Failed to write to RPC stream: {e}"
+                            ))
                         })?;
                         Ok(None)
                     }
                     Ok(false) => Ok(Some(PyPollable::from(request.subscribe()))),
                     Err(StreamError::Closed) => {
                         self.request.take();
-                        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                            "connection closed".to_string(),
+                        Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                            "RPC connection closed",
                         ))
                     }
-                    Err(error) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        error.to_string(),
+                    Err(error) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                        format!("RPC send failed: {error}"),
                     )),
                 }
             } else {
-                Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    "connection closed".to_string(),
+                Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                    "RPC connection closed",
                 ))
             }
         }
 
         fn close(&mut self) -> PyResult<()> {
             if let Some(r) = self.request.take() {
-                return RequestStream::finish(r)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()));
+                return RequestStream::finish(r).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyConnectionError, _>(format!(
+                        "Failed to close RPC stream: {e}"
+                    ))
+                });
             }
             Ok(())
         }
