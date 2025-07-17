@@ -28,14 +28,6 @@ pub mod serde_module {
                 })?;
                 Ok(pyo3::types::PyString::new(py, &yaml_str).into_any())
             }
-            "toml" => {
-                let toml_str = toml::to_string(&PyValue::new(value)).map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to serialize to TOML: {e}"
-                    ))
-                })?;
-                Ok(pyo3::types::PyString::new(py, &toml_str).into_any())
-            }
             "cbor" => {
                 let buffer = minicbor_serde::to_vec(PyValue::new(value)).map_err(|e| {
                     PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
@@ -45,7 +37,7 @@ pub mod serde_module {
                 Ok(pyo3::types::PyBytes::new(py, &buffer).into_any())
             }
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "Unsupported format. Use 'json', 'toml', 'yaml', or 'cbor'.",
+                "Unsupported format. Use 'json', 'yaml', or 'cbor'.",
             )),
         }
     }
@@ -75,22 +67,6 @@ pub mod serde_module {
                     ))
                 })
             }
-            "toml" => {
-                let s_str = s.extract::<&str>()?;
-                PyValue::deserialize(
-                    py,
-                    toml::Deserializer::parse(s_str).map_err(|e| {
-                        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                            "Failed to parse TOML format: {e}"
-                        ))
-                    })?,
-                )
-                .map_err(|e| {
-                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                        "Failed to deserialize TOML: {e}"
-                    ))
-                })
-            }
             "cbor" => {
                 let bytes = s.extract::<&[u8]>().map_err(|_e| {
                     PyErr::new::<pyo3::exceptions::PyTypeError, _>(
@@ -106,7 +82,7 @@ pub mod serde_module {
                 )
             }
             _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "Unsupported format. Use 'json', 'toml', 'yaml', or 'cbor'.",
+                "Unsupported format. Use 'json', 'yaml', or 'cbor'.",
             )),
         }
     }

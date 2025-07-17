@@ -88,17 +88,10 @@ impl Scope {
 
         Python::with_gil(|py| {
             if let Some(meta) = pymeta::parse_pep723(code.as_bytes()) {
-                if let Ok(init) = PyValue::deserialize(
-                    py,
-                    toml::Deserializer::parse(&meta).map_err(|_e| {
-                        Error::UnexpectedError("Failed to parse PEP 723 TOML metadata")
-                    })?,
-                ) {
-                    INIT.import(py, "promptkit.importlib", "_initialize_pep723")
-                        .expect("failed to import promptkit.importlib")
-                        .call1((init,))
-                        .map_err(|e| Error::from_pyerr(py, e))?;
-                }
+                INIT.import(py, "promptkit.importlib", "_initialize_pep723")
+                    .expect("failed to import promptkit.importlib")
+                    .call1((meta,))
+                    .map_err(|e| Error::from_pyerr(py, e))?;
             }
             let code = std::ffi::CString::new(code).unwrap();
             py.run(

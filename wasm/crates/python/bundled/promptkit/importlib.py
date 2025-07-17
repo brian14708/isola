@@ -182,7 +182,11 @@ def _parse_dependency(dep: str) -> dict:
     return result
 
 
-def _initialize_pep723(script: dict) -> None:
+def _initialize_pep723(meta: str) -> None:
+    import tomllib
+
+    script = tomllib.loads(meta)
+
     blacklist = set(
         ["xmltodict", "pydantic", "setuptools", "promptkit-py", "numpy", "pillow"]
     )
