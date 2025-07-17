@@ -1,5 +1,6 @@
 use std::{future::Future, pin::Pin, task::Poll};
 
+use pin_project_lite::pin_project;
 use tokio_stream::Stream;
 
 pub fn join_with<T, E>(
@@ -12,12 +13,13 @@ pub fn join_with<T, E>(
     }
 }
 
-#[pin_project::pin_project]
-pub struct StreamJoin<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> {
-    #[pin]
-    stream: Option<S>,
-    #[pin]
-    task: Option<F>,
+pin_project! {
+    pub struct StreamJoin<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> {
+        #[pin]
+        stream: Option<S>,
+        #[pin]
+        task: Option<F>,
+    }
 }
 
 impl<S: Stream<Item = Result<T, E>>, F: Future<Output = Result<(), E>>, T, E> Stream
@@ -72,14 +74,15 @@ pub fn stream_until<T, E>(
     }
 }
 
-#[pin_project::pin_project]
-pub struct StreamTimeout<S: Stream<Item = Result<T, E>>, T, E> {
-    #[pin]
-    stream: Option<S>,
-    #[pin]
-    sleep: tokio::time::Sleep,
-    span: tracing::Span,
-    timeout_response: Option<Result<T, E>>,
+pin_project! {
+    pub struct StreamTimeout<S: Stream<Item = Result<T, E>>, T, E> {
+        #[pin]
+        stream: Option<S>,
+        #[pin]
+        sleep: tokio::time::Sleep,
+        span: tracing::Span,
+        timeout_response: Option<Result<T, E>>,
+    }
 }
 
 impl<S: Stream<Item = Result<T, E>>, T, E> Stream for StreamTimeout<S, T, E> {
