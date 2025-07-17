@@ -564,6 +564,7 @@ dependencies = [
 name = "promptkit_python"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "eventsource",
  "memchr",
  "minicbor-serde",

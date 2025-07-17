@@ -6,7 +6,7 @@ use pyo3::{
     types::{PyBytes, PyList, PyString},
 };
 
-use crate::serde::PyValue;
+use crate::serde::json_to_python;
 
 pub trait BodyBuffer: Default {
     fn write(&mut self, data: Vec<u8>);
@@ -201,13 +201,11 @@ impl BodyBuffer for Json {
             return Ok(None);
         }
 
-        let obj = PyValue::deserialize(
-            py,
-            &mut serde_json::Deserializer::from_reader(std::io::Cursor::new(std::mem::take(
-                &mut self.buffer,
-            ))),
-        )
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        let buf = str::from_utf8(&self.buffer).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!("Invalid UTF-8: {e}"))
+        })?;
+        let obj = json_to_python(py, buf)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         Ok(Some(obj))
     }
 

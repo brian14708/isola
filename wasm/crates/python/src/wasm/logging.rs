@@ -12,16 +12,38 @@ thread_local! {
 #[pyo3(name = "_promptkit_logging")]
 pub mod logging_module {
     use pyo3::{
-        Bound, PyErr, PyResult, pyfunction,
+        Bound, PyAny, PyErr, PyResult, pyfunction,
         types::{PyAnyMethods, PyDict, PyString, PyTuple, PyTupleMethods},
     };
 
     use crate::{
-        serde::PyLogDict,
+        serde::python_to_json,
         wasm::wasi::logging::logging::{Level, log},
     };
 
     use super::{GLOBAL_LOGGING, loglevel_to_i32};
+
+    fn log_dict_to_json(
+        dict: Option<&Bound<'_, PyDict>>,
+        msg: Bound<'_, PyAny>,
+    ) -> PyResult<String> {
+        let out = PyDict::new(msg.py());
+        out.set_item("message", msg)?;
+        if let Some(d) = dict {
+            for (key, value) in d {
+                if value.is_callable() {
+                    out.set_item(key, value.call0()?)?;
+                } else {
+                    out.set_item(key, value)?;
+                }
+            }
+        }
+        python_to_json(out.into_any()).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>(format!(
+                "Failed to convert log dict to JSON: {e}"
+            ))
+        })
+    }
 
     #[pyfunction]
     #[pyo3(signature = (msg, *args, **kwds))]
@@ -37,7 +59,7 @@ pub mod logging_module {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = PyLogDict::to_json(kwds, msg)
+                let m = log_dict_to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 log(Level::Debug, "log", &m);
             }
@@ -59,7 +81,7 @@ pub mod logging_module {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = PyLogDict::to_json(kwds, msg)
+                let m = log_dict_to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 log(Level::Info, "log", &m);
             }
@@ -81,7 +103,7 @@ pub mod logging_module {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = PyLogDict::to_json(kwds, msg)
+                let m = log_dict_to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 log(Level::Warn, "log", &m);
             }
@@ -103,7 +125,7 @@ pub mod logging_module {
                 } else {
                     msg.clone().into_any()
                 };
-                let m = PyLogDict::to_json(kwds, msg)
+                let m = log_dict_to_json(kwds, msg)
                     .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
                 log(Level::Error, "log", &m);
             }

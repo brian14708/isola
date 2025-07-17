@@ -16,7 +16,7 @@ use pyo3::{
 use crate::{
     error::{Error, Result},
     pymeta,
-    serde::PyValue,
+    serde::{cbor_to_python, python_to_cbor},
     wasm::ArgIter,
 };
 
@@ -151,13 +151,8 @@ impl Scope {
                         .into_iter()
                         .map(|v| match v {
                             InputValue::Iter(it) => Ok(it.into_pyobject(py).unwrap().into_any()),
-                            InputValue::Cbor(v) => Ok(PyValue::deserialize(
-                                py,
-                                &mut minicbor_serde::Deserializer::new(v.as_ref()),
-                            )
-                            .map_err(|_e| {
-                                Error::UnexpectedError("Failed to deserialize CBOR data")
-                            })?),
+                            InputValue::Cbor(v) => Ok(cbor_to_python(py, v.as_ref())
+                                .map_err(|e| Error::from_pyerr(py, e))?),
                         })
                         .collect::<Result<Vec<_>>>()?,
                 )
@@ -169,15 +164,8 @@ impl Scope {
                             kwargs
                                 .set_item(
                                     k,
-                                    PyValue::deserialize(
-                                        py,
-                                        &mut minicbor_serde::Deserializer::new(v.as_ref()),
-                                    )
-                                    .map_err(|_e| {
-                                        Error::UnexpectedError(
-                                            "Failed to deserialize CBOR argument",
-                                        )
-                                    })?,
+                                    cbor_to_python(py, v.as_ref())
+                                        .map_err(|e| Error::from_pyerr(py, e))?,
                                 )
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
@@ -207,12 +195,10 @@ impl Scope {
             };
 
             if Self::is_serializable(&obj) {
-                match minicbor_serde::to_vec(PyValue::new(obj)) {
+                match python_to_cbor(obj) {
                     Ok(s) => return Ok(Some(s)),
-                    Err(_) => {
-                        return Err(Error::UnexpectedError(
-                            "Failed to serialize return value to CBOR",
-                        ));
+                    Err(e) => {
+                        return Err(Error::from_pyerr(py, e));
                     }
                 };
             }
@@ -221,11 +207,9 @@ impl Scope {
                 for el in iter {
                     let mut tmp = {
                         let object = el.map_err(|e| Error::from_pyerr(py, e))?;
-                        minicbor_serde::to_vec(PyValue::new(object))
+                        python_to_cbor(object)
                     }
-                    .map_err(|_e| {
-                        Error::UnexpectedError("Failed to serialize Python object to CBOR")
-                    })?;
+                    .map_err(|e| Error::from_pyerr(py, e))?;
                     callback(&tmp);
                     tmp.clear();
                 }
@@ -259,23 +243,16 @@ impl Scope {
                                     "Iterator input not supported for analyze",
                                 ));
                             }
-                            InputValue::Cbor(v) => PyValue::deserialize(
-                                py,
-                                &mut minicbor_serde::Deserializer::new(v.as_ref()),
-                            )
-                            .map_err(|_e| {
-                                Error::UnexpectedError("Failed to deserialize CBOR request")
-                            })?,
+                            InputValue::Cbor(v) => cbor_to_python(py, v.as_ref())
+                                .map_err(|e| Error::from_pyerr(py, e))?,
                         },
                     ),
                     None,
                 )
                 .map_err(|e| Error::from_pyerr(py, e))?;
-            match minicbor_serde::to_vec(PyValue::new(obj)) {
+            match python_to_cbor(obj) {
                 Ok(s) => Ok(Some(s)),
-                Err(_e) => Err(Error::UnexpectedError(
-                    "Failed to serialize analyze result to CBOR",
-                )),
+                Err(e) => Err(Error::from_pyerr(py, e)),
             }
         })
     }

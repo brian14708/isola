@@ -10,23 +10,21 @@ pub mod http_module {
     };
     use url::Url;
 
-    use crate::{
-        serde::PyValue,
-        wasm::{
-            PyPollable,
-            body_buffer::{BodyBuffer, Buffer},
-            future::create_future,
-            wasi::{
-                http::{
-                    outgoing_handler::{
-                        ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
-                    },
-                    types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
+    use crate::serde::python_to_json_writer;
+    use crate::wasm::{
+        PyPollable,
+        body_buffer::{BodyBuffer, Buffer},
+        future::create_future,
+        wasi::{
+            http::{
+                outgoing_handler::{
+                    ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
                 },
-                io::{
-                    poll::Pollable,
-                    streams::{InputStream, StreamError},
-                },
+                types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
+            },
+            io::{
+                poll::Pollable,
+                streams::{InputStream, StreamError},
             },
         },
     };
@@ -163,9 +161,9 @@ pub mod http_module {
                     })?;
                 }
                 Body::Object(b) => {
-                    serde_json::to_writer(BufWriter::new(&mut os), &PyValue::new(b)).map_err(
-                        |_e| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"),
-                    )?;
+                    python_to_json_writer(b, BufWriter::new(&mut os)).map_err(|_e| {
+                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
+                    })?;
                 }
             }
 

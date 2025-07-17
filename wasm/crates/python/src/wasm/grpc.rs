@@ -4,7 +4,7 @@ pub mod grpc_module {
     use std::collections::BTreeSet;
 
     use prost_reflect::{
-        DescriptorPool, DeserializeOptions, DynamicMessage, SerializeOptions,
+        DescriptorPool, DynamicMessage,
         prost::Message,
         prost_types::{FileDescriptorProto, FileDescriptorSet},
     };
@@ -12,14 +12,13 @@ pub mod grpc_module {
         Bound, PyAny, PyErr, Python, pyclass, pyfunction, pymethods,
         types::{PyAnyMethods, PyDict, PyDictMethods},
     };
-    use serde::de::IntoDeserializer;
     use tonic_reflection::pb::v1::{
         ServerReflectionRequest, ServerReflectionResponse,
         server_reflection_request::MessageRequest, server_reflection_response::MessageResponse,
     };
 
     use crate::{
-        serde::PyValue,
+        serde::{protobuf_to_python, python_to_protobuf},
         wasm::promptkit::script::outgoing_rpc::{
             self, ConnectRequest, Payload, RequestStream, ResponseStream,
         },
@@ -205,13 +204,8 @@ pub mod grpc_module {
             let msg = self.0.get_message_by_name(name).ok_or_else(|| {
                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("message not found")
             })?;
-            let msg = DynamicMessage::deserialize_with_options(
-                msg,
-                PyValue::new(pyobject).into_deserializer(),
-                &DeserializeOptions::new(),
-            )
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-            Ok(msg.encode_to_vec())
+            python_to_protobuf(msg, pyobject)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))
         }
 
         pub fn decode<'py>(
@@ -225,8 +219,7 @@ pub mod grpc_module {
             })?;
             let msg = DynamicMessage::decode(msg, data)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-            let v = msg
-                .serialize_with_options(PyValue::serializer(py), &SerializeOptions::new())
+            let v = protobuf_to_python(py, &msg)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
             Ok(v)
         }

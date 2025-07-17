@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+base64 = "0.22.1"
 minicbor-serde = { version = "0.5.0", features = ["alloc"] }
 prost-types = { version = "0.13.0", optional = true }
 serde = "1.0.219"

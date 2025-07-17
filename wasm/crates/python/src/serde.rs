@@ -1,6 +1,11 @@
+use std::io::{self, Write};
+
+use prost_reflect::{
+    DeserializeOptions, DynamicMessage, MessageDescriptor, SerializeOptions, prost::Message,
+};
 use pyo3::{
-    Bound, IntoPyObject, PyAny, PyTypeInfo, Python,
-    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
+    Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
+    types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
 };
 use serde::{
     Deserializer, Serialize, Serializer,
@@ -16,44 +21,22 @@ use serde::{
 
 const MAX_DEPTH: usize = 128;
 
-pub enum PyValue<'py> {
-    Empty(Python<'py>),
-    Object(Bound<'py, PyAny>),
-}
+struct PyValue<'py>(Bound<'py, PyAny>);
 
 impl<'py> PyValue<'py> {
-    pub fn new(obj: Bound<'py, PyAny>) -> Self {
-        PyValue::Object(obj)
+    fn new(obj: Bound<'py, PyAny>) -> Self {
+        PyValue(obj)
     }
 
-    fn py(&self) -> Python<'py> {
-        match self {
-            PyValue::Empty(py) => *py,
-            PyValue::Object(obj) => obj.py(),
-        }
-    }
-
-    pub fn deserialize<'de, D>(
-        py: Python<'py>,
-        deserializer: D,
-    ) -> Result<Bound<'py, PyAny>, D::Error>
+    fn deserialize<'de, D>(py: Python<'py>, deserializer: D) -> Result<Bound<'py, PyAny>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        PyValue::Empty(py).deserialize(deserializer)
+        PyDeserializer(py).deserialize(deserializer)
     }
 
-    pub fn serializer(py: Python<'py>) -> impl Serializer<Ok = Bound<'py, PyAny>> {
+    fn serializer(py: Python<'py>) -> PySerializer<'py> {
         PySerializer(py)
-    }
-}
-
-impl<'py> From<PyValue<'py>> for Bound<'py, PyAny> {
-    fn from(val: PyValue<'py>) -> Self {
-        match val {
-            PyValue::Empty(py) => PyNone::get(py).to_owned().into_any(),
-            PyValue::Object(obj) => obj,
-        }
     }
 }
 
@@ -70,9 +53,11 @@ impl PyValue<'_> {
     where
         E: serde::de::Error,
     {
-        let o = &self.get();
+        let o = &self.0;
         let unexp = if PyDict::is_exact_type_of(o) {
             Unexpected::Map
+        } else if let Ok(s) = o.extract::<&[u8]>() {
+            Unexpected::Bytes(s)
         } else if PyList::is_exact_type_of(o) {
             Unexpected::Seq
         } else if PyTuple::is_exact_type_of(o) {
@@ -102,19 +87,20 @@ impl PyValue<'_> {
         };
         serde::de::Error::invalid_type(unexp, exp)
     }
+}
 
-    #[inline]
-    fn get(&self) -> Bound<'_, PyAny> {
-        match self {
-            PyValue::Empty(py) => PyNone::get(*py).to_owned().into_any(),
-            PyValue::Object(o) => o.to_owned(),
-        }
+struct PyDeserializer<'py>(Python<'py>);
+
+impl<'py> PyDeserializer<'py> {
+    fn py(&self) -> Python<'py> {
+        self.0
     }
 }
 
-impl<'de, 'py> DeserializeSeed<'de> for PyValue<'py> {
+impl<'de, 'py> DeserializeSeed<'de> for PyDeserializer<'py> {
     type Value = Bound<'py, PyAny>;
 
+    #[allow(clippy::too_many_lines)]
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -156,9 +142,30 @@ impl<'de, 'py> DeserializeSeed<'de> for PyValue<'py> {
             impl_py_visit!(visit_str, &str);
             impl_py_visit!(visit_borrowed_str, &'de str);
             impl_py_visit!(visit_string, String);
-            impl_py_visit!(visit_bytes, &[u8]);
-            impl_py_visit!(visit_borrowed_bytes, &'de [u8]);
-            impl_py_visit!(visit_byte_buf, Vec<u8>);
+
+            #[inline]
+            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(PyBytes::new(self.0, v).clone().into_any())
+            }
+
+            #[inline]
+            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(PyBytes::new(self.0, v).clone().into_any())
+            }
+
+            #[inline]
+            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(PyBytes::new(self.0, &v).clone().into_any())
+            }
 
             #[inline]
             fn visit_unit<E>(self) -> Result<Self::Value, E>
@@ -181,7 +188,7 @@ impl<'de, 'py> DeserializeSeed<'de> for PyValue<'py> {
                 A: serde::de::SeqAccess<'de>,
             {
                 let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-                while let Some(val) = seq.next_element_seed(PyValue::Empty(self.0))? {
+                while let Some(val) = seq.next_element_seed(PyDeserializer(self.0))? {
                     elems.push(val);
                 }
                 Ok(elems.into_pyobject(self.0).unwrap().into_any())
@@ -193,7 +200,7 @@ impl<'de, 'py> DeserializeSeed<'de> for PyValue<'py> {
             {
                 let dict = PyDict::new(self.0);
                 while let Some((key, val)) =
-                    map.next_entry_seed(PyValue::Empty(self.0), PyValue::Empty(self.0))?
+                    map.next_entry_seed(PyDeserializer(self.0), PyDeserializer(self.0))?
                 {
                     dict.set_item(key, val).unwrap();
                 }
@@ -249,6 +256,8 @@ impl Serialize for PyValue<'_> {
                         map.serialize_entry(&self.child(key), &self.child(value))?;
                     }
                     map.end()
+                } else if let Ok(s) = o.extract::<&[u8]>() {
+                    serializer.serialize_bytes(s)
                 } else if let Ok(list) = o.downcast_exact::<PyList>() {
                     let len = list.len().ok();
                     let mut seq = serializer.serialize_seq(len)?;
@@ -299,10 +308,7 @@ impl Serialize for PyValue<'_> {
                 }
             }
         }
-        match self {
-            PyValue::Empty(_) => serializer.serialize_none(),
-            PyValue::Object(obj) => PySerialize(obj.to_owned(), MAX_DEPTH).serialize(serializer),
-        }
+        PySerialize(self.0.clone(), MAX_DEPTH).serialize(serializer)
     }
 }
 
@@ -312,7 +318,7 @@ macro_rules! impl_py_deserialize {
         where
             V: Visitor<'de>,
         {
-            if let Ok(v) = self.get().extract() {
+            if let Ok(v) = self.0.extract() {
                 visitor.$visit(v)
             } else {
                 Err(self.invalid_type(&visitor))
@@ -328,12 +334,12 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        let o = self.get();
-        if PyDict::is_exact_type_of(&o) {
-            drop(o);
+        let o = &self.0;
+        if PyDict::is_exact_type_of(o) {
             self.deserialize_map(visitor)
-        } else if PyList::is_exact_type_of(&o) || PyTuple::is_exact_type_of(&o) {
-            drop(o);
+        } else if let Ok(s) = o.extract::<&[u8]>() {
+            visitor.visit_bytes(s)
+        } else if PyList::is_exact_type_of(o) || PyTuple::is_exact_type_of(o) {
             self.deserialize_seq(visitor)
         } else if let Ok(s) = o.extract::<&str>() {
             visitor.visit_str(s)
@@ -341,9 +347,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
             visitor.visit_bool(b)
         } else if o.is_none() {
             visitor.visit_unit()
-        } else if let Ok(f) = o.extract::<f64>() {
-            visitor.visit_f64(f)
-        } else if PyInt::is_exact_type_of(&o) {
+        } else if PyInt::is_exact_type_of(o) {
             if let Ok(i) = o.extract::<i64>() {
                 visitor.visit_i64(i)
             } else if let Ok(i) = o.extract::<u64>() {
@@ -351,6 +355,8 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
             } else {
                 Err(self.invalid_type(&visitor))
             }
+        } else if let Ok(f) = o.extract::<f64>() {
+            visitor.visit_f64(f)
         } else {
             Err(self.invalid_type(&visitor))
         }
@@ -377,7 +383,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if self.get().is_none() {
+        if self.0.is_none() {
             visitor.visit_unit()
         } else {
             visitor.visit_some(self)
@@ -388,7 +394,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if self.get().is_none() {
+        if self.0.is_none() {
             visitor.visit_unit()
         } else {
             Err(self.invalid_type(&visitor))
@@ -421,12 +427,12 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if let Ok(list) = self.get().downcast_exact::<PyList>() {
+        if let Ok(list) = self.0.downcast_exact::<PyList>() {
             let mut deserializer = SeqDeserializer::new(list.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
             Ok(seq)
-        } else if let Ok(tuple) = self.get().downcast_exact::<PyTuple>() {
+        } else if let Ok(tuple) = self.0.downcast_exact::<PyTuple>() {
             let mut deserializer = SeqDeserializer::new(tuple.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
@@ -459,7 +465,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if let Ok(dict) = self.get().downcast_exact::<PyDict>() {
+        if let Ok(dict) = self.0.downcast_exact::<PyDict>() {
             let mut map = MapDeserializer::new(
                 dict.into_iter()
                     .map(|(k, v)| (PyValue::new(k), PyValue::new(v))),
@@ -493,7 +499,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        let o = &self.get();
+        let o = &self.0;
         if let Ok(s) = o.extract::<&str>() {
             visitor.visit_enum(s.into_deserializer())
         } else if let Ok(dict) = o.downcast_exact::<PyDict>() {
@@ -560,7 +566,10 @@ impl<'py> Serializer for PySerializer<'py> {
     impl_py_serialize!(serialize_f64, f64);
     impl_py_serialize!(serialize_char, char);
     impl_py_serialize!(serialize_str, &str);
-    impl_py_serialize!(serialize_bytes, &[u8]);
+
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Ok(PyBytes::new(self.0, v).clone().into_any())
+    }
 
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(PyNone::get(self.0).to_owned().into_any())
@@ -684,7 +693,7 @@ impl<'py> Serializer for PySerializer<'py> {
     }
 }
 
-pub struct SeqSerializer<'py> {
+struct SeqSerializer<'py> {
     py: Python<'py>,
     elems: Vec<Bound<'py, PyAny>>,
 }
@@ -748,7 +757,7 @@ impl<'py> SerializeTupleVariant for SeqSerializer<'py> {
     }
 }
 
-pub struct MapSerializer<'py> {
+struct MapSerializer<'py> {
     py: Python<'py>,
     dict: Vec<(Bound<'py, PyAny>, Option<Bound<'py, PyAny>>)>,
 }
@@ -817,66 +826,103 @@ impl SerializeStructVariant for MapSerializer<'_> {
     }
 }
 
-pub struct PyLogDict<'s> {
-    dict: Option<&'s Bound<'s, PyDict>>,
-    msg: Bound<'s, PyAny>,
+pub fn python_to_cbor(py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    let mut serializer = minicbor_serde::Serializer::new(vec![]);
+    PyValue::new(py_obj)
+        .serialize(serializer.serialize_unit_as_null(true))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(serializer.into_encoder().into_writer())
 }
 
-impl PyLogDict<'_> {
-    fn new<'s>(dict: Option<&'s Bound<'s, PyDict>>, msg: Bound<'s, PyAny>) -> PyLogDict<'s> {
-        PyLogDict { dict, msg }
-    }
-
-    pub fn to_json<'s>(
-        dict: Option<&'s Bound<'s, PyDict>>,
-        msg: Bound<'s, PyAny>,
-    ) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&Self::new(dict, msg))
-    }
+pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+    let mut deserializer = minicbor_serde::Deserializer::new(cbor);
+    PyValue::deserialize(py, &mut deserializer)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 
-impl serde::Serialize for PyLogDict<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+pub fn python_to_json(py_obj: Bound<'_, PyAny>) -> PyResult<String> {
+    let mut o = vec![];
+    let mut serializer = serde_json::Serializer::with_formatter(&mut o, Base64Formatter);
+    PyValue::new(py_obj)
+        .serialize(&mut serializer)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    String::from_utf8(o).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+pub fn python_to_json_writer(py_obj: Bound<'_, PyAny>, mut w: impl Write) -> PyResult<()> {
+    PyValue::new(py_obj)
+        .serialize(&mut serde_json::Serializer::with_formatter(
+            &mut w,
+            Base64Formatter,
+        ))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(())
+}
+
+pub fn json_to_python<'py>(py: Python<'py>, json: &str) -> PyResult<Bound<'py, PyAny>> {
+    let mut de = serde_json::Deserializer::from_str(json);
+    PyValue::deserialize(py, &mut de)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+pub fn python_to_yaml(py_obj: Bound<'_, PyAny>) -> PyResult<String> {
+    let mut o = vec![];
+    PyValue::new(py_obj)
+        .serialize(&mut serde_yaml::Serializer::new(&mut o))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    String::from_utf8(o).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+pub fn yaml_to_python<'py>(py: Python<'py>, yaml: &str) -> PyResult<Bound<'py, PyAny>> {
+    let deserializer = serde_yaml::Deserializer::from_str(yaml);
+    PyValue::deserialize(py, deserializer)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+pub fn python_to_protobuf(desc: MessageDescriptor, py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    let msg = DynamicMessage::deserialize_with_options(
+        desc,
+        PyValue::new(py_obj),
+        &DeserializeOptions::new(),
+    )
+    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(msg.encode_to_vec())
+}
+
+pub fn protobuf_to_python<'py>(
+    py: Python<'py>,
+    msg: &DynamicMessage,
+) -> PyResult<Bound<'py, PyAny>> {
+    msg.serialize_with_options(PyValue::serializer(py), &SerializeOptions::default())
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
+}
+
+struct Base64Formatter;
+
+impl serde_json::ser::Formatter for Base64Formatter {
+    fn write_byte_array<W>(&mut self, mut writer: &mut W, value: &[u8]) -> io::Result<()>
     where
-        S: serde::Serializer,
+        W: io::Write + ?Sized,
     {
-        let mut map = if let Some(dict) = self.dict {
-            let len = dict.len().ok().map(|i| i + 1);
-            let mut map = serializer.serialize_map(len)?;
-            for (key, value) in dict {
-                if value.is_callable() {
-                    map.serialize_entry(
-                        &PyValue::new(key),
-                        &PyValue::new(value.call0().map_err(serde::ser::Error::custom)?),
-                    )?;
-                } else {
-                    map.serialize_entry(&PyValue::new(key), &PyValue::new(value))?;
-                }
-            }
-            map
-        } else {
-            serializer.serialize_map(Some(1))?
-        };
-        map.serialize_entry("message", &PyValue::new(self.msg.clone()))?;
-        map.end()
+        writer.write_all(b"\"")?;
+        base64::write::EncoderWriter::new(&mut writer, &base64::engine::general_purpose::STANDARD)
+            .write_all(value)?;
+        writer.write_all(b"\"")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyo3::types::PyBytes;
     use serde_json::json;
-
-    fn to_json(object: Bound<'_, PyAny>) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&PyValue::new(object))
-    }
 
     #[test]
     fn test_pyobject_serializer() {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             assert_eq!(
-                to_json(PyList::new(py, [1]).unwrap().into_any()).unwrap(),
+                python_to_json(PyList::new(py, [1]).unwrap().into_any()).unwrap(),
                 json!([1]).to_string()
             );
 
@@ -884,7 +930,73 @@ mod tests {
             let p = p
                 .call_method("__add__", (1_u32.into_pyobject(py).unwrap(),), None)
                 .unwrap();
-            assert!(to_json(p).is_err());
+            assert!(python_to_json(p).is_err());
+        });
+    }
+
+    #[test]
+    fn test_pyvalue_minicbor_roundtrip() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            // Test various Python types for round-trip serialization through minicbor
+            let mut test_cases = vec![
+                // Basic types
+                42i32.into_pyobject(py).unwrap().into_any(),
+                "hello world".into_pyobject(py).unwrap().into_any(),
+                3.14f64.into_pyobject(py).unwrap().into_any(),
+                // Collections
+                PyList::new(py, [1, 2, 3]).unwrap().into_any(),
+                PyTuple::new(py, [1, 2, 3]).unwrap().into_any(),
+                // Bytes
+                PyBytes::new(py, b"test bytes").into_any(),
+            ];
+
+            // Add bool and None separately to handle cloning
+            test_cases.push(true.into_pyobject(py).unwrap().to_owned().into_any());
+            test_cases.push(false.into_pyobject(py).unwrap().to_owned().into_any());
+            test_cases.push(PyNone::get(py).to_owned().into_any());
+
+            // Test dictionary
+            let dict = PyDict::new(py);
+            dict.set_item("key1", "value1").unwrap();
+            dict.set_item("key2", 42).unwrap();
+            dict.set_item("key3", PyList::new(py, [1, 2, 3]).unwrap())
+                .unwrap();
+            test_cases.push(dict.into_any());
+
+            // Test nested structures
+            let nested_list = PyList::new(
+                py,
+                [
+                    PyList::new(py, [1, 2]).unwrap().into_any(),
+                    PyDict::new(py).into_any(),
+                ],
+            )
+            .unwrap();
+            test_cases.push(nested_list.into_any());
+
+            for original in test_cases {
+                // Serialize to CBOR
+                let cbor_bytes =
+                    python_to_cbor(original.clone()).expect("Failed to serialize to CBOR");
+
+                // Deserialize from CBOR
+                let deserialized =
+                    cbor_to_python(py, &cbor_bytes).expect("Failed to deserialize from CBOR");
+
+                // Compare by serializing both to JSON (as a proxy for equality)
+                let original_json =
+                    python_to_json(original.clone()).expect("Failed to serialize original to JSON");
+                let deserialized_json =
+                    python_to_json(deserialized).expect("Failed to serialize deserialized to JSON");
+
+                assert_eq!(
+                    original_json,
+                    deserialized_json,
+                    "Round-trip failed for type: {}",
+                    original.get_type()
+                );
+            }
         });
     }
 }

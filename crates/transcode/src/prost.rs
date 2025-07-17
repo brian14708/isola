@@ -1,3 +1,4 @@
+use base64::Engine;
 use serde::{
     Deserializer, Serialize, Serializer,
     de::{Expected, Unexpected, Visitor},
@@ -464,10 +465,12 @@ impl serde::ser::Serializer for ProstValueSerializer {
             kind: Some(prost_types::value::Kind::StringValue(v.to_owned())),
         })
     }
-    fn serialize_bytes(self, _v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Err(serde::de::Error::custom(
-            "bytes serialization not supported",
-        ))
+    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
+        Ok(prost_types::Value {
+            kind: Some(prost_types::value::Kind::StringValue(
+                base64::prelude::BASE64_STANDARD.encode(v),
+            )),
+        })
     }
     fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
         Ok(prost_types::Value {

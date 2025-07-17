@@ -2234,6 +2234,7 @@ dependencies = [
 name = "promptkit_transcode"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "minicbor-serde",
  "prost-types",
  "serde",

@@ -1,4 +1,5 @@
 use std::error::Error as StdError;
+use std::io::{self, Write};
 
 use serde::Serialize;
 
@@ -6,6 +7,20 @@ use serde::Serialize;
 mod prost;
 
 pub type Error = Box<dyn StdError>;
+
+struct Base64Formatter;
+
+impl serde_json::ser::Formatter for Base64Formatter {
+    fn write_byte_array<W>(&mut self, mut writer: &mut W, value: &[u8]) -> io::Result<()>
+    where
+        W: io::Write + ?Sized,
+    {
+        writer.write_all(b"\"")?;
+        base64::write::EncoderWriter::new(&mut writer, &base64::engine::general_purpose::STANDARD)
+            .write_all(value)?;
+        writer.write_all(b"\"")
+    }
+}
 
 pub fn json_to_cbor(json: &str) -> Result<Vec<u8>, Error> {
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
@@ -18,7 +33,10 @@ pub fn json_to_cbor(json: &str) -> Result<Vec<u8>, Error> {
 pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
     let mut o = vec![];
     serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
-        .serialize(&mut serde_json::Serializer::new(&mut o))
+        .serialize(&mut serde_json::Serializer::with_formatter(
+            &mut o,
+            Base64Formatter,
+        ))
         .map_err(Box::new)?;
     Ok(String::from_utf8(o).map_err(Box::new)?)
 }
@@ -45,6 +63,7 @@ pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
 mod tests {
     use super::*;
 
+    use base64::Engine;
     #[cfg(feature = "prost")]
     use prost_types::Value;
 
@@ -152,6 +171,40 @@ mod tests {
             assert!(cbor_to_prost(b"notcbor").is_err());
             assert!(prost_to_cbor(&Value { kind: None }).is_ok());
         }
+    }
+
+    #[test]
+    fn test_base64_bytes_encoding() {
+        use serde::Serializer;
+
+        let test_bytes = b"Hello, World!";
+        let mut cbor_serializer = minicbor_serde::Serializer::new(vec![]);
+        cbor_serializer.serialize_bytes(test_bytes).unwrap();
+        let cbor_data = cbor_serializer.into_encoder().into_writer();
+
+        let json_result = cbor_to_json(&cbor_data).unwrap();
+
+        let expected_base64 = base64::prelude::BASE64_STANDARD.encode(test_bytes);
+        assert_eq!(json_result, format!("\"{}\"", expected_base64));
+        assert_eq!(json_result, "\"SGVsbG8sIFdvcmxkIQ==\"");
+    }
+
+    #[test]
+    #[cfg(feature = "prost")]
+    fn test_prost_base64_bytes_encoding() {
+        use serde::Serializer;
+
+        let test_bytes = b"Hello, World!";
+        let mut cbor_serializer = minicbor_serde::Serializer::new(vec![]);
+        cbor_serializer.serialize_bytes(test_bytes).unwrap();
+        let cbor_data = cbor_serializer.into_encoder().into_writer();
+
+        let prost_value = cbor_to_prost(&cbor_data).unwrap();
+        let json_result = serde_json::to_string(&prost::ProstValue::new(&prost_value)).unwrap();
+
+        let expected_base64 = base64::prelude::BASE64_STANDARD.encode(test_bytes);
+        assert_eq!(json_result, format!("\"{}\"", expected_base64));
+        assert_eq!(json_result, "\"SGVsbG8sIFdvcmxkIQ==\"");
     }
 
     #[test]

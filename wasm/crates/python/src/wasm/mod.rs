@@ -18,7 +18,7 @@ use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
 use crate::{
     error::Error,
     script::{InputValue, Scope},
-    serde::PyValue,
+    serde::cbor_to_python,
 };
 
 use self::{exports::promptkit::script::guest, promptkit::script::host};
@@ -239,7 +239,7 @@ impl ArgIter {
         match self.iter.blocking_read() {
             Ok(a) => match a {
                 host::Value::Cbor(c) => Ok(Some(
-                    PyValue::deserialize(py, &mut minicbor_serde::Deserializer::new(&c))
+                    cbor_to_python(py, &c)
                         .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
                         .into(),
                 )),
@@ -266,7 +266,7 @@ impl ArgIter {
                 host::Value::Cbor(c) => Ok((
                     true,
                     Some(
-                        PyValue::deserialize(py, &mut minicbor_serde::Deserializer::new(&c))
+                        cbor_to_python(py, &c)
                             .map_err(|_| {
                                 PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
                             })?
