@@ -73,7 +73,7 @@
 
 		$effect(() => {
 			editor.dispatch({
-				effects: editorTheme.reconfigure($mode === "light" ? githubLight : githubDark),
+				effects: editorTheme.reconfigure(mode.current === "light" ? githubLight : githubDark),
 			});
 		});
 	});

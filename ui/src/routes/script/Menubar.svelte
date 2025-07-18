@@ -32,7 +32,7 @@
 
 		<Menubar.MenubarContent>
 			<Menubar.MenubarRadioGroup
-				value={$mode}
+				value={mode.current}
 				onValueChange={(m) => {
 					setMode(m !== "dark" ? "light" : "dark");
 				}}
