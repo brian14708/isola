@@ -9,7 +9,7 @@ COPY Cargo.toml .
 COPY Cargo.lock .
 RUN --mount=type=cache,target=/work/target/release \
     --mount=type=cache,target=/root/.cargo/registry \
-    cargo b --release -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
+    cargo b --profile release-lto -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
 
 FROM --platform=$BUILDPLATFORM docker.io/library/node:latest AS ui-build
 WORKDIR /src
