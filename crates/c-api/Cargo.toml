@@ -1,5 +1,5 @@
 [package]
-name = "promptkit_c_api"
+name = "promptkit-c-api"
 version.workspace = true
 edition.workspace = true
 
@@ -13,9 +13,9 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
-promptkit_executor = { workspace = true }
-promptkit_request = { workspace = true }
-promptkit_cbor = { workspace = true }
+promptkit-executor = { workspace = true }
+promptkit-request = { workspace = true }
+promptkit-cbor = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 

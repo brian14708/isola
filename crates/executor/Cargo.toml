@@ -1,5 +1,5 @@
 [package]
-name = "promptkit_executor"
+name = "promptkit-executor"
 version.workspace = true
 edition.workspace = true
 
@@ -18,7 +18,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
-promptkit_trace = { workspace = true }
+promptkit-trace = { workspace = true }
 rand = { workspace = true }
 rc-zip-tokio = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

@@ -52,7 +52,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "cargo b -Z build-std=std,panic_abort --profile release --target {TARGET} -p promptkit_python"
+        "cargo b -Z build-std=std,panic_abort --profile release --target {TARGET} -p promptkit-python"
     )
     .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
     .env("RUSTFLAGS", "-C relocation-model=pic")

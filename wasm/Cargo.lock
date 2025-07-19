@@ -561,7 +561,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_python"
+name = "promptkit-python"
 version = "0.1.0"
 dependencies = [
  "base64",

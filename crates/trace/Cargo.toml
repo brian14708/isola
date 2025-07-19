@@ -1,5 +1,5 @@
 [package]
-name = "promptkit_trace"
+name = "promptkit-trace"
 version.workspace = true
 edition.workspace = true
 

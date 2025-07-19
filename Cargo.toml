@@ -35,10 +35,10 @@ opentelemetry-semantic-conventions = "0.30.0"
 opentelemetry_sdk = "0.30.0"
 parking_lot = "0.12.2"
 pin-project-lite = "0.2.16"
-promptkit_cbor = { path = "crates/cbor" }
-promptkit_executor = { path = "crates/executor" }
-promptkit_request = { path = "crates/request" }
-promptkit_trace = { path = "crates/trace" }
+promptkit-cbor = { path = "crates/cbor" }
+promptkit-executor = { path = "crates/executor" }
+promptkit-request = { path = "crates/request" }
+promptkit-trace = { path = "crates/trace" }
 prost = "0.13.0"
 prost-types = "0.13.0"
 rand = "0.9.0"

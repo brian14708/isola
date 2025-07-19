@@ -7,9 +7,9 @@ COPY crates crates
 COPY apis apis
 COPY Cargo.toml .
 COPY Cargo.lock .
-RUN --mount=type=cache,target=/work/target/release \
+RUN --mount=type=cache,target=/work/target/release-lto \
     --mount=type=cache,target=/root/.cargo/registry \
-    cargo b --profile release-lto -p promptkit_server && cp target/release/promptkit_server target/promptkit_server
+    cargo b --profile release-lto -p promptkit-server && cp target/release-lto/promptkit-server target/promptkit-server
 
 FROM --platform=$BUILDPLATFORM docker.io/library/node:latest AS ui-build
 WORKDIR /src
@@ -57,14 +57,14 @@ RUN python -m compileall /src/wasm/target/wasm32-wasip1/wasi-deps/usr/
 
 FROM docker.io/chainguard/glibc-dynamic:latest AS staging
 WORKDIR /app
-COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit_server .
+COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit-server .
 COPY --from=ui-build --chown=nonroot:nonroot /src/build ui/build
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
-RUN ["./promptkit_server", "build"]
+RUN ["./promptkit-server", "build"]
 
 FROM docker.io/chainguard/glibc-dynamic:latest
 WORKDIR /app
 COPY --from=staging /app .
 EXPOSE 3000/tcp
-CMD ["./promptkit_server"]
+CMD ["./promptkit-server"]

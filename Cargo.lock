@@ -2109,7 +2109,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_c_api"
+name = "promptkit-c-api"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2118,15 +2118,15 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
- "promptkit_cbor",
- "promptkit_executor",
- "promptkit_request",
+ "promptkit-cbor",
+ "promptkit-executor",
+ "promptkit-request",
  "thiserror 2.0.12",
  "tokio",
 ]
 
 [[package]]
-name = "promptkit_cbor"
+name = "promptkit-cbor"
 version = "0.1.0"
 dependencies = [
  "base64",
@@ -2138,7 +2138,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_executor"
+name = "promptkit-executor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2153,7 +2153,7 @@ dependencies = [
  "hyper",
  "parking_lot",
  "pin-project-lite",
- "promptkit_trace",
+ "promptkit-trace",
  "rand 0.9.1",
  "rc-zip-tokio",
  "serde",
@@ -2171,7 +2171,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_request"
+name = "promptkit-request"
 version = "0.1.0"
 dependencies = [
  "bytes",
@@ -2191,7 +2191,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_server"
+name = "promptkit-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -2209,10 +2209,10 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project-lite",
- "promptkit_cbor",
- "promptkit_executor",
- "promptkit_request",
- "promptkit_trace",
+ "promptkit-cbor",
+ "promptkit-executor",
+ "promptkit-request",
+ "promptkit-trace",
  "prost",
  "prost-types",
  "serde",
@@ -2231,7 +2231,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "promptkit_trace"
+name = "promptkit-trace"
 version = "0.1.0"
 dependencies = [
  "fastant",

@@ -1,5 +1,5 @@
 [package]
-name = "promptkit_python"
+name = "promptkit-python"
 version.workspace = true
 edition.workspace = true
 exclude = ["/bundled", "bundle.py"]

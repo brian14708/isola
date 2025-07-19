@@ -1,5 +1,5 @@
 [package]
-name = "promptkit_cbor"
+name = "promptkit-cbor"
 version.workspace = true
 edition.workspace = true
 

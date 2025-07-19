@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.25)
 project(promptkit-tests-c LANGUAGES CXX)
 set(CMAKE_C_STANDARD 17)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../crates/c_api
-                 ${CMAKE_BINARY_DIR}/c_api)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../crates/c-api
+                 ${CMAKE_BINARY_DIR}/c-api)
 
 include(FetchContent)
 FetchContent_Declare(

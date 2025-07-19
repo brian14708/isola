@@ -1,7 +1,7 @@
 default: check
 
 run: build
-    cargo run --release -p promptkit_server
+    cargo run --release -p promptkit-server
 
 check: lint test
 
@@ -13,8 +13,8 @@ generate:
     cd tests/rpc && buf generate
 
 build: build-wasm build-ui
-    cargo build --release -p promptkit_server
-    cargo run --release -p promptkit_server build
+    cargo build --release -p promptkit-server
+    cargo run --release -p promptkit-server build
 
 [working-directory('wasm')]
 build-wasm:
