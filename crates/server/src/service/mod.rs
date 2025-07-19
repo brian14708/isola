@@ -81,9 +81,8 @@ impl ScriptService for ScriptServer {
         }
         let script = parse_source(request.get_mut().source.take())?;
 
-        let req =
-            promptkit_transcode::to_cbor(&Into::<ipc::AnalyzeRequest>::into(request.get_ref()))
-                .map_err(|e| Status::internal(e.to_string()))?;
+        let req = promptkit_cbor::to_cbor(&Into::<ipc::AnalyzeRequest>::into(request.get_ref()))
+            .map_err(|e| Status::internal(e.to_string()))?;
 
         let result = async {
             let run = async {
@@ -108,10 +107,9 @@ impl ScriptService for ScriptServer {
                 let m = non_stream_result(stream, [ContentType::Cbor as i32]).await?;
                 match m.result_type {
                     Some(result::ResultType::Cbor(c)) => {
-                        let r: ipc::AnalyzeResult =
-                            promptkit_transcode::from_cbor(&c).map_err(|e| {
-                                Status::internal(format!("failed to decode result: {e}"))
-                            })?;
+                        let r: ipc::AnalyzeResult = promptkit_cbor::from_cbor(&c).map_err(|e| {
+                            Status::internal(format!("failed to decode result: {e}"))
+                        })?;
                         Ok(analyze_response::ResultType::AnalyzeResult(r.into()))
                     }
                     Some(result::ResultType::Error(e)) => {

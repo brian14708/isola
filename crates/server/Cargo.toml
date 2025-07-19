@@ -4,39 +4,39 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-anyhow = "1.0.82"
-axum = { version = "0.8.0", features = ["http2"] }
-bytes = "1.7.1"
-futures-core = "0.3.30"
-futures-util = "0.3.30"
-http = "1.1.0"
-http-body = "1.0.1"
-metrics = "0.24.1"
-metrics-exporter-prometheus = { version = "0.17.0", default-features = false }
-mimalloc = { version = "0.1.41", default-features = false }
-opentelemetry = "0.30.0"
-opentelemetry-otlp = { version = "0.30.0", features = ["http-proto", "reqwest-client", "reqwest-rustls", "tokio"], default-features = false }
-opentelemetry-semantic-conventions = { version = "0.30.0", features = ["semconv_experimental"] }
-opentelemetry_sdk = { version = "0.30.0", features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
-pin-project-lite = "0.2.16"
-promptkit_executor = { path = "../executor" }
-promptkit_request = { path = "../request" }
-promptkit_trace = { path = "../trace" }
-promptkit_transcode = { path = "../transcode", features = ["prost"] }
-prost = "0.13.0"
-prost-types = "0.13.0"
-serde = { version = "1.0.199", features = ["derive"] }
-tokio = { version = "1.37.0", features = ["full"] }
-tokio-stream = "0.1.15"
-tokio-tungstenite = { version = "0.27.0", default-features = false, features = ["handshake"] }
-tonic = { version = "0.13.0", features = ["gzip", "router", "server", "tls-webpki-roots"] }
-tonic-reflection = "0.13.0"
-tonic-web = "0.13.0"
-tower-http = { version = "0.6.0", features = ["fs", "trace"] }
-tracing = "0.1.40"
-tracing-opentelemetry = "0.31.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "parking_lot"] }
-url = "2.5.1"
+anyhow = { workspace = true }
+axum = { workspace = true, features = ["http2"] }
+bytes = { workspace = true }
+futures-core = { workspace = true }
+futures-util = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
+mimalloc = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-client", "reqwest-rustls", "tokio"] }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
+opentelemetry_sdk = { workspace = true, features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
+pin-project-lite = { workspace = true }
+promptkit_executor = { workspace = true }
+promptkit_request = { workspace = true }
+promptkit_trace = { workspace = true }
+promptkit_cbor = { workspace = true, features = ["prost"] }
+prost = { workspace = true }
+prost-types = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tokio = { workspace = true, features = ["full"] }
+tokio-stream = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["handshake"] }
+tonic = { workspace = true, features = ["gzip", "router", "server", "tls-webpki-roots"] }
+tonic-reflection = { workspace = true }
+tonic-web = { workspace = true }
+tower-http = { workspace = true, features = ["fs", "trace"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "parking_lot"] }
+url = { workspace = true }
 
 [build-dependencies]
-tonic-build = "0.13.0"
+tonic-build = { workspace = true }

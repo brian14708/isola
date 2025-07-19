@@ -13,15 +13,12 @@ pub fn argument(s: script::Argument) -> Result<Result<Vec<u8>, Marker>, Status> 
     match s.argument_type {
         None => Err(Status::invalid_argument("argument type is not specified")),
         Some(arg) => match arg {
-            script::argument::ArgumentType::Value(s) => Ok(Ok(promptkit_transcode::prost_to_cbor(
-                &s,
-            )
-            .map_err(|_| Status::internal("failed to serialize argument to cbor"))?)),
-            script::argument::ArgumentType::Json(j) => {
-                Ok(Ok(promptkit_transcode::json_to_cbor(&j).map_err(|_| {
-                    Status::internal("failed to serialize argument to cbor")
-                })?))
-            }
+            script::argument::ArgumentType::Value(s) => Ok(Ok(promptkit_cbor::prost_to_cbor(&s)
+                .map_err(|_| {
+                Status::internal("failed to serialize argument to cbor")
+            })?)),
+            script::argument::ArgumentType::Json(j) => Ok(Ok(promptkit_cbor::json_to_cbor(&j)
+                .map_err(|_| Status::internal("failed to serialize argument to cbor"))?)),
             script::argument::ArgumentType::Cbor(c) => Ok(Ok(c)),
             script::argument::ArgumentType::Marker(m) => Ok(Err(Marker::try_from(m)
                 .map_err(|e| Status::invalid_argument(format!("invalid marker: {e}")))?)),
@@ -55,14 +52,14 @@ pub fn result_type(
         match c {
             ContentType::Unspecified => {}
             ContentType::Json => {
-                let v = promptkit_transcode::cbor_to_json(&s)
+                let v = promptkit_cbor::cbor_to_json(&s)
                     .map_err(|_| Status::internal("failed to serialize result to json"))?;
                 return Ok(script::Result {
                     result_type: Some(result::ResultType::Json(v)),
                 });
             }
             ContentType::ProtobufValue => {
-                let v = promptkit_transcode::cbor_to_prost(&s)
+                let v = promptkit_cbor::cbor_to_prost(&s)
                     .map_err(|_| Status::internal("failed to serialize result to struct"))?;
                 return Ok(script::Result {
                     result_type: Some(result::ResultType::Value(v)),

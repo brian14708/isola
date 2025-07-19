@@ -147,7 +147,7 @@ impl OutputCallback for Callback {
         &mut self,
         item: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = std::result::Result<(), anyhow::Error>> + Send>> {
-        let data = promptkit_transcode::cbor_to_json(&item).unwrap();
+        let data = promptkit_cbor::cbor_to_json(&item).unwrap();
         (self.callback)(
             CallbackEvent::ResultJson,
             data.as_ptr(),
@@ -241,7 +241,7 @@ impl VmHandle<'_> {
                             let json_str = std::str::from_utf8(&value).map_err(|_| {
                                 Error::InvalidArgument("Invalid UTF-8 in JSON argument")
                             })?;
-                            let cbor_data = promptkit_transcode::json_to_cbor(json_str)
+                            let cbor_data = promptkit_cbor::json_to_cbor(json_str)
                                 .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
                             Ok(promptkit_executor::vm::exports::Argument {
                                 name,
@@ -265,7 +265,7 @@ impl VmHandle<'_> {
 
                 match v {
                     Some(data) => {
-                        let json_data = promptkit_transcode::cbor_to_json(&data).map_err(|_| {
+                        let json_data = promptkit_cbor::cbor_to_json(&data).map_err(|_| {
                             Error::Internal("CBOR to JSON conversion failed".to_string())
                         })?;
                         (callback.callback)(

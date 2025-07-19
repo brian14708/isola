@@ -2118,11 +2118,23 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
+ "promptkit_cbor",
  "promptkit_executor",
  "promptkit_request",
- "promptkit_transcode",
  "thiserror 2.0.12",
  "tokio",
+]
+
+[[package]]
+name = "promptkit_cbor"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "minicbor-serde",
+ "prost-types",
+ "serde",
+ "serde-transcode",
+ "serde_json",
 ]
 
 [[package]]
@@ -2197,10 +2209,10 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry_sdk",
  "pin-project-lite",
+ "promptkit_cbor",
  "promptkit_executor",
  "promptkit_request",
  "promptkit_trace",
- "promptkit_transcode",
  "prost",
  "prost-types",
  "serde",
@@ -2226,18 +2238,6 @@ dependencies = [
  "rand 0.9.1",
  "tracing",
  "tracing-subscriber",
-]
-
-[[package]]
-name = "promptkit_transcode"
-version = "0.1.0"
-dependencies = [
- "base64",
- "minicbor-serde",
- "prost-types",
- "serde",
- "serde-transcode",
- "serde_json",
 ]
 
 [[package]]
