@@ -59,6 +59,17 @@ pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
     )
 }
 
+pub fn to_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
+    let mut serializer = minicbor_serde::Serializer::new(vec![]);
+    value.serialize(serializer.serialize_unit_as_null(true))?;
+    Ok(serializer.into_encoder().into_writer())
+}
+
+pub fn from_cbor<T: serde::de::DeserializeOwned>(cbor: &[u8]) -> Result<T, Error> {
+    let mut deserializer = minicbor_serde::Deserializer::new(cbor);
+    Ok(T::deserialize(&mut deserializer).map_err(Box::new)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

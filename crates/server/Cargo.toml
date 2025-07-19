@@ -7,7 +7,6 @@ edition.workspace = true
 anyhow = "1.0.82"
 axum = { version = "0.8.0", features = ["http2"] }
 bytes = "1.7.1"
-cbor4ii = { version = "1.0.0", features = ["serde1"] }
 futures-core = "0.3.30"
 futures-util = "0.3.30"
 http = "1.1.0"

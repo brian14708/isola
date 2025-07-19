@@ -1,6 +1,5 @@
 use std::{borrow::Cow, collections::HashMap, pin::Pin, time::Duration};
 
-use cbor4ii::core::{enc::Write, types::Array, utils::BufWriter};
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
 use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
@@ -82,11 +81,9 @@ impl ScriptService for ScriptServer {
         }
         let script = parse_source(request.get_mut().source.take())?;
 
-        let req = cbor4ii::serde::to_vec(
-            vec![],
-            &Into::<ipc::AnalyzeRequest>::into(request.get_ref()),
-        )
-        .map_err(|e| Status::internal(e.to_string()))?;
+        let req =
+            promptkit_transcode::to_cbor(&Into::<ipc::AnalyzeRequest>::into(request.get_ref()))
+                .map_err(|e| Status::internal(e.to_string()))?;
 
         let result = async {
             let run = async {
@@ -112,7 +109,7 @@ impl ScriptService for ScriptServer {
                 match m.result_type {
                     Some(result::ResultType::Cbor(c)) => {
                         let r: ipc::AnalyzeResult =
-                            cbor4ii::serde::from_slice(&c).map_err(|e| {
+                            promptkit_transcode::from_cbor(&c).map_err(|e| {
                                 Status::internal(format!("failed to decode result: {e}"))
                             })?;
                         Ok(analyze_response::ResultType::AnalyzeResult(r.into()))
@@ -540,7 +537,7 @@ async fn non_stream_result(
     mut stream: impl Stream<Item = ExecStreamItem> + Unpin,
     content_type: impl IntoIterator<Item = i32>,
 ) -> Result<script::Result, Status> {
-    let mut b = match stream.next().await {
+    let mut o = match stream.next().await {
         Some(ExecStreamItem::End(Some(value))) => {
             return prost_serde::result_type(value.into(), content_type);
         }
@@ -552,11 +549,10 @@ async fn non_stream_result(
             );
         }
         Some(ExecStreamItem::Data(d)) => {
-            let mut b = BufWriter::new(Vec::with_capacity(d.len() + 2));
-            Array::unbounded(&mut b).map_err(|_| Status::internal("failed to encode array"))?;
-            b.push(&d)
-                .map_err(|_| Status::internal("failed to write data"))?;
-            b
+            let mut o = Vec::with_capacity(d.len() + 2);
+            o.push(0x9F); // start of array
+            o.extend_from_slice(&d);
+            o
         }
         Some(ExecStreamItem::Error(err)) => return Ok(error_result(err)),
         None => return Err(Status::internal("empty stream")),
@@ -565,8 +561,7 @@ async fn non_stream_result(
     while let Some(item) = stream.next().await {
         match item {
             ExecStreamItem::Data(data) => {
-                b.push(&data)
-                    .map_err(|_| Status::internal("failed to write data"))?;
+                o.extend_from_slice(&data);
             }
             ExecStreamItem::End(None) => break,
             ExecStreamItem::End(Some(_)) => {
@@ -577,8 +572,8 @@ async fn non_stream_result(
             }
         }
     }
-    Array::end(&mut b).map_err(|_| Status::internal("failed to end array"))?;
-    prost_serde::result_type(b.into_inner().into(), content_type)
+    o.push(0xFF); // end of array
+    prost_serde::result_type(o.into(), content_type)
 }
 
 struct ParsedSpec<'a> {
