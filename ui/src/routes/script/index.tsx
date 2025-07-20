@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { ScriptOutput } from "@/components/script-output";
 import { useScriptExecution } from "@/hooks/use-script-execution";
 import { usePersistedState } from "@/hooks/use-persisted-state";
-import { useEffect } from "react";
+import { useEffect, useState, useCallback } from "react";
+import type * as Monaco from "monaco-editor";
 
 export const Route = createFileRoute("/script/")({
   component: RouteComponent,
@@ -23,9 +24,21 @@ if __name__ == '__main__':
   const [timeout, setTimeout] = usePersistedState("promptkit-timeout", 30);
   const { output, isRunning, runScript, interruptExecution } = useScriptExecution();
 
-  const handleRunScript = () => {
+  const [lspReady, setLspReady] = useState(false);
+  const [lspEnabled, setLspEnabled] = usePersistedState("promptkit-lsp-enabled", true);
+  const [diagnostics, setDiagnostics] = useState<Monaco.editor.IMarkerData[]>([]);
+
+  const handleRunScript = useCallback(() => {
     runScript(script, timeout);
-  };
+  }, [runScript, script, timeout]);
+
+  const handleDiagnostics = useCallback((newDiagnostics: Monaco.editor.IMarkerData[]) => {
+    setDiagnostics(newDiagnostics);
+  }, []);
+
+  const handleLspReady = useCallback((isReady: boolean) => {
+    setLspReady(isReady);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -34,20 +47,9 @@ if __name__ == '__main__':
         event.key === "Enter" || event.code === "Enter" || event.code === "NumpadEnter";
       const isModified = event.ctrlKey || event.metaKey;
 
-      console.log("Global key pressed:", {
-        key: event.key,
-        code: event.code,
-        ctrlKey: event.ctrlKey,
-        metaKey: event.metaKey,
-        isEnter,
-        isModified,
-        target: event.target?.constructor?.name,
-      });
-
       if (isModified && isEnter) {
         event.preventDefault();
         event.stopPropagation();
-        console.log("Running script via global keyboard shortcut");
         runScript(script, timeout);
       }
     };
@@ -81,17 +83,21 @@ if __name__ == '__main__':
               language="python"
               value={script}
               onChange={(value) => setScript(value || "")}
+              enableLsp={lspEnabled}
+              onDiagnostics={handleDiagnostics}
+              onLspReady={handleLspReady}
               options={{
                 lineNumbers: "on",
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 fontSize: 14,
+                wordWrap: "on",
+                automaticLayout: true,
               }}
               onMount={(editor, monaco) => {
                 // Add keyboard shortcut directly to Monaco editor
                 editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
-                  console.log("Monaco keyboard shortcut triggered");
-                  runScript(script, timeout);
+                  handleRunScript();
                 });
 
                 // Also try adding a direct key binding
@@ -99,8 +105,7 @@ if __name__ == '__main__':
                   if ((e.ctrlKey || e.metaKey) && e.code === "Enter") {
                     e.preventDefault();
                     e.stopPropagation();
-                    console.log("Monaco onKeyDown triggered");
-                    runScript(script, timeout);
+                    handleRunScript();
                   }
                 });
               }}
@@ -113,6 +118,55 @@ if __name__ == '__main__':
               <h2 className="text-lg font-semibold">Options</h2>
             </div>
             <div className="flex-1 space-y-4 overflow-auto p-4">
+              {/* LSP Status */}
+              <div className="rounded-md border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Language Server</span>
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`h-2 w-2 rounded-full ${
+                        !lspEnabled ? "bg-gray-400" : lspReady ? "bg-green-500" : "bg-yellow-500"
+                      }`}
+                    />
+                    <button
+                      onClick={() => setLspEnabled(!lspEnabled)}
+                      className="text-muted-foreground hover:text-foreground text-xs"
+                    >
+                      {lspEnabled ? "Disable" : "Enable"}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  {!lspEnabled ? "Disabled" : lspReady ? "Ready" : "Initializing..."}
+                </p>
+              </div>
+
+              {/* Diagnostics */}
+              {diagnostics.length > 0 && (
+                <div className="rounded-md border p-3">
+                  <h3 className="mb-2 text-sm font-medium">Issues ({diagnostics.length})</h3>
+                  <div className="max-h-32 space-y-1 overflow-auto">
+                    {diagnostics.map((diag, index) => (
+                      <div key={index} className="text-xs">
+                        <div
+                          className={`mr-2 inline-block h-2 w-2 rounded-full ${
+                            diag.severity === 8
+                              ? "bg-red-500"
+                              : diag.severity === 4
+                                ? "bg-yellow-500"
+                                : diag.severity === 2
+                                  ? "bg-blue-500"
+                                  : "bg-gray-500"
+                          }`}
+                        />
+                        <span className="text-muted-foreground">Line {diag.startLineNumber}:</span>
+                        <span>{diag.message}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="text-sm font-medium">Timeout (seconds)</label>
                 <input
@@ -129,6 +183,11 @@ if __name__ == '__main__':
               >
                 {isRunning ? "Stop Script" : "Run Script"}
               </Button>
+
+              {/* Keyboard shortcut hint */}
+              <div className="text-muted-foreground border-t pt-2 text-center text-xs">
+                Press <kbd className="bg-muted rounded px-1 py-0.5 text-xs">Ctrl+Enter</kbd> to run
+              </div>
             </div>
           </div>
         </div>

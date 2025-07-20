@@ -82,7 +82,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "python3 crates/python/bundle.py target/{TARGET}/wasi-deps/usr/local/lib/bundle.zip target/{TARGET}/python-deps crates/python/bundled"
+        "python3 crates/python/bundle.py target/{TARGET}/wasi-deps/usr/local/lib/bundle target/{TARGET}/python-deps crates/python/bundled"
     ).run()?;
 
     run_if_changed(
