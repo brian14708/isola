@@ -157,7 +157,7 @@ fn build_python(sh: &Shell) -> Result<()> {
                     outname.clone(),
                     |inp, out| -> Result<()> {
                         let inp = inp[0].clone();
-                        cmd!(sh, "wasm-opt {inp} -all -g -O4 --strip-debug -o {out}").run()?;
+                        cmd!(sh, "wasm-opt {inp} -all -O4 --strip-debug -o {out}").run()?;
                         Ok(())
                     },
                 )?;

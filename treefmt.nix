@@ -21,7 +21,7 @@
     };
     clang-format = {
       excludes = [
-        "crates/c_api/include/promptkit.h"
+        "crates/c-api/include/promptkit.h"
       ];
     };
     ruff-format = {

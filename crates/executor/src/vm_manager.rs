@@ -107,6 +107,10 @@ impl<E> VmManager<E> {
             .wasm_component_model(true)
             .async_support(true)
             .epoch_interruption(true)
+            .table_lazy_init(false)
+            .generate_address_map(false)
+            .wasm_backtrace(false)
+            .native_unwind_info(false)
             .cranelift_opt_level(wasmtime::OptLevel::Speed);
 
         if std::env::var("DISABLE_EPOCH_INTERRUPTION")
