@@ -18,8 +18,29 @@ mod utils;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
+    let rt = match std::env::var("TOKIO_NUM_WORKERS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+    {
+        Some(0) => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?,
+
+        Some(n) if n > 0 => tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(n)
+            .enable_all()
+            .build()?,
+
+        _ => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?,
+    };
+
+    rt.block_on(async_main())
+}
+
+async fn async_main() -> anyhow::Result<()> {
     let _provider = init_tracing()?;
 
     let task = args().nth(1);

@@ -42,7 +42,7 @@ typedef struct promptkit_argument {
 extern "C" {
 #endif // __cplusplus
 
-enum promptkit_error_code promptkit_context_create(size_t nr_thread,
+enum promptkit_error_code promptkit_context_create(int nr_thread,
                                                    struct promptkit_context_handle **out_context);
 
 enum promptkit_error_code promptkit_context_initialize(struct promptkit_context_handle *ctx,

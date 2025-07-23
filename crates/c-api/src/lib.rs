@@ -4,7 +4,7 @@
 #![allow(dead_code)]
 
 use std::{
-    ffi::{CStr, c_char, c_void},
+    ffi::{CStr, c_char, c_int, c_void},
     future::Future,
     path::PathBuf,
     pin::Pin,
@@ -42,19 +42,30 @@ pub struct ContextHandle {
 }
 
 impl ContextHandle {
-    fn new(nr_thread: usize) -> Result<Box<Self>> {
-        let rt = if nr_thread == 0 {
-            Builder::new_current_thread()
+    fn new(nr_thread: i32) -> Result<Box<Self>> {
+        let rt = match nr_thread {
+            0 => Builder::new_current_thread()
                 .enable_all()
                 .build()
-                .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?
-        } else {
-            Builder::new_multi_thread()
-                .worker_threads(nr_thread as _)
+                .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
+
+            n if n > 0 => Builder::new_multi_thread()
+                .worker_threads(
+                    #[allow(clippy::cast_sign_loss)]
+                    {
+                        n as usize
+                    },
+                )
                 .thread_name("promptkit-runner")
                 .enable_all()
                 .build()
-                .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?
+                .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
+
+            _ => Builder::new_multi_thread()
+                .thread_name("promptkit-runner")
+                .enable_all()
+                .build()
+                .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
         };
         Ok(Box::new(Self { rt, vmm: None }))
     }
@@ -96,7 +107,7 @@ impl ContextHandle {
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_context_create(
-    nr_thread: usize,
+    nr_thread: c_int,
     out_context: *mut Box<ContextHandle>,
 ) -> ErrorCode {
     let ctx = c_try!(ContextHandle::new(nr_thread));
