@@ -12,10 +12,10 @@ use anyhow::anyhow;
 use component_init_transform::Invoker;
 use futures_util::FutureExt;
 use pin_project_lite::pin_project;
-use rc_zip_tokio::{ReadZip, rc_zip::parse::EntryKind};
+use zip::ZipArchive;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle, io::AsyncWriteExt};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
@@ -599,31 +599,42 @@ impl Env for MockEnv {
 
 async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()> {
     let data = data.into();
-    let zip = data.read_zip().await?;
+    let cursor = std::io::Cursor::new(data);
+    let mut archive = ZipArchive::new(cursor)?;
     let mut dirs = std::collections::HashSet::new();
-    for entry in zip.entries() {
-        let outpath = match entry.sanitized_name() {
-            Some(v) => dest.join(v),
+    let mut buffer = vec![0u8; 16384]; // 16KB buffer reused across files
+    
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        let outpath = match file.enclosed_name() {
+            Some(path) => dest.join(path),
             None => continue,
         };
-        match entry.kind() {
-            EntryKind::Directory => {
-                if !dirs.contains(&outpath) {
-                    tokio::fs::create_dir_all(&outpath).await?;
-                    dirs.insert(outpath);
+        
+        if file.name().ends_with('/') {
+            // Directory
+            if !dirs.contains(&outpath) {
+                tokio::fs::create_dir_all(&outpath).await?;
+                dirs.insert(outpath);
+            }
+        } else {
+            // File
+            if let Some(p) = outpath.parent() {
+                if !dirs.contains(p) {
+                    tokio::fs::create_dir_all(&p).await?;
+                    dirs.insert(p.to_owned());
                 }
             }
-            EntryKind::File => {
-                if let Some(p) = outpath.parent() {
-                    if !dirs.contains(p) {
-                        tokio::fs::create_dir_all(&p).await?;
-                        dirs.insert(p.to_owned());
-                    }
+            
+            // Stream file contents in chunks
+            let mut out_file = tokio::fs::File::create(&outpath).await?;
+            loop {
+                let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
+                if bytes_read == 0 {
+                    break;
                 }
-                let mut out = tokio::fs::File::create(&outpath).await?;
-                tokio::io::copy(&mut entry.reader(), &mut out).await?;
+                out_file.write_all(&buffer[..bytes_read]).await?;
             }
-            EntryKind::Symlink => {} // skip for now
         }
     }
     Ok(())
