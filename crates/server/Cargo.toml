@@ -15,7 +15,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 mimalloc = { workspace = true }
 opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-client", "reqwest-rustls", "tokio"] }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-client", "reqwest-rustls-webpki-roots", "tokio"] }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 opentelemetry_sdk = { workspace = true, features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
 pin-project-lite = { workspace = true }
