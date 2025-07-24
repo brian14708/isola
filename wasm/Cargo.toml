@@ -15,7 +15,7 @@ eventsource = { version = "0.5.0", default-features = false }
 glob = "0.3.2"
 memchr = "2.7.4"
 minicbor-serde = "0.6.0"
-prost-reflect = "0.15.0"
+prost-reflect = "0.16.0"
 pyo3 = { version = "0.25.1", git = "https://github.com/brian14708/pyo3.git", branch = "wasi-0.25" }
 serde = "1.0.199"
 serde_json = "1.0.116"
