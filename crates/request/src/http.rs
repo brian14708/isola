@@ -1,4 +1,5 @@
 use std::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -15,28 +16,27 @@ use crate::{Error, WebsocketMessage};
 
 pub async fn http_impl<B>(
     span: Span,
-    client: Result<reqwest::Client, Error>,
-    mut request: http::Request<B>,
-) -> Result<
-    http::Response<
-        impl Stream<Item = Result<http_body::Frame<Bytes>, Error>> + Send + Sync + 'static,
-    >,
-    Error,
->
+    client: reqwest::Client,
+    request: http::Request<B>,
+) -> Result<http::Response<impl Stream<Item = Result<http_body::Frame<Bytes>, Error>>>, Error>
 where
-    B: http_body::Body + Send + Sync + 'static,
-    B::Error: std::error::Error + Send + Sync,
+    B: http_body::Body,
+    B::Error: std::error::Error + Send + Sync + 'static,
     B::Data: Send,
 {
-    let r = client?
-        .request(
-            std::mem::take(request.method_mut()),
-            reqwest::Url::parse(request.uri().to_string().as_str())?,
-        )
-        .version(request.version())
-        .headers(std::mem::take(request.headers_mut()))
-        .body(request.into_body().collect().await?.to_bytes());
-    let mut resp = match r.send().instrument(span.clone()).await.map_err(Box::new) {
+    let url = url::Url::parse(&request.uri().to_string())?;
+    let (parts, body) = request.into_parts();
+    let body = body
+        .collect()
+        .await
+        .map_err(|e| Error::RequestBody(Box::new(e)))?
+        .to_bytes();
+    let r = client
+        .request(parts.method, url)
+        .version(parts.version)
+        .headers(parts.headers)
+        .body(body);
+    let mut resp = match r.send().instrument(span.clone()).await {
         Ok(r) => {
             let status = r.status();
             span.record(trace::HTTP_RESPONSE_STATUS_CODE, status.as_u16());
@@ -47,7 +47,7 @@ where
         }
         Err(e) => {
             span.record(trace::OTEL_STATUS_CODE, "ERROR");
-            return Err(e);
+            return Err(Error::Http(e));
         }
     };
 
@@ -64,22 +64,17 @@ where
             Err(e) => Err(e.into()),
         }),
     );
-    Ok(builder.body(b)?)
+    builder.body(b).map_err(|e| Error::Internal(Box::new(e)))
 }
 
 pub async fn websocket_impl(
     span: Span,
     client: reqwest::Client,
-    mut request: http::Request<impl Stream<Item = WebsocketMessage> + Send + 'static>,
-) -> Result<
-    http::Response<impl Stream<Item = Result<WebsocketMessage, Error>> + Send + 'static>,
-    Error,
-> {
+    mut request: http::Request<impl Stream<Item = WebsocketMessage>>,
+) -> Result<http::Response<impl Stream<Item = Result<WebsocketMessage, Error>>>, Error> {
+    let url = reqwest::Url::parse(&request.uri().to_string())?;
     let r = client
-        .request(
-            std::mem::take(request.method_mut()),
-            reqwest::Url::parse(request.uri().to_string().as_str())?,
-        )
+        .request(std::mem::take(request.method_mut()), url)
         .version(request.version())
         .headers(std::mem::take(request.headers_mut()));
 
@@ -99,12 +94,11 @@ pub async fn websocket_impl(
         })
         .instrument(span.clone())
         .await
-        .map_err(Box::new)
     {
         Ok(r) => r,
         Err(e) => {
             span.record(trace::OTEL_STATUS_CODE, "ERROR");
-            return Err(e);
+            return Err(Error::Http(e));
         }
     };
 
@@ -113,16 +107,18 @@ pub async fn websocket_impl(
         .into_body()
         .map(Ok)
         .forward(tx)
-        .map_err(|e| -> Error { Box::new(e) });
+        .map_err(std::convert::Into::into);
     let builder = http::response::Builder::new();
-    Ok(builder.body(InstrumentJoinStream::new(
-        span,
-        rx.map(|f| match f {
-            Ok(m) => Ok(m),
-            Err(e) => Err(e.into()),
-        }),
-        write,
-    ))?)
+    builder
+        .body(InstrumentJoinStream::new(
+            span,
+            rx.map(|f| match f {
+                Ok(m) => Ok(m),
+                Err(e) => Err(e.into()),
+            }),
+            write,
+        ))
+        .map_err(|e| Error::Internal(Box::new(e)))
 }
 
 pin_project! {

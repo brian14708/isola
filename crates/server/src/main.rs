@@ -19,6 +19,10 @@ mod utils;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn main() -> anyhow::Result<()> {
+    if let Err(e) = rlimit::increase_nofile_limit(u64::MAX) {
+        tracing::warn!("Failed to raise ulimit: {}", e);
+    }
+
     let rt = match std::env::var("TOKIO_NUM_WORKERS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())

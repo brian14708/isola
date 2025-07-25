@@ -1,11 +1,16 @@
+#![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
+
 mod client;
+mod error;
 mod http;
 mod options;
 mod trace;
 
-pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub use error::Error;
+
 pub type WebsocketMessage = tokio_tungstenite::tungstenite::Message;
 
-pub use client::Client;
+pub use client::{Client, ClientBuilder};
 pub use options::{RequestContext, RequestOptions};
 pub use trace::TraceRequest;

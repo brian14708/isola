@@ -91,7 +91,7 @@ impl ContextHandle {
         };
         let vm = self
             .rt
-            .block_on(vmm.create([0; 32], Env::shared().clone()))
+            .block_on(async { vmm.create([0; 32], Env::shared().clone()).await })
             .map_err(|e| Error::Internal(format!("Failed to create VM: {e}")))?;
         Ok(VmHandle {
             ctx: self,

@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, pin::Pin, time::Duration};
+use std::{borrow::Cow, collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use futures_util::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
@@ -35,7 +35,7 @@ pub struct ScriptServer {
 impl ScriptServer {
     pub fn new(state: AppState) -> Self {
         let base_env = VmEnv {
-            client: promptkit_request::Client::new(),
+            client: Arc::new(promptkit_request::Client::new()),
         };
         Self { state, base_env }
     }

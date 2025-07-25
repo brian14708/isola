@@ -1,4 +1,4 @@
-use std::{borrow::Cow, future::Future, pin::Pin};
+use std::{borrow::Cow, future::Future, pin::Pin, sync::Arc};
 
 use anyhow::anyhow;
 use bytes::Bytes;
@@ -18,7 +18,7 @@ use url::Url;
 
 #[derive(Clone)]
 pub struct VmEnv {
-    pub client: promptkit_request::Client,
+    pub client: Arc<promptkit_request::Client>,
 }
 
 impl VmEnv {
@@ -83,9 +83,10 @@ impl Env for VmEnv {
                 )
             }),
         };
-        let http = self.client.http(request, RequestOptions::new(ctx));
+        let client = self.client.clone();
         async move {
-            let resp = http.await.map_err(anyhow::Error::from_boxed)?;
+            let http = client.http(request, RequestOptions::new(ctx));
+            let resp = http.await.map_err(anyhow::Error::from)?;
             Ok(resp.map(
                 |b| -> Pin<
                     Box<
@@ -94,7 +95,7 @@ impl Env for VmEnv {
                             + Sync
                             + 'static,
                     >,
-                > { Box::pin(b.map_err(anyhow::Error::from_boxed)) },
+                > { Box::pin(b.map_err(anyhow::Error::from)) },
             ))
         }
     }
@@ -128,7 +129,7 @@ impl Env for VmEnv {
 }
 
 async fn websocket(
-    client: promptkit_request::Client,
+    client: Arc<promptkit_request::Client>,
     mut connect: RpcConnect,
     req: tokio::sync::mpsc::Receiver<RpcPayload>,
     resp: tokio::sync::mpsc::Sender<Result<RpcPayload, anyhow::Error>>,
@@ -163,7 +164,7 @@ async fn websocket(
     let rx = client
         .websocket(r.body(req)?, RequestOptions::new(ctx))
         .await
-        .map_err(anyhow::Error::from_boxed)?
+        .map_err(anyhow::Error::from)?
         .into_body();
 
     Ok(tokio::spawn(async move {

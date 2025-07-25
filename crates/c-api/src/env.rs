@@ -1,4 +1,4 @@
-use std::{future::pending, pin::Pin};
+use std::{future::pending, pin::Pin, sync::Arc};
 
 use futures_util::TryStreamExt;
 use promptkit_executor::env::HttpResponse;
@@ -6,13 +6,13 @@ use promptkit_request::{Client, RequestOptions};
 
 #[derive(Clone)]
 pub struct Env {
-    pub client: promptkit_request::Client,
+    pub client: Arc<promptkit_request::Client>,
 }
 
 impl Default for Env {
     fn default() -> Self {
         Self {
-            client: Client::new(),
+            client: Arc::new(Client::new()),
         }
     }
 }
@@ -37,9 +37,10 @@ impl promptkit_executor::Env for Env {
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send,
     {
-        let http = self.client.http(request, RequestOptions::default());
+        let client = self.client.clone();
         async move {
-            let resp = http.await.map_err(anyhow::Error::from_boxed)?;
+            let http = client.http(request, RequestOptions::default());
+            let resp = http.await.map_err(anyhow::Error::from)?;
             Ok(resp.map(
                 |b| -> Pin<
                     Box<
@@ -49,7 +50,7 @@ impl promptkit_executor::Env for Env {
                             + Sync
                             + 'static,
                     >,
-                > { Box::pin(b.map_err(anyhow::Error::from_boxed)) },
+                > { Box::pin(b.map_err(anyhow::Error::from)) },
             ))
         }
     }
