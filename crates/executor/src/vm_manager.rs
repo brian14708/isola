@@ -1,5 +1,5 @@
 use std::{
-    future::Future,
+    future::{Future, pending},
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     pin::Pin,
@@ -12,16 +12,16 @@ use anyhow::anyhow;
 use component_init_transform::Invoker;
 use futures_util::FutureExt;
 use pin_project_lite::pin_project;
-use zip::ZipArchive;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{sync::mpsc, task::JoinHandle, io::AsyncWriteExt};
+use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
     Config, Engine, Store,
     component::{Component, Instance},
 };
+use zip::ZipArchive;
 
 use crate::{
     Env,
@@ -370,7 +370,6 @@ where
             }
             ExecSource::Bundle(b) => hasher.update(b),
         }
-        env.hash(|data| hasher.update(data));
         let hash = hasher.finalize().into();
 
         let vm = self.cache.get(hash);
@@ -482,10 +481,10 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
             }
         }
 
-        if let Some(task) = this.task.as_mut().as_pin_mut() {
-            if task.poll(cx) == Poll::Ready(()) {
-                this.task.set(None);
-            }
+        if let Some(task) = this.task.as_mut().as_pin_mut()
+            && task.poll(cx) == Poll::Ready(())
+        {
+            this.task.set(None);
         }
 
         if this.stream.is_none() && this.task.is_none() {
@@ -554,9 +553,6 @@ struct MockEnv {}
 impl Env for MockEnv {
     type Error = anyhow::Error;
 
-    fn hash(&self, _update: impl FnMut(&[u8])) {}
-
-    #[allow(clippy::manual_async_fn)]
     fn send_request_http<B>(
         &self,
         _request: http::Request<B>,
@@ -582,10 +578,9 @@ impl Env for MockEnv {
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send,
     {
-        async { todo!() }
+        pending()
     }
 
-    #[allow(clippy::manual_async_fn)]
     fn connect_rpc(
         &self,
         _connect: RpcConnect,
@@ -593,7 +588,7 @@ impl Env for MockEnv {
         _resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
     ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
     {
-        async { todo!() }
+        pending()
     }
 }
 
@@ -603,14 +598,14 @@ async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()
     let mut archive = ZipArchive::new(cursor)?;
     let mut dirs = std::collections::HashSet::new();
     let mut buffer = vec![0u8; 16384]; // 16KB buffer reused across files
-    
+
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let outpath = match file.enclosed_name() {
             Some(path) => dest.join(path),
             None => continue,
         };
-        
+
         if file.name().ends_with('/') {
             // Directory
             if !dirs.contains(&outpath) {
@@ -619,13 +614,13 @@ async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()
             }
         } else {
             // File
-            if let Some(p) = outpath.parent() {
-                if !dirs.contains(p) {
-                    tokio::fs::create_dir_all(&p).await?;
-                    dirs.insert(p.to_owned());
-                }
+            if let Some(p) = outpath.parent()
+                && !dirs.contains(p)
+            {
+                tokio::fs::create_dir_all(&p).await?;
+                dirs.insert(p.to_owned());
             }
-            
+
             // Stream file contents in chunks
             let mut out_file = tokio::fs::File::create(&outpath).await?;
             loop {

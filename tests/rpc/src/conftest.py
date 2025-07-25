@@ -15,5 +15,5 @@ async def client():
 
 @pytest.fixture
 def datadir():
-    datadir = os.path.join(os.path.dirname(__file__), "data")
+    datadir = os.path.join(os.path.dirname(__file__), "..", "data")
     return pathlib.Path(datadir)

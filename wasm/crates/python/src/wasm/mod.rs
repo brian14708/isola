@@ -1,5 +1,3 @@
-#![allow(clippy::missing_safety_doc, clippy::module_name_repetitions)]
-
 mod body_buffer;
 mod future;
 mod http;

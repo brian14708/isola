@@ -28,19 +28,15 @@ impl TraceCollector {
 
 impl Collector for TraceCollector {
     fn collect_span_start(&self, span: SpanRecord) {
-        let time = std::time::Duration::from_nanos(span.begin_time_unix_ns);
+        let time = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_nanos(span.begin_time_unix_ns);
         let span_id = to_i32(span.span_id);
         let parent_id = to_i32(span.parent_id);
 
         let _ = self.tx.send(Trace {
             id: span_id,
             group: group_name(span.name),
-            timestamp: Some(prost_types::Timestamp {
-                #[allow(clippy::cast_possible_wrap)]
-                seconds: time.as_secs() as i64,
-                #[allow(clippy::cast_possible_wrap)]
-                nanos: time.subsec_nanos() as i32,
-            }),
+            timestamp: Some(prost_types::Timestamp::from(time)),
             trace_type: Some(TraceType::SpanBegin(SpanBegin {
                 kind: span.name.to_string(),
                 parent_id,
@@ -54,19 +50,15 @@ impl Collector for TraceCollector {
     }
 
     fn collect_span_end(&self, span: SpanRecord) {
-        let time = std::time::Duration::from_nanos(span.begin_time_unix_ns);
+        let time = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_nanos(span.begin_time_unix_ns);
         let end = time + std::time::Duration::from_nanos(span.duration_ns);
         let span_id = to_i32(span.span_id);
 
         let _ = self.tx.send(Trace {
             id: to_i32(self.next_id()),
             group: group_name(span.name),
-            timestamp: Some(prost_types::Timestamp {
-                #[allow(clippy::cast_possible_wrap)]
-                seconds: end.as_secs() as i64,
-                #[allow(clippy::cast_possible_wrap)]
-                nanos: end.subsec_nanos() as i32,
-            }),
+            timestamp: Some(prost_types::Timestamp::from(end)),
             trace_type: Some(TraceType::SpanEnd(SpanEnd {
                 parent_id: span_id,
                 data: span
@@ -79,18 +71,14 @@ impl Collector for TraceCollector {
     }
 
     fn collect_event(&self, event: EventRecord) {
-        let time = std::time::Duration::from_nanos(event.timestamp_unix_ns);
+        let time = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_nanos(event.timestamp_unix_ns);
         let id = to_i32(self.next_id());
         if event.name == "log" {
             let _ = self.tx.send(Trace {
                 id,
                 group: group_name(event.name),
-                timestamp: Some(prost_types::Timestamp {
-                    #[allow(clippy::cast_possible_wrap)]
-                    seconds: time.as_secs() as i64,
-                    #[allow(clippy::cast_possible_wrap)]
-                    nanos: time.subsec_nanos() as i32,
-                }),
+                timestamp: Some(prost_types::Timestamp::from(time)),
                 trace_type: Some(TraceType::Log(Log {
                     content: event
                         .properties
@@ -110,12 +98,7 @@ impl Collector for TraceCollector {
             let _ = self.tx.send(Trace {
                 id,
                 group: group_name(event.name),
-                timestamp: Some(prost_types::Timestamp {
-                    #[allow(clippy::cast_possible_wrap)]
-                    seconds: time.as_secs() as i64,
-                    #[allow(clippy::cast_possible_wrap)]
-                    nanos: time.subsec_nanos() as i32,
-                }),
+                timestamp: Some(prost_types::Timestamp::from(time)),
                 trace_type: Some(TraceType::Event(Event {
                     kind: event.name.to_string(),
                     parent_id: to_i32(event.parent_span_id),
@@ -145,9 +128,8 @@ impl Collector for TraceCollector {
 }
 
 #[inline]
-#[allow(clippy::cast_possible_truncation)]
 fn to_i32(value: u64) -> i32 {
-    value as i32
+    i32::try_from(value).unwrap_or_default()
 }
 
 fn group_name(name: &'static str) -> String {

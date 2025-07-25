@@ -3,6 +3,6 @@ managed:
   enabled: true
 plugins:
   - local: ['uv', 'run', 'protoc-gen-python_betterproto']
-    out: stub
+    out: src/stub
 inputs:
   - directory: ../../apis/proto

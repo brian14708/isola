@@ -82,19 +82,9 @@ pub mod http_module {
         }
 
         let request = OutgoingRequest::new(header_fields);
-        request
-            .set_method(&match method {
-                "GET" => Method::Get,
-                "POST" => Method::Post,
-                "DELETE" => Method::Delete,
-                "HEAD" => Method::Head,
-                "PATCH" => Method::Patch,
-                "PUT" => Method::Put,
-                m => Method::Other(m.to_string()),
-            })
-            .map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid method".to_string())
-            })?;
+        request.set_method(&to_method(method)).map_err(|()| {
+            PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid method".to_string())
+        })?;
         let mut u = Url::parse(url)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         if let Some(params) = params {
@@ -174,6 +164,18 @@ pub mod http_module {
         }
 
         Ok(PyFutureResponse::new(resp))
+    }
+
+    fn to_method(method: &str) -> Method {
+        match method {
+            "GET" => Method::Get,
+            "POST" => Method::Post,
+            "DELETE" => Method::Delete,
+            "HEAD" => Method::Head,
+            "PATCH" => Method::Patch,
+            "PUT" => Method::Put,
+            m => Method::Other(m.to_string()),
+        }
     }
 
     create_future!(PyFutureResponse, FutureIncomingResponse, PyResponse);
@@ -257,9 +259,7 @@ pub mod http_module {
 
     impl Drop for PyResponse {
         fn drop(&mut self) {
-            self.stream.take();
-            self.body.take();
-            self.response.take();
+            self.close();
         }
     }
 

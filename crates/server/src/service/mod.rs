@@ -261,32 +261,31 @@ impl ScriptService for ScriptServer {
         };
         let mover = async move {
             while let Some(msg) = body.message().await? {
-                if let Some(tx) = tx.as_mut() {
-                    if let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
+                if let Some(tx) = tx.as_mut()
+                    && let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
-                    {
-                        let name = v.name.clone();
-                        let arg = argument(v)
-                            .map_err(|_e| Status::invalid_argument("invalid arguments"))?;
-                        match arg {
-                            Err(Marker::StreamControlClose) => {
-                                tx.remove(&name);
-                            }
-                            Err(_) => Err(Status::invalid_argument("invalid marker"))?,
-                            Ok(arg) => {
-                                let tx = tx.get_mut(&name).ok_or_else(|| {
-                                    Status::invalid_argument("invalid marker arguments")
-                                })?;
-                                match msg.timeout.and_then(|t| t.try_into().ok()) {
-                                    Some(timeout) => {
-                                        tx.send_timeout(arg, timeout).await.map_err(|_| {
-                                            Status::deadline_exceeded("stream argument timeout")
-                                        })?;
-                                    }
-                                    None => tx.send(arg).await.map_err(|_| {
-                                        Status::internal("failed to send stream argument")
-                                    })?,
+                {
+                    let name = v.name.clone();
+                    let arg =
+                        argument(v).map_err(|_e| Status::invalid_argument("invalid arguments"))?;
+                    match arg {
+                        Err(Marker::StreamControlClose) => {
+                            tx.remove(&name);
+                        }
+                        Err(_) => Err(Status::invalid_argument("invalid marker"))?,
+                        Ok(arg) => {
+                            let tx = tx.get_mut(&name).ok_or_else(|| {
+                                Status::invalid_argument("invalid marker arguments")
+                            })?;
+                            match msg.timeout.and_then(|t| t.try_into().ok()) {
+                                Some(timeout) => {
+                                    tx.send_timeout(arg, timeout).await.map_err(|_| {
+                                        Status::deadline_exceeded("stream argument timeout")
+                                    })?;
                                 }
+                                None => tx.send(arg).await.map_err(|_| {
+                                    Status::internal("failed to send stream argument")
+                                })?,
                             }
                         }
                     }
@@ -451,32 +450,31 @@ impl ScriptService for ScriptServer {
 
         let mover = async move {
             while let Some(msg) = request.get_mut().message().await? {
-                if let Some(tx) = tx.as_mut() {
-                    if let Some(execute_stream_request::RequestType::StreamValue(v)) =
+                if let Some(tx) = tx.as_mut()
+                    && let Some(execute_stream_request::RequestType::StreamValue(v)) =
                         msg.request_type
-                    {
-                        let name = v.name.clone();
-                        let arg = argument(v)
-                            .map_err(|_e| Status::invalid_argument("invalid arguments"))?;
-                        match arg {
-                            Err(Marker::StreamControlClose) => {
-                                tx.remove(&name);
-                            }
-                            Err(_) => Err(Status::invalid_argument("invalid marker"))?,
-                            Ok(arg) => {
-                                let tx = tx.get_mut(&name).ok_or_else(|| {
-                                    Status::invalid_argument("invalid marker arguments")
-                                })?;
-                                match msg.timeout.and_then(|t| t.try_into().ok()) {
-                                    Some(timeout) => {
-                                        tx.send_timeout(arg, timeout).await.map_err(|_| {
-                                            Status::deadline_exceeded("stream argument timeout")
-                                        })?;
-                                    }
-                                    None => tx.send(arg).await.map_err(|_| {
-                                        Status::internal("failed to send stream argument")
-                                    })?,
+                {
+                    let name = v.name.clone();
+                    let arg =
+                        argument(v).map_err(|_e| Status::invalid_argument("invalid arguments"))?;
+                    match arg {
+                        Err(Marker::StreamControlClose) => {
+                            tx.remove(&name);
+                        }
+                        Err(_) => Err(Status::invalid_argument("invalid marker"))?,
+                        Ok(arg) => {
+                            let tx = tx.get_mut(&name).ok_or_else(|| {
+                                Status::invalid_argument("invalid marker arguments")
+                            })?;
+                            match msg.timeout.and_then(|t| t.try_into().ok()) {
+                                Some(timeout) => {
+                                    tx.send_timeout(arg, timeout).await.map_err(|_| {
+                                        Status::deadline_exceeded("stream argument timeout")
+                                    })?;
                                 }
+                                None => tx.send(arg).await.map_err(|_| {
+                                    Status::internal("failed to send stream argument")
+                                })?,
                             }
                         }
                     }
@@ -646,10 +644,11 @@ fn parse_spec<'a>(
         Ok(ParsedSpec {
             method: std::mem::take(&mut spec.method),
             args,
-            timeout: spec.timeout.as_ref().map_or(DEFAULT_TIMEOUT, |t| {
-                #[allow(clippy::cast_precision_loss)]
-                std::time::Duration::from_secs_f64(t.seconds as f64 + f64::from(t.nanos) * 1e-9)
-            }),
+            timeout: spec
+                .timeout
+                .take()
+                .and_then(|t| t.try_into().ok())
+                .unwrap_or(DEFAULT_TIMEOUT),
             stream_tx: if streams.is_empty() {
                 None
             } else {

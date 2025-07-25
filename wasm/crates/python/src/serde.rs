@@ -5,15 +5,12 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
 };
 use serde::{
-    Deserializer, Serialize, Serializer,
+    Deserializer, Serialize,
     de::{
         DeserializeSeed, Expected, IntoDeserializer, Unexpected, Visitor,
         value::{MapAccessDeserializer, MapDeserializer, SeqDeserializer},
     },
-    ser::{
-        SerializeMap, SerializeSeq, SerializeStruct, SerializeStructVariant, SerializeTuple,
-        SerializeTupleStruct, SerializeTupleVariant,
-    },
+    ser::{SerializeMap, SerializeSeq, SerializeTuple},
 };
 
 const MAX_DEPTH: usize = 128;
@@ -90,131 +87,130 @@ impl<'py> PyDeserializer<'py> {
     }
 }
 
+struct PyVisitor<'py>(Python<'py>);
+
+macro_rules! impl_py_visit {
+    ($name:ident, $t:ty) => {
+        #[inline]
+        fn $name<E>(self, v: $t) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(v.into_pyobject(self.0).unwrap().to_owned().into_any())
+        }
+    };
+}
+impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
+    type Value = Bound<'py, PyAny>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a type that can deserialize in Python")
+    }
+
+    impl_py_visit!(visit_bool, bool);
+    impl_py_visit!(visit_i8, i8);
+    impl_py_visit!(visit_i16, i16);
+    impl_py_visit!(visit_i32, i32);
+    impl_py_visit!(visit_i64, i64);
+    impl_py_visit!(visit_i128, i128);
+    impl_py_visit!(visit_u8, u8);
+    impl_py_visit!(visit_u16, u16);
+    impl_py_visit!(visit_u32, u32);
+    impl_py_visit!(visit_u64, u64);
+    impl_py_visit!(visit_u128, u128);
+    impl_py_visit!(visit_f32, f32);
+    impl_py_visit!(visit_f64, f64);
+    impl_py_visit!(visit_char, char);
+    impl_py_visit!(visit_str, &str);
+    impl_py_visit!(visit_borrowed_str, &'de str);
+    impl_py_visit!(visit_string, String);
+
+    #[inline]
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(PyBytes::new(self.0, v).clone().into_any())
+    }
+
+    #[inline]
+    fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(PyBytes::new(self.0, v).clone().into_any())
+    }
+
+    #[inline]
+    fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(PyBytes::new(self.0, &v).clone().into_any())
+    }
+
+    #[inline]
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(().into_pyobject(self.0).unwrap().into_any())
+    }
+
+    #[inline]
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(PyNone::get(self.0).to_owned().into_any())
+    }
+
+    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        while let Some(val) = seq.next_element_seed(PyDeserializer(self.0))? {
+            elems.push(val);
+        }
+        Ok(elems.into_pyobject(self.0).unwrap().into_any())
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        let dict = PyDict::new(self.0);
+        while let Some((key, val)) =
+            map.next_entry_seed(PyDeserializer(self.0), PyDeserializer(self.0))?
+        {
+            dict.set_item(key, val).unwrap();
+        }
+        Ok(dict.into_pyobject(self.0).unwrap().into_any())
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        PyValue::deserialize(self.0, deserializer)
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        PyValue::deserialize(self.0, deserializer)
+    }
+}
+
 impl<'de, 'py> DeserializeSeed<'de> for PyDeserializer<'py> {
     type Value = Bound<'py, PyAny>;
 
-    #[allow(clippy::too_many_lines)]
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct PyVisitor<'py>(Python<'py>);
-
-        macro_rules! impl_py_visit {
-            ($name:ident, $t:ty) => {
-                #[inline]
-                fn $name<E>(self, v: $t) -> Result<Self::Value, E>
-                where
-                    E: serde::de::Error,
-                {
-                    Ok(v.into_pyobject(self.0).unwrap().to_owned().into_any())
-                }
-            };
-        }
-        impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
-            type Value = Bound<'py, PyAny>;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a type that can deserialize in Python")
-            }
-
-            impl_py_visit!(visit_bool, bool);
-            impl_py_visit!(visit_i8, i8);
-            impl_py_visit!(visit_i16, i16);
-            impl_py_visit!(visit_i32, i32);
-            impl_py_visit!(visit_i64, i64);
-            impl_py_visit!(visit_i128, i128);
-            impl_py_visit!(visit_u8, u8);
-            impl_py_visit!(visit_u16, u16);
-            impl_py_visit!(visit_u32, u32);
-            impl_py_visit!(visit_u64, u64);
-            impl_py_visit!(visit_u128, u128);
-            impl_py_visit!(visit_f32, f32);
-            impl_py_visit!(visit_f64, f64);
-            impl_py_visit!(visit_char, char);
-            impl_py_visit!(visit_str, &str);
-            impl_py_visit!(visit_borrowed_str, &'de str);
-            impl_py_visit!(visit_string, String);
-
-            #[inline]
-            fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(PyBytes::new(self.0, v).clone().into_any())
-            }
-
-            #[inline]
-            fn visit_borrowed_bytes<E>(self, v: &'de [u8]) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(PyBytes::new(self.0, v).clone().into_any())
-            }
-
-            #[inline]
-            fn visit_byte_buf<E>(self, v: Vec<u8>) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(PyBytes::new(self.0, &v).clone().into_any())
-            }
-
-            #[inline]
-            fn visit_unit<E>(self) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(().into_pyobject(self.0).unwrap().into_any())
-            }
-
-            #[inline]
-            fn visit_none<E>(self) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error,
-            {
-                Ok(PyNone::get(self.0).to_owned().into_any())
-            }
-
-            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::SeqAccess<'de>,
-            {
-                let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-                while let Some(val) = seq.next_element_seed(PyDeserializer(self.0))? {
-                    elems.push(val);
-                }
-                Ok(elems.into_pyobject(self.0).unwrap().into_any())
-            }
-
-            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-            where
-                A: serde::de::MapAccess<'de>,
-            {
-                let dict = PyDict::new(self.0);
-                while let Some((key, val)) =
-                    map.next_entry_seed(PyDeserializer(self.0), PyDeserializer(self.0))?
-                {
-                    dict.set_item(key, val).unwrap();
-                }
-                Ok(dict.into_pyobject(self.0).unwrap().into_any())
-            }
-
-            fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                PyValue::deserialize(self.0, deserializer)
-            }
-
-            fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                PyValue::deserialize(self.0, deserializer)
-            }
-        }
-
         deserializer.deserialize_any(PyVisitor(self.py()))
     }
 }
@@ -523,302 +519,6 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     }
 }
 
-macro_rules! impl_py_serialize {
-    ($name:ident, $type:ty) => {
-        fn $name(self, v: $type) -> Result<Self::Ok, Self::Error> {
-            Ok(v.into_pyobject(self.0).unwrap().to_owned().into_any())
-        }
-    };
-}
-
-struct PySerializer<'py>(Python<'py>);
-
-impl<'py> Serializer for PySerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-
-    type Error = serde::de::value::Error;
-
-    type SerializeSeq = SeqSerializer<'py>;
-    type SerializeTuple = SeqSerializer<'py>;
-    type SerializeTupleStruct = SeqSerializer<'py>;
-    type SerializeTupleVariant = SeqSerializer<'py>;
-    type SerializeMap = MapSerializer<'py>;
-    type SerializeStruct = MapSerializer<'py>;
-    type SerializeStructVariant = MapSerializer<'py>;
-
-    impl_py_serialize!(serialize_bool, bool);
-    impl_py_serialize!(serialize_i8, i8);
-    impl_py_serialize!(serialize_i16, i16);
-    impl_py_serialize!(serialize_i32, i32);
-    impl_py_serialize!(serialize_i64, i64);
-    impl_py_serialize!(serialize_u8, u8);
-    impl_py_serialize!(serialize_u16, u16);
-    impl_py_serialize!(serialize_u32, u32);
-    impl_py_serialize!(serialize_u64, u64);
-    impl_py_serialize!(serialize_f32, f32);
-    impl_py_serialize!(serialize_f64, f64);
-    impl_py_serialize!(serialize_char, char);
-    impl_py_serialize!(serialize_str, &str);
-
-    fn serialize_bytes(self, v: &[u8]) -> Result<Self::Ok, Self::Error> {
-        Ok(PyBytes::new(self.0, v).clone().into_any())
-    }
-
-    fn serialize_none(self) -> Result<Self::Ok, Self::Error> {
-        Ok(PyNone::get(self.0).to_owned().into_any())
-    }
-
-    fn serialize_some<T>(self, value: &T) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_unit(self) -> Result<Self::Ok, Self::Error> {
-        Ok(().into_pyobject(self.0).unwrap().into_any())
-    }
-
-    fn serialize_unit_struct(self, _name: &'static str) -> Result<Self::Ok, Self::Error> {
-        Ok(().into_pyobject(self.0).unwrap().into_any())
-    }
-
-    fn serialize_unit_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        variant: &'static str,
-    ) -> Result<Self::Ok, Self::Error> {
-        variant.serialize(self)
-    }
-
-    fn serialize_newtype_struct<T>(
-        self,
-        _name: &'static str,
-        value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_newtype_variant<T>(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        value: &T,
-    ) -> Result<Self::Ok, Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        value.serialize(self)
-    }
-
-    fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
-        Ok(SeqSerializer {
-            py: self.0,
-            elems: Vec::with_capacity(len.unwrap_or(0)),
-        })
-    }
-
-    fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {
-        Ok(SeqSerializer {
-            py: self.0,
-            elems: Vec::with_capacity(len),
-        })
-    }
-
-    fn serialize_tuple_struct(
-        self,
-        _name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeTupleStruct, Self::Error> {
-        Ok(SeqSerializer {
-            py: self.0,
-            elems: Vec::with_capacity(len),
-        })
-    }
-
-    fn serialize_tuple_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeTupleVariant, Self::Error> {
-        Ok(SeqSerializer {
-            py: self.0,
-            elems: Vec::with_capacity(len),
-        })
-    }
-
-    fn serialize_map(self, len: Option<usize>) -> Result<Self::SerializeMap, Self::Error> {
-        Ok(MapSerializer {
-            py: self.0,
-            dict: Vec::with_capacity(len.unwrap_or(0)),
-        })
-    }
-
-    fn serialize_struct(
-        self,
-        _name: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeStruct, Self::Error> {
-        Ok(MapSerializer {
-            py: self.0,
-            dict: Vec::with_capacity(len),
-        })
-    }
-
-    fn serialize_struct_variant(
-        self,
-        _name: &'static str,
-        _variant_index: u32,
-        _variant: &'static str,
-        len: usize,
-    ) -> Result<Self::SerializeStructVariant, Self::Error> {
-        Ok(MapSerializer {
-            py: self.0,
-            dict: Vec::with_capacity(len),
-        })
-    }
-}
-
-struct SeqSerializer<'py> {
-    py: Python<'py>,
-    elems: Vec<Bound<'py, PyAny>>,
-}
-
-impl<'py> SerializeSeq for SeqSerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-    type Error = serde::de::value::Error;
-
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        self.elems.push(value.serialize(PySerializer(self.py))?);
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(self.elems.into_pyobject(self.py).unwrap().into_any())
-    }
-}
-
-impl<'py> SerializeTuple for SeqSerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-    type Error = serde::de::value::Error;
-    fn serialize_element<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(PyTuple::new(self.py, self.elems).unwrap().into_any())
-    }
-}
-
-impl<'py> SerializeTupleStruct for SeqSerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-    type Error = serde::de::value::Error;
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(PyTuple::new(self.py, self.elems).unwrap().into_any())
-    }
-}
-
-impl<'py> SerializeTupleVariant for SeqSerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-    type Error = serde::de::value::Error;
-    fn serialize_field<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        SerializeSeq::serialize_element(self, value)
-    }
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        Ok(PyTuple::new(self.py, self.elems).unwrap().into_any())
-    }
-}
-
-struct MapSerializer<'py> {
-    py: Python<'py>,
-    dict: Vec<(Bound<'py, PyAny>, Option<Bound<'py, PyAny>>)>,
-}
-
-impl<'py> SerializeMap for MapSerializer<'py> {
-    type Ok = Bound<'py, PyAny>;
-    type Error = serde::de::value::Error;
-
-    fn serialize_key<T>(&mut self, key: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        let key = key.serialize(PySerializer(self.py))?;
-        self.dict.push((key, None));
-        Ok(())
-    }
-
-    fn serialize_value<T>(&mut self, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        let value = value.serialize(PySerializer(self.py))?;
-        self.dict.last_mut().unwrap().1 = Some(value);
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        let dict = PyDict::new(self.py);
-        for (key, value) in self.dict {
-            dict.set_item(key, value).unwrap();
-        }
-        Ok(dict.into_any())
-    }
-}
-
-impl SerializeStruct for MapSerializer<'_> {
-    type Ok = <Self as SerializeMap>::Ok;
-    type Error = <Self as SerializeMap>::Error;
-
-    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        let key = key.serialize(PySerializer(self.py))?;
-        let value = value.serialize(PySerializer(self.py))?;
-        self.dict.push((key, Some(value)));
-        Ok(())
-    }
-
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        SerializeMap::end(self)
-    }
-}
-
-impl SerializeStructVariant for MapSerializer<'_> {
-    type Ok = <Self as SerializeMap>::Ok;
-    type Error = <Self as SerializeMap>::Error;
-    fn serialize_field<T>(&mut self, key: &'static str, value: &T) -> Result<(), Self::Error>
-    where
-        T: ?Sized + Serialize,
-    {
-        SerializeStruct::serialize_field(self, key, value)
-    }
-    fn end(self) -> Result<Self::Ok, Self::Error> {
-        SerializeStruct::end(self)
-    }
-}
-
 pub fn python_to_cbor(py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
     PyValue::new(py_obj)
@@ -835,10 +535,7 @@ pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, 
 
 pub fn python_to_json(py_obj: Bound<'_, PyAny>) -> PyResult<String> {
     let mut o = vec![];
-    let mut serializer = serde_json::Serializer::with_formatter(&mut o, Base64Formatter);
-    PyValue::new(py_obj)
-        .serialize(&mut serializer)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    python_to_json_writer(py_obj, &mut o)?;
     String::from_utf8(o).map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 

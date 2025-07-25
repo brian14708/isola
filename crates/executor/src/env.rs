@@ -28,8 +28,6 @@ pub struct RpcPayload {
 pub trait Env {
     type Error: std::fmt::Display + Send + Sync + 'static;
 
-    fn hash(&self, update: impl FnMut(&[u8]));
-
     fn send_request_http<B>(
         &self,
         _request: http::Request<B>,

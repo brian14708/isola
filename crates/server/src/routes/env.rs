@@ -50,8 +50,6 @@ where
 impl Env for VmEnv {
     type Error = anyhow::Error;
 
-    fn hash(&self, _update: impl FnMut(&[u8])) {}
-
     fn send_request_http<B>(
         &self,
         request: http::Request<B>,

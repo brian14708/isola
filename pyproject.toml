@@ -22,7 +22,7 @@ dev = [
 ]
 
 [tool.ruff]
-exclude = ["tests/rpc/stub/*"]
+exclude = ["tests/rpc/src/stub/*"]
 
 [tool.ruff.lint]
 select = [

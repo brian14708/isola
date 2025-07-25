@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{future::pending, pin::Pin};
 
 use futures_util::TryStreamExt;
 use promptkit_executor::env::HttpResponse;
@@ -28,9 +28,6 @@ impl Env {
 impl promptkit_executor::Env for Env {
     type Error = anyhow::Error;
 
-    fn hash(&self, _update: impl FnMut(&[u8])) {}
-
-    #[allow(clippy::manual_async_fn)]
     fn send_request_http<B>(
         &self,
         request: http::Request<B>,
@@ -57,7 +54,6 @@ impl promptkit_executor::Env for Env {
         }
     }
 
-    #[allow(clippy::manual_async_fn)]
     fn connect_rpc(
         &self,
         _connect: promptkit_executor::env::RpcConnect,
@@ -67,6 +63,6 @@ impl promptkit_executor::Env for Env {
         Output = std::result::Result<tokio::task::JoinHandle<anyhow::Result<()>>, Self::Error>,
     > + Send
     + 'static {
-        async { unimplemented!() }
+        pending()
     }
 }
