@@ -121,8 +121,6 @@ impl Env for VmEnv {
                 } else {
                     fut.await
                 }
-            } else if url.scheme() == "grpc" || url.scheme() == "grpcs" {
-                grpc(&client, connect, req, resp)
             } else {
                 Err(anyhow!("unsupported protocol"))
             }
@@ -187,57 +185,6 @@ async fn websocket(
                 | WebsocketMessage::Frame(_),
             ) => Ok(None),
             Err(_) => Err(anyhow!("Error recv message")),
-        })
-        .then(|msg| {
-            let resp = resp.clone();
-            async move {
-                match msg {
-                    Ok(Some(t)) => Ok::<_, SendError<_>>(resp.send(Ok(t)).await?),
-                    Ok(None) => Ok(()),
-                    Err(e) => Ok(resp.send(Err(e)).await?),
-                }
-            }
-        })
-        .try_collect::<()>()
-        .await?;
-        Ok(())
-    }))
-}
-
-fn grpc(
-    client: &promptkit_request::Client,
-    mut connect: RpcConnect,
-    req: tokio::sync::mpsc::Receiver<RpcPayload>,
-    resp: tokio::sync::mpsc::Sender<Result<RpcPayload, anyhow::Error>>,
-) -> anyhow::Result<JoinHandle<anyhow::Result<()>>> {
-    let mut r = http::Request::builder().uri("http".to_owned() + &connect.url[4..]);
-    for (k, v) in connect.metadata.take().unwrap_or_default() {
-        r = r.header(k, v);
-    }
-    let req = tokio_stream::wrappers::ReceiverStream::new(req);
-
-    let ctx = Context {
-        make_span: Some(|r: &TraceRequest| {
-            request_span!(
-                r,
-                target: TRACE_TARGET_SCRIPT,
-                tracing::Level::INFO,
-                "grpc.request",
-            )
-        }),
-    };
-    let rx = client.grpc(
-        r.body(req.map(|v| Bytes::from(v.data)))?,
-        RequestOptions::new(ctx),
-    );
-    Ok(tokio::task::spawn(async move {
-        let rx = rx.await.map_err(anyhow::Error::from_boxed)?.into_body();
-        rx.map(|msg| match msg {
-            Ok(v) => Ok(Some(RpcPayload {
-                content_type: None,
-                data: v.to_vec(),
-            })),
-            Err(v) => Err(anyhow!("{:?}", v)),
         })
         .then(|msg| {
             let resp = resp.clone();

@@ -1,5 +1,4 @@
 mod client;
-mod grpc;
 mod http;
 mod options;
 mod trace;

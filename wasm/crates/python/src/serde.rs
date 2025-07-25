@@ -1,8 +1,5 @@
 use std::io::{self, Write};
 
-use prost_reflect::{
-    DeserializeOptions, DynamicMessage, MessageDescriptor, SerializeOptions, prost::Message,
-};
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
     types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
@@ -33,10 +30,6 @@ impl<'py> PyValue<'py> {
         D: serde::Deserializer<'de>,
     {
         PyDeserializer(py).deserialize(deserializer)
-    }
-
-    fn serializer(py: Python<'py>) -> PySerializer<'py> {
-        PySerializer(py)
     }
 }
 
@@ -876,24 +869,6 @@ pub fn python_to_yaml(py_obj: Bound<'_, PyAny>) -> PyResult<String> {
 pub fn yaml_to_python<'py>(py: Python<'py>, yaml: &str) -> PyResult<Bound<'py, PyAny>> {
     let deserializer = serde_yaml::Deserializer::from_str(yaml);
     PyValue::deserialize(py, deserializer)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
-}
-
-pub fn python_to_protobuf(desc: MessageDescriptor, py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
-    let msg = DynamicMessage::deserialize_with_options(
-        desc,
-        PyValue::new(py_obj),
-        &DeserializeOptions::new(),
-    )
-    .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
-    Ok(msg.encode_to_vec())
-}
-
-pub fn protobuf_to_python<'py>(
-    py: Python<'py>,
-    msg: &DynamicMessage,
-) -> PyResult<Bound<'py, PyAny>> {
-    msg.serialize_with_options(PyValue::serializer(py), &SerializeOptions::default())
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
 }
 

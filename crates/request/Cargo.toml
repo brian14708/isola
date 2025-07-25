@@ -9,18 +9,16 @@ futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
-moka = { workspace = true, features = ["future"] }
 opentelemetry = { workspace = true }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 pin-project-lite = { workspace = true }
 reqwest = { workspace = true, features = ["http2", "stream", "socks"] }
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
-tonic = { workspace = true, features = ["channel"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 
 [features]
 default = ["gzip", "tls-webpki-roots"]
-tls-webpki-roots = ["tls", "reqwest/rustls-tls-webpki-roots", "tonic/tls-webpki-roots"]
-tls = ["reqwest/rustls-tls", "tonic/tls-ring"]
-gzip = ["reqwest/gzip", "tonic/gzip"]
+tls-webpki-roots = ["tls", "reqwest/rustls-tls-webpki-roots"]
+tls = ["reqwest/rustls-tls"]
+gzip = ["reqwest/gzip"]

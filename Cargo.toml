@@ -28,7 +28,6 @@ metrics = "0.24.1"
 metrics-exporter-prometheus = { version = "0.17.0", default-features = false }
 mimalloc = { version = "0.1.41", default-features = false }
 minicbor-serde = "0.6.0"
-moka = "0.12.10"
 opentelemetry = "0.30.0"
 opentelemetry-otlp = { version = "0.30.0", default-features = false }
 opentelemetry-semantic-conventions = "0.30.0"

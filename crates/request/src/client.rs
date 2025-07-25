@@ -7,14 +7,12 @@ use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tracing::Span;
 
 use crate::{
-    Error, RequestOptions, WebsocketMessage, grpc::GrpcPool, options::RequestContext,
-    trace::TraceRequest,
+    Error, RequestOptions, WebsocketMessage, options::RequestContext, trace::TraceRequest,
 };
 
 #[derive(Clone)]
 pub struct Client {
     http: reqwest::Client,
-    grpc: GrpcPool,
 }
 
 impl Default for Client {
@@ -30,7 +28,6 @@ impl Client {
         let cli = reqwest::Client::builder().user_agent(USER_AGENT);
         Self {
             http: cli.build().unwrap(),
-            grpc: GrpcPool::new(),
         }
     }
 
@@ -105,24 +102,6 @@ impl Client {
             HeaderValue::try_from(generate_key()).unwrap(),
         );
         crate::http::websocket_impl(span, self.http.clone(), request)
-    }
-
-    pub fn grpc<C: RequestContext>(
-        &self,
-        request: http::Request<impl Stream<Item = Bytes> + Send + 'static>,
-        mut options: RequestOptions<C>,
-    ) -> impl Future<
-        Output = Result<
-            http::Response<impl Stream<Item = Result<Bytes, Error>> + Send + 'static>,
-            Error,
-        >,
-    > + Send
-    + 'static {
-        let (parts, body) = request.into_parts();
-        let span = options.context.make_span(&TraceRequest::Grpc(&parts));
-        let mut request = http::Request::from_parts(parts, body);
-        inject_headers(&span, &mut request);
-        crate::grpc::grpc(span, self.grpc.clone(), request)
     }
 }
 

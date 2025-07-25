@@ -2,7 +2,6 @@
 
 mod body_buffer;
 mod future;
-mod grpc;
 mod http;
 mod logging;
 mod rpc;
@@ -111,7 +110,6 @@ impl guest::Guest for Global {
         GLOBAL_SCOPE.with(|scope| {
             let mut scope = scope.borrow_mut();
             if scope.is_none() {
-                use grpc::grpc_module;
                 use http::http_module;
                 use logging::logging_module;
                 use rpc::rpc_module;
@@ -120,7 +118,6 @@ impl guest::Guest for Global {
                 append_to_inittab!(http_module);
                 append_to_inittab!(logging_module);
                 append_to_inittab!(sys_module);
-                append_to_inittab!(grpc_module);
                 append_to_inittab!(rpc_module);
                 append_to_inittab!(serde_module);
 
