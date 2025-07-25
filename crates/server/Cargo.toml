@@ -15,7 +15,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 mimalloc = { workspace = true }
 opentelemetry = { workspace = true }
-opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-client", "reqwest-rustls-webpki-roots", "tokio"] }
+opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-client", "reqwest-rustls", "tokio"] }
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 opentelemetry_sdk = { workspace = true, features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
 pin-project-lite = { workspace = true }
@@ -29,7 +29,7 @@ serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tokio-tungstenite = { workspace = true, features = ["handshake"] }
-tonic = { workspace = true, features = ["gzip", "router", "server", "tls-webpki-roots"] }
+tonic = { workspace = true, features = ["gzip", "router", "server", "tls-native-roots"] }
 tonic-reflection = { workspace = true }
 tonic-web = { workspace = true }
 tower-http = { workspace = true, features = ["fs", "trace"] }
