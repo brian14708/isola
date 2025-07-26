@@ -5,9 +5,9 @@ find_package(Python3 ${PYTHON_VERSION})
 
 FetchContent_Declare(
   pillow-src
-  URL "https://github.com/python-pillow/Pillow/archive/refs/tags/11.2.1.tar.gz"
+  URL "https://github.com/python-pillow/Pillow/archive/refs/tags/11.3.0.tar.gz"
   URL_HASH
-    SHA256=67dd6d40e282fd3b50189bd7f68a6e9b8e59b297d3684cb35ab107e7aec8379e
+    SHA256=fa4aca745b1e1c733589ebf0ef19491b145dd4225c4aa06958963b4e7f0734cf
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/pillow.patch)
 FetchContent_MakeAvailable(pillow-src)
