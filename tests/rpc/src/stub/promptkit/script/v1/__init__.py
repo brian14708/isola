@@ -277,7 +277,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> "ListRuntimeResponse":
         return await self._unary_unary(
             "/promptkit.script.v1.ScriptService/ListRuntime",
@@ -294,7 +294,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> "AnalyzeResponse":
         return await self._unary_unary(
             "/promptkit.script.v1.ScriptService/Analyze",
@@ -311,7 +311,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> "ExecuteResponse":
         return await self._unary_unary(
             "/promptkit.script.v1.ScriptService/Execute",
@@ -331,7 +331,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> "ExecuteClientStreamResponse":
         return await self._stream_unary(
             "/promptkit.script.v1.ScriptService/ExecuteClientStream",
@@ -349,7 +349,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> AsyncIterator[ExecuteServerStreamResponse]:
         async for response in self._unary_stream(
             "/promptkit.script.v1.ScriptService/ExecuteServerStream",
@@ -369,7 +369,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
         *,
         timeout: Optional[float] = None,
         deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None,
+        metadata: Optional["MetadataLike"] = None
     ) -> AsyncIterator[ExecuteStreamResponse]:
         async for response in self._stream_stream(
             "/promptkit.script.v1.ScriptService/ExecuteStream",
@@ -384,6 +384,7 @@ class ScriptServiceStub(betterproto.ServiceStub):
 
 
 class ScriptServiceBase(ServiceBase):
+
     async def list_runtime(
         self, list_runtime_request: "ListRuntimeRequest"
     ) -> "ListRuntimeResponse":

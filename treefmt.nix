@@ -26,7 +26,7 @@
     };
     ruff-format = {
       excludes = [
-        "tests/rpc/stub/*"
+        "tests/rpc/src/stub/*"
       ];
     };
   };
