@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
-    types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PyTuple},
+    types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyTuple},
 };
 use serde::{
     Deserializer, Serialize,
@@ -48,7 +48,7 @@ impl PyValue<'_> {
             Unexpected::Map
         } else if let Ok(s) = o.extract::<&[u8]>() {
             Unexpected::Bytes(s)
-        } else if PyList::is_exact_type_of(o) {
+        } else if PyList::is_exact_type_of(o) || PySet::is_exact_type_of(o) {
             Unexpected::Seq
         } else if PyTuple::is_exact_type_of(o) {
             Unexpected::TupleVariant
@@ -254,6 +254,13 @@ impl Serialize for PyValue<'_> {
                         seq.serialize_element(&self.child(elem))?;
                     }
                     seq.end()
+                } else if let Ok(set) = o.downcast_exact::<PySet>() {
+                    let len = set.len().ok();
+                    let mut seq = serializer.serialize_seq(len)?;
+                    for elem in set {
+                        seq.serialize_element(&self.child(elem))?;
+                    }
+                    seq.end()
                 } else if let Ok(tuple) = o.downcast_exact::<PyTuple>() {
                     let len = tuple.len().map_err(serde::ser::Error::custom)?;
                     let mut seq = serializer.serialize_tuple(len)?;
@@ -328,7 +335,10 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
             self.deserialize_map(visitor)
         } else if let Ok(s) = o.extract::<&[u8]>() {
             visitor.visit_bytes(s)
-        } else if PyList::is_exact_type_of(o) || PyTuple::is_exact_type_of(o) {
+        } else if PyList::is_exact_type_of(o)
+            || PyTuple::is_exact_type_of(o)
+            || PySet::is_exact_type_of(o)
+        {
             self.deserialize_seq(visitor)
         } else if let Ok(s) = o.extract::<&str>() {
             visitor.visit_str(s)
@@ -423,6 +433,11 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
             Ok(seq)
         } else if let Ok(tuple) = self.0.downcast_exact::<PyTuple>() {
             let mut deserializer = SeqDeserializer::new(tuple.into_iter().map(PyValue::new));
+            let seq = visitor.visit_seq(&mut deserializer)?;
+            deserializer.end()?;
+            Ok(seq)
+        } else if let Ok(set) = self.0.downcast_exact::<PySet>() {
+            let mut deserializer = SeqDeserializer::new(set.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
             Ok(seq)
@@ -635,6 +650,10 @@ mod tests {
             dict.set_item("key3", PyList::new(py, [1, 2, 3]).unwrap())
                 .unwrap();
             test_cases.push(dict.into_any());
+
+            // Test set
+            let set = PySet::new(py, &[1, 2, 3, 2, 1]).unwrap();
+            test_cases.push(set.into_any());
 
             // Test nested structures
             let nested_list = PyList::new(
