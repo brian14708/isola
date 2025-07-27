@@ -43,6 +43,11 @@ pub struct VmState<E> {
 }
 
 impl<E: Env + Send> VmState<E> {
+    /// Creates a new linker for the VM state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any of the WASI components fail to link.
     pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
@@ -52,18 +57,23 @@ impl<E: Env + Send> VmState<E> {
         Ok(linker)
     }
 
+    /// Creates a new VM state with the specified configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the preopened directories cannot be added to the WASI context.
     pub fn new(
         engine: &Engine,
         base_dir: &Path,
         workdir: &Path,
         max_memory: usize,
         env: E,
-    ) -> Store<Self> {
+    ) -> anyhow::Result<Store<Self>> {
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
-            .unwrap()
+            .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {}", e))?
             .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
-            .unwrap()
+            .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {}", e))?
             .allow_tcp(false)
             .allow_udp(false)
             .stdout(TraceOutput::new("stdout"))
@@ -83,7 +93,7 @@ impl<E: Env + Send> VmState<E> {
             },
         );
         s.limiter(|s| &mut s.limiter);
-        s
+        Ok(s)
     }
 
     pub const fn reuse(&self) -> bool {

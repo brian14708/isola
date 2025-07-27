@@ -13,7 +13,7 @@ pub trait Collector: Sync + Send + 'static {
 
                 g.set((prefix, suffix));
 
-                ((prefix as u64) << 32) | (suffix as u64)
+                (u64::from(prefix) << 32) | u64::from(suffix)
             })
             .unwrap_or_else(|_| rand::random())
     }

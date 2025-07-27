@@ -3,8 +3,6 @@ name = "promptkit-executor"
 version.workspace = true
 edition.workspace = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
@@ -33,6 +31,3 @@ tracing = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
-
-[dev-dependencies]
-http = { workspace = true }

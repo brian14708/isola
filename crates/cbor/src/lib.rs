@@ -1,3 +1,6 @@
+#![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
+
 use std::error::Error as StdError;
 use std::io::{self, Write};
 
@@ -22,6 +25,10 @@ impl serde_json::ser::Formatter for Base64Formatter {
     }
 }
 
+/// Convert JSON string to CBOR bytes.
+///
+/// # Errors
+/// Returns error if JSON parsing or CBOR serialization fails.
 pub fn json_to_cbor(json: &str) -> Result<Vec<u8>, Error> {
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
     serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(json))
@@ -30,6 +37,10 @@ pub fn json_to_cbor(json: &str) -> Result<Vec<u8>, Error> {
     Ok(serializer.into_encoder().into_writer())
 }
 
+/// Convert CBOR bytes to JSON string.
+///
+/// # Errors
+/// Returns error if CBOR parsing or JSON serialization fails.
 pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
     let mut o = vec![];
     serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
@@ -42,6 +53,10 @@ pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
 }
 
 #[cfg(feature = "prost")]
+/// Convert prost Value to CBOR bytes.
+///
+/// # Errors
+/// Returns error if CBOR serialization fails.
 pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Vec<u8>, Error> {
     let mut o = vec![];
     serde_transcode::Transcoder::new(prost::ProstValue::new(prost))
@@ -51,6 +66,10 @@ pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Vec<u8>, Error> {
 }
 
 #[cfg(feature = "prost")]
+/// Convert CBOR bytes to prost Value.
+///
+/// # Errors
+/// Returns error if CBOR parsing fails.
 pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
     Ok(
         serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
@@ -59,12 +78,20 @@ pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
     )
 }
 
+/// Serialize any serializable value to CBOR bytes.
+///
+/// # Errors
+/// Returns error if serialization fails.
 pub fn to_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
     value.serialize(serializer.serialize_unit_as_null(true))?;
     Ok(serializer.into_encoder().into_writer())
 }
 
+/// Deserialize CBOR bytes to any deserializable type.
+///
+/// # Errors
+/// Returns error if deserialization fails.
 pub fn from_cbor<T: serde::de::DeserializeOwned>(cbor: &[u8]) -> Result<T, Error> {
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
     Ok(T::deserialize(&mut deserializer).map_err(Box::new)?)
@@ -196,7 +223,7 @@ mod tests {
         let json_result = cbor_to_json(&cbor_data).unwrap();
 
         let expected_base64 = base64::prelude::BASE64_STANDARD.encode(test_bytes);
-        assert_eq!(json_result, format!("\"{}\"", expected_base64));
+        assert_eq!(json_result, format!("\"{expected_base64}\""));
         assert_eq!(json_result, "\"SGVsbG8sIFdvcmxkIQ==\"");
     }
 
@@ -214,7 +241,7 @@ mod tests {
         let json_result = serde_json::to_string(&prost::ProstValue::new(&prost_value)).unwrap();
 
         let expected_base64 = base64::prelude::BASE64_STANDARD.encode(test_bytes);
-        assert_eq!(json_result, format!("\"{}\"", expected_base64));
+        assert_eq!(json_result, format!("\"{expected_base64}\""));
         assert_eq!(json_result, "\"SGVsbG8sIFdvcmxkIQ==\"");
     }
 

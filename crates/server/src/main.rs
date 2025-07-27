@@ -1,4 +1,5 @@
 #![warn(clippy::pedantic)]
+#![forbid(unsafe_code)]
 
 use std::{env::args, path::PathBuf};
 

@@ -107,6 +107,7 @@ where
 
 macro_rules! impl_deserialize_number {
     ($method:ident, $visit:ident) => {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         fn $method<V>(self, visitor: V) -> Result<V::Value, Self::Error>
         where
             V: Visitor<'de>,
@@ -431,6 +432,7 @@ impl serde::ser::Serializer for ProstValueSerializer {
     }
     fn serialize_i64(self, v: i64) -> Result<Self::Ok, Self::Error> {
         Ok(prost_types::Value {
+            #[expect(clippy::cast_precision_loss)]
             kind: Some(prost_types::value::Kind::NumberValue(v as f64)),
         })
     }
@@ -446,6 +448,7 @@ impl serde::ser::Serializer for ProstValueSerializer {
 
     fn serialize_u64(self, v: u64) -> Result<Self::Ok, Self::Error> {
         Ok(prost_types::Value {
+            #[expect(clippy::cast_precision_loss)]
             kind: Some(prost_types::value::Kind::NumberValue(v as f64)),
         })
     }

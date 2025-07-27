@@ -1,7 +1,4 @@
 #![warn(clippy::pedantic)]
-#![allow(clippy::missing_panics_doc)]
-#![allow(clippy::missing_safety_doc)]
-#![allow(dead_code)]
 
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
@@ -51,10 +48,8 @@ impl ContextHandle {
 
             n if n > 0 => Builder::new_multi_thread()
                 .worker_threads(
-                    #[allow(clippy::cast_sign_loss)]
-                    {
-                        n as usize
-                    },
+                    n.try_into()
+                        .map_err(|_| Error::InvalidArgument("Invalid thread count"))?,
                 )
                 .thread_name("promptkit-runner")
                 .enable_all()
@@ -105,6 +100,12 @@ impl ContextHandle {
     }
 }
 
+/// Creates a new promptkit context with the specified number of threads.
+///
+/// # Safety
+///
+/// The caller must ensure that `out_context` is a valid pointer to an
+/// uninitialized `Box<ContextHandle>`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_context_create(
     nr_thread: c_int,
@@ -115,6 +116,11 @@ pub unsafe extern "C" fn promptkit_context_create(
     ErrorCode::Ok
 }
 
+/// Initializes the promptkit context with the specified path.
+///
+/// # Safety
+///
+/// The caller must ensure that `path` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_context_initialize(
     ctx: &mut ContextHandle,
@@ -129,6 +135,11 @@ pub unsafe extern "C" fn promptkit_context_initialize(
     ErrorCode::Ok
 }
 
+/// Sets a configuration value for the promptkit context.
+///
+/// # Safety
+///
+/// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_context_config_set(
     ctx: &mut ContextHandle,
@@ -303,6 +314,12 @@ impl VmHandle<'_> {
     }
 }
 
+/// Creates a new VM instance from the context.
+///
+/// # Safety
+///
+/// The caller must ensure that `out_vm` is a valid pointer to an
+/// uninitialized `Box<VmHandle>`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_vm_create<'a>(
     ctx: &'a mut ContextHandle,
@@ -316,6 +333,11 @@ pub unsafe extern "C" fn promptkit_vm_create<'a>(
 #[unsafe(no_mangle)]
 pub extern "C" fn promptkit_vm_destroy(_vm: Box<VmHandle<'_>>) {}
 
+/// Sets a configuration value for the VM.
+///
+/// # Safety
+///
+/// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_vm_set_config(
     vm: &mut VmHandle<'_>,
@@ -374,6 +396,11 @@ pub extern "C" fn promptkit_vm_start(vm: &mut VmHandle<'_>) -> ErrorCode {
     ErrorCode::Ok
 }
 
+/// Loads a script into the VM.
+///
+/// # Safety
+///
+/// The caller must ensure that `input` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_vm_load_script(
     vm: &mut VmHandle<'_>,
@@ -389,6 +416,18 @@ pub unsafe extern "C" fn promptkit_vm_load_script(
     ErrorCode::Ok
 }
 
+/// Runs a function in the VM with the specified arguments.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - `func` is a valid, null-terminated C string
+/// - `args` is a valid pointer to an array of `Argument` structs of length `args_len`
+/// - Each `Argument` in the array has valid pointers and data
+///
+/// # Panics
+///
+/// This function may panic if argument names contain invalid UTF-8 sequences.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn promptkit_vm_run(
     vm: &mut VmHandle<'_>,
@@ -400,28 +439,34 @@ pub unsafe extern "C" fn promptkit_vm_run(
     let args = if args_len == 0 {
         vec![]
     } else {
-        unsafe { std::slice::from_raw_parts(args, args_len) }
-            .iter()
-            .map(|arg| {
+        {
+            let mut parsed_args = Vec::new();
+            for arg in unsafe { std::slice::from_raw_parts(args, args_len) } {
                 let name = if arg.name.is_null() {
                     None
                 } else {
                     let name = unsafe { CStr::from_ptr(arg.name) };
-                    let name = name.to_str().expect("Invalid name string");
-                    Some(name.to_string())
+                    match name.to_str() {
+                        Ok(s) => Some(s.to_string()),
+                        Err(_) => return ErrorCode::InvalidArgument,
+                    }
                 };
 
                 let value = unsafe { std::slice::from_raw_parts(arg.value, arg.len) };
                 let value = value.to_vec();
-                match arg.r#type {
+                let parsed_arg = match arg.r#type {
                     ArgumentType::Json => RawArgument::Json(name, value),
-                }
-            })
-            .collect::<Vec<_>>()
+                };
+                parsed_args.push(parsed_arg);
+            }
+            parsed_args
+        }
     };
 
     let func = unsafe { CStr::from_ptr(func) };
-    let func = func.to_str().expect("Invalid func string");
+    let Ok(func) = func.to_str() else {
+        return ErrorCode::InvalidArgument;
+    };
 
     c_try!(vm.run(func, args, timeout_in_ms));
     ErrorCode::Ok

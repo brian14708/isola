@@ -97,7 +97,12 @@ impl Tracer {
         if self.record.span_id == 0 {
             return;
         }
-        self.record.duration_ns = self.instant.elapsed().as_nanos() as _;
+        self.record.duration_ns = self
+            .instant
+            .elapsed()
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX);
         self.inner.collector.collect_span_end(self.record);
     }
 

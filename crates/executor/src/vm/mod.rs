@@ -28,6 +28,11 @@ where
         VmRun::new(self, callback)
     }
 
+    /// Creates a new iterator resource from the given stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the iterator resource cannot be created in the resource table.
     pub fn new_iter(
         &mut self,
         stream: impl Stream<Item = Value> + Send + 'static,

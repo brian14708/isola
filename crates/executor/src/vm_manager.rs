@@ -140,6 +140,11 @@ impl<E> VmManager<E> {
         base_dir
     }
 
+    /// Compiles a WASM component from the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be read, compiled, or serialized.
     pub async fn compile(path: &Path) -> anyhow::Result<PathBuf> {
         let data = std::fs::read(path)?;
         let base_dir = Self::base_dir(path);
@@ -159,7 +164,7 @@ impl<E> VmManager<E> {
                     workdir.path(),
                     Self::get_max_memory(),
                     MockEnv {},
-                );
+                )?;
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
@@ -224,6 +229,11 @@ impl<E> VmManager<E>
 where
     E: Env + Send + Sync + Clone + 'static,
 {
+    /// Creates a new VM manager from the compiled component at the given path.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the component cannot be loaded or if the linker fails to initialize.
     pub async fn new(path: &Path) -> Result<Self> {
         let (config, feature_hash) = Self::cfg();
         let engine = Engine::new(&config)?;
@@ -282,6 +292,11 @@ where
         })
     }
 
+    /// Creates a new VM instance with the given hash and environment.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the VM cannot be instantiated or initialized.
     pub async fn create(&self, hash: [u8; 32], env: E) -> Result<Vm<E>> {
         let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
         let mut store = VmState::new(
@@ -290,7 +305,7 @@ where
             workdir.path(),
             Self::get_max_memory(),
             env,
-        );
+        )?;
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
@@ -352,6 +367,12 @@ where
         join_with(ReceiverStream::new(rx), exec)
     }
 
+    /// Executes a function in a VM with the given script and arguments.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the VM cannot be created, the script cannot be evaluated,
+    /// or the function arguments cannot be processed.
     pub async fn exec(
         &self,
         id: &str,

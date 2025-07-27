@@ -123,7 +123,7 @@ impl ScriptService for ScriptServer {
                 Ok(Err(s)) => Err(s),
                 Err(_) => Ok(analyze_response::ResultType::Error(script::Error {
                     code: i32::from(script::ErrorCode::DeadlineExceeded),
-                    message: "deadline execeeded".to_string(),
+                    message: "deadline exceeded".to_string(),
                 })),
             }
         }
@@ -677,7 +677,7 @@ fn timeout_error() -> script::Result {
     script::Result {
         result_type: Some(result::ResultType::Error(script::Error {
             code: i32::from(script::ErrorCode::DeadlineExceeded),
-            message: "deadline execeeded".to_string(),
+            message: "deadline exceeded".to_string(),
         })),
     }
 }

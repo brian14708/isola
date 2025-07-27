@@ -42,23 +42,60 @@ typedef struct promptkit_argument {
 extern "C" {
 #endif // __cplusplus
 
+/**
+ * Creates a new promptkit context with the specified number of threads.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_context` is a valid pointer to an
+ * uninitialized `Box<ContextHandle>`.
+ */
 enum promptkit_error_code promptkit_context_create(int nr_thread,
                                                    struct promptkit_context_handle **out_context);
 
+/**
+ * Initializes the promptkit context with the specified path.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `path` is a valid, null-terminated C string.
+ */
 enum promptkit_error_code promptkit_context_initialize(struct promptkit_context_handle *ctx,
                                                        const char *path);
 
+/**
+ * Sets a configuration value for the promptkit context.
+ *
+ * # Safety
+ *
+ * The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+ */
 enum promptkit_error_code promptkit_context_config_set(struct promptkit_context_handle *ctx,
                                                        const char *key,
                                                        const char *value);
 
 void promptkit_context_destroy(struct promptkit_context_handle *_ctx);
 
+/**
+ * Creates a new VM instance from the context.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_vm` is a valid pointer to an
+ * uninitialized `Box<VmHandle>`.
+ */
 enum promptkit_error_code promptkit_vm_create(struct promptkit_context_handle *ctx,
                                               struct promptkit_vm_handle **out_vm);
 
 void promptkit_vm_destroy(struct promptkit_vm_handle *_vm);
 
+/**
+ * Sets a configuration value for the VM.
+ *
+ * # Safety
+ *
+ * The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+ */
 enum promptkit_error_code promptkit_vm_set_config(struct promptkit_vm_handle *vm,
                                                   const char *key,
                                                   const char *value);
@@ -72,10 +109,31 @@ enum promptkit_error_code promptkit_vm_set_callback(struct promptkit_vm_handle *
 
 enum promptkit_error_code promptkit_vm_start(struct promptkit_vm_handle *vm);
 
+/**
+ * Loads a script into the VM.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `input` is a valid, null-terminated C string.
+ */
 enum promptkit_error_code promptkit_vm_load_script(struct promptkit_vm_handle *vm,
                                                    const char *input,
                                                    uint64_t timeout_in_ms);
 
+/**
+ * Runs a function in the VM with the specified arguments.
+ *
+ * # Safety
+ *
+ * The caller must ensure that:
+ * - `func` is a valid, null-terminated C string
+ * - `args` is a valid pointer to an array of `Argument` structs of length `args_len`
+ * - Each `Argument` in the array has valid pointers and data
+ *
+ * # Panics
+ *
+ * This function may panic if argument names contain invalid UTF-8 sequences.
+ */
 enum promptkit_error_code promptkit_vm_run(struct promptkit_vm_handle *vm,
                                            const char *func,
                                            const struct promptkit_argument *args,
