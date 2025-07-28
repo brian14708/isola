@@ -2,7 +2,7 @@ mod bindgen;
 mod run;
 mod state;
 
-use bindgen::host::{Value, ValueIterator};
+use bindgen::host::ValueIterator;
 pub use bindgen::{Sandbox, SandboxPre, guest as exports};
 use futures_core::Stream;
 pub use state::{OutputCallback, VmState};
@@ -35,7 +35,7 @@ where
     /// Returns an error if the iterator resource cannot be created in the resource table.
     pub fn new_iter(
         &mut self,
-        stream: impl Stream<Item = Value> + Send + 'static,
+        stream: impl Stream<Item = Vec<u8>> + Send + 'static,
     ) -> wasmtime::Result<wasmtime::component::Resource<ValueIterator>, ResourceTableError> {
         self.store
             .data_mut()

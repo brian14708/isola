@@ -4,11 +4,11 @@ interface host {
 
     variant value {
         cbor(list<u8>),
-        iterator(value-iterator),
+        cbor-iterator(value-iterator),
     }
     resource value-iterator {
-        read: func() -> option<result<value, stream-error>>;
-        blocking-read: func() -> result<value, stream-error>;
+        read: func() -> option<result<list<u8>, stream-error>>;
+        blocking-read: func() -> result<list<u8>, stream-error>;
         subscribe: func() -> pollable;
     }
     emit: func(%cbor: list<u8>);

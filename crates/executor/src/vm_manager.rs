@@ -15,7 +15,7 @@ use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
-use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
     Config, Engine, Store,
@@ -448,8 +448,8 @@ where
                         name: a.name,
                         value: match a.value {
                             ExecArgumentValue::Cbor(a) => Value::Cbor(a),
-                            ExecArgumentValue::CborStream(s) => Value::Iterator(
-                                vm.new_iter(ReceiverStream::new(s).map(Value::Cbor))
+                            ExecArgumentValue::CborStream(s) => Value::CborIterator(
+                                vm.new_iter(ReceiverStream::new(s))
                                     .map_err(anyhow::Error::from)?,
                             ),
                         },

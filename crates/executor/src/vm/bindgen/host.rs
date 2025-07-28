@@ -5,26 +5,25 @@ use tokio_stream::Stream;
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::{DynPollable, Pollable, bindings::io::streams::StreamError};
 
-pub use super::promptkit::script::host::Value;
 use super::{
     HostView,
     promptkit::script::host::{Host, HostValueIterator},
 };
 
 pub struct ValueIterator {
-    pub(crate) stream: Pin<Box<dyn Stream<Item = Value> + Send>>,
-    pub(crate) peek: Option<Result<Value, StreamError>>,
+    pub(crate) stream: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
+    pub(crate) peek: Option<Result<Vec<u8>, StreamError>>,
 }
 
 impl ValueIterator {
-    pub fn new(stream: impl Stream<Item = Value> + Send + 'static) -> Self {
+    pub fn new(stream: impl Stream<Item = Vec<u8>> + Send + 'static) -> Self {
         Self {
             stream: Box::pin(stream),
             peek: None,
         }
     }
 
-    pub async fn next(&mut self) -> Result<Value, StreamError> {
+    pub async fn next(&mut self) -> Result<Vec<u8>, StreamError> {
         match self.peek.take() {
             Some(v) => v,
             None => match self.stream.next().await {
@@ -34,7 +33,7 @@ impl ValueIterator {
         }
     }
 
-    pub fn try_next(&mut self) -> Option<Result<Value, StreamError>> {
+    pub fn try_next(&mut self) -> Option<Result<Vec<u8>, StreamError>> {
         match self.peek.take() {
             Some(v) => Some(v),
             None => match self.stream.next().now_or_never() {
@@ -68,14 +67,14 @@ impl<T: HostView> HostValueIterator for super::HostImpl<T> {
     async fn read(
         &mut self,
         resource: Resource<ValueIterator>,
-    ) -> wasmtime::Result<Option<Result<Value, StreamError>>> {
+    ) -> wasmtime::Result<Option<Result<Vec<u8>, StreamError>>> {
         Ok(self.0.table().get_mut(&resource)?.try_next())
     }
 
     async fn blocking_read(
         &mut self,
         resource: Resource<ValueIterator>,
-    ) -> wasmtime::Result<Result<Value, StreamError>> {
+    ) -> wasmtime::Result<Result<Vec<u8>, StreamError>> {
         let response = self.0.table().get_mut(&resource)?;
         Ok(response.next().await)
     }

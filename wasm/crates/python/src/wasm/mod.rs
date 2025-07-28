@@ -199,7 +199,7 @@ impl guest::Guest for Global {
                         let guest::Argument { name, value } = arg;
                         let value = match value {
                             host::Value::Cbor(s) => InputValue::Cbor(s.into()),
-                            host::Value::Iterator(e) => InputValue::Iter(ArgIter { iter: e }),
+                            host::Value::CborIterator(e) => InputValue::Iter(ArgIter { iter: e }),
                         };
                         if let Some(name) = name {
                             named.push((name.into(), value));
@@ -232,14 +232,11 @@ impl ArgIter {
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
         match self.iter.blocking_read() {
-            Ok(a) => match a {
-                host::Value::Cbor(c) => Ok(Some(
-                    cbor_to_python(py, &c)
-                        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
-                        .into(),
-                )),
-                host::Value::Iterator(_) => todo!(),
-            },
+            Ok(c) => Ok(Some(
+                cbor_to_python(py, &c)
+                    .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
+                    .into(),
+            )),
             Err(StreamError::Closed) => Ok(None),
             Err(StreamError::LastOperationFailed(e)) => Err(PyErr::new::<
                 pyo3::exceptions::PyTypeError,
@@ -257,24 +254,17 @@ impl ArgIter {
 
     fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<PyObject>, Option<PyPollable>)> {
         match self.iter.read() {
-            Some(Ok(a)) => match a {
-                host::Value::Cbor(c) => Ok((
-                    true,
-                    Some(
-                        cbor_to_python(py, &c)
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                            })?
-                            .into_pyobject(py)
-                            .map_err(|_| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error")
-                            })?
-                            .into(),
-                    ),
-                    None,
-                )),
-                host::Value::Iterator(_) => todo!(),
-            },
+            Some(Ok(c)) => Ok((
+                true,
+                Some(
+                    cbor_to_python(py, &c)
+                        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
+                        .into_pyobject(py)
+                        .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("pyo3 error"))?
+                        .into(),
+                ),
+                None,
+            )),
             Some(Err(StreamError::Closed)) => Ok((false, None, None)),
             Some(Err(StreamError::LastOperationFailed(e))) => {
                 Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
