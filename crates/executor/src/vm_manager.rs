@@ -37,7 +37,7 @@ use crate::{
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
-pub struct VmManager<E: 'static> {
+pub struct VmManager<E: Env> {
     engine: Engine,
     instance_pre: SandboxPre<VmState<E>>,
     cache: Arc<VmCache<E>>,
@@ -64,34 +64,24 @@ impl MpscOutputCallback {
 }
 
 impl OutputCallback for MpscOutputCallback {
-    fn on_result(
-        &mut self,
-        item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>> {
+    async fn on_result(&mut self, item: Vec<u8>) -> Result<(), anyhow::Error> {
         let sender = self.sender.clone();
-        Box::pin(async move {
-            sender
-                .send(ExecStreamItem::Data(item))
-                .await
-                .map_err(|e| anyhow!("Send error: {}", e))
-        })
+        sender
+            .send(ExecStreamItem::Data(item))
+            .await
+            .map_err(|e| anyhow!("Send error: {}", e))
     }
 
-    fn on_end(
-        &mut self,
-        item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>> {
+    async fn on_end(&mut self, item: Vec<u8>) -> Result<(), anyhow::Error> {
         let sender = self.sender.clone();
-        Box::pin(async move {
-            sender
-                .send(ExecStreamItem::End(if item.is_empty() {
-                    None
-                } else {
-                    Some(item)
-                }))
-                .await
-                .map_err(|e| anyhow!("Send error: {}", e))
-        })
+        sender
+            .send(ExecStreamItem::End(if item.is_empty() {
+                None
+            } else {
+                Some(item)
+            }))
+            .await
+            .map_err(|e| anyhow!("Send error: {}", e))
     }
 }
 
@@ -116,7 +106,7 @@ struct Manifest {
     prelude: Option<String>,
 }
 
-impl<E> VmManager<E> {
+impl<E: Env> VmManager<E> {
     fn cfg() -> (Config, String) {
         let mut hash = String::new();
         let mut config = Config::new();
@@ -174,7 +164,7 @@ impl<E> VmManager<E> {
                 let engine = Engine::new(&config)?;
                 let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
                 let component = Component::new(&engine, &instrumented)?;
-                let linker = VmState::new_linker(&engine)?;
+                let linker = VmState::<MockEnv>::new_linker(&engine)?;
                 let mut store = VmState::new(
                     &engine,
                     &base_dir,
@@ -242,10 +232,7 @@ impl<E> VmManager<E> {
     }
 }
 
-impl<E> VmManager<E>
-where
-    E: Env + Send + Sync + Clone + 'static,
-{
+impl<E: Env> VmManager<E> {
     /// Creates a new VM manager from the compiled component at the given path.
     ///
     /// # Errors
@@ -337,7 +324,12 @@ where
             workdir,
         })
     }
+}
 
+impl<E> VmManager<E>
+where
+    E: Env<Callback = MpscOutputCallback> + Clone,
+{
     fn exec_impl(
         &self,
         func: String,
@@ -478,7 +470,7 @@ where
     }
 }
 
-impl<E> Drop for VmManager<E> {
+impl<E: Env> Drop for VmManager<E> {
     fn drop(&mut self) {
         self.epoch_ticker.abort();
         // yield one last time
@@ -532,13 +524,13 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
     }
 }
 
-struct MyInvoker<S: 'static> {
+struct MyInvoker<S: Env> {
     store: Store<VmState<S>>,
     instance: Instance,
 }
 
 #[async_trait::async_trait]
-impl<S: Send> Invoker for MyInvoker<S> {
+impl<S: Env> Invoker for MyInvoker<S> {
     async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
         let func = self
             .instance
@@ -588,6 +580,7 @@ impl<S: Send> Invoker for MyInvoker<S> {
 struct MockEnv {}
 
 impl Env for MockEnv {
+    type Callback = MockEnv;
     type Error = anyhow::Error;
 
     fn send_request_http<B>(
@@ -626,6 +619,15 @@ impl Env for MockEnv {
     ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
     {
         pending()
+    }
+}
+
+impl OutputCallback for MockEnv {
+    async fn on_result(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
+        pending().await
+    }
+    async fn on_end(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
+        pending().await
     }
 }
 

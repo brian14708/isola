@@ -13,7 +13,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         Ok(Self {
-            vm: Arc::new(VmManager::<VmEnv>::new(vm_path.as_ref()).await?),
+            vm: Arc::new(VmManager::new(vm_path.as_ref()).await?),
         })
     }
 }

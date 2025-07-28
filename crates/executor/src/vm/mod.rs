@@ -12,19 +12,16 @@ use wasmtime_wasi::p2::IoView;
 
 pub use crate::{Env, vm::run::VmRun};
 
-pub struct Vm<E: 'static> {
+pub struct Vm<E: Env> {
     pub(crate) hash: [u8; 32],
     pub(crate) store: Store<VmState<E>>,
     pub(crate) sandbox: Sandbox,
     pub(crate) workdir: TempDir,
 }
 
-impl<E> Vm<E>
-where
-    E: Env + Send + 'static,
-{
+impl<E: Env> Vm<E> {
     #[must_use]
-    pub fn run(self, callback: impl OutputCallback) -> VmRun<E> {
+    pub fn run(self, callback: E::Callback) -> VmRun<E> {
         VmRun::new(self, callback)
     }
 

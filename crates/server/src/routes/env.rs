@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use promptkit_executor::{
-    Env,
+    Env, MpscOutputCallback,
     env::{RpcConnect, RpcPayload},
 };
 use promptkit_request::{
@@ -48,6 +48,7 @@ where
 }
 
 impl Env for VmEnv {
+    type Callback = MpscOutputCallback;
     type Error = anyhow::Error;
 
     fn send_request_http<B>(

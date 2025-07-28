@@ -2,9 +2,7 @@
 
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
-    future::{Future, ready},
     path::PathBuf,
-    pin::Pin,
     time::Duration,
 };
 
@@ -156,7 +154,7 @@ pub unsafe extern "C" fn promptkit_context_config_set(
 pub extern "C" fn promptkit_context_destroy(_ctx: Box<ContextHandle>) {}
 
 #[derive(Clone)]
-struct Callback {
+pub struct Callback {
     callback: extern "C" fn(CallbackEvent, *const u8, usize, *mut c_void),
     user_data: *mut c_void,
 }
@@ -165,10 +163,7 @@ unsafe impl Send for Callback {}
 unsafe impl Sync for Callback {}
 
 impl OutputCallback for Callback {
-    fn on_result(
-        &mut self,
-        item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), anyhow::Error>> + Send>> {
+    async fn on_result(&mut self, item: Vec<u8>) -> std::result::Result<(), anyhow::Error> {
         let data = promptkit_cbor::cbor_to_json(&item).unwrap();
         (self.callback)(
             CallbackEvent::ResultJson,
@@ -176,13 +171,10 @@ impl OutputCallback for Callback {
             data.len(),
             self.user_data,
         );
-        Box::pin(ready(Ok(())))
+        Ok(())
     }
 
-    fn on_end(
-        &mut self,
-        item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), anyhow::Error>> + Send>> {
+    async fn on_end(&mut self, item: Vec<u8>) -> std::result::Result<(), anyhow::Error> {
         if item.is_empty() {
             (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         } else {
@@ -194,7 +186,7 @@ impl OutputCallback for Callback {
                 self.user_data,
             );
         }
-        Box::pin(ready(Ok(())))
+        Ok(())
     }
 }
 

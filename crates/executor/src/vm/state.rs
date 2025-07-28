@@ -1,4 +1,4 @@
-use std::{future::Future, path::Path, pin::Pin};
+use std::{future::Future, path::Path};
 
 use futures_util::StreamExt;
 use http::header::HOST;
@@ -22,34 +22,31 @@ use wasmtime_wasi_http::{
 use super::bindgen::{HostView, add_to_linker};
 use crate::{Env, resource::MemoryLimiter, trace_output::TraceOutput, vm::bindgen::EmitValue};
 
-pub trait OutputCallback: Send + 'static {
+pub trait OutputCallback: Send {
     fn on_result(
         &mut self,
         item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
+    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 
-    fn on_end(
-        &mut self,
-        item: Vec<u8>,
-    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
+    fn on_end(&mut self, item: Vec<u8>) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 }
 
-pub struct VmRunState {
-    pub(crate) output: Box<dyn OutputCallback>,
+pub struct VmRunState<E: Env> {
+    pub(crate) output: E::Callback,
 }
 
-pub struct VmState<E> {
+pub struct VmState<E: Env> {
     limiter: MemoryLimiter,
     env: E,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     table: ResourceTable,
-    pub(crate) run: Option<VmRunState>,
+    pub(crate) run: Option<VmRunState<E>>,
 
     output_buffer: OutputBuffer,
 }
 
-impl<E: Env + Send> VmState<E> {
+impl<E: Env> VmState<E> {
     /// Creates a new linker for the VM state.
     ///
     /// # Errors
@@ -109,19 +106,19 @@ impl<E: Env + Send> VmState<E> {
     }
 }
 
-impl<E: Send> IoView for VmState<E> {
+impl<E: Env> IoView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 }
 
-impl<E: Send> WasiView for VmState<E> {
+impl<E: Env> WasiView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }
 }
 
-impl<E: Env + Send> WasiHttpView for VmState<E> {
+impl<E: Env> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -170,7 +167,7 @@ impl<E: Env + Send> WasiHttpView for VmState<E> {
     }
 }
 
-impl<E: Send + Env> HostView for VmState<E> {
+impl<E: Env> HostView for VmState<E> {
     type Env = E;
 
     fn env(&mut self) -> &mut Self::Env {

@@ -4,6 +4,8 @@ use futures_util::TryStreamExt;
 use promptkit_executor::env::HttpResponse;
 use promptkit_request::{Client, RequestOptions};
 
+use crate::Callback;
+
 #[derive(Clone)]
 pub struct Env {
     pub client: Arc<promptkit_request::Client>,
@@ -26,6 +28,7 @@ impl Env {
 }
 
 impl promptkit_executor::Env for Env {
+    type Callback = Callback;
     type Error = anyhow::Error;
 
     fn send_request_http<B>(

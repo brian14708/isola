@@ -3,6 +3,8 @@ use std::{future::Future, pin::Pin};
 use bytes::Bytes;
 use tokio::task::JoinHandle;
 
+use crate::vm::OutputCallback;
+
 pub type HttpResponse<E> = http::Response<
     Pin<
         Box<
@@ -25,7 +27,8 @@ pub struct RpcPayload {
     pub content_type: Option<String>,
 }
 
-pub trait Env {
+pub trait Env: Send + 'static {
+    type Callback: OutputCallback;
     type Error: std::fmt::Display + Send + Sync + 'static;
 
     fn send_request_http<B>(

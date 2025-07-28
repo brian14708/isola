@@ -9,6 +9,8 @@ use proto::script::v1::script_service_server::ScriptServiceServer;
 use tonic::{codec::CompressionEncoding, service::LayerExt};
 use utils::{grpc_trace::grpc_server_tracing_layer, otel::init_tracing};
 
+use crate::routes::VmEnv;
+
 mod proto;
 mod routes;
 mod server;
@@ -50,7 +52,8 @@ async fn async_main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            VmManager::<()>::compile(&PathBuf::from("wasm/target/promptkit_python.wasm")).await?;
+            VmManager::<VmEnv>::compile(&PathBuf::from("wasm/target/promptkit_python.wasm"))
+                .await?;
             Ok(())
         }
         None | Some("serve") => {

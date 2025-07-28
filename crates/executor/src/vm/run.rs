@@ -4,23 +4,18 @@ use wasmtime::Store;
 
 use super::{
     Vm, exports,
-    state::{OutputCallback, VmRunState, VmState},
+    state::{VmRunState, VmState},
 };
 use crate::Env;
 
-pub struct VmRun<E: Env + 'static> {
+pub struct VmRun<E: Env> {
     vm: Vm<E>,
 }
 
-impl<E> VmRun<E>
-where
-    E: Env + 'static,
-{
-    pub fn new(mut vm: Vm<E>, callback: impl OutputCallback) -> Self {
+impl<E: Env> VmRun<E> {
+    pub fn new(mut vm: Vm<E>, callback: E::Callback) -> Self {
         let o: &mut VmState<_> = vm.store.data_mut();
-        o.run = Some(VmRunState {
-            output: Box::new(callback),
-        });
+        o.run = Some(VmRunState { output: callback });
         Self { vm }
     }
 
