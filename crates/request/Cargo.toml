@@ -3,6 +3,11 @@ name = "promptkit-request"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = ["gzip", "tls"]
+tls = ["reqwest/rustls-tls-native-roots"]
+gzip = ["reqwest/gzip"]
+
 [dependencies]
 bytes = { workspace = true }
 dashmap = { workspace = true }
@@ -21,8 +26,3 @@ tokio-tungstenite = { workspace = true, features = ["handshake"] }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 url = { workspace = true }
-
-[features]
-default = ["gzip", "tls"]
-tls = ["reqwest/rustls-tls-native-roots"]
-gzip = ["reqwest/gzip"]

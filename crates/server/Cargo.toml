@@ -19,12 +19,13 @@ opentelemetry-otlp = { workspace = true, features = ["http-proto", "reqwest-clie
 opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
 opentelemetry_sdk = { workspace = true, features = ["experimental_trace_batch_span_processor_with_async_runtime", "rt-tokio"] }
 pin-project-lite = { workspace = true }
+promptkit-cbor = { workspace = true, features = ["prost"] }
 promptkit-executor = { workspace = true }
 promptkit-request = { workspace = true }
 promptkit-trace = { workspace = true }
-promptkit-cbor = { workspace = true, features = ["prost"] }
 prost = { workspace = true }
 prost-types = { workspace = true }
+rlimit = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
@@ -37,7 +38,6 @@ tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "parking_lot"] }
 url = { workspace = true }
-rlimit = { workspace = true }
 
 [build-dependencies]
 tonic-build = { workspace = true }

@@ -18,7 +18,6 @@ parking_lot = { workspace = true }
 pin-project-lite = { workspace = true }
 promptkit-trace = { workspace = true }
 rand = { workspace = true }
-zip = { workspace = true, features = ["deflate"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -31,3 +30,4 @@ tracing = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
+zip = { workspace = true, features = ["deflate"] }

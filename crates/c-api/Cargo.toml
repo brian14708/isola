@@ -13,9 +13,9 @@ bytes = { workspace = true }
 futures-util = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
+promptkit-cbor = { workspace = true }
 promptkit-executor = { workspace = true }
 promptkit-request = { workspace = true }
-promptkit-cbor = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 

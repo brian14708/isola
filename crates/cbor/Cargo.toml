@@ -3,6 +3,9 @@ name = "promptkit-cbor"
 version.workspace = true
 edition.workspace = true
 
+[features]
+prost = ["dep:prost-types"]
+
 [dependencies]
 base64 = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
@@ -10,6 +13,3 @@ prost-types = { workspace = true, optional = true }
 serde = { workspace = true }
 serde-transcode = { workspace = true }
 serde_json = { workspace = true }
-
-[features]
-prost = ["dep:prost-types"]
