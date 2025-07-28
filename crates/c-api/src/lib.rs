@@ -2,7 +2,7 @@
 
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
-    future::Future,
+    future::{Future, ready},
     path::PathBuf,
     pin::Pin,
     time::Duration,
@@ -176,7 +176,25 @@ impl OutputCallback for Callback {
             data.len(),
             self.user_data,
         );
-        Box::pin(async { Ok(()) })
+        Box::pin(ready(Ok(())))
+    }
+
+    fn on_end(
+        &mut self,
+        item: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = std::result::Result<(), anyhow::Error>> + Send>> {
+        if item.is_empty() {
+            (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
+        } else {
+            let data = promptkit_cbor::cbor_to_json(&item).unwrap();
+            (self.callback)(
+                CallbackEvent::EndJson,
+                data.as_ptr(),
+                data.len(),
+                self.user_data,
+            );
+        }
+        Box::pin(ready(Ok(())))
     }
 }
 
@@ -188,7 +206,6 @@ enum VmInner {
     },
     Running {
         run: VmRun<Env>,
-        callback: Callback,
     },
 }
 
@@ -221,10 +238,7 @@ impl VmHandle<'_> {
                     .rt
                     .block_on(run.exec(|guest, store| guest.call_initialize(store, true)))
                     .map_err(|e| Error::Internal(format!("VM initialization failed: {e}")))?;
-                self.inner = VmInner::Running {
-                    run,
-                    callback: output_callback,
-                };
+                self.inner = VmInner::Running { run };
                 Ok(())
             }
             _ => Err(Error::InvalidArgument("Vm not loaded")),
@@ -233,7 +247,7 @@ impl VmHandle<'_> {
 
     fn load_script(&mut self, input: &str, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            VmInner::Running { run, .. } => {
+            VmInner::Running { run } => {
                 self.ctx
                     .rt
                     .block_on(run.exec(|guest, store| async move {
@@ -254,7 +268,7 @@ impl VmHandle<'_> {
 
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            VmInner::Running { run, callback } => {
+            VmInner::Running { run } => {
                 let args = args
                     .into_iter()
                     .map(|arg| match arg {
@@ -272,8 +286,7 @@ impl VmHandle<'_> {
                         }
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let v = self
-                    .ctx
+                self.ctx
                     .rt
                     .block_on(run.exec(|guest, store| async move {
                         tokio::time::timeout(
@@ -284,28 +297,6 @@ impl VmHandle<'_> {
                     }))
                     .map_err(|_| Error::Internal("Operation timeout".to_string()))??
                     .map_err(|e| Error::Internal(format!("VM execution failed: {e}")))?;
-
-                match v {
-                    Some(data) => {
-                        let json_data = promptkit_cbor::cbor_to_json(&data).map_err(|_| {
-                            Error::Internal("CBOR to JSON conversion failed".to_string())
-                        })?;
-                        (callback.callback)(
-                            CallbackEvent::EndJson,
-                            json_data.as_ptr(),
-                            json_data.len(),
-                            callback.user_data,
-                        );
-                    }
-                    None => {
-                        (callback.callback)(
-                            CallbackEvent::EndJson,
-                            std::ptr::null(),
-                            0,
-                            callback.user_data,
-                        );
-                    }
-                }
 
                 Ok(())
             }

@@ -22,10 +22,16 @@ pub use exports::promptkit::script::guest;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::IoView;
 
+pub enum EmitValue {
+    Continuation(Vec<u8>),
+    PartialResult(Vec<u8>),
+    End(Vec<u8>),
+}
+
 pub trait HostView: IoView + Send {
     type Env: crate::Env + Send;
     fn env(&mut self) -> &mut Self::Env;
-    fn emit(&mut self, data: Vec<u8>) -> impl Future<Output = wasmtime::Result<()>> + Send;
+    fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
 
 impl<T: ?Sized + HostView> HostView for &mut T {
@@ -34,7 +40,7 @@ impl<T: ?Sized + HostView> HostView for &mut T {
         T::env(self)
     }
 
-    fn emit(&mut self, data: Vec<u8>) -> impl Future<Output = wasmtime::Result<()>> + Send {
+    fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send {
         T::emit(self, data)
     }
 }

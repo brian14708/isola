@@ -5,6 +5,8 @@ use tokio_stream::Stream;
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::{DynPollable, Pollable, bindings::io::streams::StreamError};
 
+use crate::vm::bindgen::EmitValue;
+
 use super::{
     HostView,
     promptkit::script::host::{Host, HostValueIterator},
@@ -58,8 +60,19 @@ impl Pollable for ValueIterator {
 }
 
 impl<T: HostView> Host for super::HostImpl<T> {
-    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
-        self.0.emit(data).await
+    async fn blocking_emit(
+        &mut self,
+        emit_type: super::promptkit::script::host::EmitType,
+        cbor: Vec<u8>,
+    ) -> wasmtime::Result<()> {
+        let emit_value = match emit_type {
+            super::promptkit::script::host::EmitType::Continuation => EmitValue::Continuation(cbor),
+            super::promptkit::script::host::EmitType::End => EmitValue::End(cbor),
+            super::promptkit::script::host::EmitType::PartialResult => {
+                EmitValue::PartialResult(cbor)
+            }
+        };
+        self.0.emit(emit_value).await
     }
 }
 

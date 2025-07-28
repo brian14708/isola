@@ -11,5 +11,11 @@ interface host {
         blocking-read: func() -> result<list<u8>, stream-error>;
         subscribe: func() -> pollable;
     }
-    emit: func(%cbor: list<u8>);
+    enum emit-type {
+        continuation,
+        end,
+        partial-result,
+    }
+
+    blocking-emit: func(%type: emit-type, %cbor: list<u8>);
 }

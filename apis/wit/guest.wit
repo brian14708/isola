@@ -19,5 +19,5 @@ interface guest {
     set-log-level: func(%level: option<level>);
     eval-script: func(%script: string) -> result<_, error>;
     eval-file: func(%path: string) -> result<_, error>;
-    call-func: func(%func: string, %args: list<argument>) -> result<option<list<u8>>, error>;
+    call-func: func(%func: string, %args: list<argument>) -> result<_, error>;
 }

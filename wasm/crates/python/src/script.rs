@@ -16,8 +16,8 @@ use pyo3::{
 use crate::{
     error::{Error, Result},
     pymeta,
-    serde::{cbor_to_python, python_to_cbor},
-    wasm::ArgIter,
+    serde::{cbor_to_python, python_to_cbor_emit},
+    wasm::{ArgIter, promptkit::script::host::EmitType},
 };
 
 pub struct Scope {
@@ -127,8 +127,8 @@ impl Scope {
         name: &str,
         positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
         named: impl IntoIterator<Item = (Cow<'a, str>, InputValue<'a>)>,
-        mut callback: impl FnMut(&[u8]),
-    ) -> Result<Option<Vec<u8>>>
+        mut callback: impl FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    ) -> Result<()>
     where
         U: ExactSizeIterator<Item = InputValue<'a>>,
     {
@@ -195,25 +195,22 @@ impl Scope {
             };
 
             if Self::is_serializable(&obj) {
-                match python_to_cbor(obj) {
-                    Ok(s) => return Ok(Some(s)),
-                    Err(e) => {
-                        return Err(Error::from_pyerr(py, e));
-                    }
-                };
+                return python_to_cbor_emit(obj, EmitType::End, callback)
+                    .map_err(|e| Error::from_pyerr(py, e));
             }
 
             if let Ok(iter) = obj.try_iter() {
                 for el in iter {
-                    let mut tmp = {
-                        let object = el.map_err(|e| Error::from_pyerr(py, e))?;
-                        python_to_cbor(object)
-                    }
+                    python_to_cbor_emit(
+                        el.map_err(|e| Error::from_pyerr(py, e))?,
+                        EmitType::PartialResult,
+                        &mut callback,
+                    )
                     .map_err(|e| Error::from_pyerr(py, e))?;
-                    callback(&tmp);
-                    tmp.clear();
                 }
-                return Ok(None);
+
+                callback(EmitType::End, &[]);
+                return Ok(());
             }
 
             Err(Error::UnexpectedError(
@@ -222,7 +219,11 @@ impl Scope {
         })
     }
 
-    pub fn analyze(&self, request: InputValue<'_>) -> Result<Option<Vec<u8>>> {
+    pub fn analyze(
+        &self,
+        request: InputValue<'_>,
+        callback: impl FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    ) -> Result<()> {
         Python::with_gil(|py| {
             let module = py
                 .import(intern!(py, "promptkit._analyze"))
@@ -250,10 +251,7 @@ impl Scope {
                     None,
                 )
                 .map_err(|e| Error::from_pyerr(py, e))?;
-            match python_to_cbor(obj) {
-                Ok(s) => Ok(Some(s)),
-                Err(e) => Err(Error::from_pyerr(py, e)),
-            }
+            python_to_cbor_emit(obj, EmitType::End, callback).map_err(|e| Error::from_pyerr(py, e))
         })
     }
 }
@@ -261,6 +259,36 @@ impl Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_python_to_cbor_emit() {
+        use std::cell::RefCell;
+        let emissions = RefCell::new(Vec::new());
+
+        pyo3::prepare_freethreaded_python();
+
+        {
+            let emit_fn = |emit_type: crate::wasm::promptkit::script::host::EmitType,
+                           data: &[u8]| {
+                emissions.borrow_mut().push((emit_type, data.to_vec()));
+            };
+
+            // Test the python_to_cbor_emit function with a simple value
+            use pyo3::{Python, types::PyString};
+            Python::with_gil(|py| {
+                let test_string = PyString::new(py, "test");
+                let test_value = test_string.as_any();
+                python_to_cbor_emit(test_value.clone(), EmitType::End, emit_fn).unwrap();
+            });
+        }
+
+        // Check that emission occurred
+        let emissions = emissions.into_inner();
+        assert_eq!(emissions.len(), 1);
+        assert_eq!(emissions[0].0, EmitType::End);
+        // The exact content will be CBOR-encoded "test"
+        assert!(!emissions[0].1.is_empty());
+    }
 
     #[test]
     fn test() {
@@ -283,22 +311,32 @@ def gen():
 "#;
         let s = Scope::new();
         s.load_script(content).unwrap();
-        let x = s
-            .run(
-                "hello",
-                [InputValue::Cbor(minicbor_serde::to_vec(32).unwrap().into())],
-                [],
-                |_| {},
-            )
-            .unwrap();
-        assert_eq!(x.unwrap(), minicbor_serde::to_vec("hello 54").unwrap());
+        let mut x = vec![];
+        s.run(
+            "hello",
+            [InputValue::Cbor(minicbor_serde::to_vec(32).unwrap().into())],
+            [],
+            |_emit_type, data| {
+                x.push(data.to_owned());
+            },
+        )
+        .unwrap();
+        assert_eq!(x[0], minicbor_serde::to_vec("hello 54").unwrap());
 
-        let x = s.run("i", [], [], |_| {}).unwrap();
-        assert_eq!(x.unwrap(), minicbor_serde::to_vec(22).unwrap());
+        let mut x = vec![];
+        s.run("i", [], [], |_emit_type, data| {
+            x.push(data.to_owned());
+        })
+        .unwrap();
+        assert_eq!(x[0], minicbor_serde::to_vec(22).unwrap());
 
         let mut v = vec![];
-        let x = s.run("gen", [], [], |s| v.push(s.to_owned())).unwrap();
-        assert_eq!(x, None);
+        s.run("gen", [], [], |emit_type, data| {
+            if emit_type == EmitType::PartialResult {
+                v.push(data.to_owned());
+            }
+        })
+        .unwrap();
         assert_eq!(v.len(), 10);
         for (i, vv) in v.iter().enumerate() {
             assert_eq!(*vv, minicbor_serde::to_vec(i).unwrap());

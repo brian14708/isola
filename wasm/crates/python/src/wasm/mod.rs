@@ -175,10 +175,7 @@ impl guest::Guest for Global {
         })
     }
 
-    fn call_func(
-        func: String,
-        args: Vec<guest::Argument>,
-    ) -> Result<Option<Vec<u8>>, guest::Error> {
+    fn call_func(func: String, args: Vec<guest::Argument>) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
             if let Some(vm) = vm.as_ref() {
                 let ret = if func == "$analyze" {
@@ -187,8 +184,10 @@ impl guest::Guest for Global {
                         value: host::Value::Cbor(s),
                     }) = args.first()
                     {
-                        vm.analyze(InputValue::Cbor(s.into()))
-                            .map_err(Into::<guest::Error>::into)
+                        vm.analyze(InputValue::Cbor(s.into()), |emit_type, data| {
+                            host::blocking_emit(emit_type, data);
+                        })
+                        .map_err(Into::<guest::Error>::into)
                     } else {
                         return Err(Error::UnexpectedError("Invalid Value").into());
                     }
@@ -207,8 +206,10 @@ impl guest::Guest for Global {
                             positional.push(value);
                         }
                     }
-                    vm.run(&func, positional, named, host::emit)
-                        .map_err(Into::<guest::Error>::into)
+                    vm.run(&func, positional, named, |emit_type, data| {
+                        host::blocking_emit(emit_type, data);
+                    })
+                    .map_err(Into::<guest::Error>::into)
                 };
                 vm.flush();
                 ret

@@ -1,8 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-  "crates/*",
-]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -13,7 +11,9 @@ anyhow = "1.0.83"
 base64 = "0.22.1"
 eventsource = { version = "0.5.0", default-features = false }
 glob = "0.3.2"
+heapless = "0.8"
 memchr = "2.7.4"
+minicbor = "2.0.0"
 minicbor-serde = "0.6.0"
 pyo3 = { version = "0.25.1", git = "https://github.com/brian14708/pyo3.git", branch = "wasi-0.25" }
 serde = "1.0.199"

@@ -542,6 +542,98 @@ pub fn python_to_cbor(py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
     Ok(serializer.into_encoder().into_writer())
 }
 
+pub fn python_to_cbor_emit<F>(
+    py_obj: Bound<'_, PyAny>,
+    emit_type: crate::wasm::promptkit::script::host::EmitType,
+    mut emit_fn: F,
+) -> PyResult<()>
+where
+    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+{
+    let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
+    let mut serializer = minicbor_serde::Serializer::new(&mut writer);
+    PyValue::new(py_obj)
+        .serialize(serializer.serialize_unit_as_null(true))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(())
+}
+
+/// A buffered writer that emits CBOR data through a callback with streaming control
+pub struct CallbackWriter<'a, F, const N: usize = 1024>
+where
+    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+{
+    buffer: heapless::Vec<u8, N>,
+    emit_fn: &'a mut F,
+    end_type: crate::wasm::promptkit::script::host::EmitType,
+}
+
+impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
+where
+    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+{
+    /// Creates a new `CallbackWriter` with the given callback and end type
+    pub fn new(
+        emit_fn: &'a mut F,
+        end_type: crate::wasm::promptkit::script::host::EmitType,
+    ) -> Self {
+        Self {
+            emit_fn,
+            buffer: heapless::Vec::new(),
+            end_type,
+        }
+    }
+
+    /// Flushes any buffered data as a continuation
+    fn flush(&mut self) {
+        if !self.buffer.is_empty() {
+            (self.emit_fn)(
+                crate::wasm::promptkit::script::host::EmitType::Continuation,
+                &self.buffer,
+            );
+            self.buffer.clear();
+        }
+    }
+}
+
+impl<F, const N: usize> minicbor::encode::Write for CallbackWriter<'_, F, N>
+where
+    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+{
+    type Error = std::convert::Infallible;
+
+    fn write_all(&mut self, buf: &[u8]) -> std::result::Result<(), Self::Error> {
+        let mut remaining = buf;
+
+        while !remaining.is_empty() {
+            let available_space = N - self.buffer.len();
+            if available_space == 0 {
+                // Buffer is full, flush it
+                self.flush();
+                continue;
+            }
+
+            let to_write = remaining.len().min(available_space);
+            let (chunk, rest) = remaining.split_at(to_write);
+
+            // This should never fail because we checked available space
+            self.buffer.extend_from_slice(chunk).ok();
+            remaining = rest;
+        }
+
+        Ok(())
+    }
+}
+
+impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
+where
+    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+{
+    fn drop(&mut self) {
+        (self.emit_fn)(self.end_type, &self.buffer);
+    }
+}
+
 pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, PyAny>> {
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
     PyValue::deserialize(py, &mut deserializer)

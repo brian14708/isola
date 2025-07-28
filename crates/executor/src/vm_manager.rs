@@ -76,6 +76,23 @@ impl OutputCallback for MpscOutputCallback {
                 .map_err(|e| anyhow!("Send error: {}", e))
         })
     }
+
+    fn on_end(
+        &mut self,
+        item: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>> {
+        let sender = self.sender.clone();
+        Box::pin(async move {
+            sender
+                .send(ExecStreamItem::End(if item.is_empty() {
+                    None
+                } else {
+                    Some(item)
+                }))
+                .await
+                .map_err(|e| anyhow!("Send error: {}", e))
+        })
+    }
 }
 
 pub enum ExecArgumentValue {
@@ -351,8 +368,7 @@ where
                 })
                 .await;
             match ret {
-                Ok(Ok(e)) => {
-                    let _ = tx.send(ExecStreamItem::End(e)).await;
+                Ok(Ok(())) => {
                     cache.put(run.reuse());
                 }
                 Ok(Err(err)) => {

@@ -20,10 +20,15 @@ use wasmtime_wasi_http::{
 };
 
 use super::bindgen::{HostView, add_to_linker};
-use crate::{Env, resource::MemoryLimiter, trace_output::TraceOutput};
+use crate::{Env, resource::MemoryLimiter, trace_output::TraceOutput, vm::bindgen::EmitValue};
 
 pub trait OutputCallback: Send + 'static {
     fn on_result(
+        &mut self,
+        item: Vec<u8>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
+
+    fn on_end(
         &mut self,
         item: Vec<u8>,
     ) -> Pin<Box<dyn Future<Output = Result<(), anyhow::Error>> + Send>>;
@@ -40,6 +45,8 @@ pub struct VmState<E> {
     http: WasiHttpCtx,
     table: ResourceTable,
     pub(crate) run: Option<VmRunState>,
+
+    output_buffer: OutputBuffer,
 }
 
 impl<E: Env + Send> VmState<E> {
@@ -90,6 +97,7 @@ impl<E: Env + Send> VmState<E> {
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
                 run: None,
+                output_buffer: OutputBuffer::new(),
             },
         );
         s.limiter(|s| &mut s.limiter);
@@ -169,13 +177,49 @@ impl<E: Send + Env> HostView for VmState<E> {
         &mut self.env
     }
 
-    async fn emit(&mut self, data: Vec<u8>) -> wasmtime::Result<()> {
-        match &mut self.run {
-            Some(run) => {
-                run.output.on_result(data).await?;
-                Ok(())
+    async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
+        let Some(run) = self.run.as_mut() else {
+            return Err(anyhow::anyhow!("output channel missing"));
+        };
+
+        match data {
+            EmitValue::Continuation(new_data) => {
+                self.output_buffer.append(new_data);
             }
-            _ => Err(anyhow::anyhow!("output channel missing")),
+            EmitValue::End(new_data) => {
+                let output = self.output_buffer.take(new_data);
+                run.output.on_end(output).await?;
+            }
+            EmitValue::PartialResult(new_data) => {
+                let output = self.output_buffer.take(new_data);
+                run.output.on_result(output).await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+struct OutputBuffer(Option<Vec<u8>>);
+
+impl OutputBuffer {
+    fn new() -> Self {
+        Self(None)
+    }
+
+    fn append(&mut self, data: Vec<u8>) {
+        match &mut self.0 {
+            Some(buffer) => buffer.extend(data),
+            None => self.0 = Some(data),
+        }
+    }
+
+    fn take(&mut self, data: Vec<u8>) -> Vec<u8> {
+        match self.0.take() {
+            Some(mut existing) => {
+                existing.extend(data);
+                existing
+            }
+            None => data,
         }
     }
 }
