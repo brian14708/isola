@@ -2,6 +2,8 @@
 name = "promptkit-c-api"
 version.workspace = true
 edition.workspace = true
+publish = false
+license.workspace = true
 
 [lib]
 name = "promptkit"

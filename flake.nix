@@ -58,7 +58,6 @@
           just
 
           # js
-          nodejs
           bun
 
           # python
@@ -83,6 +82,11 @@
           pkg-config
         ];
 
+        depsFull = with pkgs; [
+          android-tools
+          cargo-deny
+        ];
+
         mkShell = pkgs.mkShell.override {
           stdenv =
             if pkgs.stdenv.isDarwin then
@@ -104,7 +108,7 @@
               };
             in
             rec {
-              buildInputs = deps ++ [ pkgs.android-tools ];
+              buildInputs = deps ++ depsFull;
 
               ANDROID_SDK_ROOT = "${androidComposition.androidsdk}/libexec/android-sdk";
               ANDROID_NDK_ROOT = "${ANDROID_SDK_ROOT}/ndk-bundle";
