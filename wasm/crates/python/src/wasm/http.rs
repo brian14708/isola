@@ -38,7 +38,7 @@ pub mod http_module {
 
     #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn fetch(
         py: Python<'_>,
         method: &str,

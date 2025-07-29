@@ -395,7 +395,7 @@ impl ScriptService for ScriptServer {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     async fn execute_stream(
         &self,
         mut request: tonic::Request<tonic::Streaming<script::ExecuteStreamRequest>>,
@@ -583,7 +583,6 @@ struct ParsedSpec<'a> {
     env: Cow<'a, VmEnv>,
 }
 
-#[allow(clippy::result_large_err)]
 fn parse_spec<'a>(
     spec: Option<&mut script::ExecutionSpec>,
     base_env: &'a VmEnv,

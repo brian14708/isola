@@ -1,5 +1,3 @@
-#![allow(clippy::result_large_err)]
-
 use std::borrow::Cow;
 
 use promptkit_executor::ExecSource;
