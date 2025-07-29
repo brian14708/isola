@@ -2,7 +2,6 @@ mod body_buffer;
 mod future;
 mod http;
 mod logging;
-mod rpc;
 mod serde;
 
 use std::cell::RefCell;
@@ -60,11 +59,11 @@ pub mod sys_module {
     }
 
     #[pyfunction]
-    #[pyo3(signature = (poll))]
-    fn poll<'py>(poll: &Bound<'py, PyList>) -> PyResult<Bound<'py, PySet>> {
+    #[pyo3(signature = (poll, block))]
+    fn poll<'py>(poll: &Bound<'py, PyList>, block: bool) -> PyResult<Bound<'py, PySet>> {
         let py = poll.py();
-        let mut refs = vec![];
         let mut result = vec![];
+        let mut refs = vec![];
         for (i, p) in poll.iter().enumerate() {
             let p = p.downcast_exact::<PyTuple>()?;
             let p = p.get_item(0)?;
@@ -73,8 +72,21 @@ pub mod sys_module {
                 result.push(i);
             } else {
                 let p = p.downcast_exact::<PyPollable>()?;
-                refs.push((i, p.borrow_mut()));
+                let mut p = p.borrow_mut();
+                if p.ready() {
+                    p.release();
+                    result.push(i);
+                } else {
+                    refs.push((i, p));
+                }
             }
+        }
+
+        if !result.is_empty() || !block {
+            for (_, p) in &mut refs {
+                p.release();
+            }
+            return PySet::new(py, result);
         }
 
         let handles = refs
@@ -83,15 +95,11 @@ pub mod sys_module {
             .collect::<Vec<_>>();
         let result = PySet::new(
             py,
-            host_poll(&handles)
-                .into_iter()
-                .map(|idx| {
-                    let (i, _) = refs[idx as usize];
-                    i
-                })
-                .chain(result),
-        )
-        .unwrap();
+            host_poll(&handles).into_iter().map(|idx| {
+                let (i, _) = refs[idx as usize];
+                i
+            }),
+        )?;
         for (_, p) in &mut refs {
             p.release();
         }
@@ -110,13 +118,11 @@ impl guest::Guest for Global {
             if scope.is_none() {
                 use http::http_module;
                 use logging::logging_module;
-                use rpc::rpc_module;
                 use serde::serde_module;
 
                 append_to_inittab!(http_module);
                 append_to_inittab!(logging_module);
                 append_to_inittab!(sys_module);
-                append_to_inittab!(rpc_module);
                 append_to_inittab!(serde_module);
 
                 let v = Scope::new();

@@ -24,7 +24,7 @@ use wasmtime::{
 use zip::ZipArchive;
 
 use crate::{
-    env::{BoxedStream, Env, EnvHandle, EnvHttp, RpcConnect, RpcPayload},
+    env::{BoxedStream, Env, EnvHandle, EnvHttp, WebsocketMessage},
     error::{Error, Result},
     vm::{
         OutputCallback, SandboxPre, Vm, VmState,
@@ -579,6 +579,7 @@ impl Env for CompileEnv {
 
 impl EnvHttp for CompileEnv {
     type Error = anyhow::Error;
+
     async fn send_request_http<B>(
         &self,
         _request: http::Request<B>,
@@ -594,12 +595,13 @@ impl EnvHttp for CompileEnv {
         anyhow::bail!("unsupported during compilation")
     }
 
-    async fn connect_rpc(
+    async fn connect_websocket<B>(
         &self,
-        _connect: RpcConnect,
-        _req: tokio::sync::mpsc::Receiver<RpcPayload>,
-        _resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
-    ) -> Result<JoinHandle<anyhow::Result<()>>, Self::Error> {
+        _request: http::Request<B>,
+    ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
+    where
+        B: futures::Stream<Item = WebsocketMessage> + Sync + Send + 'static,
+    {
         anyhow::bail!("unsupported during compilation")
     }
 }

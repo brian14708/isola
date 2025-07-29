@@ -7,12 +7,12 @@ wasmtime::component::bindgen!({
         "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::wasm::logging::bindings,
         "promptkit:script/host/value-iterator": host::ValueIterator,
-        "promptkit:script/outgoing-rpc/connection": outgoing_rpc::Connection,
-        "promptkit:script/outgoing-rpc/future-connection": outgoing_rpc::FutureConnection,
-        "promptkit:script/outgoing-rpc/connect-request": outgoing_rpc::ConnectRequest,
-        "promptkit:script/outgoing-rpc/payload": outgoing_rpc::Payload,
-        "promptkit:script/outgoing-rpc/request-stream": outgoing_rpc::RequestStream,
-        "promptkit:script/outgoing-rpc/response-stream": outgoing_rpc::ResponseStream,
+        "promptkit:script/outgoing-websocket/connect-request": outgoing_websocket::ConnectRequest,
+        "promptkit:script/outgoing-websocket/websocket-message": outgoing_websocket::WebsocketMessage,
+        "promptkit:script/outgoing-websocket/read-stream": outgoing_websocket::ReadStream,
+        "promptkit:script/outgoing-websocket/write-stream": outgoing_websocket::WriteStream,
+        "promptkit:script/outgoing-websocket/websocket-connection": outgoing_websocket::WebsocketConnection,
+        "promptkit:script/outgoing-websocket/future-websocket": outgoing_websocket::FutureWebsocket,
     },
 });
 
@@ -21,6 +21,9 @@ use std::future::Future;
 pub use exports::promptkit::script::guest;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::IoView;
+
+pub mod host;
+pub mod outgoing_websocket;
 
 pub enum EmitValue {
     Continuation(Vec<u8>),
@@ -48,15 +51,12 @@ impl<T: ?Sized + HostView> HostView for &mut T {
 
 struct HostImpl<T>(T);
 
-pub mod host;
-pub mod outgoing_rpc;
-
 pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
     struct Host<T>(T);
     impl<T: 'static> HasData for Host<T> {
         type Data<'a> = HostImpl<&'a mut T>;
     }
     promptkit::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
-    promptkit::script::outgoing_rpc::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
+    promptkit::script::outgoing_websocket::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
     Ok(())
 }

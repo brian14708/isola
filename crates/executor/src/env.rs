@@ -1,20 +1,11 @@
 use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
-use tokio::task::JoinHandle;
+use http_body::Frame;
 
 use crate::vm::OutputCallback;
 
-pub struct RpcConnect {
-    pub url: String,
-    pub metadata: Option<Vec<(String, Vec<u8>)>>,
-    pub timeout: Option<std::time::Duration>,
-}
-
-pub struct RpcPayload {
-    pub data: Vec<u8>,
-    pub content_type: Option<String>,
-}
+pub type WebsocketMessage = tungstenite::protocol::Message;
 
 pub trait Env {
     type Callback: OutputCallback;
@@ -22,29 +13,28 @@ pub trait Env {
 
 pub type BoxedStream<T, E> = Pin<Box<dyn futures::Stream<Item = Result<T, E>> + Send + Sync>>;
 
+type HttpBodyStream<E> = BoxedStream<Frame<Bytes>, E>;
+
 pub trait EnvHttp {
     type Error: std::fmt::Display + Send + Sync + 'static;
 
     fn send_request_http<B>(
         &self,
         _request: http::Request<B>,
-    ) -> impl Future<
-        Output = Result<
-            http::Response<BoxedStream<http_body::Frame<Bytes>, Self::Error>>,
-            Self::Error,
-        >,
-    > + Send
+    ) -> impl Future<Output = Result<http::Response<HttpBodyStream<Self::Error>>, Self::Error>> + Send
     where
         B: http_body::Body + Send + 'static,
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send;
 
-    fn connect_rpc(
+    fn connect_websocket<B>(
         &self,
-        connect: RpcConnect,
-        req: tokio::sync::mpsc::Receiver<RpcPayload>,
-        resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
-    ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send;
+        request: http::Request<B>,
+    ) -> impl std::future::Future<
+        Output = Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>,
+    > + Send
+    where
+        B: futures::Stream<Item = WebsocketMessage> + Send + Sync + 'static;
 }
 
 pub trait EnvHandle: Env + EnvHttp + Send + Clone + 'static {}

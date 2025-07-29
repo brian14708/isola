@@ -7,19 +7,19 @@ use std::{
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryFutureExt};
 use http::header::HOST;
+use http_body::Frame;
 use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project_lite::pin_project;
 use tokio_tungstenite::tungstenite;
-use tracing::{Instrument, Span};
+use tracing::Span;
 
 use crate::{Error, WebsocketMessage};
 
 pub async fn http_impl<B>(
-    span: Span,
     client: reqwest::Client,
     mut request: http::Request<B>,
-) -> Result<http::Response<impl Stream<Item = Result<http_body::Frame<Bytes>, Error>>>, Error>
+) -> Result<http::Response<impl Stream<Item = Result<Frame<Bytes>, Error>>>, Error>
 where
     B: http_body::Body,
     B::Error: std::error::Error + Send + Sync + 'static,
@@ -39,7 +39,8 @@ where
         .version(parts.version)
         .headers(parts.headers)
         .body(body);
-    let mut resp = match r.send().instrument(span.clone()).await {
+    let span = Span::current();
+    let mut resp = match r.send().await {
         Ok(r) => {
             let status = r.status();
             span.record(trace::HTTP_RESPONSE_STATUS_CODE, status.as_u16());
@@ -63,7 +64,7 @@ where
     let b = InstrumentStream::new(
         span,
         resp.bytes_stream().map(|f| match f {
-            Ok(d) => Ok(http_body::Frame::data(d)),
+            Ok(d) => Ok(Frame::data(d)),
             Err(e) => Err(e.into()),
         }),
     );
@@ -71,31 +72,45 @@ where
 }
 
 pub async fn websocket_impl(
-    span: Span,
     client: reqwest::Client,
     mut request: http::Request<impl Stream<Item = WebsocketMessage>>,
 ) -> Result<http::Response<impl Stream<Item = Result<WebsocketMessage, Error>>>, Error> {
-    let url = reqwest::Url::parse(&request.uri().to_string())?;
+    let mut url = reqwest::Url::parse(&request.uri().to_string())?;
+    let _ = match url.scheme() {
+        "ws" => url.set_scheme("http"),
+        "wss" => url.set_scheme("https"),
+        _ => Ok(()),
+    };
+
     let r = client
         .request(std::mem::take(request.method_mut()), url)
         .version(request.version())
         .headers(std::mem::take(request.headers_mut()));
 
-    let conn = match r
+    let span = Span::current();
+    let (builder, conn) = match r
         .send()
-        .and_then(|resp| async {
+        .and_then(|mut resp| async {
             span.record(trace::HTTP_RESPONSE_STATUS_CODE, resp.status().as_u16());
-            resp.upgrade().await
+            let mut builder = http::response::Builder::new()
+                .status(resp.status())
+                .version(resp.version());
+            if let Some(h) = builder.headers_mut() {
+                *h = std::mem::take(resp.headers_mut());
+            }
+            Ok((builder, resp.upgrade().await?))
         })
-        .and_then(|response| async {
-            Ok(tokio_tungstenite::WebSocketStream::from_raw_socket(
-                response,
-                tungstenite::protocol::Role::Client,
-                None,
-            )
-            .await)
+        .and_then(|(builder, response)| async {
+            Ok((
+                builder,
+                tokio_tungstenite::WebSocketStream::from_raw_socket(
+                    response,
+                    tungstenite::protocol::Role::Client,
+                    None,
+                )
+                .await,
+            ))
         })
-        .instrument(span.clone())
         .await
     {
         Ok(r) => r,
@@ -111,7 +126,6 @@ pub async fn websocket_impl(
         .map(Ok)
         .forward(tx)
         .map_err(std::convert::Into::into);
-    let builder = http::response::Builder::new();
     builder
         .body(InstrumentJoinStream::new(
             span,

@@ -34,6 +34,13 @@ impl PyPollable {
         }
     }
 
+    pub(crate) fn ready(&self) -> bool {
+        self.inner
+            .as_ref()
+            .expect("pollable already released")
+            .ready()
+    }
+
     fn get(&self) {
         let _ = self;
     }

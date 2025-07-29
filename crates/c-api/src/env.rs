@@ -1,7 +1,7 @@
-use std::{pin::Pin, sync::Arc};
+use std::sync::Arc;
 
-use futures::{Stream, TryStreamExt};
-use promptkit_executor::env::BoxedStream;
+use futures::TryStreamExt;
+use promptkit_executor::env::{BoxedStream, WebsocketMessage};
 use promptkit_request::{Client, RequestOptions};
 
 use crate::Callback;
@@ -49,24 +49,16 @@ impl promptkit_executor::env::EnvHttp for Env {
         let client = self.client.clone();
         let http = client.http(request, RequestOptions::default());
         let resp = http.await.map_err(anyhow::Error::from)?;
-        Ok(resp.map(
-            |b| -> Pin<
-                Box<
-                    dyn Stream<Item = Result<http_body::Frame<bytes::Bytes>, anyhow::Error>>
-                        + Send
-                        + Sync
-                        + 'static,
-                >,
-            > { Box::pin(b.map_err(anyhow::Error::from)) },
-        ))
+        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(anyhow::Error::from)) }))
     }
 
-    async fn connect_rpc(
+    async fn connect_websocket<B>(
         &self,
-        _connect: promptkit_executor::env::RpcConnect,
-        _req: tokio::sync::mpsc::Receiver<promptkit_executor::env::RpcPayload>,
-        _resp: tokio::sync::mpsc::Sender<anyhow::Result<promptkit_executor::env::RpcPayload>>,
-    ) -> std::result::Result<tokio::task::JoinHandle<anyhow::Result<()>>, Self::Error> {
+        _request: http::Request<B>,
+    ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
+    where
+        B: futures::Stream<Item = WebsocketMessage> + Sync + Send + 'static,
+    {
         unimplemented!()
     }
 }

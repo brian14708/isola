@@ -99,16 +99,10 @@ class PollLoop(asyncio.AbstractEventLoop):
     def _run_until_complete[T](self, future: "Awaitable[T]") -> asyncio.Future[T]:
         future = asyncio.ensure_future(future, loop=self)
         while self.running and (self.handles or self.wakers) and (not future.done()):
-            handles = self.handles
-            self.handles = []
-            for handle in handles:
-                if not handle._cancelled:
-                    handle._run()
-
-            if self.wakers and len(handles) == 0:
+            if self.wakers:
                 wakers = self.wakers
                 self.wakers = []
-                ready_indices_set = _promptkit_sys.poll(wakers)
+                ready_indices_set = _promptkit_sys.poll(wakers, len(self.handles) == 0)
                 for i, (pollable, waker) in enumerate(wakers):
                     if i in ready_indices_set:
                         if isinstance(waker, asyncio.Handle):
@@ -117,6 +111,14 @@ class PollLoop(asyncio.AbstractEventLoop):
                             waker.set_result(None)
                     else:
                         self.wakers.append((pollable, waker))
+
+            if self.handles:
+                handles = self.handles
+                self.handles = []
+                for handle in handles:
+                    if not handle._cancelled:
+                        handle._run()
+
         return future
 
     def _cleanup(self) -> None:

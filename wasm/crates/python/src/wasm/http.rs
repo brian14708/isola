@@ -15,6 +15,10 @@ pub mod http_module {
         PyPollable,
         body_buffer::{BodyBuffer, Buffer},
         future::create_future,
+        promptkit::script::outgoing_websocket::{
+            self, ConnectRequest as WsConnectRequest, ErrorCode as WsErrorCode, FutureWebsocket,
+            MessageType, ReadStream, WebsocketConnection, WebsocketMessage, WriteStream,
+        },
         wasi::{
             http::{
                 outgoing_handler::{
@@ -35,6 +39,39 @@ pub mod http_module {
             inner: Buffer::new(kind),
         }
     }
+
+    #[pyfunction]
+    #[pyo3(signature = (url, headers, timeout))]
+    fn ws_connect(
+        url: &str,
+        headers: Option<&Bound<'_, PyDict>>,
+        timeout: Option<f64>,
+    ) -> PyResult<PyFutureWebsocket> {
+        let mut hdrs = vec![];
+        if let Some(headers) = headers {
+            for (k, v) in headers {
+                let k: String = k.extract()?;
+                let v: String = v.extract()?;
+                hdrs.push((k, v));
+            }
+        }
+        let req = WsConnectRequest::new(url, Some(&hdrs));
+        if let Some(timeout) = timeout {
+            req.set_connect_timeout(Some(
+                u64::try_from(std::time::Duration::from_secs_f64(timeout).as_nanos())
+                    .expect("duration is too large"),
+            ))
+            .map_err(|()| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "Timeout value is too large or invalid",
+                )
+            })?;
+        }
+        let c = outgoing_websocket::connect(req);
+        Ok(PyFutureWebsocket::new(c))
+    }
+
+    create_future!(PyFutureWebsocket, FutureWebsocket, PyWebsocket);
 
     #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
@@ -334,6 +371,151 @@ pub mod http_module {
 
         fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
             self.inner.decode_all(py).map(|o| o.map(Into::into))
+        }
+    }
+
+    #[pyclass]
+    struct PyWebsocket {
+        read_stream: Option<ReadStream>,
+        write_stream: Option<WriteStream>,
+        connection: Option<WebsocketConnection>,
+    }
+
+    impl TryFrom<Result<WebsocketConnection, WsErrorCode>> for PyWebsocket {
+        type Error = PyErr;
+
+        fn try_from(result: Result<WebsocketConnection, WsErrorCode>) -> Result<Self, Self::Error> {
+            match result {
+                Ok(connection) => {
+                    let (write_stream, read_stream) = connection.streams().unwrap();
+                    Ok(Self {
+                        connection: Some(connection),
+                        read_stream: Some(read_stream),
+                        write_stream: Some(write_stream),
+                    })
+                }
+                Err(error) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                    format!("WebSocket connection failed: {error:?}"),
+                )),
+            }
+        }
+    }
+
+    #[pymethods]
+    impl PyWebsocket {
+        fn recv<'py>(
+            &mut self,
+            py: Python<'py>,
+        ) -> PyResult<(bool, Option<Bound<'py, PyAny>>, Option<PyPollable>)> {
+            if let Some(read_stream) = &self.read_stream {
+                match read_stream.read() {
+                    Some(Ok(message)) => {
+                        let data = message.read();
+                        let content = match message.message_type() {
+                            MessageType::Text => {
+                                let text = std::str::from_utf8(&data)?;
+                                pyo3::types::PyString::new(py, text).into_any()
+                            }
+                            MessageType::Binary => pyo3::types::PyBytes::new(py, &data).into_any(),
+                        };
+                        Ok((true, Some(content), None))
+                    }
+                    None => Ok((true, None, Some(PyPollable::from(read_stream.subscribe())))),
+                    Some(Err(WsErrorCode::Closed((code, reason)))) => {
+                        if matches!(code, 1000 | 1001 | 1005) {
+                            self.read_stream.take();
+                            Ok((false, None, None))
+                        } else {
+                            Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                                format!(
+                                    "WebSocket closed with code {code:?} and reason: {reason:?}"
+                                ),
+                            ))
+                        }
+                    }
+                    Some(Err(error)) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                        format!("WebSocket error: {error:?}"),
+                    )),
+                }
+            } else {
+                Ok((false, None, None))
+            }
+        }
+
+        fn send(&mut self, obj: &Bound<'_, PyAny>) -> PyResult<Option<PyPollable>> {
+            let message = if let Ok(s) = obj.extract::<&str>() {
+                WebsocketMessage::new(MessageType::Text, s.as_bytes())
+            } else if let Ok(b) = obj.extract::<&[u8]>() {
+                WebsocketMessage::new(MessageType::Binary, b)
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                    "Unsupported type for WebSocket message, expected str or bytes",
+                ));
+            };
+
+            if let Some(write_stream) = &self.write_stream {
+                match write_stream.check_write(&message) {
+                    Ok(true) => {
+                        write_stream.write(message).map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyConnectionError, _>(format!(
+                                "Failed to write to WebSocket: {e:?}"
+                            ))
+                        })?;
+                        Ok(None)
+                    }
+                    Ok(false) => Ok(Some(PyPollable::from(write_stream.subscribe()))),
+                    Err(error) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                        format!("WebSocket send failed: {error:?}"),
+                    )),
+                }
+            } else {
+                Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                    "WebSocket connection closed",
+                ))
+            }
+        }
+
+        fn close(&mut self, code: u16, reason: &str) -> PyResult<Option<PyPollable>> {
+            if let Some(write_stream) = &self.write_stream {
+                match write_stream.close(code, reason) {
+                    None => Ok(Some(PyPollable::from(write_stream.subscribe()))),
+                    Some(Ok(())) => {
+                        self.write_stream.take();
+                        Ok(None)
+                    }
+                    Some(Err(error)) => Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                        format!("WebSocket send failed: {error:?}"),
+                    )),
+                }
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn shutdown(&mut self) {
+            self.read_stream.take();
+            self.write_stream.take();
+            self.connection.take();
+        }
+
+        fn headers<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+            if let Some(connection) = &self.connection {
+                let d = PyDict::new(py);
+                for (k, v) in connection.headers() {
+                    d.set_item(k, v)?;
+                }
+                Ok(d)
+            } else {
+                Err(PyErr::new::<pyo3::exceptions::PyConnectionError, _>(
+                    "WebSocket connection closed",
+                ))
+            }
+        }
+    }
+
+    impl Drop for PyWebsocket {
+        fn drop(&mut self) {
+            self.shutdown();
         }
     }
 }

@@ -5,7 +5,7 @@ use futures::Stream;
 use http::{HeaderName, HeaderValue};
 use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
-use tracing::Span;
+use tracing::{Instrument, Span};
 
 use crate::{
     Error, RequestOptions, WebsocketMessage, client::pool::ClientPool, options::RequestContext,
@@ -77,8 +77,8 @@ impl Client {
         B::Data: Send,
         C: RequestContext,
     {
-        self.with_http_client(request, options, |client, span, request| {
-            crate::http::http_impl(span, client, request)
+        self.with_http_client(request, options, |client, request| {
+            crate::http::http_impl(client, request)
         })
         .await
     }
@@ -95,35 +95,31 @@ impl Client {
     where
         B: Stream<Item = WebsocketMessage> + Send + 'static,
     {
-        self.with_http_client(
-            request,
-            options,
-            |client, span, mut request: http::Request<B>| {
-                let headers = request.headers_mut();
-                headers.insert(
-                    HeaderName::from_static("connection"),
-                    HeaderValue::from_static("Upgrade"),
-                );
-                headers.insert(
-                    HeaderName::from_static("upgrade"),
-                    HeaderValue::from_static("websocket"),
-                );
-                headers.insert(
-                    HeaderName::from_static("sec-websocket-version"),
-                    HeaderValue::from_static("13"),
-                );
-                headers.insert(
-                    HeaderName::from_static("sec-websocket-key"),
-                    #[expect(
-                        clippy::missing_panics_doc,
-                        reason = "generate_key only returns base64"
-                    )]
-                    HeaderValue::try_from(generate_key()).unwrap(),
-                );
+        self.with_http_client(request, options, |client, mut request: http::Request<B>| {
+            let headers = request.headers_mut();
+            headers.insert(
+                HeaderName::from_static("connection"),
+                HeaderValue::from_static("Upgrade"),
+            );
+            headers.insert(
+                HeaderName::from_static("upgrade"),
+                HeaderValue::from_static("websocket"),
+            );
+            headers.insert(
+                HeaderName::from_static("sec-websocket-version"),
+                HeaderValue::from_static("13"),
+            );
+            headers.insert(
+                HeaderName::from_static("sec-websocket-key"),
+                #[expect(
+                    clippy::missing_panics_doc,
+                    reason = "generate_key only returns base64"
+                )]
+                HeaderValue::try_from(generate_key()).unwrap(),
+            );
 
-                crate::http::websocket_impl(span, client, request)
-            },
-        )
+            crate::http::websocket_impl(client, request)
+        })
         .await
     }
 
@@ -131,7 +127,7 @@ impl Client {
         &self,
         mut request: http::Request<B>,
         mut options: RequestOptions<C>,
-        f: impl AsyncFnOnce(reqwest::Client, tracing::Span, http::Request<B>) -> Result<T, Error>,
+        f: impl AsyncFnOnce(reqwest::Client, http::Request<B>) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let mut config = options.config;
 
@@ -147,7 +143,7 @@ impl Client {
         let request = inject_headers(&span, http::Request::from_parts(parts, body));
 
         let token = self.pool.reserve(config)?;
-        f(token.client.clone(), span, request).await
+        f(token.client.clone(), request).instrument(span).await
     }
 }
 

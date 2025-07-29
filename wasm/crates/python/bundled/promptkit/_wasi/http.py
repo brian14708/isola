@@ -4,7 +4,6 @@ import os
 from typing import IO, TYPE_CHECKING, Literal, cast, final, overload
 
 import _promptkit_http as _http
-import _promptkit_rpc
 import _promptkit_serde
 
 from promptkit.asyncio import run as asyncio_run
@@ -216,47 +215,60 @@ class Response:
 
 
 @final
-class WebSocketRequest:
+class WebsocketRequest:
     __slots__ = ("url", "headers", "conn", "timeout")
 
     def __init__(self, url: str, headers: dict[str, str] | None, timeout: float | None):
         self.url = url
         self.headers = headers
         self.timeout = timeout
-        self.conn: Websocket | None = None
+        self.conn: AsyncWebsocket | SyncWebsocket | None = None
 
-    def _conn(self) -> "_promptkit_sys.Pollable[_promptkit_rpc.Connection]":
-        return _promptkit_rpc.connect(self.url, self.headers, self.timeout)
+    def _conn(self) -> "_promptkit_sys.Pollable[_http.Websocket]":
+        return _http.ws_connect(self.url, self.headers, self.timeout)
 
-    async def __aenter__(self) -> "Websocket":
-        self.conn = Websocket(await subscribe(self._conn()))
+    async def __aenter__(self) -> "AsyncWebsocket":
+        self.conn = AsyncWebsocket(await subscribe(self._conn()))
         return self.conn
 
     async def __aexit__(self, *_: object) -> None:
         if self.conn:
+            await cast("AsyncWebsocket", self.conn).aclose()
             self.conn.shutdown()
 
-    def __enter__(self) -> "Websocket":
-        self.conn = Websocket(self._conn().wait())
+    def __enter__(self) -> "SyncWebsocket":
+        self.conn = SyncWebsocket(self._conn().wait())
         return self.conn
 
     def __exit__(self, *_: object) -> None:
         if self.conn:
+            cast("SyncWebsocket", self.conn).close()
             self.conn.shutdown()
 
 
-@final
-class Websocket:
+class _BaseWebsocket:
     __slots__ = ("conn",)
 
-    def __init__(self, conn: "_promptkit_rpc.Connection"):
+    def __init__(self, conn: "_http.Websocket"):
         self.conn = conn
 
     def shutdown(self) -> None:
         self.conn.shutdown()
 
-    def close(self) -> None:
-        self.conn.close()
+    @property
+    def headers(self) -> dict[str, str]:
+        return self.conn.headers()
+
+
+@final
+class AsyncWebsocket(_BaseWebsocket):
+    async def aclose(self, code: int = 1000, reason: str = "") -> None:
+        while True:
+            poll = self.conn.close(code, reason)
+            if poll is not None:
+                await subscribe(poll)
+            else:
+                break
 
     async def arecv(self) -> bytes | str | None:
         while True:
@@ -275,6 +287,25 @@ class Websocket:
                 return
             yield value
 
+    async def asend(self, value: bytes | str) -> None:
+        while True:
+            poll = self.conn.send(value)
+            if poll is not None:
+                await subscribe(poll)
+            else:
+                break
+
+
+@final
+class SyncWebsocket(_BaseWebsocket):
+    def close(self, code: int = 1000, reason: str = "") -> None:
+        while True:
+            poll = self.conn.close(code, reason)
+            if poll is not None:
+                poll.wait()
+            else:
+                break
+
     def recv(self) -> bytes | str | None:
         while True:
             ok, value, poll = self.conn.recv()
@@ -288,14 +319,6 @@ class Websocket:
     def recv_streaming(self) -> "Generator[bytes | str]":
         while (value := self.recv()) is not None:
             yield value
-
-    async def asend(self, value: bytes | str) -> None:
-        while True:
-            poll = self.conn.send(value)
-            if poll is not None:
-                await subscribe(poll)
-            else:
-                break
 
     def send(self, value: bytes | str) -> None:
         while True:
@@ -333,8 +356,8 @@ def fetch(
 
 def ws_connect(
     url: str, *, headers: dict[str, str] | None = None, timeout: float | None = None
-) -> WebSocketRequest:
-    return WebSocketRequest(url, headers, timeout)
+) -> WebsocketRequest:
+    return WebsocketRequest(url, headers, timeout)
 
 
 def _encode_multipart_formdata(fields: dict[str, _FileType]) -> tuple[bytes, str]:

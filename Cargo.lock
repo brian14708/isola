@@ -1920,6 +1920,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "tungstenite",
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
@@ -1988,7 +1989,6 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
- "url",
 ]
 
 [[package]]

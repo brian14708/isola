@@ -1,0 +1,54 @@
+interface outgoing-websocket {
+    use wasi:io/poll@0.2.6.{pollable};
+    use wasi:clocks/monotonic-clock@0.2.6.{duration};
+
+    variant error-code {
+        closed(tuple<u16, string>),
+        timeout,
+        connection-failed(option<string>),
+        protocol-error(option<string>),
+        internal-error(option<string>)
+    }
+
+    variant message-type {
+        text,
+        binary
+    }
+
+    resource websocket-message {
+        constructor(message-type: message-type, data: list<u8>);
+        message-type: func() -> message-type;
+        read: func() -> list<u8>;
+    }
+
+    type headers = list<tuple<string, string>>;
+
+    resource connect-request {
+        constructor(url: string, headers: option<headers>);
+        set-connect-timeout: func(duration: option<duration>) -> result;
+    }
+
+    resource read-stream {
+        subscribe: func() -> pollable;
+        read: func() -> option<result<websocket-message, error-code>>;
+    }
+
+    resource write-stream {
+        subscribe: func() -> pollable;
+        check-write: func(message: borrow<websocket-message>) -> result<bool, error-code>;
+        write: func(message: websocket-message) -> result<_, error-code>;
+        close: func(code: u16, reason: string) -> option<result<_, error-code>>;
+    }
+
+    resource websocket-connection {
+        streams: func() -> result<tuple<write-stream, read-stream>>;
+        headers: func() -> headers;
+    }
+
+    resource future-websocket {
+        subscribe: func() -> pollable;
+        get: func() -> option<result<result<websocket-connection, error-code>>>;
+    }
+
+    connect: func(connect: connect-request) -> future-websocket;
+}
