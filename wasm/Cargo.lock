@@ -442,7 +442,6 @@ dependencies = [
  "base64",
  "eventsource",
  "heapless",
- "memchr",
  "minicbor",
  "minicbor-serde",
  "pyo3",

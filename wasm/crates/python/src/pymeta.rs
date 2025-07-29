@@ -1,18 +1,11 @@
-use std::sync::LazyLock;
+pub fn parse_pep723(contents: &str) -> Option<String> {
+    let index = contents.find("# /// script")?;
 
-use memchr::memmem::Finder;
-
-static FINDER: LazyLock<Finder> = LazyLock::new(|| Finder::new(b"# /// script"));
-
-pub fn parse_pep723(contents: &[u8]) -> Option<String> {
-    let index = FINDER.find(contents)?;
-
-    if !(index == 0 || matches!(contents[index - 1], b'\r' | b'\n')) {
+    if !(index == 0 || contents.as_bytes()[index - 1] == b'\n') {
         return None;
     }
 
     let contents = &contents[index..];
-    let contents = std::str::from_utf8(contents).ok()?;
     let mut lines = contents.lines();
 
     if lines.next().is_none_or(|line| line != "# /// script") {
@@ -60,7 +53,7 @@ mod tests {
     ";
 
         assert_eq!(
-            parse_pep723(contents.as_bytes()).unwrap(),
+            parse_pep723(contents).unwrap(),
             "requires-python = '>=3.11'\ndependencies = [\n  'requests<3',\n  'rich',\n]\n"
         );
     }

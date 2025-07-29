@@ -13,7 +13,6 @@ crate-type = ["cdylib"]
 base64 = { workspace = true }
 eventsource = { workspace = true }
 heapless = { workspace = true }
-memchr = { workspace = true }
 minicbor = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
 pyo3 = { workspace = true, features = ["abi3"] }

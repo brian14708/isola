@@ -87,7 +87,7 @@ impl Scope {
         static INIT: GILOnceCell<PyObject> = GILOnceCell::new();
 
         Python::attach(|py| {
-            if let Some(meta) = pymeta::parse_pep723(code.as_bytes()) {
+            if let Some(meta) = pymeta::parse_pep723(code) {
                 INIT.import(py, "promptkit.importlib", "_initialize_pep723")
                     .expect("failed to import promptkit.importlib")
                     .call1((meta,))
