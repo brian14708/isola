@@ -1,6 +1,6 @@
 use std::pin::Pin;
 
-use futures_util::{FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt};
 use tokio_stream::Stream;
 use wasmtime::component::Resource;
 use wasmtime_wasi::p2::{DynPollable, Pollable, bindings::io::streams::StreamError};

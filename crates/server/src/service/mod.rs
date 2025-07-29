@@ -1,6 +1,6 @@
-use std::{borrow::Cow, collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use futures_util::{Stream, StreamExt};
+use futures::{Stream, StreamExt};
 use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
 use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
 use tokio::{sync::mpsc, try_join};
@@ -97,7 +97,7 @@ impl ScriptService for ScriptServer {
                             name: None,
                             value: ExecArgumentValue::Cbor(req),
                         }],
-                        env.as_ref(),
+                        env,
                         log_level,
                     )
                     .await
@@ -164,7 +164,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(ns, script, method, args, env.as_ref(), log_level)
+                    .exec(ns, script, method, args, env, log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -235,7 +235,7 @@ impl ScriptService for ScriptServer {
                 let stream = self
                     .state
                     .vm
-                    .exec(ns, script, method, args, env.as_ref(), log_level)
+                    .exec(ns, script, method, args, env, log_level)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -329,9 +329,7 @@ impl ScriptService for ScriptServer {
 
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(ns, script, method, args, env.as_ref(), log_level),
+            self.state.vm.exec(ns, script, method, args, env, log_level),
         )
         .instrument(span.clone())
         .await
@@ -428,9 +426,7 @@ impl ScriptService for ScriptServer {
             .unwrap_or("");
         let stream = match tokio::time::timeout(
             timeout,
-            self.state
-                .vm
-                .exec(ns, script, method, args, env.as_ref(), log_level),
+            self.state.vm.exec(ns, script, method, args, env, log_level),
         )
         .instrument(span.clone())
         .await
@@ -572,7 +568,7 @@ async fn non_stream_result(
     prost_serde::result_type(o.into(), content_type)
 }
 
-struct ParsedSpec<'a> {
+struct ParsedSpec {
     method: String,
     args: Vec<ExecArgument>,
     timeout: Duration,
@@ -580,13 +576,13 @@ struct ParsedSpec<'a> {
     log_level: LevelFilter,
     span: tracing::Span,
     trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
-    env: Cow<'a, VmEnv>,
+    env: VmEnv,
 }
 
-fn parse_spec<'a>(
+fn parse_spec(
     spec: Option<&mut script::ExecutionSpec>,
-    base_env: &'a VmEnv,
-) -> Result<ParsedSpec<'a>, Status> {
+    base_env: &VmEnv,
+) -> Result<ParsedSpec, Status> {
     if let Some(spec) = spec {
         let mut streams = HashMap::new();
         let args = std::mem::take(&mut spec.arguments)
@@ -656,7 +652,7 @@ fn parse_spec<'a>(
             span,
             log_level,
             trace_events: trace,
-            env: base_env.update(),
+            env: base_env.clone(),
         })
     } else {
         Ok(ParsedSpec {
@@ -667,7 +663,7 @@ fn parse_spec<'a>(
             span: Span::none(),
             log_level: LevelFilter::OFF,
             trace_events: None,
-            env: Cow::Borrowed(base_env),
+            env: base_env.clone(),
         })
     }
 }

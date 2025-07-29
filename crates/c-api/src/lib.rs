@@ -89,7 +89,7 @@ impl ContextHandle {
         };
         let vm = self
             .rt
-            .block_on(async { vmm.create([0; 32], Env::shared().clone()).await })
+            .block_on(async { vmm.create([0; 32]).await })
             .map_err(|e| Error::Internal(format!("Failed to create VM: {e}")))?;
         Ok(VmHandle {
             ctx: self,
@@ -225,10 +225,15 @@ impl VmHandle<'_> {
         match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
             VmInner::Pending { vm, callback } => {
                 let output_callback = callback.ok_or(Error::InvalidArgument("Callback not set"))?;
-                let mut run = vm.run(output_callback.clone());
-                self.ctx
+                let run = self
+                    .ctx
                     .rt
-                    .block_on(run.exec(|guest, store| guest.call_initialize(store, true)))
+                    .block_on(async move {
+                        let mut run = vm.run(Env::shared().await, output_callback);
+                        run.exec(|guest, store| guest.call_initialize(store, true))
+                            .await?;
+                        Ok::<_, anyhow::Error>(run)
+                    })
                     .map_err(|e| Error::Internal(format!("VM initialization failed: {e}")))?;
                 self.inner = VmInner::Running { run };
                 Ok(())

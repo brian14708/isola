@@ -6,6 +6,7 @@ use std::{
 
 use bytes::Bytes;
 use futures::{Stream, StreamExt, TryFutureExt};
+use http::header::HOST;
 use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project_lite::pin_project;
@@ -17,13 +18,15 @@ use crate::{Error, WebsocketMessage};
 pub async fn http_impl<B>(
     span: Span,
     client: reqwest::Client,
-    request: http::Request<B>,
+    mut request: http::Request<B>,
 ) -> Result<http::Response<impl Stream<Item = Result<http_body::Frame<Bytes>, Error>>>, Error>
 where
     B: http_body::Body,
     B::Error: std::error::Error + Send + Sync + 'static,
     B::Data: Send,
 {
+    // custom Host header messes with redirects
+    request.headers_mut().remove(HOST);
     let url = url::Url::parse(&request.uri().to_string())?;
     let (parts, body) = request.into_parts();
     let body = body

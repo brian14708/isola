@@ -1,6 +1,7 @@
 use anyhow::anyhow;
-use futures_util::FutureExt;
+use futures::FutureExt;
 use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
+use tracing::Instrument;
 use wasmtime::component::Resource;
 use wasmtime_wasi::{
     p2::{DynPollable, Pollable, bindings::clocks::monotonic_clock::Duration},
@@ -14,10 +15,7 @@ use super::{
         HostRequestStream, HostResponseStream, Metadata, StreamError,
     },
 };
-use crate::{
-    Env,
-    env::{RpcConnect, RpcPayload},
-};
+use crate::env::{EnvHttp, RpcConnect, RpcPayload};
 
 impl<T: HostView> Host for HostImpl<T> {
     async fn connect(
@@ -31,17 +29,21 @@ impl<T: HostView> Host for HostImpl<T> {
         };
         let (response, rx_req) = RequestStream::new(4);
         let conn = self.0.table().delete(connect)?;
-        let fut = self.0.env().connect_rpc(conn.0, rx_req, tx_resp);
+        let env = self.0.env()?;
 
-        let s = wasmtime_wasi::runtime::spawn(async move {
-            let join = fut
-                .await
-                .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
-            Ok(Connection {
-                handle: join.into(),
-                streams: Some((response, request)),
-            })
-        });
+        let s = wasmtime_wasi::runtime::spawn(
+            async move {
+                let fut = env.connect_rpc(conn.0, rx_req, tx_resp);
+                let join = fut
+                    .await
+                    .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
+                Ok(Connection {
+                    handle: join.into(),
+                    streams: Some((response, request)),
+                })
+            }
+            .in_current_span(),
+        );
         Ok(self.0.table().push(FutureConnection::Pending(s))?)
     }
 }

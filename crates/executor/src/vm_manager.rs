@@ -1,5 +1,5 @@
 use std::{
-    future::{Future, pending},
+    future::Future,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     pin::Pin,
@@ -10,7 +10,7 @@ use std::{
 
 use anyhow::anyhow;
 use component_init_transform::Invoker;
-use futures_util::FutureExt;
+use futures::FutureExt;
 use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
@@ -24,8 +24,7 @@ use wasmtime::{
 use zip::ZipArchive;
 
 use crate::{
-    Env,
-    env::{RpcConnect, RpcPayload},
+    env::{BoxedStream, Env, EnvHandle, EnvHttp, RpcConnect, RpcPayload},
     error::{Error, Result},
     vm::{
         OutputCallback, SandboxPre, Vm, VmState,
@@ -37,7 +36,7 @@ use crate::{
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
-pub struct VmManager<E: Env> {
+pub struct VmManager<E: EnvHandle> {
     engine: Engine,
     instance_pre: SandboxPre<VmState<E>>,
     cache: Arc<VmCache<E>>,
@@ -106,7 +105,7 @@ struct Manifest {
     prelude: Option<String>,
 }
 
-impl<E: Env> VmManager<E> {
+impl<E: EnvHandle> VmManager<E> {
     fn cfg() -> (Config, String) {
         let mut hash = String::new();
         let mut config = Config::new();
@@ -164,14 +163,9 @@ impl<E: Env> VmManager<E> {
                 let engine = Engine::new(&config)?;
                 let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
                 let component = Component::new(&engine, &instrumented)?;
-                let linker = VmState::<MockEnv>::new_linker(&engine)?;
-                let mut store = VmState::new(
-                    &engine,
-                    &base_dir,
-                    workdir.path(),
-                    Self::get_max_memory(),
-                    MockEnv {},
-                )?;
+                let linker = VmState::<CompileEnv>::new_linker(&engine)?;
+                let mut store =
+                    VmState::new(&engine, &base_dir, workdir.path(), Self::get_max_memory())?;
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
@@ -230,9 +224,7 @@ impl<E: Env> VmManager<E> {
             },
         ]
     }
-}
 
-impl<E: Env> VmManager<E> {
     /// Creates a new VM manager from the compiled component at the given path.
     ///
     /// # Errors
@@ -301,14 +293,13 @@ impl<E: Env> VmManager<E> {
     /// # Errors
     ///
     /// Returns an error if the VM cannot be instantiated or initialized.
-    pub async fn create(&self, hash: [u8; 32], env: E) -> Result<Vm<E>> {
+    pub async fn create(&self, hash: [u8; 32]) -> Result<Vm<E>> {
         let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
         let mut store = VmState::new(
             &self.engine,
             &self.base_dir,
             workdir.path(),
             Self::get_max_memory(),
-            env,
         )?;
         store.epoch_deadline_async_yield_and_update(1);
 
@@ -328,19 +319,20 @@ impl<E: Env> VmManager<E> {
 
 impl<E> VmManager<E>
 where
-    E: Env<Callback = MpscOutputCallback> + Clone,
+    E: EnvHandle + Env<Callback = MpscOutputCallback>,
 {
     fn exec_impl(
         &self,
         func: String,
         args: SmallVec<[Argument; 2]>,
         vm: Vm<E>,
+        env: E,
         level: LevelFilter,
     ) -> impl Stream<Item = ExecStreamItem> + Send + use<E> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
-        let mut run = vm.run(MpscOutputCallback::new(tx.clone()));
+        let mut run = vm.run(env, MpscOutputCallback::new(tx.clone()));
         let exec = Box::pin(async move {
             let ret = run
                 .exec(|vm, mut store| async move {
@@ -387,7 +379,7 @@ where
         script: ExecSource,
         func: String,
         args: Vec<ExecArgument>,
-        env: &E,
+        env: E,
         level: LevelFilter,
     ) -> Result<impl Stream<Item = ExecStreamItem> + Send + use<E>> {
         let mut hasher = Sha256::new();
@@ -405,7 +397,7 @@ where
         let mut vm = if let Some(vm) = vm {
             vm
         } else {
-            let mut vm = self.create(hash, env.clone()).await?;
+            let mut vm = self.create(hash).await?;
             match script {
                 ExecSource::Script(prelude, script) => {
                     if !prelude.is_empty() {
@@ -465,12 +457,13 @@ where
                 })
                 .collect::<anyhow::Result<_>>()?,
             vm,
+            env.clone(),
             level,
         ))
     }
 }
 
-impl<E: Env> Drop for VmManager<E> {
+impl<E: EnvHandle> Drop for VmManager<E> {
     fn drop(&mut self) {
         self.epoch_ticker.abort();
         // yield one last time
@@ -524,13 +517,13 @@ impl<S: Stream<Item = T>, F: Future<Output = ()>, T> Stream for StreamJoin<S, F,
     }
 }
 
-struct MyInvoker<S: Env> {
+struct MyInvoker<S: EnvHandle> {
     store: Store<VmState<S>>,
     instance: Instance,
 }
 
 #[async_trait::async_trait]
-impl<S: Env> Invoker for MyInvoker<S> {
+impl<S: EnvHandle> Invoker for MyInvoker<S> {
     async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
         let func = self
             .instance
@@ -577,57 +570,46 @@ impl<S: Env> Invoker for MyInvoker<S> {
     }
 }
 
-struct MockEnv {}
+#[derive(Clone)]
+struct CompileEnv {}
 
-impl Env for MockEnv {
-    type Callback = MockEnv;
+impl Env for CompileEnv {
+    type Callback = Self;
+}
+
+impl EnvHttp for CompileEnv {
     type Error = anyhow::Error;
-
-    fn send_request_http<B>(
+    async fn send_request_http<B>(
         &self,
         _request: http::Request<B>,
-    ) -> impl Future<
-        Output = Result<
-            http::Response<
-                Pin<
-                    Box<
-                        dyn futures_core::Stream<
-                                Item = Result<http_body::Frame<bytes::Bytes>, Self::Error>,
-                            > + Send
-                            + Sync
-                            + 'static,
-                    >,
-                >,
-            >,
-            Self::Error,
-        >,
-    > + Send
-    + 'static
+    ) -> std::result::Result<
+        http::Response<BoxedStream<http_body::Frame<bytes::Bytes>, Self::Error>>,
+        Self::Error,
+    >
     where
-        B: http_body::Body + Send + Sync + 'static,
+        B: http_body::Body + Send + 'static,
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send,
     {
-        pending()
+        anyhow::bail!("unsupported during compilation")
     }
 
-    fn connect_rpc(
+    async fn connect_rpc(
         &self,
         _connect: RpcConnect,
         _req: tokio::sync::mpsc::Receiver<RpcPayload>,
         _resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
-    ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
-    {
-        pending()
+    ) -> Result<JoinHandle<anyhow::Result<()>>, Self::Error> {
+        anyhow::bail!("unsupported during compilation")
     }
 }
 
-impl OutputCallback for MockEnv {
+impl OutputCallback for CompileEnv {
     async fn on_result(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
-        pending().await
+        anyhow::bail!("unsupported during compilation")
     }
     async fn on_end(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
-        pending().await
+        anyhow::bail!("unsupported during compilation")
     }
 }
 

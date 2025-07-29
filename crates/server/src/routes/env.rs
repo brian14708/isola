@@ -1,11 +1,10 @@
-use std::{borrow::Cow, future::Future, pin::Pin, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::anyhow;
-use bytes::Bytes;
-use futures_util::{StreamExt, TryStreamExt, stream};
+use futures::{StreamExt, TryStreamExt, stream};
 use promptkit_executor::{
-    Env, MpscOutputCallback,
-    env::{RpcConnect, RpcPayload},
+    MpscOutputCallback,
+    env::{BoxedStream, Env, EnvHttp, RpcConnect, RpcPayload},
 };
 use promptkit_request::{
     RequestContext, RequestOptions, TraceRequest, WebsocketMessage, request_span,
@@ -19,12 +18,6 @@ use url::Url;
 #[derive(Clone)]
 pub struct VmEnv {
     pub client: Arc<promptkit_request::Client>,
-}
-
-impl VmEnv {
-    pub fn update(&self) -> Cow<'_, Self> {
-        Cow::Borrowed(self)
-    }
 }
 
 pub struct Context<F>
@@ -49,28 +42,20 @@ where
 
 impl Env for VmEnv {
     type Callback = MpscOutputCallback;
+}
+
+impl EnvHttp for VmEnv {
     type Error = anyhow::Error;
 
-    fn send_request_http<B>(
+    async fn send_request_http<B>(
         &self,
         request: http::Request<B>,
-    ) -> impl Future<
-        Output = anyhow::Result<
-            http::Response<
-                Pin<
-                    Box<
-                        dyn futures_core::Stream<Item = anyhow::Result<http_body::Frame<Bytes>>>
-                            + Send
-                            + Sync
-                            + 'static,
-                    >,
-                >,
-            >,
-        >,
-    > + Send
-    + 'static
+    ) -> std::result::Result<
+        http::Response<BoxedStream<http_body::Frame<bytes::Bytes>, Self::Error>>,
+        Self::Error,
+    >
     where
-        B: http_body::Body + Send + Sync + 'static,
+        B: http_body::Body + Send + 'static,
         B::Error: std::error::Error + Send + Sync,
         B::Data: Send,
     {
@@ -84,53 +69,37 @@ impl Env for VmEnv {
                 )
             }),
         };
-        let client = self.client.clone();
-        async move {
-            let http = client.http(request, RequestOptions::new(ctx));
-            let resp = http.await.map_err(anyhow::Error::from)?;
-            Ok(resp.map(
-                |b| -> Pin<
-                    Box<
-                        dyn futures_core::Stream<Item = anyhow::Result<http_body::Frame<Bytes>>>
-                            + Send
-                            + Sync
-                            + 'static,
-                    >,
-                > { Box::pin(b.map_err(anyhow::Error::from)) },
-            ))
-        }
+        let http = self.client.http(request, RequestOptions::new(ctx));
+        let resp = http.await.map_err(anyhow::Error::from)?;
+        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(anyhow::Error::from)) }))
     }
 
-    fn connect_rpc(
+    async fn connect_rpc(
         &self,
         connect: RpcConnect,
         req: tokio::sync::mpsc::Receiver<RpcPayload>,
         resp: tokio::sync::mpsc::Sender<anyhow::Result<RpcPayload>>,
-    ) -> impl Future<Output = Result<JoinHandle<anyhow::Result<()>>, Self::Error>> + Send + 'static
-    {
+    ) -> Result<JoinHandle<anyhow::Result<()>>, Self::Error> {
         let url = Url::parse(&connect.url).unwrap();
-        let client = self.client.clone();
-        async move {
-            let timeout = connect.timeout;
-            if url.scheme() == "ws" || url.scheme() == "wss" {
-                let fut = websocket(client, connect, req, resp);
-                if let Some(d) = timeout {
-                    tokio::time::timeout(d, fut)
-                        .await
-                        .unwrap_or_else(|_| Err(anyhow!("timeout")))
-                } else {
-                    fut.await
-                }
+        let timeout = connect.timeout;
+        if url.scheme() == "ws" || url.scheme() == "wss" {
+            let fut = websocket(&self.client, connect, req, resp);
+
+            if let Some(d) = timeout {
+                tokio::time::timeout(d, fut)
+                    .await
+                    .unwrap_or_else(|_| Err(anyhow!("timeout")))
             } else {
-                Err(anyhow!("unsupported protocol"))
+                fut.await
             }
+        } else {
+            Err(anyhow!("unsupported protocol"))
         }
-        .in_current_span()
     }
 }
 
 async fn websocket(
-    client: Arc<promptkit_request::Client>,
+    client: &promptkit_request::Client,
     mut connect: RpcConnect,
     req: tokio::sync::mpsc::Receiver<RpcPayload>,
     resp: tokio::sync::mpsc::Sender<Result<RpcPayload, anyhow::Error>>,
@@ -168,36 +137,39 @@ async fn websocket(
         .map_err(anyhow::Error::from)?
         .into_body();
 
-    Ok(tokio::spawn(async move {
-        tokio_stream::StreamExt::map(rx, |msg| match msg {
-            Ok(WebsocketMessage::Text(t)) => Ok(Some(RpcPayload {
-                content_type: Some("text/plain".into()),
-                data: t.to_string().into_bytes(),
-            })),
-            Ok(WebsocketMessage::Binary(b)) => Ok(Some(RpcPayload {
-                content_type: None,
-                data: b.to_vec(),
-            })),
-            Ok(
-                WebsocketMessage::Close(_)
-                | WebsocketMessage::Ping(_)
-                | WebsocketMessage::Pong(_)
-                | WebsocketMessage::Frame(_),
-            ) => Ok(None),
-            Err(_) => Err(anyhow!("Error recv message")),
-        })
-        .then(|msg| {
-            let resp = resp.clone();
-            async move {
-                match msg {
-                    Ok(Some(t)) => Ok::<_, SendError<_>>(resp.send(Ok(t)).await?),
-                    Ok(None) => Ok(()),
-                    Err(e) => Ok(resp.send(Err(e)).await?),
+    Ok(tokio::spawn(
+        async move {
+            tokio_stream::StreamExt::map(rx, |msg| match msg {
+                Ok(WebsocketMessage::Text(t)) => Ok(Some(RpcPayload {
+                    content_type: Some("text/plain".into()),
+                    data: t.to_string().into_bytes(),
+                })),
+                Ok(WebsocketMessage::Binary(b)) => Ok(Some(RpcPayload {
+                    content_type: None,
+                    data: b.to_vec(),
+                })),
+                Ok(
+                    WebsocketMessage::Close(_)
+                    | WebsocketMessage::Ping(_)
+                    | WebsocketMessage::Pong(_)
+                    | WebsocketMessage::Frame(_),
+                ) => Ok(None),
+                Err(_) => Err(anyhow!("Error recv message")),
+            })
+            .then(|msg| {
+                let resp = resp.clone();
+                async move {
+                    match msg {
+                        Ok(Some(t)) => Ok::<_, SendError<_>>(resp.send(Ok(t)).await?),
+                        Ok(None) => Ok(()),
+                        Err(e) => Ok(resp.send(Err(e)).await?),
+                    }
                 }
-            }
-        })
-        .try_collect::<()>()
-        .await?;
-        Ok(())
-    }))
+            })
+            .try_collect::<()>()
+            .await?;
+            Ok(())
+        }
+        .in_current_span(),
+    ))
 }

@@ -29,19 +29,20 @@ pub enum EmitValue {
 }
 
 pub trait HostView: IoView + Send {
-    type Env: crate::Env + Send;
-    fn env(&mut self) -> &mut Self::Env;
+    type Env: crate::env::EnvHandle;
+    fn env(&mut self) -> wasmtime::Result<Self::Env>;
     fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
 
 impl<T: ?Sized + HostView> HostView for &mut T {
     type Env = T::Env;
-    fn env(&mut self) -> &mut Self::Env {
+
+    fn env(&mut self) -> wasmtime::Result<Self::Env> {
         T::env(self)
     }
 
-    fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send {
-        T::emit(self, data)
+    async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
+        T::emit(self, data).await
     }
 }
 

@@ -1,7 +1,6 @@
 use std::{future::Future, path::Path};
 
-use futures_util::StreamExt;
-use http::header::HOST;
+use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::Instrument;
 use wasmtime::{
@@ -13,14 +12,16 @@ use wasmtime_wasi::{
     p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView},
 };
 use wasmtime_wasi_http::{
-    HttpResult, WasiHttpCtx, WasiHttpView,
+    HttpError, HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
     body::{HyperIncomingBody, HyperOutgoingBody},
     types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
 };
 
 use super::bindgen::{HostView, add_to_linker};
-use crate::{Env, resource::MemoryLimiter, trace_output::TraceOutput, vm::bindgen::EmitValue};
+use crate::{
+    env::EnvHandle, resource::MemoryLimiter, trace_output::TraceOutput, vm::bindgen::EmitValue,
+};
 
 pub trait OutputCallback: Send {
     fn on_result(
@@ -31,13 +32,13 @@ pub trait OutputCallback: Send {
     fn on_end(&mut self, item: Vec<u8>) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 }
 
-pub struct VmRunState<E: Env> {
+pub struct VmRunState<E: EnvHandle> {
+    pub(crate) env: E,
     pub(crate) output: E::Callback,
 }
 
-pub struct VmState<E: Env> {
+pub struct VmState<E: EnvHandle> {
     limiter: MemoryLimiter,
-    env: E,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     table: ResourceTable,
@@ -46,7 +47,7 @@ pub struct VmState<E: Env> {
     output_buffer: OutputBuffer,
 }
 
-impl<E: Env> VmState<E> {
+impl<E: EnvHandle> VmState<E> {
     /// Creates a new linker for the VM state.
     ///
     /// # Errors
@@ -71,7 +72,6 @@ impl<E: Env> VmState<E> {
         base_dir: &Path,
         workdir: &Path,
         max_memory: usize,
-        env: E,
     ) -> anyhow::Result<Store<Self>> {
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
@@ -89,7 +89,6 @@ impl<E: Env> VmState<E> {
             engine,
             Self {
                 limiter,
-                env,
                 wasi,
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
@@ -106,36 +105,32 @@ impl<E: Env> VmState<E> {
     }
 }
 
-impl<E: Env> IoView for VmState<E> {
+impl<E: EnvHandle> IoView for VmState<E> {
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 }
 
-impl<E: Env> WasiView for VmState<E> {
+impl<E: EnvHandle> WasiView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiCtx {
         &mut self.wasi
     }
 }
 
-impl<E: Env> WasiHttpView for VmState<E> {
+impl<E: EnvHandle> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
 
     fn send_request(
         &mut self,
-        mut request: hyper::Request<HyperOutgoingBody>,
+        request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        request.headers_mut().remove(HOST);
-        let resp = timeout(
-            config.first_byte_timeout,
-            self.env.send_request_http(request),
-        );
-
+        let env = self.env().map_err(HttpError::trap)?;
         let handle = wasmtime_wasi::runtime::spawn(
             async move {
+                let resp = timeout(config.first_byte_timeout, env.send_request_http(request));
                 let (part, body) = match resp.await {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
@@ -167,11 +162,14 @@ impl<E: Env> WasiHttpView for VmState<E> {
     }
 }
 
-impl<E: Env> HostView for VmState<E> {
+impl<E: EnvHandle> HostView for VmState<E> {
     type Env = E;
 
-    fn env(&mut self) -> &mut Self::Env {
-        &mut self.env
+    fn env(&mut self) -> wasmtime::Result<Self::Env> {
+        let Some(run) = self.run.as_mut() else {
+            return Err(anyhow::anyhow!("env missing"));
+        };
+        Ok(run.env.clone())
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {

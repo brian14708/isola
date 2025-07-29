@@ -3,13 +3,13 @@ use std::collections::HashMap;
 use parking_lot::Mutex;
 use rand::Rng;
 
-use crate::{Env, vm::Vm};
+use crate::{env::EnvHandle, vm::Vm};
 
-pub struct VmCache<E: Env> {
+pub struct VmCache<E: EnvHandle> {
     caches: Mutex<HashMap<[u8; 32], Vec<Vm<E>>>>,
 }
 
-impl<E: Env> VmCache<E> {
+impl<E: EnvHandle> VmCache<E> {
     pub fn new() -> Self {
         Self {
             caches: Mutex::new(HashMap::new()),

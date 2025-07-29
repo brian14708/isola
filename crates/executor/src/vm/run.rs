@@ -6,16 +6,19 @@ use super::{
     Vm, exports,
     state::{VmRunState, VmState},
 };
-use crate::Env;
+use crate::env::EnvHandle;
 
-pub struct VmRun<E: Env> {
+pub struct VmRun<E: EnvHandle> {
     vm: Vm<E>,
 }
 
-impl<E: Env> VmRun<E> {
-    pub fn new(mut vm: Vm<E>, callback: E::Callback) -> Self {
+impl<E: EnvHandle> VmRun<E> {
+    pub fn new(mut vm: Vm<E>, env: E, callback: E::Callback) -> Self {
         let o: &mut VmState<_> = vm.store.data_mut();
-        o.run = Some(VmRunState { output: callback });
+        o.run = Some(VmRunState {
+            env,
+            output: callback,
+        });
         Self { vm }
     }
 
