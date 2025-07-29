@@ -33,7 +33,7 @@ pub enum InputValue<'a> {
 impl Scope {
     pub fn new() -> Self {
         prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let locals = PyDict::new(py);
             locals
                 .set_item(
@@ -73,7 +73,7 @@ impl Scope {
     }
 
     pub fn flush(&self) {
-        let _ = Python::with_gil(|py| {
+        let _ = Python::attach(|py| {
             if let Some((stdout, stderr)) = &self.stdio {
                 let flush = intern!(py, "flush");
                 stdout.call_method0(py, flush)?;
@@ -86,7 +86,7 @@ impl Scope {
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
         static INIT: GILOnceCell<PyObject> = GILOnceCell::new();
 
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             if let Some(meta) = pymeta::parse_pep723(code.as_bytes()) {
                 INIT.import(py, "promptkit.importlib", "_initialize_pep723")
                     .expect("failed to import promptkit.importlib")
@@ -132,7 +132,7 @@ impl Scope {
     where
         U: ExactSizeIterator<Item = InputValue<'a>>,
     {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let dict: &Bound<'_, PyDict> = self
                 .locals
                 .downcast_bound(py)
@@ -224,7 +224,7 @@ impl Scope {
         request: InputValue<'_>,
         callback: impl FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
     ) -> Result<()> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let module = py
                 .import(intern!(py, "promptkit._analyze"))
                 .expect("failed to import promptkit._analyze");
@@ -275,7 +275,7 @@ mod tests {
 
             // Test the python_to_cbor_emit function with a simple value
             use pyo3::{Python, types::PyString};
-            Python::with_gil(|py| {
+            Python::attach(|py| {
                 let test_string = PyString::new(py, "test");
                 let test_value = test_string.as_any();
                 python_to_cbor_emit(test_value.clone(), EmitType::End, emit_fn).unwrap();

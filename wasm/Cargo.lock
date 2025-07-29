@@ -396,12 +396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "once_cell"
-version = "1.21.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
-
-[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -462,13 +456,12 @@ dependencies = [
 
 [[package]]
 name = "pyo3"
-version = "0.25.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
+version = "0.26.0-dev"
+source = "git+https://github.com/PyO3/pyo3.git?rev=076617135b34e14775510ab87ec74621b3d30213#076617135b34e14775510ab87ec74621b3d30213"
 dependencies = [
  "indoc",
  "libc",
  "memoffset",
- "once_cell",
  "portable-atomic",
  "pyo3-build-config",
  "pyo3-ffi",
@@ -479,16 +472,15 @@ dependencies = [
 [[package]]
 name = "pyo3-build-config"
 version = "0.25.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
+source = "git+https://github.com/PyO3/pyo3.git?rev=076617135b34e14775510ab87ec74621b3d30213#076617135b34e14775510ab87ec74621b3d30213"
 dependencies = [
- "once_cell",
  "target-lexicon",
 ]
 
 [[package]]
 name = "pyo3-ffi"
 version = "0.25.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
+source = "git+https://github.com/PyO3/pyo3.git?rev=076617135b34e14775510ab87ec74621b3d30213#076617135b34e14775510ab87ec74621b3d30213"
 dependencies = [
  "libc",
  "pyo3-build-config",
@@ -497,7 +489,7 @@ dependencies = [
 [[package]]
 name = "pyo3-macros"
 version = "0.25.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
+source = "git+https://github.com/PyO3/pyo3.git?rev=076617135b34e14775510ab87ec74621b3d30213#076617135b34e14775510ab87ec74621b3d30213"
 dependencies = [
  "proc-macro2",
  "pyo3-macros-backend",
@@ -508,7 +500,7 @@ dependencies = [
 [[package]]
 name = "pyo3-macros-backend"
 version = "0.25.1"
-source = "git+https://github.com/brian14708/pyo3.git?branch=wasi-0.25#0e6bc36912a6f7313224c4d15b5a9274a2561152"
+source = "git+https://github.com/PyO3/pyo3.git?rev=076617135b34e14775510ab87ec74621b3d30213#076617135b34e14775510ab87ec74621b3d30213"
 dependencies = [
  "heck",
  "proc-macro2",
