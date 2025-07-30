@@ -34,15 +34,15 @@ fn get_env_var(names: &[&'static str]) -> Option<String> {
 }
 
 pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
-    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
-        Box::new(TraceContextPropagator::new()),
-        Box::new(BaggagePropagator::new()),
-    ]));
-
     let provider = if let Some(_endpoint) = get_env_var(&[
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
         OTEL_EXPORTER_OTLP_ENDPOINT,
     ]) {
+        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+            Box::new(TraceContextPropagator::new()),
+            Box::new(BaggagePropagator::new()),
+        ]));
+
         // Set protocol based on environment variables
         let protocol = get_env_var(&[
             "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
