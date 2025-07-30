@@ -1950,6 +1950,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body",
+ "log",
  "metrics",
  "metrics-exporter-prometheus",
  "mimalloc",
