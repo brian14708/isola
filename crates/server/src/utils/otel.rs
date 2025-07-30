@@ -3,7 +3,10 @@ use opentelemetry::{
     propagation::TextMapCompositePropagator,
     trace::{Tracer, TracerProvider, noop::NoopTracer},
 };
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{
+    OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+    WithExportConfig,
+};
 use opentelemetry_sdk::{
     Resource,
     propagation::{BaggagePropagator, TraceContextPropagator},
@@ -21,33 +24,49 @@ use tracing_subscriber::{
     Layer, filter::FilterFn, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
 };
 
+fn get_env_var(names: &[&'static str]) -> Option<String> {
+    for name in names {
+        if let Ok(value) = std::env::var(name) {
+            return Some(value);
+        }
+    }
+    None
+}
+
 pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
     global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
         Box::new(TraceContextPropagator::new()),
         Box::new(BaggagePropagator::new()),
     ]));
 
-    let provider = if let Ok(e) = std::env::var("OTEL_COLLECTOR_URL") {
-        let e = {
-            // compatibility with old env var
-            let mut u = url::Url::parse(&e).expect("OTEL_COLLECTOR_URL is not a valid URL");
-            if u.path() == "/" {
-                u = u.join("/v1/traces").expect("failed to append /v1/traces");
-            }
-            u.to_string()
-        };
+    let provider = if let Some(_endpoint) = get_env_var(&[
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
+        OTEL_EXPORTER_OTLP_ENDPOINT,
+    ]) {
+        // Set protocol based on environment variables
+        let protocol = get_env_var(&[
+            "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
+            OTEL_EXPORTER_OTLP_PROTOCOL,
+        ])
+        .unwrap_or_default();
+
+        let exporter = match protocol.as_str() {
+            "grpc" => opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_protocol(opentelemetry_otlp::Protocol::Grpc)
+                .build(),
+            "http/json" => opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_protocol(opentelemetry_otlp::Protocol::HttpJson)
+                .build(),
+            _ => opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
+                .build(), // default to http
+        }?;
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_span_processor(
-                BatchSpanProcessor::builder(
-                    opentelemetry_otlp::SpanExporter::builder()
-                        .with_http()
-                        .with_endpoint(e)
-                        .build()?,
-                    runtime::Tokio,
-                )
-                .build(),
-            )
+            .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build())
             .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
             .with_id_generator(RandomIdGenerator::default())
             .with_resource(
