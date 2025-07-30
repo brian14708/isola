@@ -50,7 +50,7 @@ class Request:
         self.body = body
         self.timeout = timeout
         self.extra = extra
-        self.resp: Response | None = None
+        self.resp: AsyncResponse | Response | None = None
 
     def _fetch(self) -> "_promptkit_sys.Pollable[_http.Response]":
         req = _http.fetch(
@@ -59,8 +59,8 @@ class Request:
         self.body = None
         return req
 
-    async def __aenter__(self) -> "Response":
-        self.resp = Response(await subscribe(self._fetch()))
+    async def __aenter__(self) -> "AsyncResponse":
+        self.resp = AsyncResponse(await subscribe(self._fetch()))
         return self.resp
 
     async def __aexit__(self, *_: object) -> None:
@@ -86,8 +86,7 @@ class ServerSentEvent:
         self.data = data
 
 
-@final
-class Response:
+class _BaseResponse:
     __slots__ = ("resp", "_status", "_headers")
 
     def __init__(self, resp: "_http.Response"):
@@ -116,8 +115,9 @@ class Response:
             self.resp.close()
             self.resp = None
 
-    # async read methods
 
+@final
+class AsyncResponse(_BaseResponse):
     @overload
     async def _aread(self, encoding: Literal["json"], size: int) -> object: ...
     @overload
@@ -168,8 +168,9 @@ class Response:
         ):
             yield ServerSentEvent(id, event, data)
 
-    # sync read methods
 
+@final
+class Response(_BaseResponse):
     @overload
     def _read(self, encoding: Literal["json"], size: int) -> object: ...
     @overload
@@ -222,7 +223,7 @@ class WebsocketRequest:
         self.url = url
         self.headers = headers
         self.timeout = timeout
-        self.conn: AsyncWebsocket | SyncWebsocket | None = None
+        self.conn: AsyncWebsocket | Websocket | None = None
 
     def _conn(self) -> "_promptkit_sys.Pollable[_http.Websocket]":
         return _http.ws_connect(self.url, self.headers, self.timeout)
@@ -236,13 +237,13 @@ class WebsocketRequest:
             await cast("AsyncWebsocket", self.conn).aclose()
             self.conn.shutdown()
 
-    def __enter__(self) -> "SyncWebsocket":
-        self.conn = SyncWebsocket(self._conn().wait())
+    def __enter__(self) -> "Websocket":
+        self.conn = Websocket(self._conn().wait())
         return self.conn
 
     def __exit__(self, *_: object) -> None:
         if self.conn:
-            cast("SyncWebsocket", self.conn).close()
+            cast("Websocket", self.conn).close()
             self.conn.shutdown()
 
 
@@ -297,7 +298,7 @@ class AsyncWebsocket(_BaseWebsocket):
 
 
 @final
-class SyncWebsocket(_BaseWebsocket):
+class Websocket(_BaseWebsocket):
     def close(self, code: int = 1000, reason: str = "") -> None:
         while True:
             poll = self.conn.close(code, reason)
@@ -515,8 +516,17 @@ async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Excep
     extra = r.extra or {}
     try:
         async with r as resp:
-            if extra.get("validate"):
-                _validate_status(resp)
+            if extra.get("validate") and not 200 <= resp.status < 300:
+                try:
+                    content = (await resp.aread(size=1024 * 128)).decode(
+                        "utf-8", "replace"
+                    )
+                except Exception:
+                    content = "<unable to read response content>"
+                raise RuntimeError(
+                    "http status check failed, "
+                    + f"status={resp.status}, content={repr(content)}"
+                )
             return await resp._aread(
                 cast("_ResponseType", extra.get("type", "json")), -1
             )
