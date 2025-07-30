@@ -24,6 +24,11 @@
       "automerge": true
     },
     {
+      "packageNames": ["lucid-react"],
+      "extends": ["schedule:weekly"],
+      "automerge": true
+    },
+    {
       "matchUpdateTypes": ["patch", "pin", "digest", "lockFileMaintenance"],
       "groupName": "patch updates",
       "automerge": true
