@@ -128,7 +128,27 @@ impl<'de> Deserializer<'de> for ProstValue<'de> {
     {
         match &self.0.kind {
             Some(prost_types::value::Kind::NullValue(_)) => visitor.visit_none(),
-            Some(prost_types::value::Kind::NumberValue(f)) => visitor.visit_f64(*f),
+            Some(prost_types::value::Kind::NumberValue(value)) => {
+                let value = *value;
+                if value.is_finite() && value.fract() == 0.0 {
+                    #[expect(clippy::cast_precision_loss)]
+                    const MIN_SAFE_I64: f64 = i64::MIN as f64;
+                    #[expect(clippy::cast_precision_loss)]
+                    const MAX_SAFE_U64: f64 = u64::MAX as f64;
+
+                    if (0.0..=MAX_SAFE_U64).contains(&value) {
+                        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        visitor.visit_u64(value as u64)
+                    } else if (MIN_SAFE_I64..0.0).contains(&value) {
+                        #[expect(clippy::cast_possible_truncation)]
+                        visitor.visit_i64(value as i64)
+                    } else {
+                        visitor.visit_f64(value)
+                    }
+                } else {
+                    visitor.visit_f64(value)
+                }
+            }
             Some(prost_types::value::Kind::StringValue(s)) => visitor.visit_str(s),
             Some(prost_types::value::Kind::BoolValue(b)) => visitor.visit_bool(*b),
             Some(prost_types::value::Kind::StructValue(s)) => {
@@ -380,7 +400,27 @@ impl Serialize for ProstValue<'_> {
     {
         match &self.0.kind {
             Some(prost_types::value::Kind::NullValue(_)) => serializer.serialize_none(),
-            Some(prost_types::value::Kind::NumberValue(f)) => serializer.serialize_f64(*f),
+            Some(prost_types::value::Kind::NumberValue(value)) => {
+                let value = *value;
+                if value.is_finite() && value.fract() == 0.0 {
+                    #[expect(clippy::cast_precision_loss)]
+                    const MIN_SAFE_I64: f64 = i64::MIN as f64;
+                    #[expect(clippy::cast_precision_loss)]
+                    const MAX_SAFE_U64: f64 = u64::MAX as f64;
+
+                    if (0.0..=MAX_SAFE_U64).contains(&value) {
+                        #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        serializer.serialize_u64(value as u64)
+                    } else if (MIN_SAFE_I64..0.0).contains(&value) {
+                        #[expect(clippy::cast_possible_truncation)]
+                        serializer.serialize_i64(value as i64)
+                    } else {
+                        serializer.serialize_f64(value)
+                    }
+                } else {
+                    serializer.serialize_f64(value)
+                }
+            }
             Some(prost_types::value::Kind::StringValue(s)) => serializer.serialize_str(s),
             Some(prost_types::value::Kind::BoolValue(b)) => serializer.serialize_bool(*b),
             Some(prost_types::value::Kind::StructValue(s)) => {

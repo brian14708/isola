@@ -248,7 +248,8 @@ mod tests {
     #[test]
     #[cfg(feature = "prost")]
     fn test_cross_format_consistency() {
-        let json = r#"{"mixed": {"string": "value", "number": 42.0, "bool": true, "array": [1.0, 2.0, 3.0]}}"#;
+        let json =
+            r#"{"mixed": {"string": "value", "number": 42, "bool": true, "array": [1, 2, 3]}}"#;
 
         let cbor = json_to_cbor(json).unwrap();
         let json2 = cbor_to_json(&cbor).unwrap();
@@ -263,5 +264,24 @@ mod tests {
 
         assert_eq!(v1, v2);
         assert_eq!(v2, v3);
+    }
+
+    #[test]
+    #[cfg(feature = "prost")]
+    fn test_prost_integer_conversion_precision() {
+        let test_cases = [
+            (42.0, "42"),
+            (2000.0, "2000"),
+            (-42.0, "-42"),
+            (42.1, "42.1"),
+            (1e30, "1e30"),
+            (-1e30, "-1e30"),
+        ];
+
+        for (input, expected) in test_cases {
+            let prost_value = make_prost_number(input);
+            let json = cbor_to_json(&prost_to_cbor(&prost_value).unwrap()).unwrap();
+            assert_eq!(json, expected, "Failed for input: {}", input);
+        }
     }
 }
