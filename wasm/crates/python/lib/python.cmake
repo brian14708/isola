@@ -30,7 +30,7 @@ ExternalProject_Add(
     --host=wasm32-wasi --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
     --with-tzpath=/usr/local/lib/python3.13/site-packages/tzdata/zoneinfo
-    --enable-big-digits=30
+    --enable-big-digits=30 --with-pymalloc
   PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/python.patch
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
   BUILD_IN_SOURCE TRUE

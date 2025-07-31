@@ -8,13 +8,13 @@ use std::cell::RefCell;
 
 use self::wasi::io::streams::StreamError;
 use self::wasi::logging::logging::Level;
-use future::PyPollable;
 use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
 
 use crate::{
     error::Error,
     script::{InputValue, Scope},
     serde::cbor_to_python,
+    wasm::future::PyPollable,
 };
 
 use self::{exports::promptkit::script::guest, promptkit::script::host};
@@ -28,12 +28,15 @@ wit_bindgen::generate!({
 #[pymodule]
 #[pyo3(name = "_promptkit_sys")]
 pub mod sys_module {
-    use std::time::Duration;
+    use std::{ops::Deref, time::Duration};
 
     use pyo3::{
-        Bound, PyResult, intern, pyfunction,
-        types::{PyAnyMethods, PyList, PyListMethods, PySet, PyTuple, PyTupleMethods},
+        Bound, PyResult, pyfunction,
+        types::{PyAnyMethods, PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
     };
+    use smallvec::{SmallVec, smallvec};
+
+    use crate::wasm::future::Pollable;
 
     use super::wasi::{
         clocks::monotonic_clock::{now, subscribe_duration},
@@ -41,16 +44,16 @@ pub mod sys_module {
     };
 
     #[pymodule_export]
-    use super::PyPollable;
+    use super::future::PyPollable;
 
     #[pyfunction]
     #[pyo3(signature = (duration))]
     fn sleep(duration: f64) -> PyPollable {
-        let poll = subscribe_duration(
+        subscribe_duration(
             u64::try_from(Duration::from_secs_f64(duration).as_nanos())
                 .expect("duration is too large"),
-        );
-        poll.into()
+        )
+        .into()
     }
 
     #[pyfunction]
@@ -59,51 +62,43 @@ pub mod sys_module {
     }
 
     #[pyfunction]
-    #[pyo3(signature = (poll, block))]
-    fn poll<'py>(poll: &Bound<'py, PyList>, block: bool) -> PyResult<Bound<'py, PySet>> {
-        let py = poll.py();
-        let mut result = vec![];
-        let mut refs = vec![];
-        for (i, p) in poll.iter().enumerate() {
-            let p = p.downcast_exact::<PyTuple>()?;
-            let p = p.get_item(0)?;
-            let p = p.call_method0(intern!(py, "subscribe"))?;
-            if p.is_none() {
-                result.push(i);
-            } else {
-                let p = p.downcast_exact::<PyPollable>()?;
-                let mut p = p.borrow_mut();
-                if p.ready() {
-                    p.release();
-                    result.push(i);
-                } else {
-                    refs.push((i, p));
+    #[pyo3(signature = (poll))]
+    fn poll<'py>(poll: &Bound<'py, PyList>) -> PyResult<Option<Bound<'py, PyBytes>>> {
+        let (pollables, ready_count) = poll.iter().try_fold(
+            (SmallVec::<[_; 8]>::with_capacity(poll.len()), 0),
+            |(mut vec, mut count), p| -> PyResult<_> {
+                let pollable =
+                    Pollable::subscribe(p.downcast_exact::<PyTuple>()?.get_borrowed_item(0)?)?;
+                if pollable.is_none() {
+                    count += 1;
                 }
-            }
-        }
-
-        if !result.is_empty() || !block {
-            for (_, p) in &mut refs {
-                p.release();
-            }
-            return PySet::new(py, result);
-        }
-
-        let handles = refs
-            .iter()
-            .map(|(_, p)| p.get_pollable())
-            .collect::<Vec<_>>();
-        let result = PySet::new(
-            py,
-            host_poll(&handles).into_iter().map(|idx| {
-                let (i, _) = refs[idx as usize];
-                i
-            }),
+                vec.push(pollable);
+                Ok((vec, count))
+            },
         )?;
-        for (_, p) in &mut refs {
-            p.release();
+        assert!(pollables.len() == poll.len());
+
+        let py = poll.py();
+        if ready_count > 0 {
+            Ok(Some(PyBytes::new(
+                py,
+                &pollables
+                    .into_iter()
+                    .map(|p| u8::from(p.is_none()))
+                    .collect::<SmallVec<[_; 8]>>(),
+            )))
+        } else {
+            let handles = pollables
+                .iter()
+                .map(|p| p.as_ref().unwrap().deref())
+                .collect::<SmallVec<[_; 8]>>();
+
+            let mut result: SmallVec<[_; 8]> = smallvec![0; poll.len()];
+            for index in host_poll(&handles) {
+                result[index as usize] = 1;
+            }
+            Ok(Some(PyBytes::new(py, &result)))
         }
-        Ok(result)
     }
 }
 

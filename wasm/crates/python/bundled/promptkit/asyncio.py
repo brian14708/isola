@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from collections import deque
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -36,18 +37,15 @@ async def subscribe[T](
     fut: "_promptkit_sys.Pollable[T]",
 ) -> T:
     loop = asyncio.get_running_loop()
-    if isinstance(loop, PollLoop):
-        waker = loop.add_waker(fut)
-        try:
-            await waker
-            return fut.get()
-        finally:
-            fut.release()
-    else:
-        raise RuntimeError("subscribe() must be called from a PollLoop context")
+    assert isinstance(loop, PollLoop), (
+        "subscribe() must be called from a PollLoop context"
+    )
+    return await loop.subscribe(fut)
 
 
 class PollLoop(asyncio.AbstractEventLoop):
+    __slots__ = ("wakers", "running", "closed", "handles")
+
     def __init__(self) -> None:
         self.wakers: list[
             tuple[
@@ -56,21 +54,19 @@ class PollLoop(asyncio.AbstractEventLoop):
         ] = []
         self.running: bool = False
         self.closed: bool = False
-        self.handles: list[asyncio.Handle] = []
+        self.handles: deque[asyncio.Handle] = deque()
 
-    def add_waker(
-        self, pollable: "_promptkit_sys.Pollable[object]"
-    ) -> asyncio.Future[object]:
+    def subscribe[T](self, pollable: "_promptkit_sys.Pollable[T]") -> asyncio.Future[T]:
         waker = self.create_future()
         self.wakers.append((pollable, waker))
-        return waker
+        return cast("asyncio.Future[T]", waker)
 
     @override
     def run_until_complete[T](self, future: "Awaitable[T]") -> T:
         try:
             self.running = True
             asyncio.events._set_running_loop(self)
-            return self._run_until_complete(future).result()
+            return self._run_until_complete(future)
         finally:
             self._cleanup()
             self.running = False
@@ -83,57 +79,53 @@ class PollLoop(asyncio.AbstractEventLoop):
             asyncio.events._set_running_loop(self)
 
             while True:
-                future = self._run_until_complete(anext(it))
-                exc = future.exception()
-                if exc is None:
-                    yield future.result()
-                elif isinstance(exc, StopAsyncIteration):
-                    return
-                else:
-                    raise exc
+                try:
+                    yield self._run_until_complete(anext(it))
+                except StopAsyncIteration:
+                    break
         finally:
             self._cleanup()
             self.running = False
             asyncio.events._set_running_loop(None)
 
-    def _run_until_complete[T](self, future: "Awaitable[T]") -> asyncio.Future[T]:
+    def _run_until_complete[T](self, future: "Awaitable[T]") -> T:
         future = asyncio.ensure_future(future, loop=self)
         while self.running and (self.handles or self.wakers) and (not future.done()):
-            if self.wakers:
-                wakers = self.wakers
-                self.wakers = []
-                ready_indices_set = _promptkit_sys.poll(wakers, len(self.handles) == 0)
-                for i, (pollable, waker) in enumerate(wakers):
-                    if i in ready_indices_set:
-                        if isinstance(waker, asyncio.Handle):
-                            self.handles.append(waker)
-                        elif not waker.cancelled():
-                            waker.set_result(None)
-                    else:
-                        self.wakers.append((pollable, waker))
-
-            if self.handles:
-                handles = self.handles
-                self.handles = []
-                for handle in handles:
-                    if not handle._cancelled:
-                        handle._run()
-
-        return future
-
-    def _cleanup(self) -> None:
-        while self.handles or self.wakers:
-            handles = self.handles
-            self.handles = []
-            for handle in handles:
+            while self.handles:
+                handle = self.handles.popleft()
                 if not handle._cancelled:
                     handle._run()
 
-            wakers = self.wakers
-            self.wakers = []
-            for pollable, waker in wakers:
-                _ = waker.cancel()
+            if self.wakers and (readyset := _promptkit_sys.poll(self.wakers)):
+                new_wakers = []
+                for is_ready, (pollable, waker) in zip(
+                    readyset, self.wakers, strict=True
+                ):
+                    if is_ready:
+                        if isinstance(waker, asyncio.Handle):
+                            self.handles.append(waker)
+                        elif not waker.cancelled():
+                            waker.set_result(pollable.get())
+                            pollable.release()
+                    else:
+                        new_wakers.append((pollable, waker))
+                self.wakers = new_wakers
+
+        if not future.done():
+            future.cancel()
+        return future.result()
+
+    def _cleanup(self) -> None:
+        while self.handles or self.wakers:
+            while self.handles:
+                handle = self.handles.popleft()
+                if not handle._cancelled:
+                    handle._run()
+
+            for pollable, waker in self.wakers:
+                waker.cancel()
                 pollable.release()
+            self.wakers.clear()
 
     @override
     def is_running(self) -> bool:
@@ -191,11 +183,15 @@ class PollLoop(asyncio.AbstractEventLoop):
         return self.call_later(when - self.time(), callback, *args, context=context)
 
     def _timer_handle_cancelled(self, handle: asyncio.TimerHandle) -> None:
-        for i, (pollable, waker) in enumerate(self.wakers):
-            if waker == handle:
-                _ = self.wakers.pop(i)
+        w = self.wakers
+        ln = len(w)
+        for i in range(ln):
+            pollable, waker = w[i]
+            if waker is handle:
                 pollable.release()
-                break
+                w[i] = w[ln - 1]
+                w.pop()
+                return
 
     @override
     def time(self) -> float:
@@ -247,14 +243,11 @@ class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
         return PollLoop()  # type: ignore[abstract]
 
 
-def _iter[T](runner: asyncio.Runner, it: "AsyncGenerator[T]") -> "Generator[T]":
-    loop = runner.get_loop()
-    if not isinstance(loop, PollLoop):
-        raise RuntimeError("runner.get_loop() must return a PollLoop")
-    try:
+def _iter[T](it: "AsyncGenerator[T]") -> "Generator[T]":
+    with asyncio.Runner() as runner:
+        loop = runner.get_loop()
+        assert isinstance(loop, PollLoop), "runner.get_loop() must return a PollLoop"
         yield from loop.run_async_generator(it)
-    finally:
-        runner.close()
 
 
 @overload
@@ -262,10 +255,9 @@ def run[T](main: "_Coroutine[T]") -> T: ...
 @overload
 def run[T](main: "AsyncGenerator[T]") -> "Generator[T]": ...
 def run[T](main: "_Coroutine[T] | AsyncGenerator[T]") -> "T | Generator[T]":
-    runner = asyncio.Runner()
     if hasattr(main, "__aiter__"):
-        return _iter(runner, cast("AsyncGenerator[T]", main))
-    with runner:
+        return _iter(cast("AsyncGenerator[T]", main))
+    with asyncio.Runner() as runner:
         return runner.run(cast("Coroutine[None, None, T]", main))
 
 

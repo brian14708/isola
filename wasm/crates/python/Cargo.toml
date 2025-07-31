@@ -19,6 +19,7 @@ pyo3 = { workspace = true, features = ["abi3"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
+smallvec = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 wit-bindgen = { workspace = true, features = ["macros"] }
