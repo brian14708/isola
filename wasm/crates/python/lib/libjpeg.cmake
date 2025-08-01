@@ -16,7 +16,7 @@ ExternalProject_Add(
              -DENABLE_SHARED=OFF
              -DCMAKE_POSITION_INDEPENDENT_CODE=ON
              -DCMAKE_C_FLAGS=-mllvm\ -wasm-enable-sjlj
-  PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/libjpeg.patch)
+             -DCMAKE_EXE_LINKER_FLAGS=-lsetjmp)
 
 add_library(jpeg STATIC IMPORTED GLOBAL)
 add_dependencies(jpeg jpeg-build)

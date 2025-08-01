@@ -13,10 +13,11 @@ ExternalProject_Add(
   CONFIGURE_COMMAND
     cmake -E env CC=${CMAKE_C_COMPILER} CC_BUILD=$ENV{CC}
     CXX=${CMAKE_CXX_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
-    LD=${CMAKE_LINKER} CFLAGS=-fPIC <SOURCE_DIR>/configure
-    --prefix=<INSTALL_DIR> --host=wasm32-wasi --with-brotli=no --with-bzip2=no
-    --with-zlib=no --with-png=no --with-sysroot=${WASMLIB_SYSROOT}
-    --with-harfbuzz=no)
+    LD=${CMAKE_LINKER} CFLAGS=-fPIC ZLIB_CFLAGS=-I${WASMLIB_SYSROOT}/include
+    <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --host=wasm32-wasi
+    --with-brotli=no --with-bzip2=no --with-png=no
+    --with-sysroot=${WASMLIB_SYSROOT} --with-harfbuzz=no
+  DEPENDS zlib)
 
 add_library(freetype STATIC IMPORTED GLOBAL)
 add_dependencies(freetype freetype-build)

@@ -30,6 +30,6 @@ ExternalProject_Add(
   INSTALL_COMMAND
     ${Python3_EXECUTABLE} <SOURCE_DIR>/vendored-meson/meson/meson.py install
     --no-rebuild --tags=runtime,python-runtime,devel
-  DEPENDS python)
+  DEPENDS python python-stub)
 
 install(DIRECTORY ${CMAKE_BINARY_DIR}/pythonpkgs/ DESTINATION usr/local)

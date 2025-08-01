@@ -25,7 +25,7 @@ ExternalProject_Add(
     PKG_CONFIG_LIBDIR=${WASMLIB_SYSROOT}/lib/pkgconfig CC=${CMAKE_C_COMPILER}
     CXX=${CMAKE_CXX_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
     CFLAGS=-fPIC\ -I${WASMLIB_SYSROOT}/usr/local/include/python3.13\ -I${WASMLIB_SYSROOT}/include/wasm32-wasip1
-    LDFLAGS=-L${WASMLIB_SYSROOT}/lib/wasm32-wasip1\ ${CMAKE_BINARY_DIR}/libpython3.13.so\ -ldl
+    LDFLAGS=-L${WASMLIB_SYSROOT}/lib/wasm32-wasip1\ ${CMAKE_BINARY_DIR}/libpython3.13.so\ -ldl\ ${WASMLIB_SYSROOT}/lib/libz.a
     -- ${Python3_EXECUTABLE} <SOURCE_DIR>/setup.py install
     --prefix=${CMAKE_BINARY_DIR}/pythonpkgs --single-version-externally-managed
     --root=/

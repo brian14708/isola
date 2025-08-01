@@ -98,7 +98,7 @@ fn build_python(sh: &Shell) -> Result<()> {
             }
 
             let mut libs = vec![
-                lib("", &inp[0], false),
+                lib("libpromptkit_python.so", &inp[0], false),
                 lib(
                     "libc.so",
                     format!("target/{TARGET}/wasi-deps/lib/libc.so"),
@@ -141,7 +141,7 @@ fn build_python(sh: &Shell) -> Result<()> {
                 let filename = entry
                     .to_str()
                     .unwrap()
-                    .replace(&base, "/usr/local/lib/python3.13/site-packages/");
+                    .replace(&format!("target/{TARGET}/wasi-deps/"), "/");
                 libs.push(lib(filename, entry, true));
             }
 
@@ -166,7 +166,7 @@ fn build_python(sh: &Shell) -> Result<()> {
             }
             let wasm = wasm
                 .adapter(
-                    "wasi_snapshot_preview1",
+                    wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
                     wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
                 )?
                 .encode()?;

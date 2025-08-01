@@ -24,8 +24,9 @@ ExternalProject_Add(
   INSTALL_DIR ${WASMLIB_SYSROOT}
   EXCLUDE_FROM_ALL TRUE
   CONFIGURE_COMMAND
-    CFLAGS=-fPIC CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
+    CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env cmake -E env
+    CFLAGS=-fPIC\ -fno-semantic-interposition
     PKG_CONFIG_SYSROOT_DIR= -- <SOURCE_DIR>/configure --prefix=/usr/local
     --host=wasm32-wasi --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
@@ -71,3 +72,7 @@ target_link_libraries(
 install(TARGETS python DESTINATION lib)
 install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
         DESTINATION include)
+
+add_library(python-stub STATIC ${CMAKE_BINARY_DIR}/python-stub.c)
+set_target_properties(python-stub PROPERTIES OUTPUT_NAME
+                                             python${PYTHON_VERSION})

@@ -19,13 +19,13 @@ elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
 else()
   message(FATAL_ERROR "Unsupported host OS: ${CMAKE_HOST_SYSTEM_NAME}")
 endif()
-set(WASI_SDK_VERSION 25)
+set(WASI_SDK_VERSION 27)
 set(WASI_SHA256_x86_64-linux
-    "52640dde13599bf127a95499e61d6d640256119456d1af8897ab6725bcf3d89c")
+    "b7d4d944c88503e4f21d84af07ac293e3440b1b6210bfd7fe78e0afd92c23bc2")
 set(WASI_SHA256_arm64-linux
-    "47fccad8b2498f2239e05e1115c3ffc652bf37e7de2f88fb64b2d663c976ce2d")
+    "4cf4c553c4640e63e780442146f87d83fdff5737f988c06a6e3b2f0228e37665")
 set(WASI_SHA256_arm64-macos
-    "e1e529ea226b1db0b430327809deae9246b580fa3cae32d31c82dfe770233587")
+    "055c3dc2766772c38e71a05d353e35c322c7b2c6458a36a26a836f9808a550f8")
 
 FetchContent_Declare(
   wasi-sdk
@@ -46,7 +46,7 @@ add_library(wasi INTERFACE)
 target_link_libraries(
   wasi
   INTERFACE
-    ${WASI_SDK_PATH}/lib/clang/19/lib/wasip1/libclang_rt.builtins-wasm32.a
+    ${WASI_SDK_PATH}/lib/clang/20/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-signal.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
     ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
