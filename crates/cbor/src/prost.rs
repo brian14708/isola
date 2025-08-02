@@ -221,7 +221,7 @@ impl<'de> Deserializer<'de> for ProstValue<'de> {
         V: Visitor<'de>,
     {
         match &self.0.kind {
-            Some(prost_types::value::Kind::StringValue(s)) => visitor.visit_string(s.clone()),
+            Some(prost_types::value::Kind::StringValue(s)) => visitor.visit_str(s),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -241,9 +241,7 @@ impl<'de> Deserializer<'de> for ProstValue<'de> {
         V: Visitor<'de>,
     {
         match &self.0.kind {
-            Some(prost_types::value::Kind::StringValue(s)) => {
-                visitor.visit_byte_buf(s.clone().into_bytes())
-            }
+            Some(prost_types::value::Kind::StringValue(s)) => visitor.visit_bytes(s.as_bytes()),
             _ => Err(self.invalid_type(&visitor)),
         }
     }
@@ -501,7 +499,9 @@ impl serde::ser::Serializer for ProstValueSerializer {
         })
     }
     fn serialize_char(self, v: char) -> Result<Self::Ok, Self::Error> {
-        self.serialize_str(&v.to_string())
+        let mut buf = [0; 4];
+        let s = v.encode_utf8(&mut buf);
+        self.serialize_str(s)
     }
     fn serialize_str(self, v: &str) -> Result<Self::Ok, Self::Error> {
         Ok(prost_types::Value {
