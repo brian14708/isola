@@ -37,8 +37,10 @@ class Request:
         return self.response
 
     async def __aexit__(self, _type, _value, _trace):
-        await self.response.aclose()
-        await self.client.aclose()
+        if self.response is not None:
+            await self.response.aclose()
+        if self.client is not None:
+            await self.client.aclose()
 
     def __enter__(self):
         self.client = httpx.Client(timeout=self.timeout)
@@ -46,8 +48,10 @@ class Request:
         return self.response
 
     def __exit__(self, _type, _value, _trace):
-        self.response.close()
-        self.client.close()
+        if self.response is not None:
+            self.response.close()
+        if self.client is not None:
+            self.client.close()
 
 
 class Response:

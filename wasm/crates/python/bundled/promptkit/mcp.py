@@ -10,7 +10,7 @@ __all__ = ["sse_connect"]
 
 class Session:
     def __init__(self, url, headers):
-        self.queue = asyncio.Queue(8)
+        self.queue: asyncio.Queue = asyncio.Queue(8)
         self.url = url
         self.headers = headers
         self.id = 1

@@ -38,6 +38,9 @@ select = [
 [tool.ruff.lint.flake8-type-checking]
 quote-annotations = true
 
+[tool.mypy]
+check_untyped_defs = true
+
 [[tool.mypy.overrides]]
 module = ["stub.*"]
 disable_error_code = ["arg-type"]

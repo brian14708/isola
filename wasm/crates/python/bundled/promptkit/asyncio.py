@@ -234,7 +234,7 @@ class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
         return cls._instance
 
     def __init__(self) -> None:
-        if not hasattr(self, '_initialized'):
+        if not hasattr(self, "_initialized"):
             self._loop: asyncio.AbstractEventLoop | None = None
             self._initialized = True
 

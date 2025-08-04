@@ -10,8 +10,8 @@ class WebSocketTestServer:
     def __init__(self, host: str = "localhost", port: int = 0):
         self.host = host
         self.port = port
-        self.server = None
-        self.url = None
+        self.server: websockets.asyncio.server.Server | None = None
+        self.url: str | None = None
 
     async def echo_handler(self, websocket):
         """Echo server that returns received messages"""
@@ -34,8 +34,9 @@ class WebSocketTestServer:
             self.echo_handler, self.host, self.port
         )
         # Get the actual port if 0 was specified
-        actual_port = self.server.sockets[0].getsockname()[1]
-        self.url = f"ws://{self.host}:{actual_port}"
+        if self.server is not None:
+            actual_port = next(iter(self.server.sockets)).getsockname()[1]
+            self.url = f"ws://{self.host}:{actual_port}"
 
     async def stop_server(self):
         if self.server:

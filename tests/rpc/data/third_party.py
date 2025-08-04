@@ -66,7 +66,7 @@ def pydantic():
     class Sanity(BaseModel):
         n: int
 
-    s = Sanity(n="5")
+    s = Sanity(n=5)
     assert json.loads(s.json())["n"] == 5
 
 
@@ -75,5 +75,6 @@ def tzdata():
     from zoneinfo import ZoneInfo
 
     now_tokyo = datetime.now(ZoneInfo("Asia/Tokyo"))
-    tokyo_offset = now_tokyo.utcoffset().total_seconds() / 3600
+    utc_offset = now_tokyo.utcoffset()
+    tokyo_offset = utc_offset.total_seconds() / 3600 if utc_offset is not None else 0.0
     assert tokyo_offset == 9.0, f"Asia/Tokyo offset != +9: {tokyo_offset}"
