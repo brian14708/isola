@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 __all__ = [
     "run",
     "subscribe",
+    "WasiEventLoopPolicy",
 ]
 
 with contextlib.suppress(ImportError):
@@ -225,8 +226,17 @@ class PollLoop(asyncio.AbstractEventLoop):
 
 
 class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
+    _instance: "WasiEventLoopPolicy | None" = None
+
+    def __new__(cls) -> "WasiEventLoopPolicy":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self) -> None:
-        self._loop: asyncio.AbstractEventLoop | None = None
+        if not hasattr(self, '_initialized'):
+            self._loop: asyncio.AbstractEventLoop | None = None
+            self._initialized = True
 
     @override
     def get_event_loop(self) -> asyncio.AbstractEventLoop:
