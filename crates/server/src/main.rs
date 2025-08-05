@@ -47,8 +47,6 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn async_main() -> anyhow::Result<()> {
-    let _provider = init_tracing()?;
-
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
@@ -57,6 +55,7 @@ async fn async_main() -> anyhow::Result<()> {
             Ok(())
         }
         None | Some("serve") => {
+            let _provider = init_tracing()?;
             let state = routes::AppState::new("wasm/target/promptkit_python.wasm").await?;
             let app = routes::router(&state);
 
