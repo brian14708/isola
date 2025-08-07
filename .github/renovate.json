@@ -46,7 +46,7 @@
     },
     {
       "matchPackageNames": [
-        "lucid-react"
+        "lucide-react"
       ],
       "extends": [
         "schedule:weekly"
