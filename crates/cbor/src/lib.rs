@@ -1,9 +1,11 @@
 #![warn(clippy::pedantic)]
 #![forbid(unsafe_code)]
 
+use std::convert::Infallible;
 use std::error::Error as StdError;
 use std::io::{self, Write};
 
+use bytes::{Bytes, BytesMut};
 use serde::Serialize;
 
 #[cfg(feature = "prost")]
@@ -29,12 +31,12 @@ impl serde_json::ser::Formatter for Base64Formatter {
 ///
 /// # Errors
 /// Returns error if JSON parsing or CBOR serialization fails.
-pub fn json_to_cbor(json: &str) -> Result<Vec<u8>, Error> {
-    let mut serializer = minicbor_serde::Serializer::new(vec![]);
+pub fn json_to_cbor(json: &str) -> Result<Bytes, Error> {
+    let mut serializer = minicbor_serde::Serializer::new(CborBytesMut::default());
     serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(json))
         .serialize(serializer.serialize_unit_as_null(true))
         .map_err(Box::new)?;
-    Ok(serializer.into_encoder().into_writer())
+    Ok(serializer.into_encoder().into_writer().freeze())
 }
 
 /// Convert CBOR bytes to JSON string.
@@ -57,12 +59,12 @@ pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
 ///
 /// # Errors
 /// Returns error if CBOR serialization fails.
-pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Vec<u8>, Error> {
-    let mut o = vec![];
+pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Bytes, Error> {
+    let mut o = CborBytesMut::default();
     serde_transcode::Transcoder::new(prost::ProstValue::new(prost))
         .serialize(&mut minicbor_serde::Serializer::new(&mut o))
         .map_err(Box::new)?;
-    Ok(o)
+    Ok(o.freeze())
 }
 
 #[cfg(feature = "prost")]
@@ -82,10 +84,10 @@ pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
 ///
 /// # Errors
 /// Returns error if serialization fails.
-pub fn to_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
-    let mut serializer = minicbor_serde::Serializer::new(vec![]);
+pub fn to_cbor<T: Serialize>(value: &T) -> Result<Bytes, Error> {
+    let mut serializer = minicbor_serde::Serializer::new(CborBytesMut::default());
     value.serialize(serializer.serialize_unit_as_null(true))?;
-    Ok(serializer.into_encoder().into_writer())
+    Ok(serializer.into_encoder().into_writer().freeze())
 }
 
 /// Deserialize CBOR bytes to any deserializable type.
@@ -95,6 +97,29 @@ pub fn to_cbor<T: Serialize>(value: &T) -> Result<Vec<u8>, Error> {
 pub fn from_cbor<T: serde::de::DeserializeOwned>(cbor: &[u8]) -> Result<T, Error> {
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
     Ok(T::deserialize(&mut deserializer).map_err(Box::new)?)
+}
+
+struct CborBytesMut(BytesMut);
+
+impl CborBytesMut {
+    fn freeze(self) -> Bytes {
+        self.0.freeze()
+    }
+}
+
+impl Default for CborBytesMut {
+    fn default() -> Self {
+        CborBytesMut(BytesMut::new())
+    }
+}
+
+impl minicbor::encode::Write for CborBytesMut {
+    type Error = Infallible;
+
+    fn write_all(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+        self.0.extend_from_slice(buf);
+        Ok(())
+    }
 }
 
 #[cfg(test)]

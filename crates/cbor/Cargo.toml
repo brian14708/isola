@@ -10,6 +10,8 @@ prost = ["dep:prost-types"]
 
 [dependencies]
 base64 = { workspace = true }
+bytes = { workspace = true }
+minicbor = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
 prost-types = { workspace = true, optional = true }
 serde = { workspace = true }

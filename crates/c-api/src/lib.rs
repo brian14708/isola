@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use bytes::Bytes;
 use promptkit_executor::{
     VmManager,
     vm::{OutputCallback, Vm, VmRun},
@@ -163,7 +164,7 @@ unsafe impl Send for Callback {}
 unsafe impl Sync for Callback {}
 
 impl OutputCallback for Callback {
-    async fn on_result(&mut self, item: Vec<u8>) -> std::result::Result<(), anyhow::Error> {
+    async fn on_result(&mut self, item: Bytes) -> std::result::Result<(), anyhow::Error> {
         let data = promptkit_cbor::cbor_to_json(&item).unwrap();
         (self.callback)(
             CallbackEvent::ResultJson,
@@ -174,7 +175,7 @@ impl OutputCallback for Callback {
         Ok(())
     }
 
-    async fn on_end(&mut self, item: Vec<u8>) -> std::result::Result<(), anyhow::Error> {
+    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), anyhow::Error> {
         if item.is_empty() {
             (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         } else {
@@ -266,7 +267,7 @@ impl VmHandle<'_> {
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
             VmInner::Running { run } => {
-                let args = args
+                let mut args = args
                     .into_iter()
                     .map(|arg| match arg {
                         RawArgument::Json(name, value) => {
@@ -274,21 +275,29 @@ impl VmHandle<'_> {
                             let json_str = std::str::from_utf8(&value).map_err(|_| {
                                 Error::InvalidArgument("Invalid UTF-8 in JSON argument")
                             })?;
-                            let cbor_data = promptkit_cbor::json_to_cbor(json_str)
-                                .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
-                            Ok(promptkit_executor::vm::exports::Argument {
+                            Ok((
                                 name,
-                                value: promptkit_executor::vm::exports::Value::Cbor(cbor_data),
-                            })
+                                promptkit_cbor::json_to_cbor(json_str)
+                                    .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?,
+                            ))
                         }
                     })
                     .collect::<Result<Vec<_>>>()?;
+                let mut new_args = vec![];
+                for a in &mut args {
+                    new_args.push(promptkit_executor::vm::exports::Argument {
+                        name: a.0.as_deref(),
+                        value: promptkit_executor::vm::exports::Value::Cbor(AsRef::<[u8]>::as_ref(
+                            &a.1,
+                        )),
+                    });
+                }
                 self.ctx
                     .rt
                     .block_on(run.exec(|guest, store| async move {
                         tokio::time::timeout(
                             Duration::from_millis(timeout_in_ms),
-                            guest.call_call_func(store, func, &args),
+                            guest.call_call_func(store, func, &new_args),
                         )
                         .await
                     }))

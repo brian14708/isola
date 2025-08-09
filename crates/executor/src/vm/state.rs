@@ -1,5 +1,6 @@
 use std::{future::Future, path::Path};
 
+use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -24,12 +25,9 @@ use crate::{
 };
 
 pub trait OutputCallback: Send {
-    fn on_result(
-        &mut self,
-        item: Vec<u8>,
-    ) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
+    fn on_result(&mut self, item: Bytes) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 
-    fn on_end(&mut self, item: Vec<u8>) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
+    fn on_end(&mut self, item: Bytes) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
 }
 
 pub struct VmRunState<E: EnvHandle> {
@@ -182,11 +180,13 @@ impl<E: EnvHandle> HostView for VmState<E> {
                 self.output_buffer.append(new_data);
             }
             EmitValue::End(new_data) => {
-                let output = self.output_buffer.take(new_data);
+                self.output_buffer.append(new_data);
+                let output = self.output_buffer.take();
                 run.output.on_end(output).await?;
             }
             EmitValue::PartialResult(new_data) => {
-                let output = self.output_buffer.take(new_data);
+                self.output_buffer.append(new_data);
+                let output = self.output_buffer.take();
                 run.output.on_result(output).await?;
             }
         }
@@ -194,27 +194,20 @@ impl<E: EnvHandle> HostView for VmState<E> {
     }
 }
 
-struct OutputBuffer(Option<Vec<u8>>);
+struct OutputBuffer(BytesMut);
 
 impl OutputBuffer {
     fn new() -> Self {
-        Self(None)
+        Self(BytesMut::new())
     }
 
-    fn append(&mut self, data: Vec<u8>) {
-        match &mut self.0 {
-            Some(buffer) => buffer.extend(data),
-            None => self.0 = Some(data),
-        }
+    #[inline]
+    fn append(&mut self, data: Bytes) {
+        self.0.extend(data);
     }
 
-    fn take(&mut self, data: Vec<u8>) -> Vec<u8> {
-        match self.0.take() {
-            Some(mut existing) => {
-                existing.extend(data);
-                existing
-            }
-            None => data,
-        }
+    #[inline]
+    fn take(&mut self) -> Bytes {
+        std::mem::take(&mut self.0).freeze()
     }
 }

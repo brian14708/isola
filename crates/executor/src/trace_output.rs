@@ -78,7 +78,7 @@ impl Pollable for TraceOutputStream {
 impl OutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
         if bytes.len() + self.buffer.len() < MIN_BUFFER {
-            self.buffer.extend_from_slice(&bytes);
+            self.buffer.extend(bytes);
             return Ok(());
         }
 
@@ -113,7 +113,7 @@ impl OutputStream for TraceOutputStream {
         self.record(&s);
         self.buffer.clear();
         if !v.is_empty() {
-            self.buffer.extend_from_slice(&v);
+            self.buffer.extend(v);
         }
         Ok(())
     }
@@ -147,7 +147,7 @@ impl OutputStream for TraceOutputStream {
         self.record(&s);
         self.buffer.clear();
         if !v.is_empty() {
-            self.buffer.extend_from_slice(&v);
+            self.buffer.extend(v);
         }
 
         Ok(())

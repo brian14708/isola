@@ -1,5 +1,6 @@
 use std::pin::Pin;
 
+use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use tokio_stream::Stream;
 use wasmtime::component::Resource;
@@ -13,35 +14,35 @@ use super::{
 };
 
 pub struct ValueIterator {
-    pub(crate) stream: Pin<Box<dyn Stream<Item = Vec<u8>> + Send>>,
-    pub(crate) peek: Option<Result<Vec<u8>, StreamError>>,
+    stream: Pin<Box<dyn Stream<Item = Bytes> + Send>>,
+    peek: Option<Result<Bytes, StreamError>>,
 }
 
 impl ValueIterator {
-    pub fn new(stream: impl Stream<Item = Vec<u8>> + Send + 'static) -> Self {
-        Self {
-            stream: Box::pin(stream),
-            peek: None,
-        }
+    #[must_use]
+    pub fn new(stream: Pin<Box<dyn Stream<Item = Bytes> + Send>>) -> Self {
+        Self { stream, peek: None }
     }
 
-    pub async fn next(&mut self) -> Result<Vec<u8>, StreamError> {
+    async fn next(&mut self) -> Result<Vec<u8>, StreamError> {
         match self.peek.take() {
-            Some(v) => v,
+            Some(Ok(v)) => Ok(v.into()),
+            Some(Err(e)) => Err(e),
             None => match self.stream.next().await {
-                Some(v) => Ok(v),
+                Some(v) => Ok(v.into()),
                 None => Err(StreamError::Closed),
             },
         }
     }
 
-    pub fn try_next(&mut self) -> Option<Result<Vec<u8>, StreamError>> {
+    fn try_next(&mut self) -> Option<Result<Vec<u8>, StreamError>> {
         match self.peek.take() {
-            Some(v) => Some(v),
+            Some(Ok(v)) => Some(Ok(v.into())),
+            Some(Err(e)) => Some(Err(e)),
             None => match self.stream.next().now_or_never() {
                 None => None,
                 Some(None) => Some(Err(StreamError::Closed)),
-                Some(Some(v)) => Some(Ok(v)),
+                Some(Some(v)) => Some(Ok(v.into())),
             },
         }
     }
@@ -66,10 +67,12 @@ impl<T: HostView> Host for super::HostImpl<T> {
         cbor: Vec<u8>,
     ) -> wasmtime::Result<()> {
         let emit_value = match emit_type {
-            super::promptkit::script::host::EmitType::Continuation => EmitValue::Continuation(cbor),
-            super::promptkit::script::host::EmitType::End => EmitValue::End(cbor),
+            super::promptkit::script::host::EmitType::Continuation => {
+                EmitValue::Continuation(cbor.into())
+            }
+            super::promptkit::script::host::EmitType::End => EmitValue::End(cbor.into()),
             super::promptkit::script::host::EmitType::PartialResult => {
-                EmitValue::PartialResult(cbor)
+                EmitValue::PartialResult(cbor.into())
             }
         };
         self.0.emit(emit_value).await

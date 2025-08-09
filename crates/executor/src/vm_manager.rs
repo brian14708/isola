@@ -9,27 +9,26 @@ use std::{
 };
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use component_init_transform::Invoker;
 use futures::FutureExt;
 use pin_project_lite::pin_project;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use tokio::{io::AsyncWriteExt, sync::mpsc, task::JoinHandle};
+use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 use tracing::{info, level_filters::LevelFilter};
 use wasmtime::{
     Config, Engine, Store,
     component::{Component, Instance},
 };
-use zip::ZipArchive;
 
 use crate::{
+    Argument, Source, StreamItem,
     env::{BoxedStream, Env, EnvHandle, EnvHttp, WebsocketMessage},
-    error::{Error, Result},
-    vm::{
-        OutputCallback, SandboxPre, Vm, VmState,
-        exports::{Argument, Value},
-    },
+    error::Result,
+    types::ArgumentOwned,
+    vm::{OutputCallback, SandboxPre, Vm, VmState},
     vm_cache::VmCache,
     wasm::logging::bindings::logging::Level,
 };
@@ -45,36 +44,30 @@ pub struct VmManager<E: EnvHandle> {
     _env: std::marker::PhantomData<E>,
 }
 
-pub enum ExecStreamItem {
-    Data(Vec<u8>),
-    End(Option<Vec<u8>>),
-    Error(Error),
-}
-
 pub struct MpscOutputCallback {
-    sender: mpsc::Sender<ExecStreamItem>,
+    sender: mpsc::Sender<StreamItem>,
 }
 
 impl MpscOutputCallback {
     #[must_use]
-    pub fn new(sender: mpsc::Sender<ExecStreamItem>) -> Self {
+    pub fn new(sender: mpsc::Sender<StreamItem>) -> Self {
         Self { sender }
     }
 }
 
 impl OutputCallback for MpscOutputCallback {
-    async fn on_result(&mut self, item: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn on_result(&mut self, item: Bytes) -> Result<(), anyhow::Error> {
         let sender = self.sender.clone();
         sender
-            .send(ExecStreamItem::Data(item))
+            .send(StreamItem::Data(item))
             .await
             .map_err(|e| anyhow!("Send error: {}", e))
     }
 
-    async fn on_end(&mut self, item: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn on_end(&mut self, item: Bytes) -> Result<(), anyhow::Error> {
         let sender = self.sender.clone();
         sender
-            .send(ExecStreamItem::End(if item.is_empty() {
+            .send(StreamItem::End(if item.is_empty() {
                 None
             } else {
                 Some(item)
@@ -82,21 +75,6 @@ impl OutputCallback for MpscOutputCallback {
             .await
             .map_err(|e| anyhow!("Send error: {}", e))
     }
-}
-
-pub enum ExecArgumentValue {
-    Cbor(Vec<u8>),
-    CborStream(mpsc::Receiver<Vec<u8>>),
-}
-
-pub struct ExecArgument {
-    pub name: Option<String>,
-    pub value: ExecArgumentValue,
-}
-
-pub enum ExecSource {
-    Script(String, String),
-    Bundle(Vec<u8>),
 }
 
 #[derive(serde::Deserialize)]
@@ -324,11 +302,11 @@ where
     fn exec_impl(
         &self,
         func: String,
-        args: SmallVec<[Argument; 2]>,
+        mut args: SmallVec<[ArgumentOwned; 2]>,
         vm: Vm<E>,
         env: E,
         level: LevelFilter,
-    ) -> impl Stream<Item = ExecStreamItem> + Send + use<E> {
+    ) -> impl Stream<Item = StreamItem> + Send + use<E> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
@@ -348,7 +326,11 @@ where
                             },
                         )
                         .await;
-                    vm.call_call_func(&mut store, &func, &args).await
+                    let new_args = args
+                        .iter_mut()
+                        .map(|a| a.as_value())
+                        .collect::<SmallVec<[_; 2]>>();
+                    vm.call_call_func(&mut store, &func, &new_args).await
                 })
                 .await;
             match ret {
@@ -356,10 +338,10 @@ where
                     cache.put(run.reuse());
                 }
                 Ok(Err(err)) => {
-                    _ = tx.send(ExecStreamItem::Error(err.into())).await;
+                    _ = tx.send(StreamItem::Error(err.into())).await;
                 }
                 Err(err) => {
-                    _ = tx.send(ExecStreamItem::Error(err.into())).await;
+                    _ = tx.send(StreamItem::Error(err.into())).await;
                 }
             }
         });
@@ -376,20 +358,20 @@ where
     pub async fn exec(
         &self,
         id: &str,
-        script: ExecSource,
+        script: Source,
         func: String,
-        args: Vec<ExecArgument>,
+        args: Vec<Argument>,
         env: E,
         level: LevelFilter,
-    ) -> Result<impl Stream<Item = ExecStreamItem> + Send + use<E>> {
+    ) -> Result<impl Stream<Item = StreamItem> + Send + use<E>> {
         let mut hasher = Sha256::new();
         hasher.update(id);
         match &script {
-            ExecSource::Script(p, s) => {
-                hasher.update(p);
-                hasher.update(s);
+            Source::Script { prelude, code } => {
+                hasher.update(prelude);
+                hasher.update(code);
             }
-            ExecSource::Bundle(b) => hasher.update(b),
+            Source::Bundle(b) => hasher.update(b),
         }
         let hash = hasher.finalize().into();
 
@@ -399,7 +381,7 @@ where
         } else {
             let mut vm = self.create(hash).await?;
             match script {
-                ExecSource::Script(prelude, script) => {
+                Source::Script { prelude, code } => {
                     if !prelude.is_empty() {
                         vm.sandbox
                             .promptkit_script_guest()
@@ -408,12 +390,12 @@ where
                     }
                     vm.sandbox
                         .promptkit_script_guest()
-                        .call_eval_script(&mut vm.store, &script)
+                        .call_eval_script(&mut vm.store, &code)
                         .await??;
                 }
-                ExecSource::Bundle(bundle) => {
+                Source::Bundle(bundle) => {
                     let base = vm.workdir.path();
-                    extract_zip(bundle, base).await?;
+                    Source::extract_zip(bundle, base).await?;
                     let manifest: Manifest = serde_json::from_str(
                         &tokio::fs::read_to_string(base.join("manifest.json"))
                             .await
@@ -440,26 +422,12 @@ where
             vm
         };
 
-        Ok(self.exec_impl(
-            func,
-            args.into_iter()
-                .map(|a| {
-                    Ok(Argument {
-                        name: a.name,
-                        value: match a.value {
-                            ExecArgumentValue::Cbor(a) => Value::Cbor(a),
-                            ExecArgumentValue::CborStream(s) => Value::CborIterator(
-                                vm.new_iter(ReceiverStream::new(s))
-                                    .map_err(anyhow::Error::from)?,
-                            ),
-                        },
-                    })
-                })
-                .collect::<anyhow::Result<_>>()?,
-            vm,
-            env.clone(),
-            level,
-        ))
+        let args = args
+            .into_iter()
+            .map(|a| a.into_owned(&mut vm))
+            .collect::<anyhow::Result<_>>()?;
+
+        Ok(self.exec_impl(func, args, vm, env.clone(), level))
     }
 }
 
@@ -607,53 +575,10 @@ impl EnvHttp for CompileEnv {
 }
 
 impl OutputCallback for CompileEnv {
-    async fn on_result(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn on_result(&mut self, _item: Bytes) -> Result<(), anyhow::Error> {
         anyhow::bail!("unsupported during compilation")
     }
-    async fn on_end(&mut self, _item: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn on_end(&mut self, _item: Bytes) -> Result<(), anyhow::Error> {
         anyhow::bail!("unsupported during compilation")
     }
-}
-
-async fn extract_zip(data: impl Into<Vec<u8>>, dest: &Path) -> anyhow::Result<()> {
-    let data = data.into();
-    let cursor = std::io::Cursor::new(data);
-    let mut archive = ZipArchive::new(cursor)?;
-    let mut dirs = std::collections::HashSet::new();
-    let mut buffer = vec![0u8; 16384]; // 16KB buffer reused across files
-
-    for i in 0..archive.len() {
-        let mut file = archive.by_index(i)?;
-        let outpath = match file.enclosed_name() {
-            Some(path) => dest.join(path),
-            None => continue,
-        };
-
-        if file.name().ends_with('/') {
-            // Directory
-            if !dirs.contains(&outpath) {
-                tokio::fs::create_dir_all(&outpath).await?;
-                dirs.insert(outpath);
-            }
-        } else {
-            // File
-            if let Some(p) = outpath.parent()
-                && !dirs.contains(p)
-            {
-                tokio::fs::create_dir_all(&p).await?;
-                dirs.insert(p.to_owned());
-            }
-
-            // Stream file contents in chunks
-            let mut out_file = tokio::fs::File::create(&outpath).await?;
-            loop {
-                let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
-                if bytes_read == 0 {
-                    break;
-                }
-                out_file.write_all(&buffer[..bytes_read]).await?;
-            }
-        }
-    }
-    Ok(())
 }

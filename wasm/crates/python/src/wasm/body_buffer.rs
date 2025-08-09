@@ -91,11 +91,7 @@ pub struct Bytes {
 
 impl BodyBuffer for Bytes {
     fn write(&mut self, data: Vec<u8>) {
-        if self.buffer.is_empty() {
-            self.buffer = data;
-        } else {
-            self.buffer.extend(data);
-        }
+        self.buffer.extend(data);
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -127,11 +123,7 @@ pub struct Lines {
 
 impl BodyBuffer for Lines {
     fn write(&mut self, data: Vec<u8>) {
-        if self.buffer.is_empty() {
-            self.buffer = data.into();
-        } else {
-            self.buffer.extend(data);
-        }
+        self.buffer.extend(data);
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -186,11 +178,7 @@ pub struct Json {
 
 impl BodyBuffer for Json {
     fn write(&mut self, data: Vec<u8>) {
-        if self.buffer.is_empty() {
-            self.buffer = data;
-        } else {
-            self.buffer.extend(data);
-        }
+        self.buffer.extend(data);
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -226,11 +214,7 @@ pub struct Text {
 
 impl BodyBuffer for Text {
     fn write(&mut self, data: Vec<u8>) {
-        if self.buffer.is_empty() {
-            self.buffer = data;
-        } else {
-            self.buffer.extend(data);
-        }
+        self.buffer.extend(data);
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -278,11 +262,7 @@ impl Default for ServerSentEvent {
 
 impl BodyBuffer for ServerSentEvent {
     fn write(&mut self, data: Vec<u8>) {
-        if self.buffer.is_empty() {
-            self.buffer = data.into();
-        } else {
-            self.buffer.extend(data);
-        }
+        self.buffer.extend(data);
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {

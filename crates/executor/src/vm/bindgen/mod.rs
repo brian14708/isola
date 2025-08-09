@@ -3,6 +3,9 @@ wasmtime::component::bindgen!({
     path: "../../apis/wit",
     async: true,
     trappable_imports: true,
+    ownership: Borrowing {
+        duplicate_if_necessary: true
+    },
     with: {
         "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::wasm::logging::bindings,
@@ -18,6 +21,7 @@ wasmtime::component::bindgen!({
 
 use std::future::Future;
 
+use bytes::Bytes;
 pub use exports::promptkit::script::guest;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::p2::IoView;
@@ -26,9 +30,9 @@ pub mod host;
 pub mod outgoing_websocket;
 
 pub enum EmitValue {
-    Continuation(Vec<u8>),
-    PartialResult(Vec<u8>),
-    End(Vec<u8>),
+    Continuation(Bytes),
+    PartialResult(Bytes),
+    End(Bytes),
 }
 
 pub trait HostView: IoView + Send {

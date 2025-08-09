@@ -1,10 +1,14 @@
 use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
-use futures::{Stream, StreamExt};
-use promptkit_executor::{ExecArgument, ExecArgumentValue, ExecStreamItem};
+use bytes::{BufMut, Bytes, BytesMut};
+use futures::{Stream, StreamExt, TryStreamExt};
+use promptkit_executor::{Argument, StreamItem};
 use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
 use tokio::{sync::mpsc, try_join};
-use tokio_stream::{once, wrappers::UnboundedReceiverStream};
+use tokio_stream::{
+    once,
+    wrappers::{ReceiverStream, UnboundedReceiverStream},
+};
 use tonic::{Response, Status};
 use tracing::{Instrument, Span, info_span, level_filters::LevelFilter};
 
@@ -67,15 +71,18 @@ impl ScriptService for ScriptServer {
             method,
             args,
             timeout,
-            stream_tx: None,
+            stream_tx,
             span,
             log_level,
-            trace_events: None,
+            trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
-        else {
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
-        };
+        }
+        if trace_events.is_some() {
+            return Err(Status::invalid_argument("unexpected trace events"));
+        }
         if !(method.is_empty() && args.is_empty()) {
             return Err(Status::invalid_argument("method & args not allowed"));
         }
@@ -86,17 +93,14 @@ impl ScriptService for ScriptServer {
 
         let result = async {
             let run = async {
-                let stream = self
+                let mut stream = self
                     .state
                     .vm
                     .exec(
                         "",
                         script,
                         "$analyze".to_string(),
-                        vec![ExecArgument {
-                            name: None,
-                            value: ExecArgumentValue::Cbor(req),
-                        }],
+                        vec![Argument::cbor(None, req)],
                         env,
                         log_level,
                     )
@@ -104,7 +108,8 @@ impl ScriptService for ScriptServer {
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
                     })?;
-                let m = non_stream_result(stream, [ContentType::Cbor as i32]).await?;
+                let m =
+                    non_stream_result(Pin::new(&mut stream), [ContentType::Cbor as i32]).await?;
                 match m.result_type {
                     Some(result::ResultType::Cbor(c)) => {
                         let r: ipc::AnalyzeResult = promptkit_cbor::from_cbor(&c).map_err(|e| {
@@ -143,15 +148,15 @@ impl ScriptService for ScriptServer {
             method,
             args,
             timeout,
-            stream_tx: None,
+            stream_tx,
             span,
             log_level,
             mut trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
-        else {
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
-        };
+        }
         let script = parse_source(request.get_mut().source.take())?;
         let ns = request
             .metadata()
@@ -161,7 +166,7 @@ impl ScriptService for ScriptServer {
 
         let result = async {
             let run = async {
-                let stream = self
+                let mut stream = self
                     .state
                     .vm
                     .exec(ns, script, method, args, env, log_level)
@@ -170,7 +175,7 @@ impl ScriptService for ScriptServer {
                         Status::invalid_argument(format!("failed to start script: {e}"))
                     })?;
                 non_stream_result(
-                    stream,
+                    Pin::new(&mut stream),
                     request.get_ref().result_content_type.iter().copied(),
                 )
                 .await
@@ -218,21 +223,21 @@ impl ScriptService for ScriptServer {
             method,
             args,
             timeout,
-            stream_tx: mut tx,
+            stream_tx,
             span,
             log_level,
             mut trace_events,
             env,
         } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
-        let (md, _, mut body) = request.into_parts();
+        let (md, _, body) = request.into_parts();
         let ns = md
             .get("x-app-id")
             .and_then(|s| s.to_str().ok())
             .unwrap_or("");
         let result = async {
             let run = async {
-                let stream = self
+                let mut stream = self
                     .state
                     .vm
                     .exec(ns, script, method, args, env, log_level)
@@ -240,7 +245,11 @@ impl ScriptService for ScriptServer {
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
                     })?;
-                non_stream_result(stream, initial.result_content_type.iter().copied()).await
+                non_stream_result(
+                    Pin::new(&mut stream),
+                    initial.result_content_type.iter().copied(),
+                )
+                .await
             };
             match tokio::time::timeout(timeout, run).await {
                 Ok(Ok(v)) => Ok(v),
@@ -259,42 +268,12 @@ impl ScriptService for ScriptServer {
             }
             Ok::<_, Status>(metadata)
         };
-        let mover = async move {
-            while let Some(msg) = body.message().await? {
-                if let Some(tx) = tx.as_mut()
-                    && let Some(execute_client_stream_request::RequestType::StreamValue(v)) =
-                        msg.request_type
-                {
-                    let name = v.name.clone();
-                    let arg =
-                        argument(v).map_err(|_e| Status::invalid_argument("invalid arguments"))?;
-                    match arg {
-                        Err(Marker::StreamControlClose) => {
-                            tx.remove(&name);
-                        }
-                        Err(_) => Err(Status::invalid_argument("invalid marker"))?,
-                        Ok(arg) => {
-                            let tx = tx.get_mut(&name).ok_or_else(|| {
-                                Status::invalid_argument("invalid marker arguments")
-                            })?;
-                            match msg.timeout.and_then(|t| t.try_into().ok()) {
-                                Some(timeout) => {
-                                    tx.send_timeout(arg, timeout).await.map_err(|_| {
-                                        Status::deadline_exceeded("stream argument timeout")
-                                    })?;
-                                }
-                                None => tx.send(arg).await.map_err(|_| {
-                                    Status::internal("failed to send stream argument")
-                                })?,
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(())
-        };
+        let pump = pump_stream(
+            body.map(|msg| msg.map(map_client_stream_to_stream)),
+            stream_tx,
+        );
 
-        let (result, metadata, ()) = try_join!(result, trace_async, mover)?;
+        let (result, metadata, ()) = try_join!(result, trace_async, pump)?;
         Ok(Response::new(script::ExecuteClientStreamResponse {
             metadata: Some(metadata),
             result: Some(result),
@@ -309,15 +288,15 @@ impl ScriptService for ScriptServer {
             method,
             args,
             timeout,
-            stream_tx: None,
+            stream_tx,
             span,
             log_level,
             trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?
-        else {
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
-        };
+        }
         let script = parse_source(request.get_mut().source.take())?;
         let deadline = std::time::Instant::now() + timeout;
 
@@ -349,17 +328,14 @@ impl ScriptService for ScriptServer {
 
         let content_type = request.get_ref().result_content_type.clone();
         let m = stream.map(move |s| match s {
-            ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => {
+            StreamItem::Data(d) | StreamItem::End(Some(d)) => {
                 Ok(script::ExecuteServerStreamResponse {
-                    result: Some(prost_serde::result_type(
-                        d.into(),
-                        content_type.iter().copied(),
-                    )?),
+                    result: Some(prost_serde::result_type(d, content_type.iter().copied())?),
                     metadata: None,
                 })
             }
-            ExecStreamItem::End(None) => Ok(script::ExecuteServerStreamResponse::default()),
-            ExecStreamItem::Error(err) => Ok(script::ExecuteServerStreamResponse {
+            StreamItem::End(None) => Ok(script::ExecuteServerStreamResponse::default()),
+            StreamItem::Error(err) => Ok(script::ExecuteServerStreamResponse {
                 result: Some(error_result(err)),
                 metadata: None,
             }),
@@ -393,7 +369,6 @@ impl ScriptService for ScriptServer {
         }
     }
 
-    #[expect(clippy::too_many_lines)]
     async fn execute_stream(
         &self,
         mut request: tonic::Request<tonic::Streaming<script::ExecuteStreamRequest>>,
@@ -411,7 +386,7 @@ impl ScriptService for ScriptServer {
             method,
             args,
             timeout,
-            stream_tx: mut tx,
+            stream_tx,
             span,
             trace_events,
             log_level,
@@ -444,60 +419,22 @@ impl ScriptService for ScriptServer {
             }
         };
 
-        let mover = async move {
-            while let Some(msg) = request.get_mut().message().await? {
-                if let Some(tx) = tx.as_mut()
-                    && let Some(execute_stream_request::RequestType::StreamValue(v)) =
-                        msg.request_type
-                {
-                    let name = v.name.clone();
-                    let arg =
-                        argument(v).map_err(|_e| Status::invalid_argument("invalid arguments"))?;
-                    match arg {
-                        Err(Marker::StreamControlClose) => {
-                            tx.remove(&name);
-                        }
-                        Err(_) => Err(Status::invalid_argument("invalid marker"))?,
-                        Ok(arg) => {
-                            let tx = tx.get_mut(&name).ok_or_else(|| {
-                                Status::invalid_argument("invalid marker arguments")
-                            })?;
-                            match msg.timeout.and_then(|t| t.try_into().ok()) {
-                                Some(timeout) => {
-                                    tx.send_timeout(arg, timeout).await.map_err(|_| {
-                                        Status::deadline_exceeded("stream argument timeout")
-                                    })?;
-                                }
-                                None => tx.send(arg).await.map_err(|_| {
-                                    Status::internal("failed to send stream argument")
-                                })?,
-                            }
-                        }
-                    }
-                }
-            }
-            Ok::<_, Status>(())
-        };
+        let pump = pump_stream(request.into_inner(), stream_tx);
 
         let content_type = initial.result_content_type.clone();
         let m = stream.map(move |s| match s {
-            ExecStreamItem::Data(d) | ExecStreamItem::End(Some(d)) => {
-                Ok(script::ExecuteStreamResponse {
-                    result: Some(prost_serde::result_type(
-                        d.into(),
-                        content_type.iter().copied(),
-                    )?),
-                    metadata: None,
-                })
-            }
-            ExecStreamItem::End(None) => Ok(script::ExecuteStreamResponse::default()),
-            ExecStreamItem::Error(err) => Ok(script::ExecuteStreamResponse {
+            StreamItem::Data(d) | StreamItem::End(Some(d)) => Ok(script::ExecuteStreamResponse {
+                result: Some(prost_serde::result_type(d, content_type.iter().copied())?),
+                metadata: None,
+            }),
+            StreamItem::End(None) => Ok(script::ExecuteStreamResponse::default()),
+            StreamItem::Error(err) => Ok(script::ExecuteStreamResponse {
                 result: Some(error_result(err)),
                 metadata: None,
             }),
         });
         let stream = stream_until(
-            join_with(m, mover),
+            join_with(m, pump),
             deadline,
             span,
             Ok(script::ExecuteStreamResponse {
@@ -525,54 +462,57 @@ impl ScriptService for ScriptServer {
     }
 }
 
-async fn non_stream_result(
-    mut stream: impl Stream<Item = ExecStreamItem> + Unpin,
+async fn non_stream_result<S>(
+    mut stream: Pin<&mut S>,
     content_type: impl IntoIterator<Item = i32>,
-) -> Result<script::Result, Status> {
+) -> Result<script::Result, Status>
+where
+    S: Stream<Item = StreamItem>,
+{
     let mut o = match stream.next().await {
-        Some(ExecStreamItem::End(Some(value))) => {
-            return prost_serde::result_type(value.into(), content_type);
+        Some(StreamItem::End(Some(value))) => {
+            return prost_serde::result_type(value, content_type);
         }
-        Some(ExecStreamItem::End(None)) => {
+        Some(StreamItem::End(None)) => {
             return prost_serde::result_type(
                 // empty array
-                std::borrow::Cow::Borrowed(b"\x80"),
+                Bytes::from_static(b"\x80"),
                 content_type,
             );
         }
-        Some(ExecStreamItem::Data(d)) => {
-            let mut o = Vec::with_capacity(d.len() + 2);
-            o.push(0x9F); // start of array
-            o.extend_from_slice(&d);
+        Some(StreamItem::Data(d)) => {
+            let mut o = BytesMut::with_capacity(d.len() + 2);
+            o.put_u8(0x9F); // start of array
+            o.extend(d);
             o
         }
-        Some(ExecStreamItem::Error(err)) => return Ok(error_result(err)),
+        Some(StreamItem::Error(err)) => return Ok(error_result(err)),
         None => return Err(Status::internal("empty stream")),
     };
 
     while let Some(item) = stream.next().await {
         match item {
-            ExecStreamItem::Data(data) => {
-                o.extend_from_slice(&data);
+            StreamItem::Data(data) => {
+                o.extend(data);
             }
-            ExecStreamItem::End(None) => break,
-            ExecStreamItem::End(Some(_)) => {
+            StreamItem::End(None) => break,
+            StreamItem::End(Some(_)) => {
                 return Err(Status::internal("unexpected end with data"));
             }
-            ExecStreamItem::Error(err) => {
+            StreamItem::Error(err) => {
                 return Err(Status::internal(err.to_string()));
             }
         }
     }
-    o.push(0xFF); // end of array
-    prost_serde::result_type(o.into(), content_type)
+    o.put_u8(0xFF); // end of array
+    prost_serde::result_type(o.freeze(), content_type)
 }
 
 struct ParsedSpec {
     method: String,
-    args: Vec<ExecArgument>,
+    args: Vec<Argument>,
     timeout: Duration,
-    stream_tx: Option<HashMap<String, mpsc::Sender<Vec<u8>>>>,
+    stream_tx: HashMap<String, mpsc::Sender<Bytes>>,
     log_level: LevelFilter,
     span: tracing::Span,
     trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
@@ -587,35 +527,29 @@ fn parse_spec(
         let mut streams = HashMap::new();
         let args = std::mem::take(&mut spec.arguments)
             .into_iter()
-            .map(|mut a| {
+            .map(|a| {
                 let name = if a.name.is_empty() {
                     None
                 } else {
-                    Some(std::mem::take(&mut a.name))
+                    Some(a.name)
                 };
-                match argument(a) {
-                    Ok(Ok(a)) => Ok(ExecArgument {
-                        name,
-                        value: ExecArgumentValue::Cbor(a),
-                    }),
+                match argument(a.argument_type) {
+                    Ok(Ok(a)) => Ok(Argument::cbor(name, a)),
                     Ok(Err(Marker::Stream)) => {
                         let (tx, rx) = mpsc::channel(64);
-                        let key = name.as_ref().map_or("", |v| v);
-                        if streams.contains_key(key) {
-                            Err(Status::invalid_argument("invalid marker arguments"))
-                        } else {
-                            streams.insert(key.to_string(), tx);
-                            Ok(ExecArgument {
-                                name,
-                                value: ExecArgumentValue::CborStream(rx),
-                            })
+                        if streams
+                            .insert(name.clone().unwrap_or_default(), tx)
+                            .is_some()
+                        {
+                            return Err(Status::invalid_argument("invalid marker arguments"));
                         }
+                        Ok(Argument::cbor_stream(name, ReceiverStream::new(rx)))
                     }
                     Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
                     Err(e) => Err(e),
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?;
+            .collect::<Result<_, _>>()?;
 
         let (span, trace, log_level) = match script::TraceLevel::try_from(spec.trace_level) {
             Ok(script::TraceLevel::All) => {
@@ -644,11 +578,7 @@ fn parse_spec(
                 .take()
                 .and_then(|t| t.try_into().ok())
                 .unwrap_or(DEFAULT_TIMEOUT),
-            stream_tx: if streams.is_empty() {
-                None
-            } else {
-                Some(streams)
-            },
+            stream_tx: streams,
             span,
             log_level,
             trace_events: trace,
@@ -659,7 +589,7 @@ fn parse_spec(
             method: String::new(),
             args: vec![],
             timeout: DEFAULT_TIMEOUT,
-            stream_tx: None,
+            stream_tx: HashMap::default(),
             span: Span::none(),
             log_level: LevelFilter::OFF,
             trace_events: None,
@@ -674,6 +604,62 @@ fn timeout_error() -> script::Result {
             code: i32::from(script::ErrorCode::DeadlineExceeded),
             message: "deadline exceeded".to_string(),
         })),
+    }
+}
+
+async fn pump_stream<T>(
+    mut body: T,
+    mut stream_tx: HashMap<String, mpsc::Sender<Bytes>>,
+) -> Result<(), Status>
+where
+    T: Stream<Item = Result<script::ExecuteStreamRequest, tonic::Status>> + Unpin,
+{
+    while let Some(msg) = body.try_next().await? {
+        let Some(execute_stream_request::RequestType::StreamValue(v)) = msg.request_type else {
+            continue;
+        };
+
+        let arg = argument(v.argument_type)
+            .map_err(|_e| Status::invalid_argument("invalid arguments"))?;
+        match arg {
+            Err(Marker::StreamControlClose) => {
+                stream_tx.remove(&v.name);
+            }
+            Err(_) => return Err(Status::invalid_argument("invalid marker")),
+            Ok(arg) => {
+                let tx = stream_tx
+                    .get_mut(&v.name)
+                    .ok_or_else(|| Status::invalid_argument("invalid marker arguments"))?;
+                match msg.timeout.and_then(|t| t.try_into().ok()) {
+                    Some(timeout) => {
+                        tx.send_timeout(arg, timeout)
+                            .await
+                            .map_err(|_| Status::deadline_exceeded("stream argument timeout"))?;
+                    }
+                    None => tx
+                        .send(arg)
+                        .await
+                        .map_err(|_| Status::internal("failed to send stream argument"))?,
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn map_client_stream_to_stream(
+    req: script::ExecuteClientStreamRequest,
+) -> script::ExecuteStreamRequest {
+    script::ExecuteStreamRequest {
+        request_type: req.request_type.map(|rt| match rt {
+            execute_client_stream_request::RequestType::InitialRequest(ir) => {
+                execute_stream_request::RequestType::InitialRequest(ir)
+            }
+            execute_client_stream_request::RequestType::StreamValue(sv) => {
+                execute_stream_request::RequestType::StreamValue(sv)
+            }
+        }),
+        timeout: req.timeout,
     }
 }
 
