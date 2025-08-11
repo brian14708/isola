@@ -33,7 +33,7 @@ except ImportError:
     def _loads(s: bytes, format: Literal["cbor"]) -> object: ...
     def _loads(s: str | bytes, format: Format | str) -> object:
         if format == "json":
-            return json.loads(s)
+            return cast("object", json.loads(s))
         elif format == "yaml":
             return cast("object", yaml.safe_load(s))
         elif format == "cbor":

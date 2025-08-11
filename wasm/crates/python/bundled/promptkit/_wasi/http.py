@@ -87,7 +87,7 @@ class ServerSentEvent:
 
 
 class _BaseResponse:
-    __slots__ = ("resp", "_status", "_headers")
+    __slots__: tuple[str, ...] = ("resp", "_status", "_headers")
 
     def __init__(self, resp: "_http.Response"):
         self.resp: _http.Response | None = resp
@@ -248,10 +248,10 @@ class WebsocketRequest:
 
 
 class _BaseWebsocket:
-    __slots__ = ("conn",)
+    __slots__: tuple[str, ...] = ("conn",)
 
     def __init__(self, conn: "_http.Websocket"):
-        self.conn = conn
+        self.conn: _http.Websocket = conn
 
     def shutdown(self) -> None:
         self.conn.shutdown()
@@ -416,7 +416,7 @@ def get(
     with Request("GET", url, params, headers, None, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response, -1)
+        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]
 
 
 def get_async(
@@ -473,7 +473,7 @@ def post(
     with Request("POST", url, None, headers, data, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response, -1)
+        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]
 
 
 def post_async(
@@ -527,7 +527,7 @@ async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Excep
                     "http status check failed, "
                     + f"status={resp.status}, content={repr(content)}"
                 )
-            return await resp._aread(
+            return await resp._aread(  # pyright:ignore[reportPrivateUsage]
                 cast("_ResponseType", extra.get("type", "json")), -1
             )
     except Exception as e:

@@ -1,7 +1,9 @@
 # type: ignore
+# pyright: basic
 
 import asyncio
 import json
+from typing import cast
 
 import httpx
 
@@ -42,7 +44,7 @@ class Request:
         if self.response is not None:
             await self.response.aclose()
         if self.client is not None:
-            await self.client.aclose()
+            await cast("httpx.AsyncClient", self.client).aclose()
 
     def __enter__(self):
         self.client = httpx.Client(timeout=self.timeout)
@@ -53,7 +55,7 @@ class Request:
         if self.response is not None:
             self.response.close()
         if self.client is not None:
-            self.client.close()
+            cast("httpx.Client", self.client).close()
 
 
 class Response:

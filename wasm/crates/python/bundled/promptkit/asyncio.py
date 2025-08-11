@@ -44,7 +44,7 @@ async def subscribe[T](
 
 
 class PollLoop(asyncio.AbstractEventLoop):
-    __slots__ = ("wakers", "running", "closed", "handles")
+    __slots__: tuple[str, ...] = ("wakers", "running", "closed", "handles")
 
     def __init__(self) -> None:
         self.wakers: list[
@@ -276,7 +276,7 @@ def run[T](main: "_Coroutine[T] | AsyncGenerator[T]") -> "T | Generator[T]":
         return runner.run(cast("Coroutine[None, None, T]", main))
 
 
-async def _aiter_arg(args: "_promptkit_sys.ArgIter") -> "AsyncGenerator[object]":
+async def _aiter_arg(args: "_promptkit_sys.ArgIter") -> "AsyncGenerator[object]":  # pyright:ignore[reportUnusedFunction]
     while True:
         ok, result, poll = args.read()
         if not ok:

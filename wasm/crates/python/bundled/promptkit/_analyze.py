@@ -1,4 +1,5 @@
 # type: ignore
+# pyright: reportAny=false
 
 import inspect
 import json

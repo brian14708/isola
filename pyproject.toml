@@ -17,6 +17,7 @@ members = [
 [dependency-groups]
 dev = [
     "basedmypy>=2.10.0",
+    "basedpyright>=1.31.1",
     "ruff>=0.11.2",
     "types-pyyaml>=6.0.12.20250516",
 ]

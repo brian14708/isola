@@ -1,4 +1,5 @@
 # type: ignore
+# pyright: basic
 
 import asyncio
 import contextlib
