@@ -1,4 +1,4 @@
-from typing import Any, Literal
+from typing import Literal
 
 import _promptkit_sys as _sys
 
@@ -7,7 +7,7 @@ def fetch(
     url: str,
     params: dict[str, str] | None,
     headers: dict[str, str] | None,
-    body: Any | bytes | None,
+    body: object | bytes | None,
     timeout: float | None,
 ) -> _sys.Pollable[Response]: ...
 def ws_connect(
@@ -15,7 +15,7 @@ def ws_connect(
     headers: dict[str, str] | None,
     timeout: float | None,
 ) -> _sys.Pollable[Websocket]: ...
-def loads_json(data: str) -> Any: ...
+def loads_json(data: str) -> object: ...
 
 _BufferTypes = Literal["json", "text", "bytes", "binary", "lines", "sse"]
 

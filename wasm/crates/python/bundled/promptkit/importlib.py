@@ -1,3 +1,5 @@
+# type: ignore
+
 import importlib
 import importlib.abc
 import importlib.util

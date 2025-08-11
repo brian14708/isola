@@ -2,7 +2,7 @@ try:
     from _promptkit_serde import dumps, loads
 except ImportError:
     import json
-    from typing import Any, Literal, overload
+    from typing import Literal, cast, overload
 
     import cbor2
     import yaml
@@ -10,12 +10,12 @@ except ImportError:
     type Format = Literal["json", "yaml", "cbor"]
 
     @overload
-    def _dumps(obj: Any, format: Literal["json"]) -> str: ...
+    def _dumps(obj: object, format: Literal["json"]) -> str: ...
     @overload
-    def _dumps(obj: Any, format: Literal["yaml"]) -> str: ...
+    def _dumps(obj: object, format: Literal["yaml"]) -> str: ...
     @overload
-    def _dumps(obj: Any, format: Literal["cbor"]) -> bytes: ...
-    def _dumps(obj: Any, format: Format) -> str | bytes:
+    def _dumps(obj: object, format: Literal["cbor"]) -> bytes: ...
+    def _dumps(obj: object, format: str) -> str | bytes:
         if format == "json":
             return json.dumps(obj)
         elif format == "yaml":
@@ -26,20 +26,20 @@ except ImportError:
             raise ValueError(f"Unsupported format: {format}")
 
     @overload
-    def _loads(s: str, format: Literal["json"]) -> Any: ...
+    def _loads(s: str, format: Literal["json"]) -> object: ...
     @overload
-    def _loads(s: str, format: Literal["yaml"]) -> Any: ...
+    def _loads(s: str, format: Literal["yaml"]) -> object: ...
     @overload
-    def _loads(s: bytes | bytearray, format: Literal["cbor"]) -> Any: ...
-    def _loads(s: str | bytes | bytearray, format: Format) -> Any:
+    def _loads(s: bytes, format: Literal["cbor"]) -> object: ...
+    def _loads(s: str | bytes, format: Format | str) -> object:
         if format == "json":
             return json.loads(s)
         elif format == "yaml":
-            return yaml.safe_load(s)
+            return cast("object", yaml.safe_load(s))
         elif format == "cbor":
             if isinstance(s, str):
                 raise ValueError("CBOR format requires bytes input")
-            return cbor2.loads(s)
+            return cast("object", cbor2.loads(s))
         else:
             raise ValueError(f"Unsupported format: {format}")
 

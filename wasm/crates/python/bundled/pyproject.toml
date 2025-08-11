@@ -23,8 +23,3 @@ typings = "."
 
 [tool.mypy]
 mypy_path = "typings"
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"
-stubPath = "typings"

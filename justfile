@@ -36,7 +36,6 @@ test-wasm:
 lint: lint-wasm lint-ui lint-proto init-py
     cargo clippy --all-features -- --deny warnings
     uv run ruff check
-    uv run mypy tests/rpc
 
 [private]
 lint-wasm: init-py

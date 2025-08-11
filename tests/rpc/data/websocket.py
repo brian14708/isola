@@ -95,12 +95,12 @@ async def concurrent_messages(ws_url: str) -> None:
 
     async with ws_connect(ws_url + "/echo") as ws:
 
-        async def sender_task():
+        async def sender_task() -> None:
             """Task that sends messages and closes connection."""
             for msg in messages:
                 await ws.asend(msg)
 
-        async def receiver_task(expected_count: int):
+        async def receiver_task(expected_count: int) -> list[bytes | str]:
             """Task that receives messages using streaming."""
             received = []
             async for msg in ws.arecv_streaming():
@@ -109,7 +109,7 @@ async def concurrent_messages(ws_url: str) -> None:
                     break
             return received
 
-        _, _, _, received_messages = await asyncio.gather(
+        _s1, _s2, _s3, received_messages = await asyncio.gather(
             sender_task(),
             sender_task(),
             sender_task(),

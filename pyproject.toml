@@ -16,7 +16,7 @@ members = [
 
 [dependency-groups]
 dev = [
-    "mypy>=1.15.0",
+    "basedmypy>=2.10.0",
     "ruff>=0.11.2",
     "types-pyyaml>=6.0.12.20250516",
 ]
@@ -37,14 +37,3 @@ select = [
 
 [tool.ruff.lint.flake8-type-checking]
 quote-annotations = true
-
-[tool.mypy]
-check_untyped_defs = true
-
-[[tool.mypy.overrides]]
-module = ["stub.*"]
-disable_error_code = ["arg-type"]
-
-[tool.pyright]
-venvPath = "."
-venv = ".venv"

@@ -1,7 +1,7 @@
 def pillow():
     from io import BytesIO
 
-    from PIL import Image, ImageDraw, ImageFont  # type: ignore
+    from PIL import Image, ImageDraw, ImageFont
 
     img = Image.new("RGB", (200, 200), color="white")
     draw = ImageDraw.Draw(img)
@@ -45,7 +45,7 @@ def pillow():
 
 
 def numpy():
-    import numpy as np  # type: ignore
+    import numpy as np
 
     arr = np.random.randint(0, 100, size=(10, 10))
     mean = np.mean(arr)

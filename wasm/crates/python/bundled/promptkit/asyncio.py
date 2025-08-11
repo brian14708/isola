@@ -3,7 +3,6 @@ import contextlib
 from collections import deque
 from typing import (
     TYPE_CHECKING,
-    Any,
     Unpack,
     cast,
     overload,
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
 
     import _promptkit_sys
 
-    type _Coroutine[T] = Coroutine[Any, Any, T]
+    type _Coroutine[T] = Coroutine[object, object, T]
 
 __all__ = [
     "run",
@@ -98,7 +97,12 @@ class PollLoop(asyncio.AbstractEventLoop):
                     handle._run()
 
             if self.wakers and (readyset := _promptkit_sys.poll(self.wakers)):
-                new_wakers = []
+                new_wakers: list[
+                    tuple[
+                        _promptkit_sys.Pollable[object],
+                        asyncio.Future[object] | asyncio.Handle,
+                    ]
+                ] = []
                 for is_ready, (pollable, waker) in zip(
                     readyset, self.wakers, strict=True
                 ):
@@ -113,7 +117,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                 self.wakers = new_wakers
 
         if not future.done():
-            future.cancel()
+            _ = future.cancel()
         return future.result()
 
     def _cleanup(self) -> None:
@@ -124,7 +128,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                     handle._run()
 
             for pollable, waker in self.wakers:
-                waker.cancel()
+                _ = waker.cancel()
                 pollable.release()
             self.wakers.clear()
 
@@ -191,7 +195,7 @@ class PollLoop(asyncio.AbstractEventLoop):
             if waker is handle:
                 pollable.release()
                 w[i] = w[ln - 1]
-                w.pop()
+                _ = w.pop()
                 return
 
     @override
@@ -227,6 +231,7 @@ class PollLoop(asyncio.AbstractEventLoop):
 
 class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
     _instance: "WasiEventLoopPolicy | None" = None
+    _initialized: bool
 
     def __new__(cls) -> "WasiEventLoopPolicy":
         if cls._instance is None:
