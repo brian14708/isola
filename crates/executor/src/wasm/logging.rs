@@ -4,7 +4,7 @@ use wasmtime::component::HasData;
 use wasmtime_wasi::p2::{IoImpl, WasiImpl, WasiView};
 
 wasmtime::component::bindgen!({
-    path: "../../apis/wit/deps/logging",
+    path: "../../specs/wit/deps/logging",
     trappable_imports: true,
 });
 

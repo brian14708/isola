@@ -7,7 +7,7 @@ FROM docker.io/chainguard/rust:latest-dev AS server-build
 USER root
 RUN apk add --no-cache protobuf-dev cmake glibc-dev
 COPY crates crates
-COPY apis apis
+COPY specs specs
 COPY Cargo.toml .
 COPY Cargo.lock .
 RUN --mount=type=cache,target=/work/target/release-lto \
@@ -24,7 +24,7 @@ COPY ui/package.json ui/bun.lock .
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
 COPY ui .
-COPY apis ../apis
+COPY specs ../specs
 RUN bun run build
 
 ############################
@@ -50,7 +50,7 @@ RUN pip install --root-user-action=ignore \
     cython wheel typing-extensions maturin setuptools
 
 WORKDIR /src/wasm
-COPY apis ../apis
+COPY specs ../specs
 COPY wasm .
 RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/src/wasm/target/release \

@@ -1,6 +1,6 @@
 wasmtime::component::bindgen!({
     world: "sandbox",
-    path: "../../apis/wit",
+    path: "../../specs/wit",
     async: true,
     trappable_imports: true,
     ownership: Borrowing {

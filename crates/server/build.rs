@@ -8,10 +8,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .file_descriptor_set_path(out_dir.join("promptkit_descriptor.bin"))
         .compile_protos(
             &[
-                "../../apis/proto/promptkit/script/v1/service.proto",
-                "../../apis/proto/promptkit/script/v1/error_code.proto",
+                "../../specs/proto/promptkit/script/v1/service.proto",
+                "../../specs/proto/promptkit/script/v1/error_code.proto",
             ],
-            &["../../apis/proto"],
+            &["../../specs/proto"],
         )?;
     Ok(())
 }

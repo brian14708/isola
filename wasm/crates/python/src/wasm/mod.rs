@@ -21,7 +21,7 @@ use self::{exports::promptkit::script::guest, promptkit::script::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
-    path: "../../../apis/wit",
+    path: "../../../specs/wit",
     generate_all,
 });
 

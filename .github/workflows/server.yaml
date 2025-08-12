@@ -8,7 +8,7 @@ on:
     paths:
       - .github/**
       - crates/**
-      - apis/**
+      - specs/**
       - Cargo.lock
       - Cargo.toml
   pull_request:

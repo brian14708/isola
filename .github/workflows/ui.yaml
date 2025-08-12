@@ -8,7 +8,7 @@ on:
     paths:
       - .github/**
       - ui/**
-      - apis/**
+      - specs/**
   pull_request:
     branches: [main]
 

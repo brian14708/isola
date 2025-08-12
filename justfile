@@ -49,7 +49,7 @@ lint-ui: init-ui
     bun run lint
 
 [private]
-[working-directory('apis/proto')]
+[working-directory('specs/proto')]
 lint-proto:
     buf lint
 
