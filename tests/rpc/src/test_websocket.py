@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import TYPE_CHECKING
 
 import pytest
@@ -23,7 +25,7 @@ websocket_tests = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", websocket_tests)
 async def test_websocket(
-    websocket_server, client: pb.ScriptServiceStub, datadir: "pathlib.Path", method: str
+    websocket_server, client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
 ) -> None:
     """Test WebSocket functionality via script execution in WASI environment."""
     script_text = (datadir / "websocket.py").read_text()

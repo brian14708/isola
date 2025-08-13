@@ -188,7 +188,7 @@ def fetch(
     return Request(method, url, params, headers, body, timeout, files=files)
 
 
-### Legacy API
+# Legacy API
 
 
 def _validate_status(resp):

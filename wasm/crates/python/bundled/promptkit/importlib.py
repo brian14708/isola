@@ -1,5 +1,6 @@
 # type: ignore
 # pyright: basic
+from __future__ import annotations
 
 import importlib
 import importlib.abc
@@ -28,7 +29,7 @@ class ModuleInfo:
     content: str
     filepath: str
     package: bool
-    module: "types.ModuleType | None" = None
+    module: types.ModuleType | None = None
 
 
 class HttpImporter(
@@ -53,9 +54,9 @@ class HttpImporter(
     def find_spec(
         self,
         fullname: str,
-        path: "Sequence[str] | None" = None,
-        target: "types.ModuleType | None" = None,
-    ) -> "ModuleSpec | None":
+        path: Sequence[str] | None = None,
+        target: types.ModuleType | None = None,
+    ) -> ModuleSpec | None:
         loader = self._find_module(fullname, path)
         if loader is not None:
             return importlib.util.spec_from_loader(
@@ -64,8 +65,8 @@ class HttpImporter(
         return None
 
     def _find_module(
-        self, fullname: str, path: "Sequence[str] | None" = None
-    ) -> "HttpImporter | None":
+        self, fullname: str, path: Sequence[str] | None = None
+    ) -> HttpImporter | None:
         if fullname in self.modules:
             return self
 
@@ -107,7 +108,7 @@ class HttpImporter(
         return self.modules[fullname].content
 
     @override
-    def create_module(self, spec: "ModuleSpec") -> "types.ModuleType":
+    def create_module(self, spec: ModuleSpec) -> types.ModuleType:
         fullname: str = spec.name
         if fullname not in self.modules and self._find_module(fullname) is not self:
             raise ImportError(f"Module '{fullname}' cannot be loaded from '{self.url}'")
@@ -122,7 +123,7 @@ class HttpImporter(
         return mod
 
     @override
-    def exec_module(self, module: "types.ModuleType") -> None:
+    def exec_module(self, module: types.ModuleType) -> None:
         fullname: str = module.__name__
         sys.modules[fullname] = module
         try:
@@ -139,7 +140,7 @@ class HttpImporter(
 
 
 class RepoGuard[T: importlib.abc.MetaPathFinder, **P]:
-    def __init__(self, cls: "Callable[P, T]", *args: P.args, **kwargs: P.kwargs):
+    def __init__(self, cls: Callable[P, T], *args: P.args, **kwargs: P.kwargs):
         self.importer: T = cls(*args, **kwargs)
 
     def __enter__(self) -> T:

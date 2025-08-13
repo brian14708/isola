@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import pathlib
 from typing import TYPE_CHECKING
@@ -25,7 +27,7 @@ def datadir():
 
 
 @pytest_asyncio.fixture
-async def websocket_server() -> "AsyncGenerator[WebSocketTestServer, None]":
+async def websocket_server() -> AsyncGenerator[WebSocketTestServer, None]:
     server = WebSocketTestServer()
     await server.start_server()
     yield server

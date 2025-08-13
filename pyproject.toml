@@ -35,6 +35,6 @@ select = [
     "I",
     "TC",
 ]
-
-[tool.ruff.lint.flake8-type-checking]
-quote-annotations = true
+extend-safe-fixes = ["TC"]
+preview = true
+future-annotations = true

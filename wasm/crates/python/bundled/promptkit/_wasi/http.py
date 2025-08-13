@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 import binascii
 import os
@@ -52,14 +54,14 @@ class Request:
         self.extra = extra
         self.resp: AsyncResponse | Response | None = None
 
-    def _fetch(self) -> "_promptkit_sys.Pollable[_http.Response]":
+    def _fetch(self) -> _promptkit_sys.Pollable[_http.Response]:
         req = _http.fetch(
             self.method, self.url, self.params, self.headers, self.body, self.timeout
         )
         self.body = None
         return req
 
-    async def __aenter__(self) -> "AsyncResponse":
+    async def __aenter__(self) -> AsyncResponse:
         self.resp = AsyncResponse(await subscribe(self._fetch()))
         return self.resp
 
@@ -67,7 +69,7 @@ class Request:
         if self.resp:
             self.resp.close()
 
-    def __enter__(self) -> "Response":
+    def __enter__(self) -> Response:
         self.resp = Response(self._fetch().wait())
         return self.resp
 
@@ -89,7 +91,7 @@ class ServerSentEvent:
 class _BaseResponse:
     __slots__: tuple[str, ...] = ("resp", "_status", "_headers")
 
-    def __init__(self, resp: "_http.Response"):
+    def __init__(self, resp: _http.Response):
         self.resp: _http.Response | None = resp
         self._status: int | None = None
         self._headers: dict[str, str] | None = None
@@ -143,7 +145,7 @@ class AsyncResponse(_BaseResponse):
 
     # async iterator methods
 
-    async def _aiter(self, encoding: _IterResponseType) -> "AsyncGenerator[object]":
+    async def _aiter(self, encoding: _IterResponseType) -> AsyncGenerator[object]:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
@@ -154,15 +156,15 @@ class AsyncResponse(_BaseResponse):
         while (data := buf.next()) is not None:
             yield data
 
-    async def aiter_bytes(self) -> "AsyncGenerator[bytes]":
+    async def aiter_bytes(self) -> AsyncGenerator[bytes]:
         async for data in cast("AsyncGenerator[bytes]", self._aiter("bytes")):
             yield data
 
-    async def aiter_lines(self) -> "AsyncGenerator[str]":
+    async def aiter_lines(self) -> AsyncGenerator[str]:
         async for line in cast("AsyncGenerator[str]", self._aiter("lines")):
             yield line
 
-    async def aiter_sse(self) -> "AsyncGenerator[ServerSentEvent]":
+    async def aiter_sse(self) -> AsyncGenerator[ServerSentEvent]:
         async for id, event, data in cast(
             "AsyncGenerator[tuple[str,str,str]]", self._aiter("sse")
         ):
@@ -193,7 +195,7 @@ class Response(_BaseResponse):
 
     # sync iterator methods
 
-    def _iter(self, encoding: _IterResponseType) -> "Generator[object]":
+    def _iter(self, encoding: _IterResponseType) -> Generator[object]:
         if self.resp is None:
             raise RuntimeError("Response is closed")
         buf = _http.new_buffer(encoding)
@@ -204,13 +206,13 @@ class Response(_BaseResponse):
         while (data := buf.next()) is not None:
             yield data
 
-    def iter_bytes(self) -> "Generator[bytes]":
+    def iter_bytes(self) -> Generator[bytes]:
         return cast("Generator[bytes]", self._iter("bytes"))
 
-    def iter_lines(self) -> "Generator[str]":
+    def iter_lines(self) -> Generator[str]:
         return cast("Generator[str]", self._iter("lines"))
 
-    def iter_sse(self) -> "Generator[ServerSentEvent]":
+    def iter_sse(self) -> Generator[ServerSentEvent]:
         for id, event, data in cast("Generator[tuple[str,str,str]]", self._iter("sse")):
             yield ServerSentEvent(id, event, data)
 
@@ -225,10 +227,10 @@ class WebsocketRequest:
         self.timeout = timeout
         self.conn: AsyncWebsocket | Websocket | None = None
 
-    def _conn(self) -> "_promptkit_sys.Pollable[_http.Websocket]":
+    def _conn(self) -> _promptkit_sys.Pollable[_http.Websocket]:
         return _http.ws_connect(self.url, self.headers, self.timeout)
 
-    async def __aenter__(self) -> "AsyncWebsocket":
+    async def __aenter__(self) -> AsyncWebsocket:
         self.conn = AsyncWebsocket(await subscribe(self._conn()))
         return self.conn
 
@@ -237,7 +239,7 @@ class WebsocketRequest:
             await cast("AsyncWebsocket", self.conn).aclose()
             self.conn.shutdown()
 
-    def __enter__(self) -> "Websocket":
+    def __enter__(self) -> Websocket:
         self.conn = Websocket(self._conn().wait())
         return self.conn
 
@@ -250,7 +252,7 @@ class WebsocketRequest:
 class _BaseWebsocket:
     __slots__: tuple[str, ...] = ("conn",)
 
-    def __init__(self, conn: "_http.Websocket"):
+    def __init__(self, conn: _http.Websocket):
         self.conn: _http.Websocket = conn
 
     def shutdown(self) -> None:
@@ -281,7 +283,7 @@ class AsyncWebsocket(_BaseWebsocket):
             else:
                 return value
 
-    async def arecv_streaming(self) -> "AsyncGenerator[bytes | str]":
+    async def arecv_streaming(self) -> AsyncGenerator[bytes | str]:
         while True:
             value = await self.arecv()
             if value is None:
@@ -317,7 +319,7 @@ class Websocket(_BaseWebsocket):
             else:
                 return value
 
-    def recv_streaming(self) -> "Generator[bytes | str]":
+    def recv_streaming(self) -> Generator[bytes | str]:
         while (value := self.recv()) is not None:
             yield value
 
@@ -391,7 +393,7 @@ def _encode_multipart_formdata(fields: dict[str, _FileType]) -> tuple[bytes, str
     return body, f"multipart/form-data; boundary={boundary}"
 
 
-### Legacy API
+# Legacy API
 
 
 def _validate_status(resp: Response) -> None:
@@ -446,7 +448,7 @@ def get_sse(
     params: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
-) -> "Generator[object]":
+) -> Generator[object]:
     with Request(
         "GET",
         url,
@@ -503,7 +505,7 @@ def post_sse(
     data: object | bytes | None = None,
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
-) -> "Generator[object]":
+) -> Generator[object]:
     with Request("POST", url, None, headers, data, timeout) as resp:
         _validate_status(resp)
         for event in resp.iter_sse():

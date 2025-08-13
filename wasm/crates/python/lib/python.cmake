@@ -26,9 +26,9 @@ ExternalProject_Add(
   CONFIGURE_COMMAND
     CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env cmake -E env
-    CFLAGS=-fPIC\ -fno-semantic-interposition
-    PKG_CONFIG_SYSROOT_DIR= -- <SOURCE_DIR>/configure --prefix=/usr/local
-    --host=wasm32-wasi --enable-shared --build=${PYTHON_BUILD_ARCH}
+    CFLAGS=-fPIC\ -fno-semantic-interposition PKG_CONFIG_SYSROOT_DIR= --
+    <SOURCE_DIR>/configure --prefix=/usr/local --host=wasm32-wasi
+    --enable-shared --build=${PYTHON_BUILD_ARCH}
     --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
     --with-tzpath=/usr/local/lib/python3.13/site-packages/tzdata/zoneinfo
     --enable-big-digits=30 --with-pymalloc

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from typing import TYPE_CHECKING, Any
 
@@ -19,7 +21,7 @@ all_tests = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", all_tests)
 async def test_httpbin(
-    httpbin, client: pb.ScriptServiceStub, datadir: "pathlib.Path", method: str
+    httpbin, client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
 ) -> None:
     script_text = (datadir / "http.py").read_text()
     request = pb.ExecuteRequest(
@@ -35,7 +37,7 @@ async def test_httpbin(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", all_tests)
-async def test_httpbin_local(httpbin, datadir: "pathlib.Path", method: str) -> None:
+async def test_httpbin_local(httpbin, datadir: pathlib.Path, method: str) -> None:
     scope: dict[str, Any] = {}
     exec((datadir / "http.py").read_text(), scope)
     fn = scope[method]

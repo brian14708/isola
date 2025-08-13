@@ -25,6 +25,6 @@ typings = "."
 mypy_path = "typings"
 
 [tool.pyright]
-venv = "."
-venvPath = "../../../../.venv"
+venv = ".venv"
+venvPath = "../../../.."
 reportMissingModuleSource = "none"
