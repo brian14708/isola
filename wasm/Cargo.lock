@@ -349,18 +349,18 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minicbor"
-version = "2.0.0"
+version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d2aa21725f9442def0570f427df351961a79439f63fff51b7d022a5ca31304"
+checksum = "2872b0488eb23abe7b4c26afe14581b30d0e1a7beb05286fe44978a58ea34ba2"
 dependencies = [
  "minicbor-derive",
 ]
 
 [[package]]
 name = "minicbor-derive"
-version = "0.18.0"
+version = "0.18.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "efcc51e9571691dc36dd629a3e81447e6e7803ff3a209b0fb6a60d4274ba63c3"
+checksum = "73b241342fbf809fe5e9ed7fafd25a28c5283618dbcdfce7d9dac8a85728521c"
 dependencies = [
  "proc-macro2",
  "quote",
