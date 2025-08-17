@@ -698,7 +698,7 @@ mod tests {
 
     #[test]
     fn test_pyobject_serializer() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
         Python::attach(|py| {
             assert_eq!(
                 python_to_json(PyList::new(py, [1]).unwrap().into_any()).unwrap(),
@@ -715,7 +715,7 @@ mod tests {
 
     #[test]
     fn test_pyvalue_minicbor_roundtrip() {
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
         Python::attach(|py| {
             // Test various Python types for round-trip serialization through minicbor
             let mut test_cases = vec![

@@ -82,7 +82,7 @@ pub mod http_module {
         url: &str,
         params: Option<&Bound<'_, PyDict>>,
         headers: Option<&Bound<'_, PyDict>>,
-        body: Option<PyObject>,
+        body: Option<Py<PyAny>>,
         timeout: Option<f64>,
     ) -> PyResult<PyFutureResponse> {
         enum Body<'a> {
@@ -365,11 +365,11 @@ pub mod http_module {
 
     #[pymethods]
     impl ResponseBuffer {
-        fn next(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        fn next(&mut self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
             self.inner.decode(py).map(|o| o.map(Into::into))
         }
 
-        fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+        fn read_all(&mut self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
             self.inner.decode_all(py).map(|o| o.map(Into::into))
         }
     }

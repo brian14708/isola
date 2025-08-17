@@ -5,8 +5,7 @@ use pyo3::{
     exceptions::PyNameError,
     intern,
     prelude::*,
-    prepare_freethreaded_python,
-    sync::GILOnceCell,
+    sync::PyOnceLock,
     types::{
         PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyMemoryView, PyString,
         PyTuple,
@@ -21,8 +20,8 @@ use crate::{
 };
 
 pub struct Scope {
-    locals: PyObject,
-    stdio: Option<(PyObject, PyObject)>,
+    locals: Py<PyAny>,
+    stdio: Option<(Py<PyAny>, Py<PyAny>)>,
 }
 
 pub enum InputValue<'a> {
@@ -32,7 +31,7 @@ pub enum InputValue<'a> {
 
 impl Scope {
     pub fn new() -> Self {
-        prepare_freethreaded_python();
+        Python::initialize();
         Python::attach(|py| {
             let locals = PyDict::new(py);
             locals
@@ -84,7 +83,7 @@ impl Scope {
     }
 
     pub fn load_script(&self, code: &str) -> crate::error::Result<()> {
-        static INIT: GILOnceCell<PyObject> = GILOnceCell::new();
+        static INIT: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
 
         Python::attach(|py| {
             if let Some(meta) = pymeta::parse_pep723(code) {
@@ -98,7 +97,7 @@ impl Scope {
                 &code,
                 Some(
                     self.locals
-                        .downcast_bound(py)
+                        .cast_bound(py)
                         .map_err(|e| Error::from_pyerr(py, e))?,
                 ),
                 None,
@@ -135,7 +134,7 @@ impl Scope {
         Python::attach(|py| {
             let dict: &Bound<'_, PyDict> = self
                 .locals
-                .downcast_bound(py)
+                .cast_bound(py)
                 .map_err(|e| Error::from_pyerr(py, e))?;
             let Some(f) = dict.get_item(name).map_err(|e| Error::from_pyerr(py, e))? else {
                 return Err(Error::from_pyerr(
@@ -184,7 +183,7 @@ impl Scope {
             let obj = if obj.hasattr("__await__").unwrap_or_default()
                 || obj.hasattr("__aiter__").unwrap_or_default()
             {
-                static ASYNC_RUN: GILOnceCell<PyObject> = GILOnceCell::new();
+                static ASYNC_RUN: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
                 ASYNC_RUN
                     .import(py, "promptkit.asyncio", "run")
                     .expect("failed to import promptkit.asyncio")
@@ -230,7 +229,7 @@ impl Scope {
                 .expect("failed to import promptkit._analyze");
             let dict: &Bound<'_, PyDict> = self
                 .locals
-                .downcast_bound(py)
+                .cast_bound(py)
                 .map_err(|e| Error::from_pyerr(py, e))?;
             let obj = module
                 .getattr(intern!(py, "analyze"))
@@ -265,7 +264,7 @@ mod tests {
         use std::cell::RefCell;
         let emissions = RefCell::new(Vec::new());
 
-        pyo3::prepare_freethreaded_python();
+        Python::initialize();
 
         {
             let emit_fn = |emit_type: crate::wasm::promptkit::script::host::EmitType,

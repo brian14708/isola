@@ -8,7 +8,7 @@ use std::cell::RefCell;
 
 use self::wasi::io::streams::StreamError;
 use self::wasi::logging::logging::Level;
-use pyo3::{append_to_inittab, prelude::*, sync::GILOnceCell};
+use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
 
 use crate::{
     error::Error,
@@ -232,7 +232,7 @@ impl ArgIter {
         slf
     }
 
-    fn __next__(&self, py: Python<'_>) -> PyResult<Option<PyObject>> {
+    fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
         match self.iter.blocking_read() {
             Ok(c) => Ok(Some(
                 cbor_to_python(py, &c)
@@ -248,13 +248,13 @@ impl ArgIter {
     }
 
     fn __aiter__(slf: Bound<'_, Self>) -> PyResult<Bound<'_, PyAny>> {
-        static AITER: GILOnceCell<PyObject> = GILOnceCell::new();
+        static AITER: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
         AITER
             .import(slf.py(), "promptkit.asyncio", "_aiter_arg")?
             .call1((slf,))
     }
 
-    fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<PyObject>, Option<PyPollable>)> {
+    fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<Py<PyAny>>, Option<PyPollable>)> {
         match self.iter.read() {
             Some(Ok(c)) => Ok((
                 true,
