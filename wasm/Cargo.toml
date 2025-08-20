@@ -13,7 +13,7 @@ anyhow = "1.0.83"
 base64 = "0.22.1"
 eventsource = { version = "0.5.0", default-features = false }
 glob = "0.3.2"
-heapless = "0.8"
+heapless = "0.9"
 minicbor = "2.0.0"
 minicbor-serde = "0.6.0"
 pyo3 = { version = "0.26.0-dev", git = "https://github.com/PyO3/pyo3.git", rev = "076617135b34e14775510ab87ec74621b3d30213" }
