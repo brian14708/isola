@@ -1,8 +1,12 @@
 wasmtime::component::bindgen!({
     world: "sandbox",
     path: "../../specs/wit",
-    async: true,
-    trappable_imports: true,
+    imports: {
+        default: async | trappable,
+    },
+    exports: {
+        default: async | trappable,
+    },
     ownership: Borrowing {
         duplicate_if_necessary: true
     },
@@ -24,7 +28,7 @@ use std::future::Future;
 use bytes::Bytes;
 pub use exports::promptkit::script::guest;
 use wasmtime::component::{HasData, Linker};
-use wasmtime_wasi::p2::IoView;
+use wasmtime_wasi::ResourceTable;
 
 pub mod host;
 pub mod outgoing_websocket;
@@ -35,8 +39,9 @@ pub enum EmitValue {
     End(Bytes),
 }
 
-pub trait HostView: IoView + Send {
+pub trait HostView: Send {
     type Env: crate::env::EnvHandle;
+    fn table(&mut self) -> &mut ResourceTable;
     fn env(&mut self) -> wasmtime::Result<Self::Env>;
     fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
@@ -46,6 +51,10 @@ impl<T: ?Sized + HostView> HostView for &mut T {
 
     fn env(&mut self) -> wasmtime::Result<Self::Env> {
         T::env(self)
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        T::table(self)
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {

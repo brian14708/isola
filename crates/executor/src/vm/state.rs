@@ -8,10 +8,7 @@ use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
 };
-use wasmtime_wasi::{
-    DirPerms, FilePerms,
-    p2::{IoView, WasiCtx, WasiCtxBuilder, WasiView},
-};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     HttpError, HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
@@ -103,21 +100,22 @@ impl<E: EnvHandle> VmState<E> {
     }
 }
 
-impl<E: EnvHandle> IoView for VmState<E> {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-}
-
 impl<E: EnvHandle> WasiView for VmState<E> {
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
 impl<E: EnvHandle> WasiHttpView for VmState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
+    }
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
     }
 
     fn send_request(
@@ -162,6 +160,10 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
 
 impl<E: EnvHandle> HostView for VmState<E> {
     type Env = E;
+
+    fn table(&mut self) -> &mut ResourceTable {
+        &mut self.table
+    }
 
     fn env(&mut self) -> wasmtime::Result<Self::Env> {
         let Some(run) = self.run.as_mut() else {

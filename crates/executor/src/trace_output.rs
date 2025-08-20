@@ -1,8 +1,12 @@
 use bytes::Bytes;
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use smallvec::SmallVec;
+use tokio::io::AsyncWrite;
 use tracing::event;
-use wasmtime_wasi::p2::{OutputStream, Pollable, StdoutStream, StreamResult};
+use wasmtime_wasi::{
+    cli::{IsTerminal, StdoutStream},
+    p2::{OutputStream, Pollable, StreamResult},
+};
 
 pub struct TraceOutput {
     context: &'static str,
@@ -15,14 +19,20 @@ impl TraceOutput {
 }
 
 impl StdoutStream for TraceOutput {
-    fn stream(&self) -> Box<dyn OutputStream> {
+    fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
+        todo!()
+    }
+
+    fn p2_stream(&self) -> Box<dyn OutputStream> {
         Box::new(TraceOutputStream {
             context: self.context,
             buffer: SmallVec::new(),
         })
     }
+}
 
-    fn isatty(&self) -> bool {
+impl IsTerminal for TraceOutput {
+    fn is_terminal(&self) -> bool {
         false
     }
 }

@@ -11,10 +11,9 @@ use futures::Stream;
 pub use state::{OutputCallback, VmState};
 use tempfile::TempDir;
 use wasmtime::{Store, component::ResourceTableError};
-use wasmtime_wasi::p2::IoView;
 
-use crate::env::EnvHandle;
 pub use crate::vm::run::VmRun;
+use crate::{env::EnvHandle, vm::bindgen::HostView};
 
 pub struct Vm<E: EnvHandle> {
     pub(crate) hash: [u8; 32],
