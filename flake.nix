@@ -84,7 +84,6 @@
 
         depsFull = with pkgs; [
           android-tools
-          cargo-deny
         ];
 
         mkShell = pkgs.mkShell.override {
