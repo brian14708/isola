@@ -24,7 +24,7 @@ smallvec = "1.15.1"
 thiserror = "2.0.0"
 url = "2.5.0"
 wasi-preview1-component-adapter-provider = "36.0.0"
-wit-bindgen = { version = "0.44.0", default-features = false }
+wit-bindgen = { version = "0.45.0", default-features = false }
 wit-component = "0.238.0"
 xshell = "0.2.6"
 
