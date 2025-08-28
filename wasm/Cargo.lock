@@ -281,9 +281,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.10.0"
+version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
+checksum = "f2481980430f9f78649238835720ddccc57e52df14ffce1c6f37391d61b563e9"
 dependencies = [
  "equivalent",
  "hashbrown",
@@ -349,18 +349,18 @@ checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
 name = "minicbor"
-version = "2.1.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2872b0488eb23abe7b4c26afe14581b30d0e1a7beb05286fe44978a58ea34ba2"
+checksum = "4f182275033b808ede9427884caa8e05fa7db930801759524ca7925bd8aa7a82"
 dependencies = [
  "minicbor-derive",
 ]
 
 [[package]]
 name = "minicbor-derive"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73b241342fbf809fe5e9ed7fafd25a28c5283618dbcdfce7d9dac8a85728521c"
+checksum = "b17290c95158a760027059fe3f511970d6857e47ff5008f9e09bffe3d3e1c6af"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -677,13 +677,14 @@ checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "url"
-version = "2.5.6"
+version = "2.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "137a3c834eaf7139b73688502f3f1141a0337c5d8e4d9b536f9b8c796e26a7c4"
+checksum = "08bc136a29a3d1758e07a9cca267be308aeebf5cfd5a10f3f67ab2097683ef5b"
 dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]
@@ -700,9 +701,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wasi-preview1-component-adapter-provider"
-version = "36.0.1"
+version = "36.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20689c88791776219f78c2529700d15e6a9bd57a27858c62e9ef8487956b571c"
+checksum = "4da2ec25ddcaf86d98cd2e1928af72963bc24318cf22fee36c61953bc5fd9f28"
 
 [[package]]
 name = "wasm-encoder"
