@@ -31,12 +31,15 @@ pub mod sys_module {
     use std::{ops::Deref, time::Duration};
 
     use pyo3::{
-        Bound, PyResult, pyfunction,
+        Bound, PyAny, PyResult, pyfunction,
         types::{PyAnyMethods, PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
     };
     use smallvec::{SmallVec, smallvec};
 
-    use crate::wasm::future::Pollable;
+    use crate::{
+        serde::python_to_cbor_emit,
+        wasm::{future::Pollable, promptkit::script::host},
+    };
 
     use super::wasi::{
         clocks::monotonic_clock::{now, subscribe_duration},
@@ -59,6 +62,11 @@ pub mod sys_module {
     #[pyfunction]
     fn monotonic() -> f64 {
         Duration::from_nanos(now()).as_secs_f64()
+    }
+
+    #[pyfunction]
+    fn emit(obj: Bound<'_, PyAny>) -> PyResult<()> {
+        python_to_cbor_emit(obj, host::EmitType::PartialResult, host::blocking_emit)
     }
 
     #[pyfunction]
