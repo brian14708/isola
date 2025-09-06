@@ -75,7 +75,7 @@ url = "2.5.1"
 wasmtime = { version = "36.0.0", default-features = false }
 wasmtime-wasi = "36.0.0"
 wasmtime-wasi-http = { version = "36.0.0", default-features = false }
-zip = { version = "4.3.0", default-features = false }
+zip = { version = "5.0.0", default-features = false }
 
 [profile.release-lto]
 inherits = "release"
