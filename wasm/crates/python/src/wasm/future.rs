@@ -89,7 +89,7 @@ impl Drop for Pollable<'_> {
 
 macro_rules! create_future {
     ($name:ident, $future_type:ty, $type:ty) => {
-        #[pyclass]
+        #[::pyo3::prelude::pyclass]
         struct $name {
             inner: Option<$future_type>,
         }
@@ -100,7 +100,7 @@ macro_rules! create_future {
             }
         }
 
-        #[pymethods]
+        #[::pyo3::prelude::pymethods]
         impl $name {
             fn wait(mut slf: ::pyo3::PyRefMut<'_, Self>) -> PyResult<$type> {
                 match slf.inner.take() {
@@ -132,7 +132,7 @@ macro_rules! create_future {
         }
     };
     ($name:ident, $future_type:ty, $convert:ident -> $type:ty) => {
-        #[pyclass]
+        #[::pyo3::prelude::pyclass]
         struct $name {
             inner: Option<$future_type>,
         }
@@ -143,7 +143,7 @@ macro_rules! create_future {
             }
         }
 
-        #[pymethods]
+        #[::pyo3::prelude::pymethods]
         impl $name {
             fn wait(mut slf: ::pyo3::PyRefMut<'_, Self>) -> $type {
                 match slf.inner.take() {

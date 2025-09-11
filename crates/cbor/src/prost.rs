@@ -11,7 +11,8 @@ impl<'a> ProstValue<'a> {
         Self(value)
     }
 
-    pub const fn serializer() -> impl Serializer<Ok = prost_types::Value> {
+    pub const fn serializer()
+    -> impl Serializer<Ok = prost_types::Value, Error = serde::de::value::Error> {
         ProstValueSerializer
     }
 

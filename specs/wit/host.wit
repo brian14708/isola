@@ -1,5 +1,6 @@
 interface host {
     use wasi:io/poll@0.2.7.{pollable};
+    use wasi:io/error@0.2.7.{error};
     use wasi:io/streams@0.2.7.{stream-error};
 
     variant value {
@@ -18,4 +19,10 @@ interface host {
     }
 
     blocking-emit: func(%type: emit-type, %cbor: list<u8>);
+
+    resource future-hostcall {
+        subscribe: func() -> pollable;
+        get: func() -> option<result<result<list<u8>, error>>>;
+    }
+    hostcall: func(%type: string, %payload: list<u8>) -> future-hostcall;
 }

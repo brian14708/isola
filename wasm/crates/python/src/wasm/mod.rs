@@ -31,14 +31,18 @@ pub mod sys_module {
     use std::{ops::Deref, time::Duration};
 
     use pyo3::{
-        Bound, PyAny, PyResult, pyfunction,
+        Bound, PyAny, PyErr, PyResult, Python, pyfunction,
         types::{PyAnyMethods, PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
     };
     use smallvec::{SmallVec, smallvec};
 
     use crate::{
-        serde::python_to_cbor_emit,
-        wasm::{future::Pollable, promptkit::script::host},
+        serde::{cbor_to_python, python_to_cbor, python_to_cbor_emit},
+        wasm::{
+            future::{Pollable, create_future},
+            promptkit::script::host,
+            wasi,
+        },
     };
 
     use super::wasi::{
@@ -48,6 +52,18 @@ pub mod sys_module {
 
     #[pymodule_export]
     use super::future::PyPollable;
+
+    fn cbor_convert(
+        py: Python<'_>,
+        cbor: Result<Vec<u8>, wasi::io::error::Error>,
+    ) -> PyResult<Bound<'_, PyAny>> {
+        cbor_to_python(
+            py,
+            &cbor
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_debug_string()))?,
+        )
+    }
+    create_future!(PyFutureHostcall, super::host::FutureHostcall, cbor_convert -> PyResult<Bound<'_, PyAny>>);
 
     #[pyfunction]
     #[pyo3(signature = (duration))]
@@ -67,6 +83,13 @@ pub mod sys_module {
     #[pyfunction]
     fn emit(obj: Bound<'_, PyAny>) -> PyResult<()> {
         python_to_cbor_emit(obj, host::EmitType::PartialResult, host::blocking_emit)
+    }
+
+    #[pyfunction]
+    fn hostcall(call_type: &str, payload: Bound<'_, PyAny>) -> PyResult<PyFutureHostcall> {
+        let cbor_payload = python_to_cbor(payload)?;
+        let future_hostcall = host::hostcall(call_type, &cbor_payload);
+        Ok(PyFutureHostcall::new(future_hostcall))
     }
 
     #[pyfunction]

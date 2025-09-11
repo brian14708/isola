@@ -543,6 +543,17 @@ struct CompileEnv {}
 
 impl Env for CompileEnv {
     type Callback = Self;
+    type Error = anyhow::Error;
+
+    async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
+        match call_type {
+            "echo" => {
+                // Simple echo - return the payload as-is
+                Ok(payload.to_vec())
+            }
+            _ => Err(anyhow!("unknown")), // Unknown hostcall type
+        }
+    }
 }
 
 impl EnvHttp for CompileEnv {

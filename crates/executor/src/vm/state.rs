@@ -131,7 +131,8 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
                         return Ok(Err(ErrorCode::InternalError(Some(format!(
-                            "request error: {e}"
+                            "request error: {}",
+                            e.into()
                         )))));
                     }
                     Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
@@ -139,7 +140,9 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
                 .map(|b| {
                     http_body_util::StreamBody::new(b.map(|e| match e {
                         Ok(e) => Ok(e),
-                        Err(e) => Err(ErrorCode::InternalError(Some(e.to_string()))),
+                        Err(e) => Err(ErrorCode::InternalError(Some(
+                            Into::<anyhow::Error>::into(e).to_string(),
+                        ))),
                     }))
                 })
                 .into_parts();

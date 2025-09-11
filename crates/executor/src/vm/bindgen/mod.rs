@@ -14,6 +14,7 @@ wasmtime::component::bindgen!({
         "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::wasm::logging::bindings,
         "promptkit:script/host/value-iterator": host::ValueIterator,
+        "promptkit:script/host/future-hostcall": host::FutureHostcall,
         "promptkit:script/outgoing-websocket/connect-request": outgoing_websocket::ConnectRequest,
         "promptkit:script/outgoing-websocket/websocket-message": outgoing_websocket::WebsocketMessage,
         "promptkit:script/outgoing-websocket/read-stream": outgoing_websocket::ReadStream,

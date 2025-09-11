@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     type _Coroutine[T] = Coroutine[object, object, T]
 
 __all__ = [
+    "hostcall",
     "run",
     "subscribe",
     "WasiEventLoopPolicy",
@@ -287,3 +288,8 @@ async def _aiter_arg(args: _promptkit_sys.ArgIter) -> AsyncGenerator[object]:  #
             await subscribe(poll)
         else:
             yield result
+
+
+async def hostcall(call_type: str, payload: object) -> object:
+    future_hostcall = _promptkit_sys.hostcall(call_type, payload)
+    return await subscribe(future_hostcall)

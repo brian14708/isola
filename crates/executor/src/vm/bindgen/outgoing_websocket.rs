@@ -109,7 +109,9 @@ impl<T: HostView> Host for HostImpl<T> {
                 let mut request = http::Request::builder()
                     .uri(&conn.0.url)
                     .body(tokio_stream::wrappers::ReceiverStream::new(write_rx))
-                    .map_err(|e| ErrorCode::InternalError(Some(e.to_string())))?;
+                    .map_err(|e| {
+                        ErrorCode::InternalError(Some(Into::<anyhow::Error>::into(e).to_string()))
+                    })?;
 
                 // Add headers if provided
                 if let Some(headers) = &conn.0.headers {
@@ -136,7 +138,9 @@ impl<T: HostView> Host for HostImpl<T> {
                 } else {
                     env.connect_websocket(request).await
                 }
-                .map_err(|e| ErrorCode::ConnectionFailed(Some(e.to_string())))?;
+                .map_err(|e| {
+                    ErrorCode::ConnectionFailed(Some(Into::<anyhow::Error>::into(e).to_string()))
+                })?;
 
                 // Take ownership of the header map
                 let response_headers = std::mem::take(response.headers_mut());
@@ -144,7 +148,7 @@ impl<T: HostView> Host for HostImpl<T> {
                 // Use the response stream directly
                 let response_stream = response.into_body();
                 let mapped_stream =
-                    response_stream.map(|result| result.map_err(|e| anyhow::anyhow!("{}", e)));
+                    response_stream.map(|result| result.map_err(std::convert::Into::into));
                 let boxed_stream: Pin<
                     Box<dyn Stream<Item = anyhow::Result<Message>> + Send + Sync>,
                 > = Box::pin(mapped_stream);

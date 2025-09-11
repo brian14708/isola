@@ -2,16 +2,30 @@
 #![forbid(unsafe_code)]
 
 use std::convert::Infallible;
-use std::error::Error as StdError;
 use std::io::{self, Write};
 
 use bytes::{Bytes, BytesMut};
 use serde::Serialize;
+use thiserror::Error;
 
 #[cfg(feature = "prost")]
 mod prost;
 
-pub type Error = Box<dyn StdError>;
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("JSON serialization error")]
+    Json(#[from] serde_json::Error),
+    #[error("CBOR decode error")]
+    CborDecode(#[from] minicbor_serde::error::DecodeError),
+    #[error("CBOR encode error")]
+    CborEncode(#[from] minicbor_serde::error::EncodeError<std::convert::Infallible>),
+    #[error("UTF-8 encoding error")]
+    Utf8(#[from] std::string::FromUtf8Error),
+    #[error("I/O error")]
+    Io(#[from] io::Error),
+    #[error("Prost serialization error")]
+    ProstSerialization(#[from] serde::de::value::Error),
+}
 
 struct Base64Formatter;
 
@@ -34,8 +48,7 @@ impl serde_json::ser::Formatter for Base64Formatter {
 pub fn json_to_cbor(json: &str) -> Result<Bytes, Error> {
     let mut serializer = minicbor_serde::Serializer::new(CborBytesMut::default());
     serde_transcode::Transcoder::new(&mut serde_json::Deserializer::from_str(json))
-        .serialize(serializer.serialize_unit_as_null(true))
-        .map_err(Box::new)?;
+        .serialize(serializer.serialize_unit_as_null(true))?;
     Ok(serializer.into_encoder().into_writer().freeze())
 }
 
@@ -45,13 +58,10 @@ pub fn json_to_cbor(json: &str) -> Result<Bytes, Error> {
 /// Returns error if CBOR parsing or JSON serialization fails.
 pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
     let mut o = vec![];
-    serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
-        .serialize(&mut serde_json::Serializer::with_formatter(
-            &mut o,
-            Base64Formatter,
-        ))
-        .map_err(Box::new)?;
-    Ok(String::from_utf8(o).map_err(Box::new)?)
+    serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor)).serialize(
+        &mut serde_json::Serializer::with_formatter(&mut o, Base64Formatter),
+    )?;
+    Ok(String::from_utf8(o)?)
 }
 
 #[cfg(feature = "prost")]
@@ -62,8 +72,7 @@ pub fn cbor_to_json(cbor: &[u8]) -> Result<String, Error> {
 pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Bytes, Error> {
     let mut o = CborBytesMut::default();
     serde_transcode::Transcoder::new(prost::ProstValue::new(prost))
-        .serialize(&mut minicbor_serde::Serializer::new(&mut o))
-        .map_err(Box::new)?;
+        .serialize(&mut minicbor_serde::Serializer::new(&mut o))?;
     Ok(o.freeze())
 }
 
@@ -73,11 +82,9 @@ pub fn prost_to_cbor(prost: &prost_types::Value) -> Result<Bytes, Error> {
 /// # Errors
 /// Returns error if CBOR parsing fails.
 pub fn cbor_to_prost(cbor: &[u8]) -> Result<prost_types::Value, Error> {
-    Ok(
-        serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
-            .serialize(prost::ProstValue::serializer())
-            .map_err(Box::new)?,
-    )
+    serde_transcode::Transcoder::new(&mut minicbor_serde::Deserializer::new(cbor))
+        .serialize(prost::ProstValue::serializer())
+        .map_err(Error::ProstSerialization)
 }
 
 /// Serialize any serializable value to CBOR bytes.
@@ -96,7 +103,7 @@ pub fn to_cbor<T: Serialize>(value: &T) -> Result<Bytes, Error> {
 /// Returns error if deserialization fails.
 pub fn from_cbor<T: serde::de::DeserializeOwned>(cbor: &[u8]) -> Result<T, Error> {
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
-    Ok(T::deserialize(&mut deserializer).map_err(Box::new)?)
+    Ok(T::deserialize(&mut deserializer)?)
 }
 
 struct CborBytesMut(BytesMut);
@@ -306,7 +313,7 @@ mod tests {
         for (input, expected) in test_cases {
             let prost_value = make_prost_number(input);
             let json = cbor_to_json(&prost_to_cbor(&prost_value).unwrap()).unwrap();
-            assert_eq!(json, expected, "Failed for input: {}", input);
+            assert_eq!(json, expected, "Failed for input: {input}");
         }
     }
 }

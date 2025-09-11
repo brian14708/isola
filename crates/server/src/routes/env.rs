@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use futures::{StreamExt, TryStreamExt};
+use promptkit_cbor::{from_cbor, to_cbor};
 use promptkit_executor::{
     MpscOutputCallback,
     env::{BoxedStream, Env, EnvHttp},
@@ -38,6 +39,26 @@ where
 
 impl Env for VmEnv {
     type Callback = MpscOutputCallback;
+    type Error = anyhow::Error;
+
+    async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
+        match call_type {
+            "echo" => {
+                // Simple echo - return the payload as-is
+                Ok(payload.to_vec())
+            }
+            "add" => {
+                #[derive(serde::Deserialize)]
+                struct AddInput {
+                    a: i32,
+                    b: i32,
+                }
+                let p: AddInput = from_cbor(payload)?;
+                Ok(to_cbor(&(p.a + p.b))?.to_vec())
+            }
+            _ => Err(anyhow::anyhow!("unknown")), // Unknown hostcall type
+        }
+    }
 }
 
 impl EnvHttp for VmEnv {

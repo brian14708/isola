@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use futures::TryStreamExt;
 use promptkit_executor::env::{BoxedStream, WebsocketMessage};
 use promptkit_request::{Client, RequestOptions};
@@ -30,6 +31,17 @@ impl Env {
 
 impl promptkit_executor::env::Env for Env {
     type Callback = Callback;
+    type Error = anyhow::Error;
+
+    async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
+        match call_type {
+            "echo" => {
+                // Simple echo - return the payload as-is
+                Ok(payload.to_vec())
+            }
+            _ => Err(anyhow!("unknown")), // Unknown hostcall type
+        }
+    }
 }
 impl promptkit_executor::env::EnvHttp for Env {
     type Error = anyhow::Error;

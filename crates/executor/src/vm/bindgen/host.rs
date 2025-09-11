@@ -4,13 +4,16 @@ use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
 use tokio_stream::Stream;
 use wasmtime::component::Resource;
-use wasmtime_wasi::p2::{DynPollable, Pollable, bindings::io::streams::StreamError};
+use wasmtime_wasi::{
+    p2::{DynPollable, IoError, Pollable, bindings::io::streams::StreamError},
+    runtime::AbortOnDropJoinHandle,
+};
 
-use crate::vm::bindgen::EmitValue;
+use crate::{env::Env, vm::bindgen::EmitValue};
 
 use super::{
     HostView,
-    promptkit::script::host::{Host, HostValueIterator},
+    promptkit::script::host::{Host, HostFutureHostcall, HostValueIterator},
 };
 
 pub struct ValueIterator {
@@ -60,6 +63,21 @@ impl Pollable for ValueIterator {
     }
 }
 
+pub enum FutureHostcall {
+    Pending(AbortOnDropJoinHandle<wasmtime::Result<Vec<u8>>>),
+    Ready(wasmtime::Result<Vec<u8>>),
+    Consumed,
+}
+
+#[async_trait::async_trait]
+impl Pollable for FutureHostcall {
+    async fn ready(&mut self) {
+        if let Self::Pending(handle) = self {
+            *self = Self::Ready(handle.await);
+        }
+    }
+}
+
 impl<T: HostView> Host for super::HostImpl<T> {
     async fn blocking_emit(
         &mut self,
@@ -76,6 +94,21 @@ impl<T: HostView> Host for super::HostImpl<T> {
             }
         };
         self.0.emit(emit_value).await
+    }
+
+    async fn hostcall(
+        &mut self,
+        call_type: String,
+        payload: Vec<u8>,
+    ) -> wasmtime::Result<Resource<FutureHostcall>> {
+        let env = self.0.env()?;
+
+        let s = wasmtime_wasi::runtime::spawn(async move {
+            env.hostcall(&call_type, &payload)
+                .await
+                .map_err(std::convert::Into::into)
+        });
+        Ok(self.0.table().push(FutureHostcall::Pending(s))?)
     }
 }
 
@@ -103,6 +136,39 @@ impl<T: HostView> HostValueIterator for super::HostImpl<T> {
     }
 
     async fn drop(&mut self, rep: Resource<ValueIterator>) -> wasmtime::Result<()> {
+        self.0.table().delete(rep)?;
+        Ok(())
+    }
+}
+
+impl<T: HostView> HostFutureHostcall for super::HostImpl<T> {
+    async fn subscribe(
+        &mut self,
+        self_: Resource<FutureHostcall>,
+    ) -> wasmtime::Result<Resource<DynPollable>> {
+        wasmtime_wasi::p2::subscribe(self.0.table(), self_)
+    }
+
+    async fn get(
+        &mut self,
+        self_: Resource<FutureHostcall>,
+    ) -> wasmtime::Result<Option<Result<Result<Vec<u8>, Resource<IoError>>, ()>>> {
+        let future = self.0.table().get_mut(&self_)?;
+        match future {
+            FutureHostcall::Ready(_) => match std::mem::replace(future, FutureHostcall::Consumed) {
+                FutureHostcall::Ready(Ok(data)) => Ok(Some(Ok(Ok(data)))),
+                FutureHostcall::Ready(Err(e)) => {
+                    let error_resource = self.0.table().push(e)?;
+                    Ok(Some(Ok(Err(error_resource))))
+                }
+                FutureHostcall::Pending(_) | FutureHostcall::Consumed => unreachable!(),
+            },
+            FutureHostcall::Pending(_) => Ok(None),
+            FutureHostcall::Consumed => Ok(Some(Err(()))),
+        }
+    }
+
+    async fn drop(&mut self, rep: Resource<FutureHostcall>) -> wasmtime::Result<()> {
         self.0.table().delete(rep)?;
         Ok(())
     }

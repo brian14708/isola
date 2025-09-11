@@ -9,6 +9,13 @@ pub type WebsocketMessage = tungstenite::protocol::Message;
 
 pub trait Env {
     type Callback: OutputCallback;
+    type Error: Into<anyhow::Error>;
+
+    fn hostcall(
+        &self,
+        call_type: &str,
+        payload: &[u8],
+    ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>> + Send;
 }
 
 pub type BoxedStream<T, E> = Pin<Box<dyn futures::Stream<Item = Result<T, E>> + Send + Sync>>;
@@ -16,7 +23,7 @@ pub type BoxedStream<T, E> = Pin<Box<dyn futures::Stream<Item = Result<T, E>> + 
 type HttpBodyStream<E> = BoxedStream<Frame<Bytes>, E>;
 
 pub trait EnvHttp {
-    type Error: std::fmt::Display + Send + Sync + 'static;
+    type Error: Into<anyhow::Error>;
 
     fn send_request_http<B>(
         &self,
