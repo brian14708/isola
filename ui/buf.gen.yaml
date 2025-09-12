@@ -6,4 +6,4 @@ plugins:
     out: src/lib/rpc
     opt: target=ts
 inputs:
-  - directory: ../specs/proto/
+  - directory: ../specs/grpc/
