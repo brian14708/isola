@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 pub mod env;
 pub mod error;
 mod resource;

@@ -1,5 +1,3 @@
-#![warn(clippy::pedantic)]
-
 mod error;
 mod pymeta;
 mod script;

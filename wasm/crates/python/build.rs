@@ -20,9 +20,7 @@ fn main() {
             .unwrap()
             .wait()
             .unwrap();
-        if !e.success() {
-            panic!("Failed to run cmake {e:?}");
-        }
+        assert!(e.success(), "Failed to run cmake {e:?}");
         let e = Command::new(&cmd)
             .arg("--build")
             .arg(".")
@@ -35,9 +33,7 @@ fn main() {
             .unwrap()
             .wait()
             .unwrap();
-        if !e.success() {
-            panic!("Failed to run cmake {e:?}");
-        }
+        assert!(e.success(), "Failed to run cmake {e:?}");
 
         println!("cargo:rustc-link-arg=-shared");
         let lib_paths = vec!["lib"];

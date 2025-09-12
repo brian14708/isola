@@ -1,6 +1,3 @@
-#![warn(clippy::pedantic)]
-#![forbid(unsafe_code)]
-
 mod client;
 mod error;
 mod http;

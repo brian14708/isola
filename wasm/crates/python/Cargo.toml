@@ -6,6 +6,9 @@ publish.workspace = true
 license.workspace = true
 exclude = ["/bundled", "bundle.py"]
 
+[lints]
+workspace = true
+
 [lib]
 crate-type = ["cdylib"]
 

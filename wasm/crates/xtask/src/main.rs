@@ -147,7 +147,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
             let mut wasm = wit_component::Linker::default()
                 .validate(true)
-                .stack_size(8388608)
+                .stack_size(8_388_608)
                 .use_built_in_libdl(true);
             for lib in libs {
                 let filename = lib.1.file_name().unwrap().to_str().unwrap();

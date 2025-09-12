@@ -2039,7 +2039,6 @@ dependencies = [
  "serde",
  "tokio",
  "tokio-stream",
- "tokio-tungstenite",
  "tonic 0.14.2",
  "tonic-prost",
  "tonic-prost-build",

@@ -8,6 +8,10 @@ edition = "2024"
 publish = false
 license = ""
 
+[workspace.lints.clippy]
+all = "warn"
+pedantic = "warn"
+
 [workspace.dependencies]
 anyhow = "1.0.83"
 base64 = "0.22.1"
