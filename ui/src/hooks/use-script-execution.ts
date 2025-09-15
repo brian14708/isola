@@ -89,10 +89,16 @@ export function useScriptExecution() {
                 setOutput((prev) => [...prev, `[${timestamp}] Event: ${event.kind}`]);
               } else if (trace.traceType.case === "spanBegin") {
                 const span = trace.traceType.value;
-                setOutput((prev) => [...prev, `[${timestamp}] → ${span.kind} ${JSON.stringify(span.data)}`]);
+                setOutput((prev) => [
+                  ...prev,
+                  `[${timestamp}] → ${span.kind} ${JSON.stringify(span.data)}`,
+                ]);
               } else if (trace.traceType.case === "spanEnd") {
                 const span = trace.traceType.value;
-                setOutput((prev) => [...prev, `[${timestamp}] ← ${span.parentId} ${JSON.stringify(span.data)}`]);
+                setOutput((prev) => [
+                  ...prev,
+                  `[${timestamp}] ← ${span.parentId} ${JSON.stringify(span.data)}`,
+                ]);
               }
             }
           }

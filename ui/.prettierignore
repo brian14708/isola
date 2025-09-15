@@ -1,3 +1,2 @@
-pnpm-lock.yaml
 src/lib/rpc/promptkit/
 src/routeTree.gen.ts
