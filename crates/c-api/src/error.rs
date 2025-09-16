@@ -71,13 +71,13 @@ impl Error {
         match self {
             Error::InvalidArgument(msg) => {
                 let cstr = msg.into_cstr();
-                *self = Error::C(ErrorCode::InvalidArgument, cstr.clone());
-                cstr.as_ptr()
+                *self = Error::C(ErrorCode::InvalidArgument, cstr);
+                self.c_error()
             }
             Error::Internal(msg) => {
                 let cstr = msg.clone().into_cstr();
-                *self = Error::C(ErrorCode::Internal, cstr.clone());
-                cstr.as_ptr()
+                *self = Error::C(ErrorCode::Internal, cstr);
+                self.c_error()
             }
             Error::C(_, msg) => msg.as_ptr(),
         }
