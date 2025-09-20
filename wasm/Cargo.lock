@@ -713,9 +713,9 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "wasi-preview1-component-adapter-provider"
-version = "36.0.2"
+version = "37.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4da2ec25ddcaf86d98cd2e1928af72963bc24318cf22fee36c61953bc5fd9f28"
+checksum = "d165ef21411cf53448af5aac9ba944b936c0a1d2eb93f0d34b6211a765dd53da"
 
 [[package]]
 name = "wasm-encoder"

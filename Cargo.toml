@@ -76,9 +76,9 @@ tracing-opentelemetry = "0.31"
 tracing-subscriber = "0.3"
 tungstenite = { version = "0.27", default-features = false }
 url = "2.5"
-wasmtime = { version = "36.0", default-features = false }
-wasmtime-wasi = "36.0"
-wasmtime-wasi-http = { version = "36.0", default-features = false }
+wasmtime = { version = "37.0", default-features = false }
+wasmtime-wasi = "37.0"
+wasmtime-wasi-http = { version = "37.0", default-features = false }
 zip = { version = "5.0", default-features = false }
 
 [profile.release-lto]
