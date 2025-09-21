@@ -61,7 +61,7 @@ impl OutputCallback for MpscOutputCallback {
         sender
             .send(StreamItem::Data(item))
             .await
-            .map_err(|e| anyhow!("Send error: {}", e))
+            .map_err(|e| anyhow!("Send error: {e}"))
     }
 
     async fn on_end(&mut self, item: Bytes) -> Result<(), anyhow::Error> {
@@ -73,7 +73,7 @@ impl OutputCallback for MpscOutputCallback {
                 Some(item)
             }))
             .await
-            .map_err(|e| anyhow!("Send error: {}", e))
+            .map_err(|e| anyhow!("Send error: {e}"))
     }
 }
 

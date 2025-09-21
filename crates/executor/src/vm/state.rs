@@ -70,9 +70,9 @@ impl<E: EnvHandle> VmState<E> {
     ) -> anyhow::Result<Store<Self>> {
         let wasi = WasiCtxBuilder::new()
             .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
-            .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {e}"))?
             .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
-            .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {}", e))?
+            .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {e}"))?
             .allow_tcp(false)
             .allow_udp(false)
             .stdout(TraceOutput::new("stdout"))
