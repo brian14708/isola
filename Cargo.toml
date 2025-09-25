@@ -64,7 +64,7 @@ tempfile = "3.10"
 thiserror = "2.0"
 tokio = "1.45"
 tokio-stream = "0.1"
-tokio-tungstenite = { version = "0.27", default-features = false }
+tokio-tungstenite = { version = "0.28", default-features = false }
 tonic = { version = "0.14", default-features = false }
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
