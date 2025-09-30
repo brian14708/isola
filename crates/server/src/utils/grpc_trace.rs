@@ -66,7 +66,7 @@ impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
             { trace::OTEL_STATUS_DESCRIPTION } = Empty,
             otel.kind = "server",
         );
-        tracing_opentelemetry::OpenTelemetrySpanExt::set_parent(&span, remote_context);
+        _ = tracing_opentelemetry::OpenTelemetrySpanExt::set_parent(&span, remote_context);
         span
     }
 }

@@ -40,10 +40,10 @@ metrics-exporter-prometheus = { version = "0.17", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"
 minicbor-serde = "0.6"
-opentelemetry = "0.30"
-opentelemetry-otlp = { version = "0.30", default-features = false }
-opentelemetry-semantic-conventions = "0.30"
-opentelemetry_sdk = "0.30"
+opentelemetry = "0.31"
+opentelemetry-otlp = { version = "0.31", default-features = false }
+opentelemetry-semantic-conventions = "0.31"
+opentelemetry_sdk = "0.31"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
 promptkit-cbor = { path = "crates/cbor" }
@@ -72,7 +72,7 @@ tonic-reflection = "0.14"
 tonic-web = "0.14"
 tower-http = "0.6"
 tracing = "0.1"
-tracing-opentelemetry = "0.31"
+tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
 tungstenite = { version = "0.28", default-features = false }
 url = "2.5"
