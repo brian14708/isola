@@ -19,7 +19,6 @@ use promptkit_trace::{
     consts::{TRACE_TARGET_OTEL, TRACE_TARGET_SCRIPT},
 };
 use tracing::{Level, Subscriber, level_filters::LevelFilter};
-use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::{
     Layer, filter::FilterFn, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
 };
@@ -107,7 +106,8 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
 fn otel_layer<S, T>(tracer: T) -> impl Layer<S>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
-    T: Tracer + PreSampledTracer + 'static,
+    T: Tracer + 'static,
+    T::Span: Send + Sync,
 {
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
         .with_location(false)
