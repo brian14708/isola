@@ -29,7 +29,6 @@ __all__ = [
     "hostcall",
     "run",
     "subscribe",
-    "WasiEventLoopPolicy",
 ]
 
 with contextlib.suppress(ImportError):
@@ -232,35 +231,6 @@ class PollLoop(asyncio.AbstractEventLoop):
         pass
 
 
-class WasiEventLoopPolicy(asyncio.AbstractEventLoopPolicy):
-    _instance: WasiEventLoopPolicy | None = None
-    _initialized: bool
-
-    def __new__(cls) -> WasiEventLoopPolicy:
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self) -> None:
-        if not hasattr(self, "_initialized"):
-            self._loop: asyncio.AbstractEventLoop | None = None
-            self._initialized = True
-
-    @override
-    def get_event_loop(self) -> asyncio.AbstractEventLoop:
-        if self._loop is None:
-            self._loop = self.new_event_loop()
-        return self._loop
-
-    @override
-    def set_event_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
-        self._loop = loop
-
-    @override
-    def new_event_loop(self) -> asyncio.AbstractEventLoop:
-        return PollLoop()  # type: ignore[abstract]
-
-
 def _iter[T](it: AsyncGenerator[T]) -> Generator[T]:
     with asyncio.Runner() as runner:
         loop = runner.get_loop()
@@ -275,7 +245,7 @@ def run[T](main: AsyncGenerator[T]) -> Generator[T]: ...
 def run[T](main: _Coroutine[T] | AsyncGenerator[T]) -> T | Generator[T]:
     if hasattr(main, "__aiter__"):
         return _iter(cast("AsyncGenerator[T]", main))
-    with asyncio.Runner() as runner:
+    with asyncio.Runner(loop_factory=PollLoop) as runner:
         return runner.run(cast("Coroutine[None, None, T]", main))
 
 
