@@ -1,33 +1,29 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index c2054b2d..a2b16274 100644
+index df90031..343081c 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -50,7 +50,7 @@ hex = "0.4.3"
+@@ -49,7 +49,7 @@ hex = "0.4.3"
  
  [lib]
  name = "_pydantic_core"
 -crate-type = ["cdylib", "rlib"]
 +crate-type = ["cdylib"]
  
- [features]
- # must be enabled when building with `cargo build`, maturin enables this automatically
-@@ -110,3 +110,9 @@ too_many_lines = "allow"
+ [profile.release]
+ lto = "fat"
+@@ -105,3 +105,5 @@ too_many_lines = "allow"
  unnecessary_wraps = "allow"
  unused_self = "allow"
  used_underscore_binding = "allow"
 +
 +[workspace]
-+
-+[patch.crates-io]
-+pyo3 = { git = "https://github.com/brian14708/pyo3.git", branch = "wasi" }
-+pyo3-build-config = { git = "https://github.com/brian14708/pyo3.git", branch = "wasi" }
 diff --git a/build.rs b/build.rs
-index f8f66901..4efa98a5 100644
+index 41a831e..61d0dec 100644
 --- a/build.rs
 +++ b/build.rs
-@@ -47,4 +47,5 @@ fn main() {
- 
-     generate_self_schema();
+@@ -13,4 +13,5 @@ fn main() {
+     }
+     println!("cargo:rustc-check-cfg=cfg(specified_profile_use)");
      println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());
 +    println!("cargo:rustc-link-arg=-shared");
  }
