@@ -26,7 +26,7 @@ axum = "0.8"
 base64 = "0.22"
 bytes = "1.10"
 cbindgen = "0.29"
-component-init-transform = { git = "https://github.com/dicej/component-init" }
+component-init-transform = "0.1"
 dashmap = "6.1"
 fastant = "0.1"
 futures = "0.3"
