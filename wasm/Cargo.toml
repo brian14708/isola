@@ -29,7 +29,7 @@ thiserror = "2.0"
 url = "2.5"
 wasi-preview1-component-adapter-provider = "37.0"
 wit-bindgen = { version = "0.46", default-features = false }
-wit-component = "0.239"
+wit-component = "0.240"
 xshell = "0.2"
 
 [profile.release]
