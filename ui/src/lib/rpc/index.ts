@@ -19,7 +19,8 @@ export function useRpcClient<T extends DescService>(service: T): Client<T> {
     }
 
     const newClient = createClient(service, transport);
-    clientMap[name] = newClient;
+    // Safe: This is a module-level cache that needs to be populated during memoization
+    clientMap[name] = newClient; // eslint-disable-line react-hooks/immutability
     return newClient;
   }, [service]);
 }
