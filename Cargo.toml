@@ -79,7 +79,7 @@ url = "2.5"
 wasmtime = { version = "37.0", default-features = false }
 wasmtime-wasi = "37.0"
 wasmtime-wasi-http = { version = "37.0", default-features = false }
-zip = { version = "5.0", default-features = false }
+zip = { version = "6.0", default-features = false }
 
 [profile.release-lto]
 inherits = "release"
