@@ -4,12 +4,12 @@ wasi_sysroot = wasi_sdk_path / 'share' / 'wasi-sysroot'
 cross_prefix = '@WASMLIB_SYSROOT@' / 'usr' / 'local'
 wasi_target = 'wasm32-wasip1'
 wasi_args = ['--sysroot=' + wasi_sysroot, '--target=' + wasi_target, '-D__EMSCRIPTEN__=1', '-DNPY_NO_SIGNAL']
-wasi_link_args = ['-L' + '@CMAKE_BINARY_DIR@', '-lpython3.13']
+wasi_link_args = ['-L' + '@CMAKE_BINARY_DIR@', '-lpython3.14']
 
 [binaries]
 exe_wrapper = 'wasmtime'
-c = [wasi_sdk_path + '/bin/clang', '-I' + cross_prefix / 'include' / 'python3.13']
-cpp = [wasi_sdk_path + '/bin/clang++', '-I' + cross_prefix / 'include' / 'python3.13', '-fno-exceptions']
+c = [wasi_sdk_path + '/bin/clang', '-I' + cross_prefix / 'include' / 'python3.14']
+cpp = [wasi_sdk_path + '/bin/clang++', '-I' + cross_prefix / 'include' / 'python3.14', '-fno-exceptions']
 asm = wasi_sdk_path + '/bin/clang'
 ar = wasi_sdk_path + '/bin/llvm-ar'
 c_ld = wasi_sdk_path + '/bin/wasm-ld'

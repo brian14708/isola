@@ -42,10 +42,10 @@ RUN curl -sSL \
       | tar -xz --strip-components=1 -C /usr/local/
 ENV PYENV_ROOT=/root/.pyenv \
     PATH=/root/.pyenv/bin:/root/.pyenv/shims:$PATH \
-    PYENV_GIT_TAG=v2.6.3
+    PYENV_GIT_TAG=v2.6.11
 RUN curl -sSL https://pyenv.run | bash \
-    && pyenv install 3.13.5 \
-    && pyenv global 3.13.5
+    && pyenv install 3.14.0 \
+    && pyenv global 3.14.0
 RUN pip install --root-user-action=ignore \
     cython wheel typing-extensions maturin setuptools
 

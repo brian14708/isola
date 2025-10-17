@@ -141,7 +141,7 @@ export class LspClient {
       fs[rootPath + fileName] = this._documentText;
       fs[rootPath + "pyrightconfig.json"] = JSON.stringify({
         typeshedPath: "/typeshed",
-        pythonVersion: "3.13",
+        pythonVersion: "3.14",
         pythonPlatform: "All",
         ...sessionOptions?.config,
       });

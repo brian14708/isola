@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import asyncio
+import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -41,7 +41,7 @@ async def test_httpbin_local(httpbin, datadir: pathlib.Path, method: str) -> Non
     scope: dict[str, Any] = {}
     exec((datadir / "http.py").read_text(), scope)
     fn = scope[method]
-    if asyncio.iscoroutinefunction(fn):
+    if inspect.iscoroutinefunction(fn):
         ret = await fn(httpbin.url)
     else:
         ret = fn(httpbin.url)

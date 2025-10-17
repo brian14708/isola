@@ -61,17 +61,27 @@
           bun
 
           # python
-          (python313.withPackages (
+          (python314.withPackages (
             p: with p; [
               cython
               setuptools
               uv
               typing-extensions
-              pip
               wheel
             ]
           ))
-          maturin
+          (maturin.overrideAttrs (old: rec {
+            version = "1.9.6";
+            src = fetchFromGitHub {
+              owner = "PyO3";
+              repo = "maturin";
+              rev = "v${version}";
+              hash = "sha256-hMMX59nq9Wusb0XZb8i5/EmQiPL4WopuZX7maycj0J4=";
+            };
+            cargoDeps = rustPlatform.importCargoLock {
+              lockFile = "${src}/Cargo.lock";
+            };
+          }))
 
           # rust / c++
           binaryen
@@ -96,7 +106,12 @@
       in
       {
         devShells = {
-          default = (craneLib.devShell.override { inherit mkShell; }) { buildInputs = deps; };
+          default = (craneLib.devShell.override { inherit mkShell; }) {
+            buildInputs = deps;
+            env = {
+              UV_PYTHON = pkgs.python314.interpreter;
+            };
+          };
 
           full = (craneLibFull.devShell.override { inherit mkShell; }) (
             let
@@ -106,13 +121,16 @@
                 platformVersions = [ "30" ];
               };
             in
-            rec {
+            {
               buildInputs = deps ++ depsFull;
 
-              ANDROID_SDK_ROOT = "${androidComposition.androidsdk}/libexec/android-sdk";
-              ANDROID_NDK_ROOT = "${ANDROID_SDK_ROOT}/ndk-bundle";
-              CC_aarch64_linux_android = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
-              CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
+              env = rec {
+                ANDROID_SDK_ROOT = "${androidComposition.androidsdk}/libexec/android-sdk";
+                ANDROID_NDK_ROOT = "${ANDROID_SDK_ROOT}/ndk-bundle";
+                CC_aarch64_linux_android = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
+                CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "${ANDROID_NDK_ROOT}/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android30-clang";
+                UV_PYTHON = pkgs.python314.interpreter;
+              };
             }
           );
         };

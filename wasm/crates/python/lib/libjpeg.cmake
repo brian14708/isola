@@ -2,9 +2,9 @@ include(ExternalProject)
 
 ExternalProject_Add(
   jpeg-build
-  URL "https://github.com/libjpeg-turbo/libjpeg-turbo/archive/refs/tags/3.1.1.tar.gz"
+  URL "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.1.2/libjpeg-turbo-3.1.2.tar.gz"
   URL_HASH
-    SHA256=304165ae11e64ab752e9cfc07c37bfdc87abd0bfe4bc699e59f34036d9c84f72
+    SHA256=8f0012234b464ce50890c490f18194f913a7b1f4e6a03d6644179fa0f867d0cf
   PREFIX _deps/jpeg
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   INSTALL_DIR ${WASMLIB_SYSROOT}

@@ -19,7 +19,7 @@ ExternalProject_Add(
   BUILD_COMMAND ""
   INSTALL_COMMAND
     cmake -E make_directory
-    ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.13/site-packages && cd
-    ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.13/site-packages &&
+    ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages && cd
+    ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages &&
     ${CMAKE_COMMAND} -E tar xvf
     ${tzdata-src_SOURCE_DIR}/tzdata-2025.2-py2.py3-none-any.whl)

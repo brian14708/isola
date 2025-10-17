@@ -5,9 +5,9 @@ find_package(Python3 ${PYTHON_VERSION})
 
 FetchContent_Declare(
   numpy-src
-  URL "https://github.com/numpy/numpy/releases/download/v2.3.0/numpy-2.3.0.tar.gz"
+  URL "https://github.com/numpy/numpy/releases/download/v2.3.4/numpy-2.3.4.tar.gz"
   URL_HASH
-    SHA256=581f87f9e9e9db2cba2141400e160e9dd644ee248788d6f90636eeb8fd9260a6
+    SHA256=a7d018bfedb375a8d979ac758b120ba846a7fe764911a64465fd87b8729f4a6a
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/patch.diff)
 FetchContent_MakeAvailable(numpy-src)
@@ -20,7 +20,7 @@ ExternalProject_Add(
   PREFIX _deps/numpy
   SOURCE_DIR ${numpy-src_SOURCE_DIR}
   CONFIGURE_COMMAND
-    PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.13
+    PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.14
     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
     ${Python3_EXECUTABLE} <SOURCE_DIR>/vendored-meson/meson/meson.py setup
     --prefix ${CMAKE_BINARY_DIR}/pythonpkgs

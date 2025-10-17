@@ -2,9 +2,9 @@ include(ExternalProject)
 
 ExternalProject_Add(
   freetype-build
-  URL "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz"
+  URL "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.1.tar.xz"
   URL_HASH
-    SHA256=0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289
+    SHA256=32427e8c471ac095853212a37aef816c60b42052d4d9e48230bab3bdf2936ccc
   PREFIX _deps/freetype
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   INSTALL_DIR ${WASMLIB_SYSROOT}

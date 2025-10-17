@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.abc
+import importlib.resources.abc
 import importlib.util
 import io
 import re
@@ -34,7 +35,7 @@ class ModuleInfo:
 class HttpImporter(
     importlib.abc.MetaPathFinder,
     importlib.abc.InspectLoader,
-    importlib.abc.TraversableResources,
+    importlib.resources.abc.TraversableResources,
 ):
     def __init__(self, url: str) -> None:
         self.url: str = url

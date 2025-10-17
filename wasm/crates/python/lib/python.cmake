@@ -1,12 +1,12 @@
 include(FetchContent)
 include(ExternalProject)
 
-set(PYTHON_VERSION 3.13)
+set(PYTHON_VERSION 3.14)
 FetchContent_Declare(
   python-src
-  URL "https://www.python.org/ftp/python/3.13.5/Python-3.13.5.tar.xz"
+  URL "https://www.python.org/ftp/python/3.14.0/Python-3.14.0.tar.xz"
   URL_HASH
-    SHA256=93e583f243454e6e9e4588ca2c2662206ad961659863277afcdb96801647d640
+    SHA256=2299dae542d395ce3883aca00d3c910307cd68e0b2f7336098c8e7b7eee9f3e9
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR})
 FetchContent_MakeAvailable(python-src)
 
@@ -24,15 +24,16 @@ ExternalProject_Add(
   INSTALL_DIR ${WASMLIB_SYSROOT}
   EXCLUDE_FROM_ALL TRUE
   CONFIGURE_COMMAND
-    CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/config.site-wasm32-wasi
+    CONFIG_SITE=<SOURCE_DIR>/Tools/wasm/wasi/config.site-wasm32-wasi
     WASI_SDK_PATH=${WASI_SDK_PATH} <SOURCE_DIR>/Tools/wasm/wasi-env cmake -E env
-    CFLAGS=-fPIC\ -fno-semantic-interposition PKG_CONFIG_SYSROOT_DIR= --
-    <SOURCE_DIR>/configure --prefix=/usr/local --host=wasm32-wasi
-    --enable-shared --build=${PYTHON_BUILD_ARCH}
-    --with-build-python=${Python3_EXECUTABLE} --disable-test-modules
-    --with-tzpath=/usr/local/lib/python3.13/site-packages/tzdata/zoneinfo
+    CFLAGS=-fPIC PKG_CONFIG_SYSROOT_DIR= -- <SOURCE_DIR>/configure
+    --prefix=/usr/local --host=wasm32-wasi --enable-shared
+    --build=${PYTHON_BUILD_ARCH} --with-build-python=${Python3_EXECUTABLE}
+    --disable-test-modules
+    --with-tzpath=/usr/local/lib/python3.14/site-packages/tzdata/zoneinfo
     --enable-big-digits=30 --with-pymalloc
   PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/python.patch
+  BUILD_COMMAND make build_all
   INSTALL_COMMAND DESTDIR=<INSTALL_DIR> make install
   BUILD_IN_SOURCE TRUE
   DEPENDS zlib)
@@ -42,10 +43,11 @@ ExternalProject_Add_Step(
   COMMAND
     _PYTHON_HOST_PLATFORM=wasi-wasm32
     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
-    ${Python3_EXECUTABLE} <SOURCE_DIR>/Tools/wasm/wasm_assets.py
+    ${Python3_EXECUTABLE} <SOURCE_DIR>/Tools/wasm/emscripten/wasm_assets.py
+    --prefix <INSTALL_DIR>/usr/local --output
+    <INSTALL_DIR>/usr/local/lib/python314.zip
   WORKING_DIRECTORY <BINARY_DIR>)
 ExternalProject_Get_Property(python-build BINARY_DIR)
-install(DIRECTORY ${BINARY_DIR}/usr/ DESTINATION usr)
 
 file(
   GENERATE
@@ -66,12 +68,21 @@ target_link_libraries(
          -Wl,--no-whole-archive)
 target_link_libraries(
   python
-  PRIVATE zlib wasi ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
+  PRIVATE zlib
+          wasi
+          ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA1.a
+          ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA2.a
+          ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_SHA3.a
+          ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_MD5.a
+          ${BINARY_DIR}/Modules/_hacl/libHacl_Hash_BLAKE2.a
+          ${BINARY_DIR}/Modules/_hacl/libHacl_HMAC.a
           ${BINARY_DIR}/Modules/_decimal/libmpdec/libmpdec.a
           ${BINARY_DIR}/Modules/expat/libexpat.a)
 install(TARGETS python DESTINATION lib)
 install(FILES $<TARGET_PROPERTY:python,INTERFACE_INCLUDE_DIRECTORIES>
         DESTINATION include)
+install(FILES ${WASMLIB_SYSROOT}/usr/local/lib/python314.zip
+        DESTINATION usr/local/lib)
 
 add_library(python-stub STATIC ${CMAKE_BINARY_DIR}/python-stub.c)
 set_target_properties(python-stub PROPERTIES OUTPUT_NAME

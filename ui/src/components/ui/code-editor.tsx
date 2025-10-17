@@ -306,7 +306,7 @@ import zipfile
 EXT = {'.py', '.pyi', '.typed'}
 
 def main():
-    r = '/usr/local/lib/python3.13/site-packages/'
+    r = '/usr/local/lib/python3.14/site-packages/'
     for root, _, files in os.walk(r):
         base = root[len(r):]
         for f in files:

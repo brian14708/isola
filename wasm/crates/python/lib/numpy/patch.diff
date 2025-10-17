@@ -1,5 +1,5 @@
 diff --git a/numpy/_core/src/common/npy_hashtable.cpp b/numpy/_core/src/common/npy_hashtable.cpp
-index ffd67d4..6d5e58b 100644
+index ffd67d4..b2ed7db 100644
 --- a/numpy/_core/src/common/npy_hashtable.cpp
 +++ b/numpy/_core/src/common/npy_hashtable.cpp
 @@ -15,7 +15,6 @@
@@ -10,21 +10,47 @@ index ffd67d4..6d5e58b 100644
  
  #include "templ_common.h"
  #include <new>
+@@ -112,14 +111,6 @@ PyArrayIdentityHash_New(int key_len)
+         return NULL;
+     }
+ 
+-#ifdef Py_GIL_DISABLED
+-    res->mutex = new(std::nothrow) std::shared_mutex();
+-    if (res->mutex == nullptr) {
+-        PyErr_NoMemory();
+-        PyMem_Free(res);
+-        return NULL;
+-    }
+-#endif
+     return res;
+ }
+ 
+@@ -128,9 +119,6 @@ NPY_NO_EXPORT void
+ PyArrayIdentityHash_Dealloc(PyArrayIdentityHash *tb)
+ {
+     PyMem_Free(tb->buckets);
+-#ifdef Py_GIL_DISABLED
+-    delete (std::shared_mutex *)tb->mutex;
+-#endif
+     PyMem_Free(tb);
+ }
+ 
 diff --git a/numpy/_core/src/multiarray/unique.cpp b/numpy/_core/src/multiarray/unique.cpp
-index f36acfd..3776565 100644
+index 720d4e4..cfdf4b8 100644
 --- a/numpy/_core/src/multiarray/unique.cpp
 +++ b/numpy/_core/src/multiarray/unique.cpp
-@@ -3,7 +3,8 @@
+@@ -3,8 +3,8 @@
  
  #include <Python.h>
  
+-#include <unordered_map>
 -#include <unordered_set>
 +#include <map>
 +#include <set>
  #include <functional>
  
  #include <numpy/npy_common.h>
-@@ -39,7 +40,7 @@ unique(PyArrayObject *self)
+@@ -40,7 +40,7 @@ unique(PyArrayObject *self)
      custom or complicated dtypes or string values.
      */
      NPY_ALLOW_C_API_DEF;
@@ -33,7 +59,7 @@ index f36acfd..3776565 100644
  
      NpyIter *iter = NpyIter_New(self, NPY_ITER_READONLY |
                                        NPY_ITER_EXTERNAL_LOOP |
-@@ -120,7 +121,7 @@ unique(PyArrayObject *self)
+@@ -121,7 +121,7 @@ unique(PyArrayObject *self)
  
  // this map contains the functions used for each item size.
  typedef std::function<PyObject *(PyArrayObject *)> function_type;
@@ -42,7 +68,7 @@ index f36acfd..3776565 100644
      {NPY_BYTE, unique<npy_byte>},
      {NPY_UBYTE, unique<npy_ubyte>},
      {NPY_SHORT, unique<npy_short>},
-@@ -163,21 +164,10 @@ array__unique_hash(PyObject *NPY_UNUSED(module), PyObject *arr_obj)
+@@ -164,21 +164,27 @@ array__unique_hash(PyObject *NPY_UNUSED(module), PyObject *arr_obj)
      }
      PyArrayObject *arr = (PyArrayObject *)arr_obj;
  
@@ -62,6 +88,23 @@ index f36acfd..3776565 100644
 -    catch (const std::exception &e) {
 -        PyErr_SetString(PyExc_RuntimeError, e.what());
 -        return NULL;
++    // try {
++    //    auto type = PyArray_TYPE(arr);
++    //    // we only support data types present in our unique_funcs map
++    //    if (unique_funcs.find(type) == unique_funcs.end()) {
++    //        Py_RETURN_NOTIMPLEMENTED;
++    //    }
++
++    //    return unique_funcs[type](arr);
++    // }
++    // catch (const std::bad_alloc &e) {
++    //     PyErr_NoMemory();
++    //     return NULL;
++    // }
++    // catch (const std::exception &e) {
++    //     PyErr_SetString(PyExc_RuntimeError, e.what());
++    //     return NULL;
++    // }
 +    auto type = PyArray_TYPE(arr);
 +    auto it = unique_funcs.find(type);
 +    if (it == unique_funcs.end()) {
@@ -69,28 +112,30 @@ index f36acfd..3776565 100644
      }
 +    return (it->second)(arr);
  }
-diff --git a/numpy/_core/src/umath/dispatching.cpp b/numpy/_core/src/umath/dispatching.cpp
-index ba98a9b..0c0d467 100644
---- a/numpy/_core/src/umath/dispatching.cpp
-+++ b/numpy/_core/src/umath/dispatching.cpp
-@@ -43,7 +43,6 @@
- #include <convert_datatype.h>
+diff --git a/numpy/_core/src/umath/reduction.c b/numpy/_core/src/umath/reduction.c
+index b376b94..823d2b1 100644
+--- a/numpy/_core/src/umath/reduction.c
++++ b/numpy/_core/src/umath/reduction.c
+@@ -21,7 +21,7 @@
+ #include "array_coercion.h"
+ #include "array_method.h"
+ #include "ctors.h"
+-#include "refcount.h"
++#include "../multiarray/refcount.h"
  
- #include <mutex>
--#include <shared_mutex>
- 
- #include "numpy/ndarraytypes.h"
- #include "numpy/npy_3kcompat.h"
+ #include "numpy/ufuncobject.h"
+ #include "lowlevel_strided_loops.h"
 diff --git a/numpy/fft/_pocketfft_umath.cpp b/numpy/fft/_pocketfft_umath.cpp
-index 525b5e5..787437b 100644
+index 28a55da..957a921 100644
 --- a/numpy/fft/_pocketfft_umath.cpp
 +++ b/numpy/fft/_pocketfft_umath.cpp
-@@ -35,19 +35,7 @@ wrap_legacy_cpp_ufunc(char **args, npy_intp const *dimensions,
-                       ptrdiff_t const *steps, void *func)
+@@ -35,19 +35,19 @@ wrap_legacy_cpp_ufunc(char **args, npy_intp const *dimensions,
+                       npy_intp const *steps, void *func)
  {
      NPY_ALLOW_C_API_DEF
 -    try {
--        cpp_ufunc(args, dimensions, steps, func);
++    // try {
+         cpp_ufunc(args, dimensions, steps, func);
 -    }
 -    catch (std::bad_alloc& e) {
 -        NPY_ALLOW_C_API;
@@ -102,12 +147,22 @@ index 525b5e5..787437b 100644
 -        PyErr_SetString(PyExc_RuntimeError, e.what());
 -        NPY_DISABLE_C_API;
 -    }
-+    cpp_ufunc(args, dimensions, steps, func);
++    // }
++    // catch (std::bad_alloc& e) {
++    //     NPY_ALLOW_C_API;
++    //     PyErr_NoMemory();
++    //     NPY_DISABLE_C_API;
++    // }
++    // catch (const std::exception& e) {
++    //     NPY_ALLOW_C_API;
++    //     PyErr_SetString(PyExc_RuntimeError, e.what());
++    //     NPY_DISABLE_C_API;
++    // }
  }
  
  /*
 diff --git a/numpy/fft/pocketfft/pocketfft_hdronly.h b/numpy/fft/pocketfft/pocketfft_hdronly.h
-index 66eea06..f1e1171 100644
+index 66eea06..e7b777a 100644
 --- a/numpy/fft/pocketfft/pocketfft_hdronly.h
 +++ b/numpy/fft/pocketfft/pocketfft_hdronly.h
 @@ -161,7 +161,7 @@ inline void *aligned_alloc(size_t align, size_t size)
@@ -137,24 +192,6 @@ index 66eea06..f1e1171 100644
        return reinterpret_cast<T *>(res);
        }
      static void dealloc(T *ptr)
-@@ -470,7 +470,7 @@ struct util // hack to avoid duplicate symbols
-           size_t x = f1175;
-           while (x*2 <= n) x *= 2;
-           if (x > bestfound) bestfound = x;
--          while (true) 
-+          while (true)
-           {
-             if (x * 3 <= n) x *= 3;
-             else if (x % 2 == 0) x /= 2;
-@@ -493,7 +493,7 @@ struct util // hack to avoid duplicate symbols
-       size_t x = f5;
-       while (x*2 <= n) x *= 2;
-       if (x > bestfound) bestfound = x;
--      while (true) 
-+      while (true)
-       {
-         if (x * 3 <= n) x *= 3;
-         else if (x % 2 == 0) x /= 2;
 @@ -517,11 +517,11 @@ struct util // hack to avoid duplicate symbols
      const stride_t &stride_in, const stride_t &stride_out, bool inplace)
      {
@@ -190,29 +227,7 @@ index 66eea06..f1e1171 100644
      }
  
  #ifdef POCKETFFT_NO_MULTITHREADING
-@@ -739,8 +739,6 @@ class thread_pool
-       size_t nthreads=workers_.size();
-       for (size_t i=0; i<nthreads; ++i)
-         {
--        try
--          {
-           auto *worker = &workers_[i];
-           worker->busy_flag.clear();
-           worker->work = nullptr;
-@@ -748,12 +746,6 @@ class thread_pool
-             {
-             worker->worker_main(shutdown_, unscheduled_tasks_, overflow_work_);
-             });
--          }
--        catch (...)
--          {
--          shutdown_locked();
--          throw;
--          }
-         }
-       }
- 
-@@ -781,7 +773,7 @@ class thread_pool
+@@ -781,7 +781,7 @@ class thread_pool
        {
        lock_t lock(mut_);
        if (shutdown_)
@@ -221,7 +236,7 @@ index 66eea06..f1e1171 100644
  
        ++unscheduled_tasks_;
  
-@@ -1589,7 +1581,7 @@ template<bool fwd, typename T> void pass_all(T c[], T0 fct) const
+@@ -1589,7 +1589,7 @@ template<bool fwd, typename T> void pass_all(T c[], T0 fct) const
      POCKETFFT_NOINLINE cfftp(size_t length_)
        : length(length_)
        {
@@ -230,7 +245,7 @@ index 66eea06..f1e1171 100644
        if (length==1) return;
        factorize();
        mem.resize(twsize());
-@@ -2398,7 +2390,7 @@ template<typename T> void radbg(size_t ido, size_t ip, size_t l1,
+@@ -2398,7 +2398,7 @@ template<typename T> void radbg(size_t ido, size_t ip, size_t l1,
      POCKETFFT_NOINLINE rfftp(size_t length_)
        : length(length_)
        {
@@ -239,7 +254,7 @@ index 66eea06..f1e1171 100644
        if (length==1) return;
        factorize();
        mem.resize(twsize());
-@@ -2523,7 +2515,7 @@ template<typename T0> class pocketfft_c
+@@ -2523,7 +2523,7 @@ template<typename T0> class pocketfft_c
      POCKETFFT_NOINLINE pocketfft_c(size_t length)
        : len(length)
        {
@@ -248,7 +263,7 @@ index 66eea06..f1e1171 100644
        size_t tmp = (length<50) ? 0 : util::largest_prime_factor(length);
        if (tmp*tmp <= length)
          {
-@@ -2560,7 +2552,7 @@ template<typename T0> class pocketfft_r
+@@ -2560,7 +2560,7 @@ template<typename T0> class pocketfft_r
      POCKETFFT_NOINLINE pocketfft_r(size_t length)
        : len(length)
        {
@@ -257,7 +272,7 @@ index 66eea06..f1e1171 100644
        size_t tmp = (length<50) ? 0 : util::largest_prime_factor(length);
        if (tmp*tmp <= length)
          {
-@@ -2945,9 +2937,9 @@ template<size_t N> class multi_iter
+@@ -2945,9 +2945,9 @@ template<size_t N> class multi_iter
        {
        auto nshares = threading::num_threads();
        if (nshares==1) return;
@@ -269,7 +284,7 @@ index 66eea06..f1e1171 100644
        size_t nbase = rem/nshares;
        size_t additional = rem%nshares;
        size_t lo = myshare*nbase + ((myshare<additional) ? myshare : additional);
-@@ -2969,7 +2961,7 @@ template<size_t N> class multi_iter
+@@ -2969,7 +2969,7 @@ template<size_t N> class multi_iter
        }
      void advance(size_t n)
        {
@@ -278,7 +293,7 @@ index 66eea06..f1e1171 100644
        for (size_t i=0; i<n; ++i)
          {
          p_i[i] = p_ii;
-@@ -3453,7 +3445,7 @@ template<typename T> void dct(const shape_t &shape,
+@@ -3453,7 +3453,7 @@ template<typename T> void dct(const shape_t &shape,
    const stride_t &stride_in, const stride_t &stride_out, const shape_t &axes,
    int type, const T *data_in, T *data_out, T fct, bool ortho, size_t nthreads=1)
    {
@@ -287,7 +302,7 @@ index 66eea06..f1e1171 100644
    if (util::prod(shape)==0) return;
    util::sanity_check(shape, stride_in, stride_out, data_in==data_out, axes);
    cndarr<T> ain(data_in, shape, stride_in);
-@@ -3471,7 +3463,7 @@ template<typename T> void dst(const shape_t &shape,
+@@ -3471,7 +3471,7 @@ template<typename T> void dst(const shape_t &shape,
    const stride_t &stride_in, const stride_t &stride_out, const shape_t &axes,
    int type, const T *data_in, T *data_out, T fct, bool ortho, size_t nthreads=1)
    {
@@ -297,7 +312,7 @@ index 66eea06..f1e1171 100644
    util::sanity_check(shape, stride_in, stride_out, data_in==data_out, axes);
    cndarr<T> ain(data_in, shape, stride_in);
 diff --git a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
-index f0515a9..38b4041 100644
+index e9125d5..3887a61 100644
 --- a/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
 +++ b/vendored-meson/meson/mesonbuild/compilers/mixins/clike.py
 @@ -84,10 +84,10 @@ def to_native(self, copy: bool = False) -> T.List[str]:
@@ -333,3 +348,4 @@ index db9c97d..dddf3e1 100644
 +        #                          stderr=subprocess.DEVNULL)
      except Exception as err:
          raise SystemExit(err)
+ 

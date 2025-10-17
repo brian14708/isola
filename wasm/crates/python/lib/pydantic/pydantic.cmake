@@ -21,14 +21,15 @@ ExternalProject_Add(
   BUILD_COMMAND
     cmake -E env --unset=CARGO_ENCODED_RUSTFLAGS
     CARGO_TARGET_WASM32_WASIP1_LINKER=${WASI_SDK_PATH}/bin/wasm-ld
-    PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.13
+    PYTHONPATH=${WASMLIB_SYSROOT}/usr/local/lib/python3.14
     _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
-    PYO3_CROSS_LIB_DIR=${WASMLIB_SYSROOT}/usr/local/lib CC=${CMAKE_C_COMPILER}
-    AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB} LDSHARED=${CMAKE_C_COMPILER}
+    PYO3_CROSS_LIB_DIR=${WASMLIB_SYSROOT}/usr/local/lib/python3.14
+    CC=${CMAKE_C_COMPILER} AR=${CMAKE_AR} RANLIB=${CMAKE_RANLIB}
+    LDSHARED=${CMAKE_C_COMPILER}
     "RUSTFLAGS=-Clink-args=-L${CMAKE_BINARY_DIR} -Clink-args=-L${WASMLIB_SYSROOT}/lib/wasm32-wasip1 -Clink-self-contained=no -Crelocation-model=pic"
-    -- maturin build --release --target wasm32-wasip1 -i python3.13 --out dist
+    -- maturin build --release --target wasm32-wasip1 -i python3.14 --out dist
   INSTALL_COMMAND
-    mkdir -p ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.13/site-packages &&
-    cd ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.13/site-packages && cmake -E
-    tar xvf <SOURCE_DIR>/dist/pydantic_core-2.41.1-cp313-cp313-any.whl
+    mkdir -p ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages && cd
+    ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages && cmake -E tar
+    xvf <SOURCE_DIR>/dist/pydantic_core-2.41.1-cp314-cp314-any.whl
   DEPENDS python)

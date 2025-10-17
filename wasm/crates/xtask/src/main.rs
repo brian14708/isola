@@ -1,6 +1,6 @@
 use std::{
     env,
-    fs::remove_dir_all,
+    fs::{create_dir_all, remove_dir_all},
     path::{Path, PathBuf},
     str::FromStr,
     vec,
@@ -54,7 +54,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         sh,
         "cargo b -Z build-std=std,panic_abort --profile release --target {TARGET} -p promptkit-python"
     )
-    .env("PYO3_CROSS_PYTHON_VERSION", "3.13")
+    .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
     .env("RUSTFLAGS", "-C relocation-model=pic")
     .run()?;
 
@@ -130,12 +130,12 @@ fn build_python(sh: &Shell) -> Result<()> {
                     false,
                 ),
                 lib(
-                    "libpython3.13.so",
-                    format!("target/{TARGET}/wasi-deps/lib/libpython3.13.so"),
+                    "libpython3.14.so",
+                    format!("target/{TARGET}/wasi-deps/lib/libpython3.14.so"),
                     false,
                 ),
             ];
-            let base = format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.13/site-packages/");
+            let base = format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.14/site-packages/");
             for entry in glob::glob(&format!("{base}/**/*.so"))? {
                 let entry = entry?;
                 let filename = entry
@@ -172,6 +172,10 @@ fn build_python(sh: &Shell) -> Result<()> {
                 .encode()?;
 
             std::fs::write(out, wasm)?;
+
+            let base = format!("target/{TARGET}/wasi-deps/usr/local/lib/python3.14/lib-dynload/");
+            create_dir_all(Path::new(&base))?;
+            std::fs::write(base + ".empty", "")?;
             Ok(())
         },
     )?;

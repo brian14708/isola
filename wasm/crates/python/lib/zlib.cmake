@@ -2,9 +2,9 @@ include(ExternalProject)
 
 ExternalProject_Add(
   zlib-build
-  URL "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.4.tar.gz"
+  URL "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.2.5.tar.gz"
   URL_HASH
-    SHA256=a73343c3093e5cdc50d9377997c3815b878fd110bf6511c2c7759f2afb90f5a3
+    SHA256=5b3b022489f3ced82384f06db1e13ba148cbce38c7941e424d6cb414416acd18
   PREFIX _deps/zlib
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   INSTALL_DIR ${WASMLIB_SYSROOT}
