@@ -5,9 +5,9 @@ find_package(Python3 ${PYTHON_VERSION})
 
 FetchContent_Declare(
   pydantic-src
-  URL "https://github.com/pydantic/pydantic-core/archive/refs/tags/v2.41.1.tar.gz"
+  URL "https://github.com/pydantic/pydantic-core/archive/refs/tags/v2.41.4.tar.gz"
   URL_HASH
-    SHA256=7ea0323d518f49dfe5619b90547529c0e18791e77a114040cac9d08fa373339a
+    SHA256=47b241aa010356fcf4b9481c76c7a1589922fb2380b586b21482b3f94b030e30
   DOWNLOAD_DIR ${WASMLIB_DOWNLOAD_DIR}
   PATCH_COMMAND patch -p1 < ${CMAKE_CURRENT_LIST_DIR}/pydantic.patch)
 FetchContent_MakeAvailable(pydantic-src)
@@ -31,5 +31,5 @@ ExternalProject_Add(
   INSTALL_COMMAND
     mkdir -p ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages && cd
     ${CMAKE_BINARY_DIR}/pythonpkgs/lib/python3.14/site-packages && cmake -E tar
-    xvf <SOURCE_DIR>/dist/pydantic_core-2.41.1-cp314-cp314-any.whl
+    xvf <SOURCE_DIR>/dist/pydantic_core-2.41.4-cp314-cp314-any.whl
   DEPENDS python)
