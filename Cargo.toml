@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/c-api",
+    "crates/c-api/export",
     "crates/cbor",
     "crates/executor",
     "crates/request",
@@ -46,6 +47,7 @@ opentelemetry-semantic-conventions = "0.31"
 opentelemetry_sdk = "0.31"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
+promptkit-c-api = { path = "crates/c-api" }
 promptkit-cbor = { path = "crates/cbor" }
 promptkit-executor = { path = "crates/executor" }
 promptkit-request = { path = "crates/request" }

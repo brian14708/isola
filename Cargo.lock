@@ -1899,6 +1899,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "promptkit-c-api-export"
+version = "0.1.0"
+dependencies = [
+ "promptkit-c-api",
+]
+
+[[package]]
 name = "promptkit-cbor"
 version = "0.1.0"
 dependencies = [

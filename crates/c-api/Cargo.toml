@@ -8,10 +8,6 @@ license.workspace = true
 [lints]
 workspace = true
 
-[lib]
-name = "promptkit"
-crate-type = ["cdylib"]
-
 [dependencies]
 anyhow = { workspace = true }
 bytes = { workspace = true }

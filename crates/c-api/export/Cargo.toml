@@ -1,0 +1,19 @@
+[package]
+name = "promptkit-c-api-export"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "promptkit"
+crate-type = ["cdylib"]
+doc = false
+test = false
+doctest = false
+
+[dependencies]
+promptkit-c-api = { workspace = true }
