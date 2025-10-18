@@ -118,8 +118,8 @@ class PollLoop(asyncio.AbstractEventLoop):
                         new_wakers.append((pollable, waker))
                 self.wakers = new_wakers
 
-        if not future.done():
-            _ = future.cancel()
+        if not future.done() and self.running:
+            raise RuntimeError("Deadlock detected")
         return future.result()
 
     def _cleanup(self) -> None:
@@ -232,7 +232,7 @@ class PollLoop(asyncio.AbstractEventLoop):
 
 
 def _iter[T](it: AsyncGenerator[T]) -> Generator[T]:
-    with asyncio.Runner() as runner:
+    with asyncio.Runner(loop_factory=PollLoop) as runner:
         loop = runner.get_loop()
         assert isinstance(loop, PollLoop), "runner.get_loop() must return a PollLoop"
         yield from loop.run_async_generator(it)
