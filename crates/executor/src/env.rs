@@ -2,6 +2,7 @@ use std::{future::Future, pin::Pin};
 
 use bytes::Bytes;
 use http_body::Frame;
+use tracing::level_filters::LevelFilter;
 
 use crate::vm::OutputCallback;
 
@@ -16,6 +17,10 @@ pub trait Env {
         call_type: &str,
         payload: &[u8],
     ) -> impl std::future::Future<Output = Result<Vec<u8>, Self::Error>> + Send;
+
+    fn log_level(&self) -> LevelFilter {
+        LevelFilter::OFF
+    }
 }
 
 pub type BoxedStream<T, E> = Pin<Box<dyn futures::Stream<Item = Result<T, E>> + Send + Sync>>;

@@ -305,11 +305,11 @@ where
         mut args: SmallVec<[ArgumentOwned; 2]>,
         vm: Vm<E>,
         env: E,
-        level: LevelFilter,
     ) -> impl Stream<Item = StreamItem> + Send + use<E> {
         let (tx, rx) = mpsc::channel(4);
         let cache = self.cache.clone();
 
+        let level = env.log_level();
         let mut run = vm.run(env, MpscOutputCallback::new(tx.clone()));
         let exec = Box::pin(async move {
             let ret = run
@@ -362,7 +362,6 @@ where
         func: String,
         args: Vec<Argument>,
         env: E,
-        level: LevelFilter,
     ) -> Result<impl Stream<Item = StreamItem> + Send + use<E>> {
         let mut hasher = Sha256::new();
         hasher.update(id);
@@ -427,7 +426,7 @@ where
             .map(|a| a.into_owned(&mut vm))
             .collect::<anyhow::Result<_>>()?;
 
-        Ok(self.exec_impl(func, args, vm, env.clone(), level))
+        Ok(self.exec_impl(func, args, vm, env.clone()))
     }
 }
 

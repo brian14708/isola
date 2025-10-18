@@ -10,11 +10,12 @@ use promptkit_request::{
     RequestContext, RequestOptions, TraceRequest, WebsocketMessage, request_span,
 };
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
-use tracing::field::Empty;
+use tracing::{field::Empty, level_filters::LevelFilter};
 
 #[derive(Clone)]
 pub struct VmEnv {
     pub client: Arc<promptkit_request::Client>,
+    pub log_level: LevelFilter,
 }
 
 pub struct Context<F>
@@ -40,6 +41,10 @@ where
 impl Env for VmEnv {
     type Callback = MpscOutputCallback;
     type Error = anyhow::Error;
+
+    fn log_level(&self) -> LevelFilter {
+        self.log_level
+    }
 
     async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
         match call_type {

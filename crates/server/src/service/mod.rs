@@ -40,6 +40,7 @@ impl ScriptServer {
     pub fn new(state: AppState) -> Self {
         let base_env = VmEnv {
             client: Arc::new(promptkit_request::Client::new()),
+            log_level: LevelFilter::OFF,
         };
         Self { state, base_env }
     }
@@ -73,7 +74,6 @@ impl ScriptService for ScriptServer {
             timeout,
             stream_tx,
             span,
-            log_level,
             trace_events,
             env,
         } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
@@ -102,7 +102,6 @@ impl ScriptService for ScriptServer {
                         "$analyze".to_string(),
                         vec![Argument::cbor(None, req)],
                         env,
-                        log_level,
                     )
                     .await
                     .map_err(|e| {
@@ -150,7 +149,6 @@ impl ScriptService for ScriptServer {
             timeout,
             stream_tx,
             span,
-            log_level,
             mut trace_events,
             env,
         } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
@@ -169,7 +167,7 @@ impl ScriptService for ScriptServer {
                 let mut stream = self
                     .state
                     .vm
-                    .exec(ns, script, method, args, env, log_level)
+                    .exec(ns, script, method, args, env)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -225,7 +223,6 @@ impl ScriptService for ScriptServer {
             timeout,
             stream_tx,
             span,
-            log_level,
             mut trace_events,
             env,
         } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
@@ -240,7 +237,7 @@ impl ScriptService for ScriptServer {
                 let mut stream = self
                     .state
                     .vm
-                    .exec(ns, script, method, args, env, log_level)
+                    .exec(ns, script, method, args, env)
                     .await
                     .map_err(|e| {
                         Status::invalid_argument(format!("failed to start script: {e}"))
@@ -290,7 +287,6 @@ impl ScriptService for ScriptServer {
             timeout,
             stream_tx,
             span,
-            log_level,
             trace_events,
             env,
         } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
@@ -306,25 +302,23 @@ impl ScriptService for ScriptServer {
             .and_then(|s| s.to_str().ok())
             .unwrap_or("");
 
-        let stream = match tokio::time::timeout(
-            timeout,
-            self.state.vm.exec(ns, script, method, args, env, log_level),
-        )
-        .instrument(span.clone())
-        .await
-        {
-            Ok(s) => {
-                s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
-            }
-            Err(_) => {
-                return Ok(Response::new(Box::pin(once(Ok(
-                    script::ExecuteServerStreamResponse {
-                        result: Some(timeout_error()),
-                        metadata: None,
-                    },
-                )))));
-            }
-        };
+        let stream =
+            match tokio::time::timeout(timeout, self.state.vm.exec(ns, script, method, args, env))
+                .instrument(span.clone())
+                .await
+            {
+                Ok(s) => {
+                    s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
+                }
+                Err(_) => {
+                    return Ok(Response::new(Box::pin(once(Ok(
+                        script::ExecuteServerStreamResponse {
+                            result: Some(timeout_error()),
+                            metadata: None,
+                        },
+                    )))));
+                }
+            };
 
         let content_type = request.get_ref().result_content_type.clone();
         let m = stream.map(move |s| match s {
@@ -389,7 +383,6 @@ impl ScriptService for ScriptServer {
             stream_tx,
             span,
             trace_events,
-            log_level,
             env,
         } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
 
@@ -399,25 +392,23 @@ impl ScriptService for ScriptServer {
             .get("x-app-id")
             .and_then(|s| s.to_str().ok())
             .unwrap_or("");
-        let stream = match tokio::time::timeout(
-            timeout,
-            self.state.vm.exec(ns, script, method, args, env, log_level),
-        )
-        .instrument(span.clone())
-        .await
-        {
-            Ok(s) => {
-                s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
-            }
-            Err(_) => {
-                return Ok(Response::new(Box::pin(once(Ok(
-                    script::ExecuteStreamResponse {
-                        result: Some(timeout_error()),
-                        metadata: None,
-                    },
-                )))));
-            }
-        };
+        let stream =
+            match tokio::time::timeout(timeout, self.state.vm.exec(ns, script, method, args, env))
+                .instrument(span.clone())
+                .await
+            {
+                Ok(s) => {
+                    s.map_err(|e| Status::invalid_argument(format!("failed to start script: {e}")))?
+                }
+                Err(_) => {
+                    return Ok(Response::new(Box::pin(once(Ok(
+                        script::ExecuteStreamResponse {
+                            result: Some(timeout_error()),
+                            metadata: None,
+                        },
+                    )))));
+                }
+            };
 
         let pump = pump_stream(request.into_inner(), stream_tx);
 
@@ -513,7 +504,6 @@ struct ParsedSpec {
     args: Vec<Argument>,
     timeout: Duration,
     stream_tx: HashMap<String, mpsc::Sender<Bytes>>,
-    log_level: LevelFilter,
     span: tracing::Span,
     trace_events: Option<mpsc::UnboundedReceiver<Trace>>,
     env: VmEnv,
@@ -579,10 +569,12 @@ fn parse_spec(
                 .and_then(|t| t.try_into().ok())
                 .unwrap_or(DEFAULT_TIMEOUT),
             stream_tx: streams,
-            span,
-            log_level,
+            span: span.clone(),
             trace_events: trace,
-            env: base_env.clone(),
+            env: VmEnv {
+                client: base_env.client.clone(),
+                log_level,
+            },
         })
     } else {
         Ok(ParsedSpec {
@@ -591,7 +583,6 @@ fn parse_spec(
             timeout: DEFAULT_TIMEOUT,
             stream_tx: HashMap::default(),
             span: Span::none(),
-            log_level: LevelFilter::OFF,
             trace_events: None,
             env: base_env.clone(),
         })
