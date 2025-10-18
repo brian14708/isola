@@ -14,6 +14,14 @@ build: build-wasm build-ui
     cargo build --release -p promptkit-server
     cargo run --release -p promptkit-server build
 
+bundle-wasm: build-wasm
+    mkdir -p dist/wasm/
+    cp wasm/target/promptkit_python.wasm dist/wasm/
+    cp -r wasm/target/wasm32-wasip1/wasi-deps/usr/local/lib dist/wasm/lib
+    find dist/wasm/ -type f -name "*.so" -exec truncate -s 0 {} \;
+    python -m compileall dist/wasm/ -q
+    tar -czf dist/promptkit_wasm_bundle.tar.gz -C dist/ wasm
+
 [private]
 [working-directory('wasm')]
 build-wasm:
