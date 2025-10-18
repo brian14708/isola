@@ -1,4 +1,7 @@
-use std::{path::Path, pin::Pin};
+use std::{
+    path::{Path, PathBuf},
+    pin::Pin,
+};
 
 use bytes::Bytes;
 use futures::Stream;
@@ -89,6 +92,7 @@ pub enum StreamItem {
 pub enum Source {
     Script { prelude: String, code: String },
     Bundle(Bytes),
+    Path(PathBuf),
 }
 
 impl Source {

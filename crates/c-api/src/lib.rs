@@ -7,7 +7,7 @@ use std::{
 use bytes::Bytes;
 use promptkit_executor::{
     VmManager,
-    vm::{OutputCallback, Vm, VmRun},
+    vm::{OutputCallback, Vm, VmRun, WorkDir},
 };
 use tokio::runtime::{Builder, Runtime};
 
@@ -88,7 +88,7 @@ impl ContextHandle {
         };
         let vm = self
             .rt
-            .block_on(async { vmm.create([0; 32]).await })
+            .block_on(async { vmm.create([0; 32], WorkDir::None).await })
             .map_err(|e| Error::Internal(format!("Failed to create VM: {e}")))?;
         Ok(VmHandle {
             ctx: self,

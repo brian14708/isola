@@ -65,14 +65,20 @@ impl<E: EnvHandle> VmState<E> {
     pub fn new(
         engine: &Engine,
         base_dir: &Path,
-        workdir: &Path,
+        workdir: Option<&Path>,
         max_memory: usize,
     ) -> anyhow::Result<Store<Self>> {
-        let wasi = WasiCtxBuilder::new()
+        let mut builder = WasiCtxBuilder::new();
+        builder
             .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
-            .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {e}"))?
-            .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
-            .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {e}"))?
+            .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {e}"))?;
+
+        if let Some(workdir) = workdir {
+            builder
+                .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
+                .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {e}"))?;
+        }
+        let wasi = builder
             .allow_tcp(false)
             .allow_udp(false)
             .stdout(TraceOutput::new("stdout"))

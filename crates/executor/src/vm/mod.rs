@@ -2,7 +2,10 @@ mod bindgen;
 mod run;
 mod state;
 
-use std::pin::Pin;
+use std::{
+    path::{Path, PathBuf},
+    pin::Pin,
+};
 
 use bindgen::host::ValueIterator;
 pub use bindgen::{Sandbox, SandboxPre, guest as exports};
@@ -19,7 +22,24 @@ pub struct Vm<E: EnvHandle> {
     pub(crate) hash: [u8; 32],
     pub(crate) store: Store<VmState<E>>,
     pub(crate) sandbox: Sandbox,
-    pub(crate) workdir: TempDir,
+    pub(crate) _workdir: WorkDir,
+}
+
+pub enum WorkDir {
+    Temp(TempDir),
+    Path(PathBuf),
+    None,
+}
+
+impl WorkDir {
+    #[must_use]
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            WorkDir::Temp(t) => Some(t.path()),
+            WorkDir::Path(p) => Some(p.as_ref()),
+            WorkDir::None => None,
+        }
+    }
 }
 
 pub type VmIterator = wasmtime::component::Resource<ValueIterator>;

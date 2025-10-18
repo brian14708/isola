@@ -28,7 +28,7 @@ use crate::{
     env::{BoxedStream, Env, EnvHandle, EnvHttp, WebsocketMessage},
     error::Result,
     types::ArgumentOwned,
-    vm::{OutputCallback, SandboxPre, Vm, VmState},
+    vm::{OutputCallback, SandboxPre, Vm, VmState, WorkDir},
     vm_cache::VmCache,
     wasm::logging::bindings::logging::Level,
 };
@@ -139,11 +139,9 @@ impl<E: EnvHandle> VmManager<E> {
                     .epoch_interruption(false)
                     .cranelift_opt_level(wasmtime::OptLevel::None);
                 let engine = Engine::new(&config)?;
-                let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
                 let component = Component::new(&engine, &instrumented)?;
                 let linker = VmState::<CompileEnv>::new_linker(&engine)?;
-                let mut store =
-                    VmState::new(&engine, &base_dir, workdir.path(), Self::get_max_memory())?;
+                let mut store = VmState::new(&engine, &base_dir, None, Self::get_max_memory())?;
 
                 let pre = linker.instantiate_pre(&component)?;
                 let binding = pre.instantiate_async(&mut store).await?;
@@ -271,8 +269,7 @@ impl<E: EnvHandle> VmManager<E> {
     /// # Errors
     ///
     /// Returns an error if the VM cannot be instantiated or initialized.
-    pub async fn create(&self, hash: [u8; 32]) -> Result<Vm<E>> {
-        let workdir = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
+    pub async fn create(&self, hash: [u8; 32], workdir: WorkDir) -> Result<Vm<E>> {
         let mut store = VmState::new(
             &self.engine,
             &self.base_dir,
@@ -290,7 +287,7 @@ impl<E: EnvHandle> VmManager<E> {
             hash,
             store,
             sandbox: bindings,
-            workdir,
+            _workdir: workdir,
         })
     }
 }
@@ -371,6 +368,9 @@ where
                 hasher.update(code);
             }
             Source::Bundle(b) => hasher.update(b),
+            Source::Path(p) => {
+                hasher.update(p.to_string_lossy().as_bytes());
+            }
         }
         let hash = hasher.finalize().into();
 
@@ -378,9 +378,9 @@ where
         let mut vm = if let Some(vm) = vm {
             vm
         } else {
-            let mut vm = self.create(hash).await?;
             match script {
                 Source::Script { prelude, code } => {
+                    let mut vm = self.create(hash, WorkDir::None).await?;
                     if !prelude.is_empty() {
                         vm.sandbox
                             .promptkit_script_guest()
@@ -391,9 +391,11 @@ where
                         .promptkit_script_guest()
                         .call_eval_script(&mut vm.store, &code)
                         .await??;
+                    vm
                 }
                 Source::Bundle(bundle) => {
-                    let base = vm.workdir.path();
+                    let temp = tempfile::TempDir::with_prefix("vm").map_err(anyhow::Error::from)?;
+                    let base = temp.path();
                     Source::extract_zip(bundle, base).await?;
                     let manifest: Manifest = serde_json::from_str(
                         &tokio::fs::read_to_string(base.join("manifest.json"))
@@ -402,6 +404,7 @@ where
                     )
                     .map_err(anyhow::Error::from)?;
 
+                    let mut vm = self.create(hash, WorkDir::Temp(temp)).await?;
                     if let Some(prelude) = &manifest.prelude {
                         vm.sandbox
                             .promptkit_script_guest()
@@ -416,9 +419,34 @@ where
                             &["/workdir/", &manifest.entrypoint].join(""),
                         )
                         .await??;
+                    vm
+                }
+                Source::Path(path) => {
+                    let manifest: Manifest = serde_json::from_str(
+                        &tokio::fs::read_to_string(path.join("manifest.json"))
+                            .await
+                            .map_err(anyhow::Error::from)?,
+                    )
+                    .map_err(anyhow::Error::from)?;
+
+                    let mut vm = self.create(hash, WorkDir::Path(path)).await?;
+                    if let Some(prelude) = &manifest.prelude {
+                        vm.sandbox
+                            .promptkit_script_guest()
+                            .call_eval_script(&mut vm.store, prelude)
+                            .await??;
+                    }
+
+                    vm.sandbox
+                        .promptkit_script_guest()
+                        .call_eval_file(
+                            &mut vm.store,
+                            &["/workdir/", &manifest.entrypoint].join(""),
+                        )
+                        .await??;
+                    vm
                 }
             }
-            vm
         };
 
         let args = args
