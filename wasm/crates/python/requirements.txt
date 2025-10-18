@@ -4,3 +4,4 @@ annotated-types==0.7.0
 typing-inspection==0.4.2
 xmltodict==0.14.2
 pydantic==2.12.0
+duron==0.0.1

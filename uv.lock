@@ -291,6 +291,18 @@ wheels = [
 ]
 
 [[package]]
+name = "duron"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4e/f3/65d2b03956d3475beb077fee8581aa4ab88ab591aa415b8e510c609cc5b5/duron-0.0.1.tar.gz", hash = "sha256:0d6b0b01c477b77c8a559db9211a29c20aa8fd38a7c405567c723a5928aa7fb3", size = 29881, upload-time = "2025-10-17T17:01:53.314Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/29/47a493597088a2c8a781ba74d2f25d352e93aba6afcd166feb0bda3769d0/duron-0.0.1-py3-none-any.whl", hash = "sha256:016cabc965029d422795e6f2229ce5a637b2ed9c775636e606d1bad7c26f19d8", size = 41812, upload-time = "2025-10-17T17:01:52.389Z" },
+]
+
+[[package]]
 name = "flasgger"
 version = "0.9.7.1"
 source = { registry = "https://pypi.org/simple" }
@@ -789,6 +801,7 @@ version = "0.1.0"
 source = { editable = "wasm/crates/python/bundled" }
 dependencies = [
     { name = "cbor2" },
+    { name = "duron" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
@@ -797,6 +810,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "cbor2", specifier = ">=5.6.0" },
+    { name = "duron", specifier = ">=0.0.1" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.11.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
