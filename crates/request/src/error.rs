@@ -18,6 +18,6 @@ pub enum Error {
 
 impl From<tokio_tungstenite::tungstenite::Error> for Error {
     fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
-        Error::WebSocket(Box::new(err))
+        Self::WebSocket(Box::new(err))
     }
 }

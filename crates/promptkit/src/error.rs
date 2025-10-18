@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-pub use crate::vm::exports::ErrorCode;
+pub use crate::internal::vm::exports::ErrorCode;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -11,13 +11,13 @@ pub enum Error {
     Other(#[from] anyhow::Error),
 }
 
-impl From<crate::vm::exports::Error> for Error {
-    fn from(value: crate::vm::exports::Error) -> Self {
+impl From<crate::internal::vm::exports::Error> for Error {
+    fn from(value: crate::internal::vm::exports::Error) -> Self {
         Self::ExecutionError(value.code, value.message)
     }
 }
 
-fn error_code_to_string(code: ErrorCode) -> &'static str {
+const fn error_code_to_string(code: ErrorCode) -> &'static str {
     match code {
         ErrorCode::Unknown => "UNKNOWN",
         ErrorCode::Internal => "INTERNAL",

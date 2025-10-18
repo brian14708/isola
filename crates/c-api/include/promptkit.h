@@ -11,6 +11,7 @@
 
 typedef enum promptkit_argument_type {
   PROMPTKIT_ARGUMENT_TYPE_JSON = 0,
+  PROMPTKIT_ARGUMENT_TYPE_JSON_STREAM = 1,
 } promptkit_argument_type;
 
 typedef enum promptkit_callback_event {
@@ -25,17 +26,30 @@ typedef enum promptkit_error_code {
   PROMPTKIT_ERROR_CODE_OK = 0,
   PROMPTKIT_ERROR_CODE_INVALID_ARGUMENT = 1,
   PROMPTKIT_ERROR_CODE_INTERNAL = 2,
+  PROMPTKIT_ERROR_CODE_STREAM_FULL = 3,
+  PROMPTKIT_ERROR_CODE_STREAM_CLOSED = 4,
 } promptkit_error_code;
 
 typedef struct promptkit_context_handle promptkit_context_handle;
 
+typedef struct promptkit_stream_handle promptkit_stream_handle;
+
 typedef struct promptkit_vm_handle promptkit_vm_handle;
+
+typedef struct promptkit_blob {
+  const uint8_t *data;
+  size_t len;
+} promptkit_blob;
+
+typedef union promptkit_argument_value {
+  struct promptkit_blob data;
+  const struct promptkit_stream_handle *stream;
+} promptkit_argument_value;
 
 typedef struct promptkit_argument {
   enum promptkit_argument_type type;
   const char *name;
-  const uint8_t *value;
-  size_t len;
+  union promptkit_argument_value value;
 } promptkit_argument;
 
 #ifdef __cplusplus
@@ -139,6 +153,42 @@ enum promptkit_error_code promptkit_vm_run(struct promptkit_vm_handle *vm,
                                            const struct promptkit_argument *args,
                                            size_t args_len,
                                            uint64_t timeout_in_ms);
+
+/**
+ * Creates a new stream handle for streaming arguments.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `out_stream` is a valid pointer to an
+ * uninitialized `Box<StreamHandle>`.
+ */
+enum promptkit_error_code promptkit_stream_create(struct promptkit_stream_handle **out_stream);
+
+/**
+ * Pushes data to a stream.
+ *
+ * # Safety
+ *
+ * The caller must ensure that `data` points to a valid buffer of length `len`.
+ *
+ * # Parameters
+ *
+ * * `blocking` - If non-zero, blocks until space is available in the channel.
+ *   If zero, returns immediately with an error if the channel is full.
+ */
+enum promptkit_error_code promptkit_stream_push(const struct promptkit_stream_handle *stream,
+                                                const uint8_t *data,
+                                                size_t len,
+                                                int blocking);
+
+/**
+ * Signals the end of a stream.
+ *
+ * After calling this function, no more data can be pushed to the stream.
+ */
+enum promptkit_error_code promptkit_stream_end(struct promptkit_stream_handle *_stream);
+
+void promptkit_stream_destroy(struct promptkit_stream_handle *_stream);
 
 const char *promptkit_last_error(void);
 

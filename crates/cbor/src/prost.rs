@@ -70,15 +70,17 @@ where
     where
         V: serde::de::DeserializeSeed<'de>,
     {
-        match self.value.take() {
-            Some(value) => {
+        self.value.take().map_or_else(
+            || {
+                Err(serde::de::Error::custom(
+                    "value called before key or after end of map",
+                ))
+            },
+            |value| {
                 let de = ProstValue(value);
                 seed.deserialize(de)
-            }
-            None => Err(serde::de::Error::custom(
-                "value called before key or after end of map",
-            )),
-        }
+            },
+        )
     }
 }
 
@@ -96,13 +98,13 @@ where
     where
         T: serde::de::DeserializeSeed<'de>,
     {
-        match self.iter.next() {
-            Some(value) => {
+        self.iter.next().map_or_else(
+            || Ok(None),
+            |value| {
                 let de = ProstValue(value);
                 seed.deserialize(de).map(Some)
-            }
-            None => Ok(None),
-        }
+            },
+        )
     }
 }
 
@@ -563,10 +565,7 @@ impl serde::ser::Serializer for ProstValueSerializer {
     where
         T: ?Sized + serde::Serialize,
     {
-        let map = std::collections::BTreeMap::from([(
-            variant.to_owned(),
-            value.serialize(ProstValueSerializer)?,
-        )]);
+        let map = std::collections::BTreeMap::from([(variant.to_owned(), value.serialize(Self)?)]);
         Ok(prost_types::Value {
             kind: Some(prost_types::value::Kind::StructValue(prost_types::Struct {
                 fields: map,
@@ -575,11 +574,7 @@ impl serde::ser::Serializer for ProstValueSerializer {
     }
     fn serialize_seq(self, len: Option<usize>) -> Result<Self::SerializeSeq, Self::Error> {
         Ok(SerializeList {
-            values: if let Some(cap) = len {
-                Vec::with_capacity(cap)
-            } else {
-                Vec::new()
-            },
+            values: len.map_or_else(Vec::new, Vec::with_capacity),
         })
     }
     fn serialize_tuple(self, len: usize) -> Result<Self::SerializeTuple, Self::Error> {

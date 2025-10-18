@@ -5,10 +5,7 @@ use std::{
 };
 
 use bytes::Bytes;
-use promptkit_executor::{
-    VmManager,
-    vm::{OutputCallback, Vm, VmRun, WorkDir},
-};
+use promptkit::{Instance, Runtime as PromptRuntime};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::env::Env;
@@ -32,7 +29,7 @@ macro_rules! c_try {
 
 pub struct ContextHandle {
     rt: Runtime,
-    vmm: Option<VmManager<Env>>,
+    runtime: Option<PromptRuntime<Env>>,
 }
 
 impl ContextHandle {
@@ -59,7 +56,7 @@ impl ContextHandle {
                 .build()
                 .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
         };
-        Ok(Box::new(Self { rt, vmm: None }))
+        Ok(Box::new(Self { rt, runtime: None }))
     }
 
     fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
@@ -68,31 +65,47 @@ impl ContextHandle {
     }
 
     fn load(&mut self, mut path: PathBuf) -> Result<()> {
-        if self.vmm.is_some() {
-            return Err(Error::InvalidArgument("Vm manager already loaded"));
+        if self.runtime.is_some() {
+            return Err(Error::InvalidArgument("Runtime already loaded"));
         }
         path.push("promptkit_python.wasm");
+
+        let parent = path
+            .parent()
+            .ok_or_else(|| Error::Internal("Wasm path has no parent directory".to_string()))?;
+
         self.rt.block_on(async {
-            self.vmm = Some(
-                VmManager::new(&path)
-                    .await
-                    .map_err(|e| Error::Internal(format!("Failed to load VM manager: {e}")))?,
-            );
+            let runtime = PromptRuntime::<Env>::builder()
+                .cache_path(parent.join("cache"))
+                .library_path({
+                    let mut lib_dir = parent.to_owned();
+                    lib_dir.push("wasm32-wasip1");
+                    lib_dir.push("wasi-deps");
+                    lib_dir.push("usr");
+                    lib_dir
+                })
+                .build(&path)
+                .await
+                .map_err(|e| Error::Internal(format!("Failed to load runtime: {e}")))?;
+            self.runtime = Some(runtime);
             Ok(())
         })
     }
 
     fn new_vm(&self) -> Result<VmHandle<'_>> {
-        let Some(vmm) = &self.vmm else {
-            return Err(Error::InvalidArgument("Vm manager not loaded"));
+        let Some(runtime) = &self.runtime else {
+            return Err(Error::InvalidArgument("Runtime not loaded"));
         };
-        let vm = self
+        let instance = self
             .rt
-            .block_on(async { vmm.create([0; 32], WorkDir::None).await })
-            .map_err(|e| Error::Internal(format!("Failed to create VM: {e}")))?;
+            .block_on(async { runtime.instantiate(None, Env::shared().await).await })
+            .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
         Ok(VmHandle {
             ctx: self,
-            inner: VmInner::Pending { vm, callback: None },
+            inner: VmInner::Pending {
+                instance,
+                callback: None,
+            },
         })
     }
 }
@@ -124,10 +137,10 @@ pub unsafe extern "C" fn promptkit_context_initialize(
     path: *const c_char,
 ) -> ErrorCode {
     let path = unsafe { CStr::from_ptr(path) };
-    let path = c_try!(match path.to_str() {
-        Ok(p) => Ok(p),
-        Err(_) => Err(Error::InvalidArgument("Invalid path string")),
-    });
+    let path = c_try!(
+        path.to_str()
+            .map_or_else(|_| Err(Error::InvalidArgument("Invalid path string")), Ok)
+    );
     c_try!(ctx.load(path.into()));
     ErrorCode::Ok
 }
@@ -161,9 +174,12 @@ pub struct Callback {
 unsafe impl Send for Callback {}
 unsafe impl Sync for Callback {}
 
-impl OutputCallback for Callback {
-    async fn on_result(&mut self, item: Bytes) -> std::result::Result<(), anyhow::Error> {
-        let data = promptkit_cbor::cbor_to_json(&item).unwrap();
+impl promptkit::environment::OutputCallback for Callback {
+    type Error = std::io::Error;
+
+    async fn on_result(&mut self, item: Bytes) -> std::result::Result<(), Self::Error> {
+        let data = promptkit_cbor::cbor_to_json(&item)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         (self.callback)(
             CallbackEvent::ResultJson,
             data.as_ptr(),
@@ -173,11 +189,12 @@ impl OutputCallback for Callback {
         Ok(())
     }
 
-    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), anyhow::Error> {
+    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), Self::Error> {
         if item.is_empty() {
             (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         } else {
-            let data = promptkit_cbor::cbor_to_json(&item).unwrap();
+            let data = promptkit_cbor::cbor_to_json(&item)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
             (self.callback)(
                 CallbackEvent::EndJson,
                 data.as_ptr(),
@@ -192,11 +209,12 @@ impl OutputCallback for Callback {
 enum VmInner {
     Uninitialized,
     Pending {
-        vm: Vm<Env>,
+        instance: Instance<Env>,
         callback: Option<Callback>,
     },
     Running {
-        run: VmRun<Env>,
+        instance: Instance<Env>,
+        callback: Callback,
     },
 }
 
@@ -206,11 +224,11 @@ pub struct VmHandle<'a> {
 }
 
 impl VmHandle<'_> {
-    fn set_config(&mut self, _key: &CStr, _value: &CStr) -> Result<()> {
+    fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
         todo!()
     }
 
-    fn set_callback(&mut self, callback: Callback) -> Result<()> {
+    const fn set_callback(&mut self, callback: Callback) -> Result<()> {
         match &mut self.inner {
             VmInner::Pending { callback: cb, .. } => {
                 *cb = Some(callback);
@@ -222,89 +240,84 @@ impl VmHandle<'_> {
 
     fn start(&mut self) -> Result<()> {
         match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
-            VmInner::Pending { vm, callback } => {
-                let output_callback = callback.ok_or(Error::InvalidArgument("Callback not set"))?;
-                let run = self
-                    .ctx
-                    .rt
-                    .block_on(async move {
-                        let mut run = vm.run(Env::shared().await, output_callback);
-                        run.exec(|guest, store| guest.call_initialize(store, true))
-                            .await?;
-                        Ok::<_, anyhow::Error>(run)
-                    })
-                    .map_err(|e| Error::Internal(format!("VM initialization failed: {e}")))?;
-                self.inner = VmInner::Running { run };
+            VmInner::Pending { instance, callback } => {
+                let callback = callback.ok_or(Error::InvalidArgument("Callback not set"))?;
+                // Instance is already initialized when created
+                self.inner = VmInner::Running { instance, callback };
                 Ok(())
             }
-            _ => Err(Error::InvalidArgument("Vm not loaded")),
+            _ => Err(Error::InvalidArgument("Instance not in pending state")),
         }
     }
 
     fn load_script(&mut self, input: &str, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            VmInner::Running { run } => {
+            VmInner::Running { instance, .. } => {
                 self.ctx
                     .rt
-                    .block_on(run.exec(|guest, store| async move {
+                    .block_on(async {
                         tokio::time::timeout(
                             Duration::from_millis(timeout_in_ms),
-                            guest.call_eval_script(store, input),
+                            instance.eval_script(input),
                         )
                         .await
-                    }))
-                    .map_err(|_| Error::Internal("Script execution timeout".to_string()))??
+                    })
+                    .map_err(|_| Error::Internal("Script execution timeout".to_string()))?
                     .map_err(|e| Error::Internal(format!("Script loading failed: {e}")))?;
 
                 Ok(())
             }
-            _ => Err(Error::InvalidArgument("Vm not running")),
+            _ => Err(Error::InvalidArgument("Instance not running")),
         }
     }
 
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
-        match &mut self.inner {
-            VmInner::Running { run } => {
-                let mut args = args
+        match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
+            VmInner::Running {
+                mut instance,
+                callback,
+            } => {
+                // Convert arguments to promptkit format
+                let promptkit_args: Vec<_> = args
                     .into_iter()
-                    .map(|arg| match arg {
-                        RawArgument::Json(name, value) => {
-                            // Avoid temporary String allocation
-                            let json_str = std::str::from_utf8(&value).map_err(|_| {
-                                Error::InvalidArgument("Invalid UTF-8 in JSON argument")
-                            })?;
-                            Ok((
-                                name,
-                                promptkit_cbor::json_to_cbor(json_str)
-                                    .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?,
-                            ))
+                    .map(|arg| -> Result<(Option<String>, promptkit::Argument)> {
+                        match arg {
+                            RawArgument::Json(name, value) => {
+                                let json_str = std::str::from_utf8(&value).map_err(|_| {
+                                    Error::InvalidArgument("Invalid UTF-8 in JSON argument")
+                                })?;
+                                let cbor = promptkit_cbor::json_to_cbor(json_str)
+                                    .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
+                                Ok((name, promptkit::Argument::Cbor(cbor)))
+                            }
+                            RawArgument::JsonStream(name, receiver) => {
+                                let stream =
+                                    Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
+                                Ok((name, promptkit::Argument::CborStream(stream)))
+                            }
                         }
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let mut new_args = vec![];
-                for a in &mut args {
-                    new_args.push(promptkit_executor::vm::exports::Argument {
-                        name: a.0.as_deref(),
-                        value: promptkit_executor::vm::exports::Value::Cbor(AsRef::<[u8]>::as_ref(
-                            &a.1,
-                        )),
-                    });
-                }
-                self.ctx
-                    .rt
-                    .block_on(run.exec(|guest, store| async move {
-                        tokio::time::timeout(
-                            Duration::from_millis(timeout_in_ms),
-                            guest.call_call_func(store, func, &new_args),
-                        )
-                        .await
-                    }))
-                    .map_err(|_| Error::Internal("Operation timeout".to_string()))??
+
+                let func = func.to_string();
+                let result = self.ctx.rt.block_on(async {
+                    tokio::time::timeout(
+                        Duration::from_millis(timeout_in_ms),
+                        instance.execute(&func, promptkit_args, callback.clone()),
+                    )
+                    .await
+                });
+
+                // Restore the instance state
+                self.inner = VmInner::Running { instance, callback };
+
+                result
+                    .map_err(|_| Error::Internal("Operation timeout".to_string()))?
                     .map_err(|e| Error::Internal(format!("VM execution failed: {e}")))?;
 
                 Ok(())
             }
-            _ => Err(Error::InvalidArgument("Vm not running")),
+            _ => Err(Error::InvalidArgument("Instance not running")),
         }
     }
 }
@@ -357,18 +370,48 @@ pub enum CallbackEvent {
 #[repr(C)]
 pub enum ArgumentType {
     Json = 0,
+    JsonStream = 1,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct Blob {
+    pub data: *const u8,
+    pub len: usize,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ArgumentValue {
+    pub data: Blob,
+    pub stream: *const StreamHandle,
 }
 
 #[repr(C)]
 pub struct Argument {
-    r#type: ArgumentType,
-    name: *const c_char,
-    value: *const u8,
-    len: usize,
+    pub r#type: ArgumentType,
+    pub name: *const c_char,
+    pub value: ArgumentValue,
+}
+
+pub struct StreamHandle {
+    sender: tokio::sync::mpsc::Sender<Bytes>,
+    receiver: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<Bytes>>>,
+}
+
+impl StreamHandle {
+    fn take_receiver(&self) -> Result<tokio::sync::mpsc::Receiver<Bytes>> {
+        self.receiver
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or(Error::InvalidArgument("Stream receiver already taken"))
+    }
 }
 
 enum RawArgument {
     Json(Option<String>, Vec<u8>),
+    JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Bytes>),
 }
 
 #[unsafe(no_mangle)]
@@ -403,10 +446,11 @@ pub unsafe extern "C" fn promptkit_vm_load_script(
     timeout_in_ms: u64,
 ) -> ErrorCode {
     let input = unsafe { CStr::from_ptr(input) };
-    let input = c_try!(match input.to_str() {
-        Ok(p) => Ok(p),
-        Err(_) => Err(Error::InvalidArgument("Invalid input string")),
-    });
+    let input = c_try!(
+        input
+            .to_str()
+            .map_or_else(|_| Err(Error::InvalidArgument("Invalid input string")), Ok)
+    );
     c_try!(vm.load_script(input, timeout_in_ms));
     ErrorCode::Ok
 }
@@ -447,10 +491,21 @@ pub unsafe extern "C" fn promptkit_vm_run(
                     }
                 };
 
-                let value = unsafe { std::slice::from_raw_parts(arg.value, arg.len) };
-                let value = value.to_vec();
                 let parsed_arg = match arg.r#type {
-                    ArgumentType::Json => RawArgument::Json(name, value),
+                    ArgumentType::Json => {
+                        let json_data = unsafe { arg.value.data };
+                        let value =
+                            unsafe { std::slice::from_raw_parts(json_data.data, json_data.len) };
+                        RawArgument::Json(name, value.to_vec())
+                    }
+                    ArgumentType::JsonStream => {
+                        let stream_ptr = unsafe { arg.value.stream };
+                        let stream_handle = unsafe { &*stream_ptr };
+                        let Ok(receiver) = stream_handle.take_receiver() else {
+                            return ErrorCode::InvalidArgument;
+                        };
+                        RawArgument::JsonStream(name, receiver)
+                    }
                 };
                 parsed_args.push(parsed_arg);
             }
@@ -466,3 +521,79 @@ pub unsafe extern "C" fn promptkit_vm_run(
     c_try!(vm.run(func, args, timeout_in_ms));
     ErrorCode::Ok
 }
+
+/// Creates a new stream handle for streaming arguments.
+///
+/// # Safety
+///
+/// The caller must ensure that `out_stream` is a valid pointer to an
+/// uninitialized `Box<StreamHandle>`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn promptkit_stream_create(out_stream: *mut Box<StreamHandle>) -> ErrorCode {
+    let (sender, receiver) = tokio::sync::mpsc::channel(1024);
+    let stream = Box::new(StreamHandle {
+        sender,
+        receiver: std::sync::Mutex::new(Some(receiver)),
+    });
+    unsafe { out_stream.write(stream) };
+    ErrorCode::Ok
+}
+
+/// Pushes data to a stream.
+///
+/// # Safety
+///
+/// The caller must ensure that `data` points to a valid buffer of length `len`.
+///
+/// # Parameters
+///
+/// * `blocking` - If non-zero, blocks until space is available in the channel.
+///   If zero, returns immediately with an error if the channel is full.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn promptkit_stream_push(
+    stream: &StreamHandle,
+    data: *const u8,
+    len: usize,
+    blocking: c_int,
+) -> ErrorCode {
+    let data = unsafe { std::slice::from_raw_parts(data, len) };
+    let bytes = Bytes::copy_from_slice(data);
+
+    if blocking != 0 {
+        // Blocking send - waits until space is available
+        if stream.sender.blocking_send(bytes) == Ok(()) {
+            ErrorCode::Ok
+        } else {
+            let err = Error::StreamClosed;
+            crate::error::set_last_error(err);
+            ErrorCode::StreamClosed
+        }
+    } else {
+        // Non-blocking send - returns immediately if full
+        match stream.sender.try_send(bytes) {
+            Ok(()) => ErrorCode::Ok,
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                let err = Error::StreamFull;
+                crate::error::set_last_error(err);
+                ErrorCode::StreamFull
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                let err = Error::StreamClosed;
+                crate::error::set_last_error(err);
+                ErrorCode::StreamClosed
+            }
+        }
+    }
+}
+
+/// Signals the end of a stream.
+///
+/// After calling this function, no more data can be pushed to the stream.
+#[unsafe(no_mangle)]
+pub extern "C" fn promptkit_stream_end(_stream: Box<StreamHandle>) -> ErrorCode {
+    // Dropping the sender will close the channel
+    ErrorCode::Ok
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn promptkit_stream_destroy(_stream: Box<StreamHandle>) {}

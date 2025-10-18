@@ -20,7 +20,7 @@ use super::{
         HostWebsocketConnection, HostWebsocketMessage, HostWriteStream, MessageType,
     },
 };
-use crate::env::EnvHttp;
+use crate::environment::Environment;
 
 struct WebsocketConnect {
     pub url: String,
@@ -36,8 +36,8 @@ pub enum WebsocketMessage {
 impl From<WebsocketMessage> for Message {
     fn from(msg: WebsocketMessage) -> Self {
         match msg {
-            WebsocketMessage::Text(data) => Message::Text(data),
-            WebsocketMessage::Binary(data) => Message::Binary(data),
+            WebsocketMessage::Text(data) => Self::Text(data),
+            WebsocketMessage::Binary(data) => Self::Binary(data),
         }
     }
 }
@@ -98,7 +98,7 @@ impl<T: HostView> Host for HostImpl<T> {
         connect: Resource<ConnectRequest>,
     ) -> wasmtime::Result<Resource<FutureWebsocket>> {
         let conn = self.0.table().delete(connect)?;
-        let env = self.0.env()?;
+        let env = self.0.env().clone();
 
         let s = wasmtime_wasi::runtime::spawn({
             async move {
@@ -132,11 +132,11 @@ impl<T: HostView> Host for HostImpl<T> {
 
                 // Connect via WebSocket
                 let mut response = if let Some(timeout) = conn.0.timeout {
-                    tokio::time::timeout(timeout, env.connect_websocket(request))
+                    tokio::time::timeout(timeout, env.websocket_connect(request))
                         .await
                         .map_err(|_| ErrorCode::Timeout)?
                 } else {
-                    env.connect_websocket(request).await
+                    env.websocket_connect(request).await
                 }
                 .map_err(|e| {
                     ErrorCode::ConnectionFailed(Some(Into::<anyhow::Error>::into(e).to_string()))
@@ -285,9 +285,9 @@ pub enum WriteStream {
 impl WriteStream {
     fn map<F, T>(&mut self, f: F) -> T
     where
-        F: FnOnce(WriteStream) -> (WriteStream, T),
+        F: FnOnce(Self) -> (Self, T),
     {
-        let tmp = std::mem::replace(self, WriteStream::Closed);
+        let tmp = std::mem::replace(self, Self::Closed);
         let (new, ret) = f(tmp);
         *self = new;
         ret
@@ -298,12 +298,10 @@ impl WriteStream {
 impl Pollable for WriteStream {
     async fn ready(&mut self) {
         match self {
-            WriteStream::Closed | WriteStream::Permit(_) => {}
-            WriteStream::Owned(sender) => {
-                *self = match sender.clone().reserve_owned().await {
-                    Ok(permit) => WriteStream::Permit(permit),
-                    Err(_) => WriteStream::Closed,
-                };
+            Self::Closed | Self::Permit(_) => {}
+            Self::Owned(sender) => {
+                *self = (sender.clone().reserve_owned().await)
+                    .map_or_else(|_| Self::Closed, Self::Permit);
             }
         }
     }

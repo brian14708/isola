@@ -9,7 +9,8 @@ use wasmtime_wasi::{
     runtime::AbortOnDropJoinHandle,
 };
 
-use crate::{env::Env, vm::bindgen::EmitValue};
+use super::EmitValue;
+use crate::environment::Environment;
 
 use super::{
     HostView,
@@ -31,10 +32,7 @@ impl ValueIterator {
         match self.peek.take() {
             Some(Ok(v)) => Ok(v.into()),
             Some(Err(e)) => Err(e),
-            None => match self.stream.next().await {
-                Some(v) => Ok(v.into()),
-                None => Err(StreamError::Closed),
-            },
+            None => (self.stream.next().await).map_or(Err(StreamError::Closed), |v| Ok(v.into())),
         }
     }
 
@@ -55,10 +53,8 @@ impl ValueIterator {
 impl Pollable for ValueIterator {
     async fn ready(&mut self) {
         if self.peek.is_none() {
-            self.peek = match self.stream.next().await {
-                Some(v) => Some(Ok(v)),
-                None => Some(Err(StreamError::Closed)),
-            }
+            self.peek = (self.stream.next().await)
+                .map_or_else(|| Some(Err(StreamError::Closed)), |v| Some(Ok(v)));
         }
     }
 }
@@ -101,7 +97,7 @@ impl<T: HostView> Host for super::HostImpl<T> {
         call_type: String,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Resource<FutureHostcall>> {
-        let env = self.0.env()?;
+        let env = self.0.env().clone();
 
         let s = wasmtime_wasi::runtime::spawn(async move {
             env.hostcall(&call_type, &payload)

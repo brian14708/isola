@@ -12,7 +12,7 @@ wasmtime::component::bindgen!({
     },
     with: {
         "wasi:io": wasmtime_wasi::p2::bindings::io,
-        "wasi:logging": crate::wasm::logging::bindings,
+        "wasi:logging": crate::internal::wasm::logging::bindings,
         "promptkit:script/host/value-iterator": host::ValueIterator,
         "promptkit:script/host/future-hostcall": host::FutureHostcall,
         "promptkit:script/outgoing-websocket/connect-request": outgoing_websocket::ConnectRequest,
@@ -41,16 +41,23 @@ pub enum EmitValue {
 }
 
 pub trait HostView: Send {
-    type Env: crate::env::EnvHandle;
+    type Env: crate::Environment;
     fn table(&mut self) -> &mut ResourceTable;
-    fn env(&mut self) -> wasmtime::Result<Self::Env>;
+
+    /// Get the environment for this execution
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the environment is not available (e.g., outside of an execution context)
+    fn env(&mut self) -> &mut Self::Env;
+
     fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
 
 impl<T: ?Sized + HostView> HostView for &mut T {
     type Env = T::Env;
 
-    fn env(&mut self) -> wasmtime::Result<Self::Env> {
+    fn env(&mut self) -> &mut Self::Env {
         T::env(self)
     }
 
@@ -70,7 +77,7 @@ pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
     impl<T: 'static> HasData for Host<T> {
         type Data<'a> = HostImpl<&'a mut T>;
     }
-    promptkit::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
-    promptkit::script::outgoing_websocket::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
+    self::promptkit::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
+    self::promptkit::script::outgoing_websocket::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
     Ok(())
 }

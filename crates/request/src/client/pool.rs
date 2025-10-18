@@ -94,6 +94,7 @@ impl ClientPool {
             }
         }
         bucket.push(client);
+        drop(bucket);
         Ok(token)
     }
 

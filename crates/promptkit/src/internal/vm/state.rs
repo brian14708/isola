@@ -1,4 +1,4 @@
-use std::{future::Future, path::Path};
+use std::path::Path;
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
@@ -10,39 +10,31 @@ use wasmtime::{
 };
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
-    HttpError, HttpResult, WasiHttpCtx, WasiHttpView,
+    HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
     body::{HyperIncomingBody, HyperOutgoingBody},
     types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
 };
 
-use super::bindgen::{HostView, add_to_linker};
+use super::bindgen::{EmitValue, HostView, add_to_linker};
 use crate::{
-    env::EnvHandle, resource::MemoryLimiter, trace_output::TraceOutput, vm::bindgen::EmitValue,
+    Environment,
+    environment::OutputCallback,
+    internal::{resource::MemoryLimiter, trace_output::TraceOutput, wasm},
 };
 
-pub trait OutputCallback: Send {
-    fn on_result(&mut self, item: Bytes) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
-
-    fn on_end(&mut self, item: Bytes) -> impl Future<Output = Result<(), anyhow::Error>> + Send;
-}
-
-pub struct VmRunState<E: EnvHandle> {
-    pub(crate) env: E,
-    pub(crate) output: E::Callback,
-}
-
-pub struct VmState<E: EnvHandle> {
-    limiter: MemoryLimiter,
+pub struct InstanceState<E: Environment> {
+    pub(crate) limiter: MemoryLimiter,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     table: ResourceTable,
-    pub(crate) run: Option<VmRunState<E>>,
+    env: E,
+    pub(crate) callback: Option<E::Callback>,
 
     output_buffer: OutputBuffer,
 }
 
-impl<E: EnvHandle> VmState<E> {
+impl<E: Environment> InstanceState<E> {
     /// Creates a new linker for the VM state.
     ///
     /// # Errors
@@ -52,7 +44,7 @@ impl<E: EnvHandle> VmState<E> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
-        crate::wasm::logging::add_to_linker(&mut linker)?;
+        wasm::logging::add_to_linker(&mut linker)?;
         add_to_linker(&mut linker)?;
         Ok(linker)
     }
@@ -67,10 +59,11 @@ impl<E: EnvHandle> VmState<E> {
         base_dir: &Path,
         workdir: Option<&Path>,
         max_memory: usize,
+        env: E,
     ) -> anyhow::Result<Store<Self>> {
         let mut builder = WasiCtxBuilder::new();
         builder
-            .preopened_dir(base_dir, "/usr", DirPerms::READ, FilePerms::READ)
+            .preopened_dir(base_dir, "/usr/local/lib", DirPerms::READ, FilePerms::READ)
             .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {e}"))?;
 
         if let Some(workdir) = workdir {
@@ -84,7 +77,7 @@ impl<E: EnvHandle> VmState<E> {
             .stdout(TraceOutput::new("stdout"))
             .stderr(TraceOutput::new("stderr"))
             .build();
-        let limiter = MemoryLimiter::new(max_memory / 2, max_memory);
+        let limiter = MemoryLimiter::new(max_memory);
 
         let mut s = Store::new(
             engine,
@@ -93,20 +86,17 @@ impl<E: EnvHandle> VmState<E> {
                 wasi,
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
-                run: None,
+                env,
+                callback: None,
                 output_buffer: OutputBuffer::new(),
             },
         );
         s.limiter(|s| &mut s.limiter);
         Ok(s)
     }
-
-    pub const fn reuse(&self) -> bool {
-        !self.limiter.exceed_soft()
-    }
 }
 
-impl<E: EnvHandle> WasiView for VmState<E> {
+impl<E: Environment> WasiView for InstanceState<E> {
     fn ctx(&mut self) -> WasiCtxView<'_> {
         WasiCtxView {
             ctx: &mut self.wasi,
@@ -115,7 +105,7 @@ impl<E: EnvHandle> WasiView for VmState<E> {
     }
 }
 
-impl<E: EnvHandle> WasiHttpView for VmState<E> {
+impl<E: Environment> WasiHttpView for InstanceState<E> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -129,16 +119,15 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
         request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        let env = self.env().map_err(HttpError::trap)?;
+        let env = self.env().clone();
         let handle = wasmtime_wasi::runtime::spawn(
             async move {
-                let resp = timeout(config.first_byte_timeout, env.send_request_http(request));
+                let resp = timeout(config.first_byte_timeout, env.http_request(request));
                 let (part, body) = match resp.await {
                     Ok(Ok(r)) => r,
                     Ok(Err(e)) => {
                         return Ok(Err(ErrorCode::InternalError(Some(format!(
-                            "request error: {}",
-                            e.into()
+                            "request error: {e}"
                         )))));
                     }
                     Err(_) => return Ok(Err(ErrorCode::HttpResponseTimeout)),
@@ -147,7 +136,7 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
                     http_body_util::StreamBody::new(b.map(|e| match e {
                         Ok(e) => Ok(e),
                         Err(e) => Err(ErrorCode::InternalError(Some(
-                            Into::<anyhow::Error>::into(e).to_string(),
+                            anyhow::Error::new(e).to_string(),
                         ))),
                     }))
                 })
@@ -167,22 +156,19 @@ impl<E: EnvHandle> WasiHttpView for VmState<E> {
     }
 }
 
-impl<E: EnvHandle> HostView for VmState<E> {
+impl<E: Environment> HostView for InstanceState<E> {
     type Env = E;
 
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 
-    fn env(&mut self) -> wasmtime::Result<Self::Env> {
-        let Some(run) = self.run.as_mut() else {
-            return Err(anyhow::anyhow!("env missing"));
-        };
-        Ok(run.env.clone())
+    fn env(&mut self) -> &mut Self::Env {
+        &mut self.env
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
-        let Some(run) = self.run.as_mut() else {
+        let Some(cb) = self.callback.as_mut() else {
             return Err(anyhow::anyhow!("output channel missing"));
         };
 
@@ -193,12 +179,12 @@ impl<E: EnvHandle> HostView for VmState<E> {
             EmitValue::End(new_data) => {
                 self.output_buffer.append(new_data);
                 let output = self.output_buffer.take();
-                run.output.on_end(output).await?;
+                cb.on_end(output).await?;
             }
             EmitValue::PartialResult(new_data) => {
                 self.output_buffer.append(new_data);
                 let output = self.output_buffer.take();
-                run.output.on_result(output).await?;
+                cb.on_result(output).await?;
             }
         }
         Ok(())

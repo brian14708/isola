@@ -42,7 +42,7 @@ impl Client {
         ClientBuilder::new()
     }
 
-    pub(crate) fn build(c: &ClientBuilder) -> Client {
+    pub(crate) fn build(c: &ClientBuilder) -> Self {
         let pool = ClientPool::new(c.max_inflight_per_client);
         let cleanup_task = {
             let cleanup_interval = c.client_idle_timeout;
@@ -56,7 +56,7 @@ impl Client {
             })
         };
 
-        Client { pool, cleanup_task }
+        Self { pool, cleanup_task }
     }
 
     /// Send an HTTP request.

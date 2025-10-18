@@ -2,7 +2,6 @@ use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt, TryStreamExt};
-use promptkit_executor::{Argument, StreamItem};
 use promptkit_trace::{collect::CollectorSpanExt, consts::TRACE_TARGET_SCRIPT};
 use tokio::{sync::mpsc, try_join};
 use tokio_stream::{
@@ -18,7 +17,7 @@ use crate::{
         execute_client_stream_request, execute_stream_request, result,
         script_service_server::ScriptService,
     },
-    routes::{AppState, VmEnv},
+    routes::{AppState, Argument, StreamItem, VmEnv},
     service::prost_serde::{argument, parse_source},
     utils::{
         stream::{join_with, stream_until},
@@ -100,7 +99,7 @@ impl ScriptService for ScriptServer {
                         "",
                         script,
                         "$analyze".to_string(),
-                        vec![Argument::cbor(None, req)],
+                        vec![(None, Argument::cbor(req))],
                         env,
                     )
                     .await
@@ -501,7 +500,7 @@ where
 
 struct ParsedSpec {
     method: String,
-    args: Vec<Argument>,
+    args: Vec<(Option<String>, Argument)>,
     timeout: Duration,
     stream_tx: HashMap<String, mpsc::Sender<Bytes>>,
     span: tracing::Span,
@@ -517,27 +516,29 @@ fn parse_spec(
         let mut streams = HashMap::new();
         let args = std::mem::take(&mut spec.arguments)
             .into_iter()
-            .map(|a| {
-                let name = if a.name.is_empty() {
-                    None
-                } else {
-                    Some(a.name)
-                };
-                match argument(a.argument_type) {
-                    Ok(Ok(a)) => Ok(Argument::cbor(name, a)),
-                    Ok(Err(Marker::Stream)) => {
-                        let (tx, rx) = mpsc::channel(64);
-                        if streams
-                            .insert(name.clone().unwrap_or_default(), tx)
-                            .is_some()
-                        {
-                            return Err(Status::invalid_argument("invalid marker arguments"));
-                        }
-                        Ok(Argument::cbor_stream(name, ReceiverStream::new(rx)))
+            .map(|a| match argument(a.argument_type) {
+                Ok(Ok(b)) => Ok((
+                    if a.name.is_empty() {
+                        None
+                    } else {
+                        Some(a.name)
+                    },
+                    Argument::cbor(b),
+                )),
+                Ok(Err(Marker::Stream)) => {
+                    let (tx, rx) = mpsc::channel(64);
+                    if streams.insert(a.name.clone(), tx).is_some() {
+                        return Err(Status::invalid_argument("invalid marker arguments"));
                     }
-                    Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
-                    Err(e) => Err(e),
+                    let name = if a.name.is_empty() {
+                        None
+                    } else {
+                        Some(a.name)
+                    };
+                    Ok((name, Argument::cbor_stream(ReceiverStream::new(rx))))
                 }
+                Ok(Err(_)) => Err(Status::invalid_argument("invalid marker arguments")),
+                Err(e) => Err(e),
             })
             .collect::<Result<_, _>>()?;
 
@@ -569,7 +570,7 @@ fn parse_spec(
                 .and_then(|t| t.try_into().ok())
                 .unwrap_or(DEFAULT_TIMEOUT),
             stream_tx: streams,
-            span: span.clone(),
+            span,
             trace_events: trace,
             env: VmEnv {
                 client: base_env.client.clone(),
@@ -654,19 +655,19 @@ fn map_client_stream_to_stream(
     }
 }
 
-fn error_result(err: promptkit_executor::error::Error) -> script::Result {
+fn error_result(err: promptkit::Error) -> script::Result {
     script::Result {
         result_type: Some(result::ResultType::Error(match err {
-            promptkit_executor::error::Error::ExecutionError(c, cause) => script::Error {
+            promptkit::Error::ExecutionError(c, cause) => script::Error {
                 code: match c {
-                    promptkit_executor::error::ErrorCode::Unknown => ErrorCode::Unknown,
-                    promptkit_executor::error::ErrorCode::Internal => ErrorCode::Internal,
-                    promptkit_executor::error::ErrorCode::Aborted => ErrorCode::GuestAborted,
+                    promptkit::ErrorCode::Unknown => ErrorCode::Unknown,
+                    promptkit::ErrorCode::Internal => ErrorCode::Internal,
+                    promptkit::ErrorCode::Aborted => ErrorCode::GuestAborted,
                 }
                 .into(),
                 message: cause,
             },
-            promptkit_executor::error::Error::Other(err) => script::Error {
+            promptkit::Error::Other(err) => script::Error {
                 code: ErrorCode::Unknown.into(),
                 message: err.to_string(),
             },

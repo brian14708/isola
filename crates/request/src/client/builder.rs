@@ -20,7 +20,7 @@ impl ClientBuilder {
         Self::default()
     }
 
-    pub fn max_inflight_per_client(mut self, max_inflight_per_client: u32) -> Self {
+    pub const fn max_inflight_per_client(mut self, max_inflight_per_client: u32) -> Self {
         self.max_inflight_per_client = max_inflight_per_client;
         self
     }

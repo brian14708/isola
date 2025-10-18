@@ -48,7 +48,7 @@ impl Scope {
                         let path = path.cast_exact::<PyList>().ok();
                         if let Some(path) = path {
                             let _ = path.insert(1, "/usr/local/lib/bundle.zip");
-                            let _ = path.insert(0, "/workdir");
+                            let _ = path.insert(2, "/workdir");
                         }
                     }
                     match (

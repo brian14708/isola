@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
-use anyhow::anyhow;
 use futures::TryStreamExt;
-use promptkit_executor::env::{BoxedStream, WebsocketMessage};
+use promptkit::{BoxedStream, Environment, WebsocketMessage};
 use promptkit_request::{Client, RequestOptions};
-
-use crate::Callback;
 
 #[derive(Clone)]
 pub struct Env {
@@ -24,14 +21,14 @@ static DEFAULT_ENV: std::sync::OnceLock<Env> = std::sync::OnceLock::new();
 
 impl Env {
     #[expect(clippy::unused_async, reason = "env must be created in async context")]
-    pub async fn shared() -> Env {
-        DEFAULT_ENV.get_or_init(Env::default).clone()
+    pub async fn shared() -> Self {
+        DEFAULT_ENV.get_or_init(Self::default).clone()
     }
 }
 
-impl promptkit_executor::env::Env for Env {
-    type Callback = Callback;
-    type Error = anyhow::Error;
+impl Environment for Env {
+    type Error = std::io::Error;
+    type Callback = crate::Callback;
 
     async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
         match call_type {
@@ -39,14 +36,14 @@ impl promptkit_executor::env::Env for Env {
                 // Simple echo - return the payload as-is
                 Ok(payload.to_vec())
             }
-            _ => Err(anyhow!("unknown")), // Unknown hostcall type
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unknown hostcall type",
+            )),
         }
     }
-}
-impl promptkit_executor::env::EnvHttp for Env {
-    type Error = anyhow::Error;
 
-    async fn send_request_http<B>(
+    async fn http_request<B>(
         &self,
         request: http::Request<B>,
     ) -> std::result::Result<
@@ -60,17 +57,20 @@ impl promptkit_executor::env::EnvHttp for Env {
     {
         let client = self.client.clone();
         let http = client.http(request, RequestOptions::default());
-        let resp = http.await.map_err(anyhow::Error::from)?;
-        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(anyhow::Error::from)) }))
+        let resp = http.await.map_err(std::io::Error::other)?;
+        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(std::io::Error::other)) }))
     }
 
-    async fn connect_websocket<B>(
+    async fn websocket_connect<B>(
         &self,
         _request: http::Request<B>,
     ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
     where
         B: futures::Stream<Item = WebsocketMessage> + Sync + Send + 'static,
     {
-        unimplemented!()
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "websocket not implemented in c-api",
+        ))
     }
 }

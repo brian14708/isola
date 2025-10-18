@@ -1,13 +1,15 @@
 mod env;
 mod state;
+mod vm_manager;
 
 use std::{future::ready, time::Duration};
 
 use axum::{http::StatusCode, response::Redirect, routing::get};
-pub use env::VmEnv;
+pub use env::{StreamItem, VmEnv};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 pub use state::AppState;
 use tower_http::services::{ServeDir, ServeFile};
+pub use vm_manager::{Argument, Source, VmManager};
 
 pub fn router(state: &AppState) -> axum::Router {
     let prometheus = PrometheusBuilder::new().install_recorder().unwrap();

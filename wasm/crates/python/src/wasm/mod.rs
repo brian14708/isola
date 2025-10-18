@@ -140,7 +140,7 @@ export!(Global);
 pub struct Global;
 
 impl guest::Guest for Global {
-    fn initialize(preinit: bool) {
+    fn initialize(preinit: bool, prelude: Option<String>) {
         GLOBAL_SCOPE.with(|scope| {
             let mut scope = scope.borrow_mut();
             if scope.is_none() {
@@ -154,9 +154,10 @@ impl guest::Guest for Global {
                 append_to_inittab!(serde_module);
 
                 let v = Scope::new();
-                let code = include_str!("prelude.py");
-                v.load_script(code).unwrap();
-                v.flush();
+                if let Some(prelude) = prelude {
+                    v.load_script(&prelude).unwrap();
+                    v.flush();
+                }
                 scope.replace(v);
             }
         });

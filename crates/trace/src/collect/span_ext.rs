@@ -23,25 +23,20 @@ impl CollectorSpanExt for tracing::Span {
         c: impl Collector,
     ) -> Option<()> {
         self.with_subscriber(|(id, subscriber)| -> Option<()> {
-            if let Some(registry) = subscriber.downcast_ref::<Registry>() {
-                match registry.span(id) {
-                    Some(span) => {
-                        if span
-                            .scope()
-                            .any(|s| s.extensions().get::<Tracer>().is_some())
-                        {
-                            // nesting is not supported
-                            None
-                        } else {
-                            span.extensions_mut().insert(Tracer::new(c, target, level));
-                            Some(())
-                        }
+            subscriber.downcast_ref::<Registry>().and_then(|registry| {
+                registry.span(id).and_then(|span| {
+                    if span
+                        .scope()
+                        .any(|s| s.extensions().get::<Tracer>().is_some())
+                    {
+                        // nesting is not supported
+                        None
+                    } else {
+                        span.extensions_mut().insert(Tracer::new(c, target, level));
+                        Some(())
                     }
-                    _ => None,
-                }
-            } else {
-                None
-            }
+                })
+            })
         })
         .flatten()
     }
@@ -97,9 +92,10 @@ mod tests {
                 info!(target: "b", "hello");
             }
             let s = spans.0.lock().unwrap();
-            let (spans, events) = (&s.0, &s.1);
-            assert_eq!(1, spans.len());
-            assert_eq!(1, events.len());
+            let (span_len, event_len) = (s.0.len(), s.1.len());
+            drop(s);
+            assert_eq!(1, span_len);
+            assert_eq!(1, event_len);
         });
     }
 }

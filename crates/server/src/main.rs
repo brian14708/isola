@@ -1,12 +1,11 @@
-use std::{env::args, path::PathBuf};
+use std::env::args;
 
 use anyhow::anyhow;
-use promptkit_executor::VmManager;
 use proto::script::v1::script_service_server::ScriptServiceServer;
 use tonic::{codec::CompressionEncoding, service::LayerExt};
 use utils::{grpc_trace::grpc_server_tracing_layer, otel::init_tracing};
 
-use crate::routes::VmEnv;
+use crate::routes::{VmEnv, VmManager};
 
 mod proto;
 mod routes;
@@ -22,33 +21,17 @@ fn main() -> anyhow::Result<()> {
         tracing::warn!("Failed to raise ulimit: {}", e);
     }
 
-    let rt = match std::env::var("TOKIO_NUM_WORKERS")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-    {
-        Some(0) => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?,
-
-        Some(n) if n > 0 => tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(n)
-            .enable_all()
-            .build()?,
-
-        _ => tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()?,
-    };
-
-    rt.block_on(async_main())
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(async_main())
 }
 
 async fn async_main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            VmManager::<VmEnv>::compile(&PathBuf::from("wasm/target/promptkit_python.wasm"))
-                .await?;
+            _ = VmManager::<VmEnv>::new("wasm/target/promptkit_python.wasm").await?;
             Ok(())
         }
         None | Some("serve") => {

@@ -51,7 +51,8 @@ impl<B> tower_http::trace::MakeSpan<B> for MakeSpan {
         let server_addr = request
             .headers()
             .get(http::header::HOST)
-            .map_or(request.uri().host(), |h| h.to_str().ok())
+            .and_then(|h| h.to_str().ok())
+            .or_else(|| request.uri().host())
             .unwrap_or("");
         let span = tracing::info_span!(
             target: TRACE_TARGET_OTEL,

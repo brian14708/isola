@@ -35,8 +35,8 @@ TEST_CASE("Context") {
   promptkit_argument args[1];
   args[0].type = PROMPTKIT_ARGUMENT_TYPE_JSON;
   args[0].name = nullptr;
-  args[0].value = reinterpret_cast<const uint8_t *>("100");
-  args[0].len = 3;
+  args[0].value.data.data = reinterpret_cast<const uint8_t *>("100");
+  args[0].value.data.len = 3;
   REQUIRE(promptkit_vm_run(vm, "main", args, 1, 1000) == 0);
 
   REQUIRE(outputs.size() == 101);

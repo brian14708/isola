@@ -10,7 +10,7 @@ where
     Pred: Fn(&'static str) -> bool,
     Rec: FnMut(&'static str, String),
 {
-    pub fn new(pred: Pred, rec: Rec) -> Self {
+    pub const fn new(pred: Pred, rec: Rec) -> Self {
         Self { pred, rec }
     }
 }

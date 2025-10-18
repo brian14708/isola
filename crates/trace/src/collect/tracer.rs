@@ -29,7 +29,7 @@ impl Tracer {
     {
         let anchor = Anchor::new();
         let instant = Instant::now();
-        Tracer {
+        Self {
             inner: Arc::new(TracerInner {
                 collector: Box::new(collector),
                 target,
@@ -124,7 +124,7 @@ impl Tracer {
         }
     }
 
-    pub fn record_event(&mut self, metadata: &Metadata<'_>, f: impl FnOnce(&mut dyn Visit)) {
+    pub fn record_event(&self, metadata: &Metadata<'_>, f: impl FnOnce(&mut dyn Visit)) {
         if !self.enabled(metadata) {
             return;
         }

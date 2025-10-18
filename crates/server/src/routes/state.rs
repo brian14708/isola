@@ -1,9 +1,8 @@
 use std::{path::Path, sync::Arc};
 
 use axum::extract::FromRef;
-use promptkit_executor::VmManager;
 
-use super::env::VmEnv;
+use super::{VmEnv, VmManager};
 
 #[derive(Clone)]
 pub struct AppState {

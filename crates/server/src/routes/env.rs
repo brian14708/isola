@@ -1,15 +1,12 @@
 use std::sync::Arc;
 
+use bytes::Bytes;
 use futures::{StreamExt, TryStreamExt};
+use promptkit::{BoxedStream, Environment, WebsocketMessage};
 use promptkit_cbor::{from_cbor, to_cbor};
-use promptkit_executor::{
-    MpscOutputCallback,
-    env::{BoxedStream, Env, EnvHttp},
-};
-use promptkit_request::{
-    RequestContext, RequestOptions, TraceRequest, WebsocketMessage, request_span,
-};
+use promptkit_request::{RequestContext, RequestOptions, TraceRequest, request_span};
 use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
+use tokio::sync::mpsc;
 use tracing::{field::Empty, level_filters::LevelFilter};
 
 #[derive(Clone)]
@@ -30,17 +27,54 @@ where
     F: FnOnce(&TraceRequest) -> tracing::Span,
 {
     fn make_span(&mut self, r: &TraceRequest) -> tracing::Span {
-        if let Some(f) = self.make_span.take() {
-            f(r)
-        } else {
-            tracing::Span::none()
-        }
+        self.make_span
+            .take()
+            .map_or_else(tracing::Span::none, |f| f(r))
     }
 }
 
-impl Env for VmEnv {
+pub enum StreamItem {
+    Data(Bytes),
+    End(Option<Bytes>),
+    Error(promptkit::Error),
+}
+
+pub struct MpscOutputCallback {
+    sender: mpsc::Sender<StreamItem>,
+}
+
+impl MpscOutputCallback {
+    #[must_use]
+    pub const fn new(sender: mpsc::Sender<StreamItem>) -> Self {
+        Self { sender }
+    }
+}
+
+impl promptkit::environment::OutputCallback for MpscOutputCallback {
+    type Error = std::io::Error;
+
+    async fn on_result(&mut self, item: Bytes) -> Result<(), Self::Error> {
+        self.sender
+            .send(StreamItem::Data(item))
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Send error"))
+    }
+
+    async fn on_end(&mut self, item: Bytes) -> Result<(), Self::Error> {
+        self.sender
+            .send(StreamItem::End(if item.is_empty() {
+                None
+            } else {
+                Some(item)
+            }))
+            .await
+            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Send error"))
+    }
+}
+
+impl Environment for VmEnv {
+    type Error = std::io::Error;
     type Callback = MpscOutputCallback;
-    type Error = anyhow::Error;
 
     fn log_level(&self) -> LevelFilter {
         self.log_level
@@ -58,18 +92,20 @@ impl Env for VmEnv {
                     a: i32,
                     b: i32,
                 }
-                let p: AddInput = from_cbor(payload)?;
-                Ok(to_cbor(&(p.a + p.b))?.to_vec())
+                let p: AddInput = from_cbor(payload)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let result = to_cbor(&(p.a + p.b))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                Ok(result.to_vec())
             }
-            _ => Err(anyhow::anyhow!("unknown")), // Unknown hostcall type
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "unknown hostcall type",
+            )),
         }
     }
-}
 
-impl EnvHttp for VmEnv {
-    type Error = anyhow::Error;
-
-    async fn send_request_http<B>(
+    async fn http_request<B>(
         &self,
         request: http::Request<B>,
     ) -> std::result::Result<
@@ -92,11 +128,11 @@ impl EnvHttp for VmEnv {
             }),
         };
         let http = self.client.http(request, RequestOptions::new(ctx));
-        let resp = http.await.map_err(anyhow::Error::from)?;
-        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(anyhow::Error::from)) }))
+        let resp = http.await.map_err(std::io::Error::other)?;
+        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(std::io::Error::other)) }))
     }
 
-    async fn connect_websocket<B>(
+    async fn websocket_connect<B>(
         &self,
         request: http::Request<B>,
     ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
@@ -122,12 +158,12 @@ impl EnvHttp for VmEnv {
                 RequestOptions::new(ctx),
             )
             .await
-            .map_err(anyhow::Error::from)?
+            .map_err(std::io::Error::other)?
             .map(|b| -> BoxedStream<_, _> {
                 Box::pin(b.filter_map(|msg| async {
                     match msg {
                         Ok(s) => Some(Ok(s)),
-                        Err(e) => Some(Err(anyhow::Error::from(e))),
+                        Err(e) => Some(Err(std::io::Error::other(e))),
                     }
                 }))
             }))

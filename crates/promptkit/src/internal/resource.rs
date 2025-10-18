@@ -1,22 +1,20 @@
 use wasmtime::ResourceLimiter;
 
 pub struct MemoryLimiter {
-    max_memory_soft: usize,
     max_memory_hard: usize,
     current: usize,
 }
 
 impl MemoryLimiter {
-    pub const fn new(max_memory_soft: usize, max_memory_hard: usize) -> Self {
+    pub const fn new(max_memory_hard: usize) -> Self {
         Self {
-            max_memory_soft,
             max_memory_hard,
             current: 0,
         }
     }
 
-    pub const fn exceed_soft(&self) -> bool {
-        self.current > self.max_memory_soft
+    pub const fn current(&self) -> usize {
+        self.current
     }
 }
 

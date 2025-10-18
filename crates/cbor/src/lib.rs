@@ -113,7 +113,7 @@ impl CborBytesMut {
 
 impl Default for CborBytesMut {
     fn default() -> Self {
-        CborBytesMut(BytesMut::new())
+        Self(BytesMut::new())
     }
 }
 

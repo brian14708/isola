@@ -4,7 +4,7 @@ members = [
     "crates/c-api",
     "crates/c-api/export",
     "crates/cbor",
-    "crates/executor",
+    "crates/promptkit",
     "crates/request",
     "crates/server",
     "crates/trace",
@@ -19,6 +19,7 @@ license = ""
 [workspace.lints.clippy]
 all = "warn"
 pedantic = "warn"
+nursery = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -47,9 +48,9 @@ opentelemetry-semantic-conventions = "0.31"
 opentelemetry_sdk = "0.31"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
+promptkit = { path = "crates/promptkit" }
 promptkit-c-api = { path = "crates/c-api" }
 promptkit-cbor = { path = "crates/cbor" }
-promptkit-executor = { path = "crates/executor" }
 promptkit-request = { path = "crates/request" }
 promptkit-trace = { path = "crates/trace" }
 prost = "0.14"

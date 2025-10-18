@@ -148,8 +148,8 @@ pin_project! {
 }
 
 impl<S> InstrumentStream<S> {
-    fn new(span: Span, stream: S) -> Self {
-        InstrumentStream {
+    const fn new(span: Span, stream: S) -> Self {
+        Self {
             stream,
             span,
             size: 0,
@@ -200,7 +200,7 @@ pin_project! {
 }
 
 impl<S, F> InstrumentJoinStream<S, F> {
-    fn new(span: Span, stream: S, fut: F) -> Self {
+    const fn new(span: Span, stream: S, fut: F) -> Self {
         Self {
             stream: Some(stream),
             span,

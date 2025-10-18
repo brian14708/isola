@@ -6,9 +6,6 @@ publish.workspace = true
 license.workspace = true
 exclude = ["/bundled", "bundle.py"]
 
-[lints]
-workspace = true
-
 [lib]
 crate-type = ["cdylib"]
 
@@ -26,3 +23,6 @@ smallvec = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
 wit-bindgen = { workspace = true, features = ["macros"] }
+
+[lints]
+workspace = true

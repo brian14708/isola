@@ -1,12 +1,14 @@
 use bytes::Bytes;
-use promptkit_executor::Source as ExecSource;
 use tonic::Status;
 
-use crate::proto::script::v1::{
-    self as script, ContentType, Source,
-    argument::{ArgumentType, Marker},
-    result,
-    source::SourceType,
+use crate::{
+    proto::script::v1::{
+        self as script, ContentType, Source,
+        argument::{ArgumentType, Marker},
+        result,
+        source::SourceType,
+    },
+    routes::Source as ExecSource,
 };
 
 pub fn argument(s: Option<ArgumentType>) -> Result<Result<Bytes, Marker>, Status> {

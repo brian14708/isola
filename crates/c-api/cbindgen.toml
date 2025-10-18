@@ -14,6 +14,9 @@ Argument = "argument"
 ErrorCode = "error_code"
 CallbackEvent = "callback_event"
 ArgumentType = "argument_type"
+Blob = "blob"
+ArgumentValue = "argument_value"
+StreamHandle = "stream_handle"
 
 [enum]
 rename_variants = "QUALIFIED_SCREAMING_SNAKE_CASE"
