@@ -18,7 +18,7 @@ const MAX_DEPTH: usize = 128;
 struct PyValue<'py>(Bound<'py, PyAny>);
 
 impl<'py> PyValue<'py> {
-    fn new(obj: Bound<'py, PyAny>) -> Self {
+    const fn new(obj: Bound<'py, PyAny>) -> Self {
         PyValue(obj)
     }
 
@@ -59,19 +59,20 @@ impl PyValue<'_> {
         } else if o.is_none() {
             Unexpected::Option
         } else if PyFloat::is_exact_type_of(o) {
-            if let Ok(i) = o.extract::<f64>() {
-                Unexpected::Float(i)
-            } else {
-                Unexpected::Other("object does not fit into a float")
-            }
+            o.extract::<f64>().map_or_else(
+                |_| Unexpected::Other("object does not fit into a float"),
+                Unexpected::Float,
+            )
         } else if PyInt::is_exact_type_of(o) {
-            if let Ok(i) = o.extract::<i64>() {
-                Unexpected::Signed(i)
-            } else if let Ok(i) = o.extract::<u64>() {
-                Unexpected::Unsigned(i)
-            } else {
-                Unexpected::Other("object does not fit into an integer")
-            }
+            o.extract::<i64>().map_or_else(
+                |_| {
+                    o.extract::<u64>().map_or_else(
+                        |_| Unexpected::Other("object does not fit into an integer"),
+                        Unexpected::Unsigned,
+                    )
+                },
+                Unexpected::Signed,
+            )
         } else {
             Unexpected::Other("object is not serializable")
         };
@@ -82,7 +83,7 @@ impl PyValue<'_> {
 struct PyDeserializer<'py>(Python<'py>);
 
 impl<'py> PyDeserializer<'py> {
-    fn py(&self) -> Python<'py> {
+    const fn py(&self) -> Python<'py> {
         self.0
     }
 }
@@ -222,7 +223,7 @@ impl Serialize for PyValue<'_> {
     {
         struct PySerialize<'s>(Bound<'s, PyAny>, usize);
         impl<'s> PySerialize<'s> {
-            fn child(&self, obj: Bound<'s, PyAny>) -> Self {
+            const fn child(&self, obj: Bound<'s, PyAny>) -> Self {
                 Self(obj, self.1 - 1)
             }
         }
@@ -275,26 +276,31 @@ impl Serialize for PyValue<'_> {
                 } else if o.is_none() {
                     serializer.serialize_none()
                 } else if PyFloat::is_exact_type_of(o) {
-                    if let Ok(i) = o.extract::<f64>() {
-                        serializer.serialize_f64(i)
-                    } else {
-                        Err(serde::ser::Error::custom(format!(
-                            "object of type '{}' does not fit into a float",
-                            o.get_type()
-                        )))
-                    }
+                    o.extract::<f64>().map_or_else(
+                        |_| {
+                            Err(serde::ser::Error::custom(format!(
+                                "object of type '{}' does not fit into a float",
+                                o.get_type()
+                            )))
+                        },
+                        |i| serializer.serialize_f64(i),
+                    )
                 } else if PyInt::is_exact_type_of(o) {
                     if let Ok(i) = o.extract::<i32>() {
                         serializer.serialize_i32(i)
-                    } else if let Ok(i) = o.extract::<i64>() {
-                        serializer.serialize_i64(i)
-                    } else if let Ok(i) = o.extract::<u64>() {
-                        serializer.serialize_u64(i)
                     } else {
-                        Err(serde::ser::Error::custom(format!(
-                            "object of type '{}' does not fit into an integer",
-                            o.get_type()
-                        )))
+                        match o.extract::<i64>() {
+                            Ok(i) => serializer.serialize_i64(i),
+                            Err(_) => o.extract::<u64>().map_or_else(
+                                |_| {
+                                    Err(serde::ser::Error::custom(format!(
+                                        "object of type '{}' does not fit into an integer",
+                                        o.get_type()
+                                    )))
+                                },
+                                |i| serializer.serialize_u64(i),
+                            ),
+                        }
                     }
                 } else {
                     Err(serde::ser::Error::custom(format!(
@@ -573,7 +579,7 @@ where
     F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
 {
     /// Creates a new `CallbackWriter` with the given callback and end type
-    pub fn new(
+    pub const fn new(
         emit_fn: &'a mut F,
         end_type: crate::wasm::promptkit::script::host::EmitType,
     ) -> Self {

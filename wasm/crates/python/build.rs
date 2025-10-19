@@ -10,7 +10,7 @@ fn main() {
         ));
 
         let odir = std::env::var("OUT_DIR").unwrap();
-        let cmd = std::env::var("CMAKE").unwrap_or(String::from("cmake"));
+        let cmd = std::env::var("CMAKE").unwrap_or_else(|_| String::from("cmake"));
         let e = Command::new(&cmd)
             .arg(String::from("-DCMAKE_INSTALL_PREFIX=") + outdir.to_str().unwrap())
             .arg("-DCMAKE_BUILD_TYPE=Release")

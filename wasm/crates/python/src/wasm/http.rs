@@ -75,14 +75,12 @@ pub mod http_module {
 
     #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
-    #[expect(clippy::too_many_lines)]
     fn fetch(
-        py: Python<'_>,
         method: &str,
         url: &str,
         params: Option<&Bound<'_, PyDict>>,
         headers: Option<&Bound<'_, PyDict>>,
-        body: Option<Py<PyAny>>,
+        body: Option<&Bound<'_, PyAny>>,
         timeout: Option<f64>,
     ) -> PyResult<PyFutureResponse> {
         enum Body<'a> {
@@ -91,15 +89,10 @@ pub mod http_module {
             Object(Bound<'a, PyAny>),
         }
 
-        let body = if let Some(body) = body {
-            if let Ok(b) = body.extract::<Bound<PyBytes>>(py) {
-                Body::Bytes(b)
-            } else {
-                Body::Object(body.into_bound(py))
-            }
-        } else {
-            Body::None
-        };
+        let body = body.map_or(Body::None, |body| {
+            body.extract::<Bound<'_, PyBytes>>()
+                .map_or(Body::Object(body.clone()), Body::Bytes)
+        });
 
         let header_fields = Fields::new();
         if let Some(headers) = headers {
@@ -114,7 +107,7 @@ pub mod http_module {
         }
         if matches!(body, Body::Object(_)) && !header_fields.has("content-type") {
             header_fields
-                .append("content-type", "application/json".as_bytes())
+                .append("content-type", b"application/json")
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         }
 

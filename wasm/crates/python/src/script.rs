@@ -41,30 +41,29 @@ impl Scope {
                 )
                 .unwrap();
 
-            let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
-                if let Ok(path) = sys.getattr(intern!(py, "path")) {
-                    let path = path.cast_exact::<PyList>().ok();
-                    if let Some(path) = path {
-                        let _ = path.insert(1, "/usr/local/lib/bundle.zip");
-                        let _ = path.insert(0, "/workdir");
+            let stdio = PyModule::import(py, intern!(py, "sys"))
+                .ok()
+                .and_then(|sys| {
+                    if let Ok(path) = sys.getattr(intern!(py, "path")) {
+                        let path = path.cast_exact::<PyList>().ok();
+                        if let Some(path) = path {
+                            let _ = path.insert(1, "/usr/local/lib/bundle.zip");
+                            let _ = path.insert(0, "/workdir");
+                        }
                     }
-                }
-                if let (Ok(stdout), Ok(stderr)) = (
-                    sys.getattr(intern!(py, "stdout")),
-                    sys.getattr(intern!(py, "stderr")),
-                ) {
-                    Some((
-                        stdout.into_pyobject(py).unwrap().into(),
-                        stderr.into_pyobject(py).unwrap().into(),
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+                    match (
+                        sys.getattr(intern!(py, "stdout")).ok(),
+                        sys.getattr(intern!(py, "stderr")).ok(),
+                    ) {
+                        (Some(stdout), Some(stderr)) => Some((
+                            stdout.into_pyobject(py).unwrap().into(),
+                            stderr.into_pyobject(py).unwrap().into(),
+                        )),
+                        _ => None,
+                    }
+                });
 
-            Scope {
+            Self {
                 locals: locals.into_pyobject(py).unwrap().into(),
                 stdio,
             }

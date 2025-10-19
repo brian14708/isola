@@ -11,6 +11,7 @@ license = ""
 [workspace.lints.clippy]
 all = "warn"
 pedantic = "warn"
+nursery = "warn"
 
 [workspace.dependencies]
 anyhow = "1.0"

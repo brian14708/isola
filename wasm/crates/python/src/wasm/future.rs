@@ -20,14 +20,14 @@ impl From<wasi::io::poll::Pollable> for PyPollable {
 }
 
 impl PyPollable {
-    fn get_pollable(&self) -> &wasi::io::poll::Pollable {
+    const fn get_pollable(&self) -> &wasi::io::poll::Pollable {
         self.inner.as_ref().expect("pollable already released")
     }
 }
 
 #[pymethods]
 impl PyPollable {
-    fn subscribe(mut slf: PyRefMut<'_, PyPollable>) -> Option<PyRefMut<'_, PyPollable>> {
+    fn subscribe(mut slf: PyRefMut<'_, Self>) -> Option<PyRefMut<'_, Self>> {
         if let Some(inner) = &slf.inner {
             if inner.ready() {
                 slf.refcnt = 0;
@@ -42,7 +42,7 @@ impl PyPollable {
         }
     }
 
-    fn get(&self) {
+    const fn get(&self) {
         let _ = self;
     }
 
@@ -95,7 +95,7 @@ macro_rules! create_future {
         }
 
         impl $name {
-            fn new(f: $future_type) -> Self {
+            const fn new(f: $future_type) -> Self {
                 Self { inner: Some(f) }
             }
         }
@@ -138,7 +138,7 @@ macro_rules! create_future {
         }
 
         impl $name {
-            fn new(f: $future_type) -> Self {
+            const fn new(f: $future_type) -> Self {
                 Self { inner: Some(f) }
             }
         }

@@ -1,10 +1,7 @@
 use pyo3::{PyErr, Python, prelude::PyTracebackMethods};
 use thiserror::Error;
 
-use crate::wasm::exports::{
-    self,
-    promptkit::script::guest::{self, ErrorCode},
-};
+use crate::wasm::exports::{self, promptkit::script::guest::ErrorCode};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -23,7 +20,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 impl Error {
     pub fn from_pyerr(py: Python<'_>, e: impl Into<PyErr>) -> Self {
         let e = e.into();
-        Error::PythonError {
+        Self::PythonError {
             cause: e.to_string(),
             traceback: e.traceback(py).and_then(|e| e.format().ok()),
         }
@@ -36,18 +33,18 @@ impl From<Error> for exports::promptkit::script::guest::Error {
             Error::PythonError {
                 cause,
                 traceback: Some(traceback),
-            } => guest::Error {
+            } => Self {
                 code: ErrorCode::Aborted,
                 message: format!("{cause}\n\n{traceback}"),
             },
             Error::PythonError {
                 cause,
                 traceback: None,
-            } => guest::Error {
+            } => Self {
                 code: ErrorCode::Aborted,
                 message: cause,
             },
-            Error::UnexpectedError(e) => guest::Error {
+            Error::UnexpectedError(e) => Self {
                 code: ErrorCode::Internal,
                 message: e.to_string(),
             },

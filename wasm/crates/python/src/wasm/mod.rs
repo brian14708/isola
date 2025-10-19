@@ -1,3 +1,5 @@
+#![expect(clippy::collection_is_never_read)]
+
 mod body_buffer;
 mod future;
 mod http;
@@ -187,11 +189,10 @@ impl guest::Guest for Global {
 
     fn eval_script(script: String) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
-            if let Some(vm) = vm.as_ref() {
-                vm.load_script(&script).map_err(Into::<guest::Error>::into)
-            } else {
-                Err(Error::UnexpectedError("VM not initialized").into())
-            }
+            vm.as_ref().map_or_else(
+                || Err(Error::UnexpectedError("VM not initialized").into()),
+                |vm| vm.load_script(&script).map_err(Into::<guest::Error>::into),
+            )
         })
     }
 
@@ -259,7 +260,7 @@ pub struct ArgIter {
 
 #[pymethods]
 impl ArgIter {
-    fn __iter__(slf: Bound<'_, Self>) -> Bound<'_, Self> {
+    const fn __iter__(slf: Bound<'_, Self>) -> Bound<'_, Self> {
         slf
     }
 
@@ -331,7 +332,7 @@ impl std::io::Write for wasi::io::streams::OutputStream {
         };
         let n = n.get().try_into().map_err(std::io::Error::other)?;
         let n = buf.len().min(n);
-        wasi::io::streams::OutputStream::write(self, &buf[..n]).map_err(|e| match e {
+        Self::write(self, &buf[..n]).map_err(|e| match e {
             StreamError::Closed => std::io::ErrorKind::UnexpectedEof.into(),
             StreamError::LastOperationFailed(e) => std::io::Error::other(e.to_debug_string()),
         })?;
