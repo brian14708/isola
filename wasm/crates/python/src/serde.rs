@@ -238,7 +238,7 @@ impl Serialize for PyValue<'_> {
                 }
 
                 let o = &self.0;
-                if let Ok(dict) = o.downcast_exact::<PyDict>() {
+                if let Ok(dict) = o.cast_exact::<PyDict>() {
                     let len = dict.len().ok();
                     let mut map = serializer.serialize_map(len)?;
                     for (key, value) in dict {
@@ -247,21 +247,21 @@ impl Serialize for PyValue<'_> {
                     map.end()
                 } else if let Ok(s) = o.extract::<&[u8]>() {
                     serializer.serialize_bytes(s)
-                } else if let Ok(list) = o.downcast_exact::<PyList>() {
+                } else if let Ok(list) = o.cast_exact::<PyList>() {
                     let len = list.len().ok();
                     let mut seq = serializer.serialize_seq(len)?;
                     for elem in list {
                         seq.serialize_element(&self.child(elem))?;
                     }
                     seq.end()
-                } else if let Ok(set) = o.downcast_exact::<PySet>() {
+                } else if let Ok(set) = o.cast_exact::<PySet>() {
                     let len = set.len().ok();
                     let mut seq = serializer.serialize_seq(len)?;
                     for elem in set {
                         seq.serialize_element(&self.child(elem))?;
                     }
                     seq.end()
-                } else if let Ok(tuple) = o.downcast_exact::<PyTuple>() {
+                } else if let Ok(tuple) = o.cast_exact::<PyTuple>() {
                     let len = tuple.len().map_err(serde::ser::Error::custom)?;
                     let mut seq = serializer.serialize_tuple(len)?;
                     for elem in tuple {
@@ -426,17 +426,17 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if let Ok(list) = self.0.downcast_exact::<PyList>() {
+        if let Ok(list) = self.0.cast_exact::<PyList>() {
             let mut deserializer = SeqDeserializer::new(list.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
             Ok(seq)
-        } else if let Ok(tuple) = self.0.downcast_exact::<PyTuple>() {
+        } else if let Ok(tuple) = self.0.cast_exact::<PyTuple>() {
             let mut deserializer = SeqDeserializer::new(tuple.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
             Ok(seq)
-        } else if let Ok(set) = self.0.downcast_exact::<PySet>() {
+        } else if let Ok(set) = self.0.cast_exact::<PySet>() {
             let mut deserializer = SeqDeserializer::new(set.into_iter().map(PyValue::new));
             let seq = visitor.visit_seq(&mut deserializer)?;
             deserializer.end()?;
@@ -469,7 +469,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
     where
         V: Visitor<'de>,
     {
-        if let Ok(dict) = self.0.downcast_exact::<PyDict>() {
+        if let Ok(dict) = self.0.cast_exact::<PyDict>() {
             let mut map = MapDeserializer::new(
                 dict.into_iter()
                     .map(|(k, v)| (PyValue::new(k), PyValue::new(v))),
@@ -506,7 +506,7 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
         let o = &self.0;
         if let Ok(s) = o.extract::<&str>() {
             visitor.visit_enum(s.into_deserializer())
-        } else if let Ok(dict) = o.downcast_exact::<PyDict>() {
+        } else if let Ok(dict) = o.cast_exact::<PyDict>() {
             let map = MapDeserializer::new(
                 dict.into_iter()
                     .map(|(k, v)| (PyValue::new(k), PyValue::new(v))),

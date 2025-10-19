@@ -70,7 +70,7 @@ impl<'py> Pollable<'py> {
         if p.is_none() {
             return Ok(None);
         }
-        Ok(Some(Self(p.downcast_exact::<PyPollable>()?.borrow_mut())))
+        Ok(Some(Self(p.cast_exact::<PyPollable>()?.borrow_mut())))
     }
 }
 
