@@ -43,7 +43,7 @@ impl Scope {
 
             let stdio = if let Ok(sys) = PyModule::import(py, intern!(py, "sys")) {
                 if let Ok(path) = sys.getattr(intern!(py, "path")) {
-                    let path = path.downcast_exact::<PyList>().ok();
+                    let path = path.cast_exact::<PyList>().ok();
                     if let Some(path) = path {
                         let _ = path.insert(1, "/usr/local/lib/bundle.zip");
                         let _ = path.insert(0, "/workdir");

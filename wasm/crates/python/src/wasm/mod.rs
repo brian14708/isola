@@ -32,7 +32,7 @@ pub mod sys_module {
 
     use pyo3::{
         Bound, PyAny, PyErr, PyResult, Python, pyfunction,
-        types::{PyAnyMethods, PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
+        types::{PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
     };
     use smallvec::{SmallVec, smallvec};
 
@@ -99,7 +99,7 @@ pub mod sys_module {
             (SmallVec::<[_; 8]>::with_capacity(poll.len()), 0),
             |(mut vec, mut count), p| -> PyResult<_> {
                 let pollable =
-                    Pollable::subscribe(p.downcast_exact::<PyTuple>()?.get_borrowed_item(0)?)?;
+                    Pollable::subscribe(p.cast_exact::<PyTuple>()?.get_borrowed_item(0)?)?;
                 if pollable.is_none() {
                     count += 1;
                 }
