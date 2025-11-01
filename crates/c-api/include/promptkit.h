@@ -9,10 +9,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-typedef enum promptkit_argument_type {
-  PROMPTKIT_ARGUMENT_TYPE_JSON = 0,
-  PROMPTKIT_ARGUMENT_TYPE_JSON_STREAM = 1,
-} promptkit_argument_type;
+typedef enum promptkit_error_code {
+  PROMPTKIT_ERROR_CODE_OK = 0,
+  PROMPTKIT_ERROR_CODE_INVALID_ARGUMENT = 1,
+  PROMPTKIT_ERROR_CODE_INTERNAL = 2,
+  PROMPTKIT_ERROR_CODE_STREAM_FULL = 3,
+  PROMPTKIT_ERROR_CODE_STREAM_CLOSED = 4,
+} promptkit_error_code;
 
 typedef enum promptkit_callback_event {
   PROMPTKIT_CALLBACK_EVENT_RESULT_JSON = 0,
@@ -22,13 +25,10 @@ typedef enum promptkit_callback_event {
   PROMPTKIT_CALLBACK_EVENT_ERROR = 3,
 } promptkit_callback_event;
 
-typedef enum promptkit_error_code {
-  PROMPTKIT_ERROR_CODE_OK = 0,
-  PROMPTKIT_ERROR_CODE_INVALID_ARGUMENT = 1,
-  PROMPTKIT_ERROR_CODE_INTERNAL = 2,
-  PROMPTKIT_ERROR_CODE_STREAM_FULL = 3,
-  PROMPTKIT_ERROR_CODE_STREAM_CLOSED = 4,
-} promptkit_error_code;
+typedef enum promptkit_argument_type {
+  PROMPTKIT_ARGUMENT_TYPE_JSON = 0,
+  PROMPTKIT_ARGUMENT_TYPE_JSON_STREAM = 1,
+} promptkit_argument_type;
 
 typedef struct promptkit_context_handle promptkit_context_handle;
 

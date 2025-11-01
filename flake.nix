@@ -70,18 +70,7 @@
               wheel
             ]
           ))
-          (maturin.overrideAttrs (old: rec {
-            version = "1.9.6";
-            src = fetchFromGitHub {
-              owner = "PyO3";
-              repo = "maturin";
-              rev = "v${version}";
-              hash = "sha256-hMMX59nq9Wusb0XZb8i5/EmQiPL4WopuZX7maycj0J4=";
-            };
-            cargoDeps = rustPlatform.importCargoLock {
-              lockFile = "${src}/Cargo.lock";
-            };
-          }))
+          maturin
 
           # rust / c++
           binaryen
