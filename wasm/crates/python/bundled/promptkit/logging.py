@@ -4,6 +4,8 @@ except ImportError:
     import json
     import logging
 
+    logger = logging.getLogger("promptkit")
+
     def _msg(message: str, *args: object, **kwargs: object) -> str:
         if args:
             message = message.format(*args)
@@ -12,16 +14,16 @@ except ImportError:
         return message
 
     def debug(message: str, *args: object, **kwargs: object) -> None:
-        logging.debug(_msg(message, *args, **kwargs))
+        logger.log(logging.DEBUG, _msg(message, *args, **kwargs))
 
     def info(message: str, *args: object, **kwargs: object) -> None:
-        logging.info(_msg(message, *args, **kwargs))
+        logger.log(logging.INFO, _msg(message, *args, **kwargs))
 
     def error(message: str, *args: object, **kwargs: object) -> None:
-        logging.error(_msg(message, *args, **kwargs))
+        logger.log(logging.ERROR, _msg(message, *args, **kwargs))
 
     def warning(message: str, *args: object, **kwargs: object) -> None:
-        logging.warning(_msg(message, *args, **kwargs))
+        logger.log(logging.WARNING, _msg(message, *args, **kwargs))
 
 
-__all__ = ["debug", "info", "warning", "error"]
+__all__ = ["debug", "error", "info", "warning"]

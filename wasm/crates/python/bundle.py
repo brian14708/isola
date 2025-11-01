@@ -1,4 +1,6 @@
-import os
+# noqa: INP001
+
+import pathlib
 import sys
 import zipfile
 
@@ -8,30 +10,26 @@ if __name__ == "__main__":
     source_dirs = sys.argv[2:]
 
     with zipfile.PyZipFile(pyzip_path, "w") as z:
-        for dir in source_dirs:
-            for f in os.listdir(dir):
-                path = os.path.join(dir, f)
-                if os.path.isfile(path) and os.path.splitext(path)[1] != ".py":
+        for dir_ in source_dirs:
+            dir_path = pathlib.Path(dir_)
+            for item in dir_path.iterdir():
+                if item.is_file() and item.suffix != ".py":
                     continue
-                z.writepy(path)
+                z.writepy(item)
 
     EXT = {".py", ".pyi", ".typed"}
     with zipfile.ZipFile(srczip_path, "w", compression=zipfile.ZIP_DEFLATED) as src_zip:
-        for dir in source_dirs:
-            for subdir in os.listdir(dir):
-                if subdir.startswith("."):
+        for dir_ in source_dirs:
+            dir_path = pathlib.Path(dir_)
+            for item in dir_path.iterdir():
+                if item.name.startswith("."):
                     continue
-                path = os.path.join(dir, subdir)
-                if os.path.isfile(path):
-                    ext = os.path.splitext(subdir)[1]
-                    if ext in EXT:
-                        arcname = os.path.relpath(path, start=dir)
-                        src_zip.write(path, arcname=arcname)
+                if item.is_file():
+                    if item.suffix in EXT:
+                        arcname = str(item.relative_to(dir_path))
+                        src_zip.write(item, arcname=arcname)
                 else:
-                    for root, _, files in os.walk(path):
-                        for f in files:
-                            ext = os.path.splitext(f)[1]
-                            if ext in EXT:
-                                full_path = os.path.join(root, f)
-                                arcname = os.path.relpath(full_path, start=dir)
-                                src_zip.write(full_path, arcname=arcname)
+                    for file_path in item.rglob("*"):
+                        if file_path.is_file() and file_path.suffix in EXT:
+                            arcname = str(file_path.relative_to(dir_path))
+                            src_zip.write(file_path, arcname=arcname)

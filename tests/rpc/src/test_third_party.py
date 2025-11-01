@@ -21,7 +21,7 @@ tests = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", tests)
 async def test_websocket(
-    websocket_server, client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
+    client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
 ) -> None:
     """Test WebSocket functionality via script execution in WASI environment."""
     script_text = (datadir / "third_party.py").read_text()

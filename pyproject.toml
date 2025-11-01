@@ -26,15 +26,38 @@ dev = [
 exclude = ["tests/rpc/src/stub/*"]
 
 [tool.ruff.lint]
-select = [
-    "E",
-    "F",
-    "UP",
-    "B",
-    "SIM",
-    "I",
-    "TC",
+select = ["ALL"]
+ignore = [
+    "COM812", "S101", "CPY",
+    "D10", "D203", "D213",
+    "PLR09", "PLR2004", "PLC2701", "C901",
 ]
 extend-safe-fixes = ["TC"]
 preview = true
 future-annotations = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["BLE001", "PLC0415", "DOC", "INP001", "ANN001"]
+"tests/rpc/data/**/*.py" = ["PT"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.mypy]
+files = ["wasm/crates/python/bundled"]
+strict = true
+python_version = "3.12"
+disable_error_code = [
+    "decorated-any",
+    "explicit-any",
+    "any",
+]
+
+[tool.pyright]
+venv = "."
+venvPath = ".venv"
+include = ["wasm/crates/python/bundled"]
+stubPath = "wasm/crates/python/bundled/typings"
+typeCheckingMode = "strict"
+enableExperimentalFeatures = true
+reportMissingModuleSource = false

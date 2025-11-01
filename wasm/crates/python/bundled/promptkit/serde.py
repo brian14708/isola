@@ -10,38 +10,39 @@ except ImportError:
     type Format = Literal["json", "yaml", "cbor"]
 
     @overload
-    def _dumps(obj: object, format: Literal["json"]) -> str: ...
+    def _dumps(obj: object, format_: Literal["json"], /) -> str: ...
     @overload
-    def _dumps(obj: object, format: Literal["yaml"]) -> str: ...
+    def _dumps(obj: object, format_: Literal["yaml"], /) -> str: ...
     @overload
-    def _dumps(obj: object, format: Literal["cbor"]) -> bytes: ...
-    def _dumps(obj: object, format: str) -> str | bytes:
-        if format == "json":
+    def _dumps(obj: object, format_: Literal["cbor"], /) -> bytes: ...
+    def _dumps(obj: object, format_: str, /) -> str | bytes:
+        if format_ == "json":
             return json.dumps(obj)
-        elif format == "yaml":
+        if format_ == "yaml":
             return yaml.dump(obj)
-        elif format == "cbor":
+        if format_ == "cbor":
             return cbor2.dumps(obj)
-        else:
-            raise ValueError(f"Unsupported format: {format}")
+        msg = f"Unsupported format: {format_}"
+        raise ValueError(msg)
 
     @overload
-    def _loads(s: str, format: Literal["json"]) -> object: ...
+    def _loads(s: str, format_: Literal["json"], /) -> object: ...
     @overload
-    def _loads(s: str, format: Literal["yaml"]) -> object: ...
+    def _loads(s: str, format_: Literal["yaml"], /) -> object: ...
     @overload
-    def _loads(s: bytes, format: Literal["cbor"]) -> object: ...
-    def _loads(s: str | bytes, format: Format | str) -> object:
-        if format == "json":
+    def _loads(s: bytes, format_: Literal["cbor"], /) -> object: ...
+    def _loads(s: str | bytes, format_: Format | str, /) -> object:
+        if format_ == "json":
             return cast("object", json.loads(s))
-        elif format == "yaml":
+        if format_ == "yaml":
             return cast("object", yaml.safe_load(s))
-        elif format == "cbor":
+        if format_ == "cbor":
             if isinstance(s, str):
-                raise ValueError("CBOR format requires bytes input")
+                msg = "CBOR format requires bytes input"
+                raise ValueError(msg)
             return cast("object", cbor2.loads(s))
-        else:
-            raise ValueError(f"Unsupported format: {format}")
+        msg = f"Unsupported format: {format_}"
+        raise ValueError(msg)
 
     dumps = _dumps
     loads = _loads

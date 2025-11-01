@@ -1,5 +1,4 @@
-# type: ignore
-# pyright: reportAny=false
+from __future__ import annotations
 
 import inspect
 import json
@@ -7,6 +6,9 @@ import typing
 from collections.abc import AsyncIterable, Iterable
 
 from pydantic import TypeAdapter
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 def analyze(ctx: dict[str, object], req: dict[str, str]) -> dict[str, object]:
@@ -21,10 +23,12 @@ def analyze(ctx: dict[str, object], req: dict[str, str]) -> dict[str, object]:
     }
 
 
-def analyze_function[T](fn: typing.Callable[..., T]) -> dict[str, object]:
+def analyze_function[T](fn: Callable[..., T]) -> dict[str, object]:
     sig = inspect.signature(fn)
+    # Access __name__ safely - all callables should have it
+    name = getattr(fn, "__name__", "<unknown>")
     return {
-        "name": fn.__name__,
+        "name": name,
         "description": fn.__doc__ or "",
         "argument_types": [
             {

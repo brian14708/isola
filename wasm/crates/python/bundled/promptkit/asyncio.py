@@ -3,13 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections import deque
-from typing import (
-    TYPE_CHECKING,
-    Unpack,
-    cast,
-    overload,
-    override,
-)
+from typing import TYPE_CHECKING, Unpack, cast, overload, override
 
 if TYPE_CHECKING:
     from collections.abc import (
@@ -46,7 +40,7 @@ async def subscribe[T](
 
 
 class PollLoop(asyncio.AbstractEventLoop):
-    __slots__: tuple[str, ...] = ("wakers", "running", "closed", "handles")
+    __slots__: tuple[str, ...] = ("closed", "handles", "running", "wakers")
 
     def __init__(self) -> None:
         self.wakers: list[
@@ -67,18 +61,18 @@ class PollLoop(asyncio.AbstractEventLoop):
     def run_until_complete[T](self, future: Awaitable[T]) -> T:
         try:
             self.running = True
-            asyncio.events._set_running_loop(self)
+            asyncio.events._set_running_loop(self)  # noqa: SLF001
             return self._run_until_complete(future)
         finally:
             self._cleanup()
             self.running = False
-            asyncio.events._set_running_loop(None)
+            asyncio.events._set_running_loop(None)  # noqa: SLF001
 
     def run_async_generator[T](self, generator: AsyncGenerator[T]) -> Generator[T]:
         it = aiter(generator)
         try:
             self.running = True
-            asyncio.events._set_running_loop(self)
+            asyncio.events._set_running_loop(self)  # noqa: SLF001
 
             while True:
                 try:
@@ -88,15 +82,15 @@ class PollLoop(asyncio.AbstractEventLoop):
         finally:
             self._cleanup()
             self.running = False
-            asyncio.events._set_running_loop(None)
+            asyncio.events._set_running_loop(None)  # noqa: SLF001
 
     def _run_until_complete[T](self, future: Awaitable[T]) -> T:
         future = asyncio.ensure_future(future, loop=self)
         while self.running and (self.handles or self.wakers) and (not future.done()):
             while self.handles:
                 handle = self.handles.popleft()
-                if not handle._cancelled:
-                    handle._run()
+                if not handle._cancelled:  # noqa: SLF001
+                    handle._run()  # noqa: SLF001
 
             if self.wakers and (readyset := _promptkit_sys.poll(self.wakers)):
                 new_wakers: list[
@@ -119,15 +113,16 @@ class PollLoop(asyncio.AbstractEventLoop):
                 self.wakers = new_wakers
 
         if not future.done() and self.running:
-            raise RuntimeError("Deadlock detected")
+            msg = "Deadlock detected"
+            raise RuntimeError(msg)
         return future.result()
 
     def _cleanup(self) -> None:
         while self.handles or self.wakers:
             while self.handles:
                 handle = self.handles.popleft()
-                if not handle._cancelled:
-                    handle._run()
+                if not handle._cancelled:  # noqa: SLF001
+                    handle._run()  # noqa: SLF001
 
             for pollable, waker in self.wakers:
                 _ = waker.cancel()
@@ -227,7 +222,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         pass
 
     @override
-    async def shutdown_default_executor(self, timeout: float | None = None) -> None:
+    async def shutdown_default_executor(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
         pass
 
 

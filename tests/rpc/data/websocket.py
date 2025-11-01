@@ -90,7 +90,6 @@ async def concurrent_connections(ws_url: str) -> None:
 
 async def concurrent_messages(ws_url: str) -> None:
     """Test concurrent sending and streaming receiving with separate tasks."""
-
     messages = [f"msg-{i}-{time.time()}" for i in range(3)]
 
     async with ws_connect(ws_url + "/echo") as ws:

@@ -6,7 +6,7 @@ def add(a: int, b: int, c: int = 1) -> int:
 
 
 async def async_add(a: int, b: int, c: int = 1) -> int:
-    async def inner() -> int:
+    async def inner() -> int:  # noqa: RUF029
         return a + b * c
 
     return await asyncio.wait_for(asyncio.create_task(inner()), 10)

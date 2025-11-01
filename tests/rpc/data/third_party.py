@@ -1,4 +1,4 @@
-def pillow():
+def pillow() -> None:
     from io import BytesIO
 
     from PIL import Image, ImageDraw, ImageFont
@@ -21,10 +21,10 @@ def pillow():
     if hasattr(draw, "textbbox"):
         # Pillow ≥10
         bbox = draw.textbbox((0, 0), text, font=font)
-        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        w, _h = bbox[2] - bbox[0], bbox[3] - bbox[1]
     else:
         # Older Pillow
-        w, h = font.getsize(text)
+        w, _h = font.getsize(text)
 
     # Center text horizontally at y=10
     x = (img.width - w) // 2
@@ -44,21 +44,22 @@ def pillow():
     assert len(png_bytes) > 512
 
 
-def numpy():
+def numpy() -> None:
     import numpy as np
 
-    arr = np.random.randint(0, 100, size=(10, 10))
+    arr = np.random.default_rng(12345).integers(0, 100, size=(10, 10))
     mean = np.mean(arr)
     stddev = np.std(arr)
     mask = arr > mean
     filtered_values = arr[mask]
     assert arr.shape == (10, 10)
-    assert mean >= 0 and mean < 100
+    assert mean >= 0
+    assert mean < 100
     assert stddev >= 0
     assert len(filtered_values) > 0
 
 
-def pydantic():
+def pydantic() -> None:
     import json
 
     from pydantic import BaseModel
@@ -70,7 +71,7 @@ def pydantic():
     assert json.loads(s.json())["n"] == 5
 
 
-def tzdata():
+def tzdata() -> None:
     from datetime import datetime
     from zoneinfo import ZoneInfo
 

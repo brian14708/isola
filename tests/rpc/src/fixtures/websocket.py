@@ -7,14 +7,17 @@ import websockets.asyncio.server
 
 
 class WebSocketTestServer:
-    def __init__(self, host: str = "localhost", port: int = 0):
+    def __init__(self, host: str = "localhost", port: int = 0) -> None:
         self.host = host
         self.port = port
         self.server: websockets.asyncio.server.Server | None = None
         self.url: str | None = None
 
-    async def echo_handler(self, websocket):
-        """Echo server that returns received messages"""
+    @staticmethod
+    async def echo_handler(
+        websocket: websockets.asyncio.server.ServerConnection,
+    ) -> None:
+        """Echo server that returns received messages."""
         try:
             path = websocket.request.path
             if path == "/echo":
@@ -28,7 +31,7 @@ class WebSocketTestServer:
         except websockets.exceptions.ConnectionClosed:
             pass
 
-    async def start_server(self):
+    async def start_server(self) -> None:
         # Use modern websockets API
         self.server = await websockets.asyncio.server.serve(
             self.echo_handler, self.host, self.port
@@ -38,7 +41,7 @@ class WebSocketTestServer:
             actual_port = next(iter(self.server.sockets)).getsockname()[1]
             self.url = f"ws://{self.host}:{actual_port}"
 
-    async def stop_server(self):
+    async def stop_server(self) -> None:
         if self.server:
             self.server.close()
             await self.server.wait_closed()

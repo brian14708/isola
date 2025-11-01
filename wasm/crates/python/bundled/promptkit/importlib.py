@@ -1,5 +1,3 @@
-# type: ignore
-# pyright: basic
 from __future__ import annotations
 
 import importlib.abc
@@ -10,7 +8,7 @@ import re
 import sys
 import zipfile
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, override
+from typing import TYPE_CHECKING, TypedDict, cast, override
 
 from promptkit.http import fetch
 
@@ -21,7 +19,7 @@ if TYPE_CHECKING:
 
 __all__ = ["http"]
 
-_module_type = type(sys)
+_module_type = cast("type[types.ModuleType]", type(sys))
 
 
 @dataclass
@@ -65,7 +63,7 @@ class HttpImporter(
         return None
 
     def _find_module(
-        self, fullname: str, path: Sequence[str] | None = None
+        self, fullname: str, _path: Sequence[str] | None = None
     ) -> HttpImporter | None:
         if fullname in self.modules:
             return self
@@ -96,22 +94,24 @@ class HttpImporter(
                         filepath=self.url + "#" + path_entry,
                         package=path_entry.endswith("__init__.py"),
                     )
-                    return self
                 except FileNotFoundError:
                     continue
+                return self
         return None
 
     @override
     def get_source(self, fullname: str) -> str:
         if self._find_module(fullname) is not self:
-            raise ImportError(f"Module '{fullname}' cannot be loaded from '{self.url}'")
+            msg = f"Module '{fullname}' cannot be loaded from '{self.url}'"
+            raise ImportError(msg)
         return self.modules[fullname].content
 
     @override
     def create_module(self, spec: ModuleSpec) -> types.ModuleType:
         fullname: str = spec.name
         if fullname not in self.modules and self._find_module(fullname) is not self:
-            raise ImportError(f"Module '{fullname}' cannot be loaded from '{self.url}'")
+            msg = f"Module '{fullname}' cannot be loaded from '{self.url}'"
+            raise ImportError(msg)
         data: ModuleInfo = self.modules[fullname]
 
         mod: types.ModuleType = _module_type(fullname)
@@ -127,7 +127,7 @@ class HttpImporter(
         fullname: str = module.__name__
         sys.modules[fullname] = module
         try:
-            exec(self.modules[fullname].content, module.__dict__)
+            exec(self.modules[fullname].content, module.__dict__)  # noqa: S102
         except Exception:
             del sys.modules[fullname]
             raise
@@ -140,7 +140,7 @@ class HttpImporter(
 
 
 class RepoGuard[T: importlib.abc.MetaPathFinder, **P]:
-    def __init__(self, cls: Callable[P, T], *args: P.args, **kwargs: P.kwargs):
+    def __init__(self, cls: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> None:
         self.importer: T = cls(*args, **kwargs)
 
     def __enter__(self) -> T:
@@ -152,12 +152,20 @@ class RepoGuard[T: importlib.abc.MetaPathFinder, **P]:
         return None
 
 
-def http(*args: Any, **kwargs: Any) -> RepoGuard[HttpImporter, ...]:
-    return RepoGuard(HttpImporter, *args, **kwargs)
+def http(url: str) -> RepoGuard[HttpImporter, ...]:
+    return RepoGuard(HttpImporter, url)
 
 
-def _parse_dependency(dep: str) -> dict:
-    result: dict[str, str | None] = {
+class _ParsedDependency(TypedDict):
+    name: str | None
+    version: str | None
+    url: str | None
+    extras: str | None
+    marker: str | None
+
+
+def _parse_dependency(dep: str) -> _ParsedDependency:
+    result: _ParsedDependency = {
         "name": None,
         "version": None,
         "url": None,
@@ -178,30 +186,38 @@ def _parse_dependency(dep: str) -> dict:
     extras_match = re.match(r"^([\w\-]+)(\[[^\]]+\])?(.*)$", dep.strip())
     if extras_match:
         result["name"] = extras_match.group(1)
-        if extras_match.group(2):
-            result["extras"] = extras_match.group(2)[1:-1]
-        if extras_match.group(3):
-            result["version"] = extras_match.group(3).strip() or None
+        if g := extras_match.group(2):
+            result["extras"] = g[1:-1]
+        if g := extras_match.group(3):
+            result["version"] = g.strip() or None
 
     return result
 
 
-def _initialize_pep723(meta: str) -> None:
-    import tomllib
+def _initialize_pep723(meta: str) -> None:  # pyright: ignore[reportUnusedFunction]
+    import tomllib  # noqa: PLC0415
 
     script = tomllib.loads(meta)
 
-    blacklist = set(
-        ["xmltodict", "pydantic", "setuptools", "promptkit-py", "numpy", "pillow"]
-    )
+    blacklist = {
+        "xmltodict",
+        "pydantic",
+        "setuptools",
+        "promptkit-py",
+        "numpy",
+        "pillow",
+        "duron",
+    }
 
-    importers = []
-    for dep in script.get("dependencies", []):
+    importers: list[HttpImporter] = []
+    for dep in cast("list[str]", script.get("dependencies", [])):
         dep_info = _parse_dependency(dep)
-        if dep_info["name"].lower() in blacklist:
+        name = dep_info["name"]
+        if not name or name.lower() in blacklist:
             continue
         if not dep_info["url"]:
-            raise ImportError("Only URL-based dependencies are supported.")
+            msg = "Only URL-based dependencies are supported."
+            raise ImportError(msg)
 
         importers.append(HttpImporter(dep_info["url"]))
 

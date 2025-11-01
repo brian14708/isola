@@ -50,8 +50,8 @@ lint: lint-wasm lint-ui lint-proto init-py
 [private]
 lint-wasm: init-py
     cd wasm && cargo clippy --all-features -- --deny warnings
-    uv run --directory wasm/crates/python/bundled mypy .
-    uv run --directory wasm/crates/python/bundled basedpyright .
+    uv run mypy
+    uv run basedpyright
 
 [private]
 [working-directory('ui')]

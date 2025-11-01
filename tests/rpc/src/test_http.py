@@ -39,7 +39,7 @@ async def test_httpbin(
 @pytest.mark.parametrize("method", all_tests)
 async def test_httpbin_local(httpbin, datadir: pathlib.Path, method: str) -> None:
     scope: dict[str, Any] = {}
-    exec((datadir / "http.py").read_text(), scope)
+    exec((datadir / "http.py").read_text(), scope)  # noqa: S102
     fn = scope[method]
     if inspect.iscoroutinefunction(fn):
         ret = await fn(httpbin.url)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import pathlib
 from typing import TYPE_CHECKING
 
@@ -15,15 +14,14 @@ if TYPE_CHECKING:
 
 
 @pytest_asyncio.fixture
-async def client():
+async def client() -> AsyncGenerator[ScriptServiceStub, None]:
     async with Channel("localhost", port=3000) as channel:
         yield ScriptServiceStub(channel)
 
 
 @pytest.fixture
-def datadir():
-    datadir = os.path.join(os.path.dirname(__file__), "..", "data")
-    return pathlib.Path(datadir)
+def datadir() -> pathlib.Path:
+    return pathlib.Path(__file__).parent / ".." / "data"
 
 
 @pytest_asyncio.fixture

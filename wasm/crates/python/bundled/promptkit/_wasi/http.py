@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import binascii
 import os
-from typing import IO, TYPE_CHECKING, Literal, cast, final, overload
+from typing import IO, TYPE_CHECKING, Literal, NamedTuple, cast, final, overload
 
 import _promptkit_http as _http
 import _promptkit_serde
@@ -25,14 +25,14 @@ type _IterResponseType = Literal["lines", "bytes", "sse"]
 @final
 class Request:
     __slots__ = (
-        "method",
-        "url",
-        "params",
-        "headers",
         "body",
-        "timeout",
         "extra",
+        "headers",
+        "method",
+        "params",
         "resp",
+        "timeout",
+        "url",
     )
 
     def __init__(
@@ -44,7 +44,7 @@ class Request:
         body: object | bytes | None,
         timeout: float | None,
         extra: dict[str, object] | None = None,
-    ):
+    ) -> None:
         self.method = method
         self.url = url
         self.params = params
@@ -78,20 +78,16 @@ class Request:
             self.resp.close()
 
 
-@final
-class ServerSentEvent:
-    __slots__ = ("id", "event", "data")
-
-    def __init__(self, id: str | None, event: str | None, data: str):
-        self.id = id
-        self.event = event
-        self.data = data
+class ServerSentEvent(NamedTuple):
+    id: str | None
+    event: str | None
+    data: str
 
 
 class _BaseResponse:
-    __slots__: tuple[str, ...] = ("resp", "_status", "_headers")
+    __slots__: tuple[str, ...] = ("_headers", "_status", "resp")
 
-    def __init__(self, resp: _http.Response):
+    def __init__(self, resp: _http.Response) -> None:
         self.resp: _http.Response | None = resp
         self._status: int | None = None
         self._headers: dict[str, str] | None = None
@@ -99,7 +95,8 @@ class _BaseResponse:
     @property
     def status(self) -> int:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         if self._status is None:
             self._status = self.resp.status()
         return self._status
@@ -107,7 +104,8 @@ class _BaseResponse:
     @property
     def headers(self) -> dict[str, str]:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         if self._headers is None:
             self._headers = self.resp.headers()
         return self._headers
@@ -128,7 +126,8 @@ class AsyncResponse(_BaseResponse):
     async def _aread(self, encoding: Literal["bytes"], size: int) -> bytes: ...
     async def _aread(self, encoding: _ResponseType, size: int) -> object | str | bytes:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, size)) is not None:
             await subscribe(poll)
@@ -147,7 +146,8 @@ class AsyncResponse(_BaseResponse):
 
     async def _aiter(self, encoding: _IterResponseType) -> AsyncGenerator[object]:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
@@ -165,10 +165,10 @@ class AsyncResponse(_BaseResponse):
             yield line
 
     async def aiter_sse(self) -> AsyncGenerator[ServerSentEvent]:
-        async for id, event, data in cast(
+        async for id_, event, data in cast(
             "AsyncGenerator[tuple[str,str,str]]", self._aiter("sse")
         ):
-            yield ServerSentEvent(id, event, data)
+            yield ServerSentEvent(id_, event, data)
 
 
 @final
@@ -181,7 +181,8 @@ class Response(_BaseResponse):
     def _read(self, encoding: Literal["bytes"], size: int) -> bytes: ...
     def _read(self, encoding: _ResponseType, size: int = -1) -> object | str | bytes:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         return self.resp.blocking_read(encoding, size)
 
     def read(self, size: int = -1) -> bytes:
@@ -197,7 +198,8 @@ class Response(_BaseResponse):
 
     def _iter(self, encoding: _IterResponseType) -> Generator[object]:
         if self.resp is None:
-            raise RuntimeError("Response is closed")
+            msg = "Response is closed"
+            raise RuntimeError(msg)
         buf = _http.new_buffer(encoding)
         while (poll := self.resp.read_into(buf, 16384)) is not None:
             while (data := buf.next()) is not None:
@@ -213,15 +215,19 @@ class Response(_BaseResponse):
         return cast("Generator[str]", self._iter("lines"))
 
     def iter_sse(self) -> Generator[ServerSentEvent]:
-        for id, event, data in cast("Generator[tuple[str,str,str]]", self._iter("sse")):
-            yield ServerSentEvent(id, event, data)
+        for id_, event, data in cast(
+            "Generator[tuple[str,str,str]]", self._iter("sse")
+        ):
+            yield ServerSentEvent(id_, event, data)
 
 
 @final
 class WebsocketRequest:
-    __slots__ = ("url", "headers", "conn", "timeout")
+    __slots__ = ("conn", "headers", "timeout", "url")
 
-    def __init__(self, url: str, headers: dict[str, str] | None, timeout: float | None):
+    def __init__(
+        self, url: str, headers: dict[str, str] | None, timeout: float | None
+    ) -> None:
         self.url = url
         self.headers = headers
         self.timeout = timeout
@@ -252,7 +258,7 @@ class WebsocketRequest:
 class _BaseWebsocket:
     __slots__: tuple[str, ...] = ("conn",)
 
-    def __init__(self, conn: _http.Websocket):
+    def __init__(self, conn: _http.Websocket) -> None:
         self.conn: _http.Websocket = conn
 
     def shutdown(self) -> None:
@@ -345,7 +351,8 @@ def fetch(
 ) -> Request:
     if files:
         if body:
-            raise ValueError("Cannot specify both files and body")
+            msg = "Cannot specify both files and body"
+            raise ValueError(msg)
         body, ty = _encode_multipart_formdata(files)
         if not headers:
             headers = {}
@@ -378,15 +385,13 @@ def _encode_multipart_formdata(fields: dict[str, _FileType]) -> tuple[bytes, str
         content_disposition = (
             f'Content-Disposition: form-data; name="{field}"; filename="{filename}"'
         )
-        parts.extend(
-            (
-                b_boundary,
-                content_disposition.encode(),
-                f"Content-Type: {mime}".encode(),
-                b"",
-                fileobj if isinstance(fileobj, bytes) else fileobj.read(),
-            )
-        )
+        parts.extend((
+            b_boundary,
+            content_disposition.encode(),
+            f"Content-Type: {mime}".encode(),
+            b"",
+            fileobj if isinstance(fileobj, bytes) else fileobj.read(),
+        ))
 
     parts.extend((b_boundary + b"--", b""))
     body = b"\r\n".join(parts)
@@ -400,11 +405,10 @@ def _validate_status(resp: Response) -> None:
     if not 200 <= resp.status < 300:
         try:
             content = resp.read(size=1024 * 128).decode("utf-8", "replace")
-        except Exception:
+        except Exception:  # noqa: BLE001
             content = "<unable to read response content>"
-        raise RuntimeError(
-            f"http status check failed, status={resp.status}, content={repr(content)}"
-        )
+        msg = f"http status check failed, status={resp.status}, content={content!r}"
+        raise RuntimeError(msg)
 
 
 def get(
@@ -413,12 +417,12 @@ def get(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
-    validate_status: bool = True,
+    validate_status: bool = True,  # noqa: FBT001, FBT002
 ) -> object:
     with Request("GET", url, params, headers, None, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]
+        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]  # noqa: SLF001
 
 
 def get_async(
@@ -427,7 +431,7 @@ def get_async(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
-    validate_status: bool = True,
+    validate_status: bool = True,  # noqa: FBT001, FBT002
 ) -> Request:
     return Request(
         "GET",
@@ -470,12 +474,12 @@ def post(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
-    validate_status: bool = True,
+    validate_status: bool = True,  # noqa: FBT001, FBT002
 ) -> object:
     with Request("POST", url, None, headers, data, timeout) as resp:
         if validate_status:
             _validate_status(resp)
-        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]
+        return resp._read(response, -1)  # pyright:ignore[reportPrivateUsage]  # noqa: SLF001
 
 
 def post_async(
@@ -484,7 +488,7 @@ def post_async(
     headers: dict[str, str] | None = None,
     timeout: float | None = None,
     response: _ResponseType = "json",
-    validate_status: bool = True,
+    validate_status: bool = True,  # noqa: FBT001, FBT002
 ) -> Request:
     return Request(
         "POST",
@@ -514,7 +518,7 @@ def post_sse(
             yield _promptkit_serde.loads(event.data, "json")
 
 
-async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Exception:
+async def _fetch(r: Request, *, ignore_error: bool) -> object | bytes | str | Exception:
     extra = r.extra or {}
     try:
         async with r as resp:
@@ -523,28 +527,32 @@ async def _fetch(r: Request, ignore_error: bool) -> object | bytes | str | Excep
                     content = (await resp.aread(size=1024 * 128)).decode(
                         "utf-8", "replace"
                     )
-                except Exception:
+                except Exception:  # noqa: BLE001
                     content = "<unable to read response content>"
-                raise RuntimeError(
+                msg = (
                     "http status check failed, "
-                    + f"status={resp.status}, content={repr(content)}"
+                    f"status={resp.status}, content={content!r}"
                 )
-            return await resp._aread(  # pyright:ignore[reportPrivateUsage]
+                raise RuntimeError(msg)  # noqa: TRY301
+            return await resp._aread(  # pyright:ignore[reportPrivateUsage]  # noqa: SLF001
                 cast("_ResponseType", extra.get("type", "json")), -1
             )
     except Exception as e:
         if ignore_error:
             return e
-        raise e
+        raise
 
 
 async def _fetch_all(
-    requests: list[Request], ignore_error: bool
+    requests: list[Request], *, ignore_error: bool
 ) -> list[object | Exception]:
-    return await asyncio.gather(*[_fetch(r, ignore_error) for r in requests])
+    return await asyncio.gather(*[
+        _fetch(r, ignore_error=ignore_error) for r in requests
+    ])
 
 
 def fetch_all(
-    requests: list[Request], ignore_error: bool = False
+    requests: list[Request],
+    ignore_error: bool = False,  # noqa: FBT001, FBT002
 ) -> list[object | Exception]:
-    return asyncio_run(_fetch_all(requests, ignore_error))
+    return asyncio_run(_fetch_all(requests, ignore_error=ignore_error))
