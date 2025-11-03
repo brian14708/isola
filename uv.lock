@@ -292,14 +292,14 @@ wheels = [
 
 [[package]]
 name = "duron"
-version = "0.0.2"
+version = "0.0.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/15/95/2aaf0a16951e320b3b95302057707e3bdc8a4b6559898eab6bbc1fb9a1e6/duron-0.0.2.tar.gz", hash = "sha256:3f787a859d85743feef19551e1cb15e3609e8b3311c02d863ca1f8a4f9c0b575", size = 29418, upload-time = "2025-10-25T06:50:16.257Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a0/8e/e738730c7be8490c5fb42b80da087f8064728f5dde1a036c09dd783fd95d/duron-0.0.3.tar.gz", hash = "sha256:39696fec290b65778ee4eb558f357ccd3f0c061b7c36e2cebee51d229fc9556d", size = 29259, upload-time = "2025-11-02T12:59:51.94Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/52/82/c2c2b78942fbad76a4de9cd855a4ef096b7542a2be5ce05a94d9e9d2829a/duron-0.0.2-py3-none-any.whl", hash = "sha256:b227e2db7fd87355ab1d70db96bc0e6463f326b3aed51e5d7dcb3c07e0fe66d9", size = 41021, upload-time = "2025-10-25T06:50:15.135Z" },
+    { url = "https://files.pythonhosted.org/packages/1d/93/f4d4644d342715607051e54ab3b064f5e6ed4ebe1c32cddbd81eb5babb57/duron-0.0.3-py3-none-any.whl", hash = "sha256:e9c94b609cc648d3f355911205a02dd6561ed7a43accd2fe6ee32f8286ca2a8e", size = 40919, upload-time = "2025-11-02T12:59:50.869Z" },
 ]
 
 [[package]]
