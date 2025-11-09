@@ -63,7 +63,7 @@ impl<E: Environment> InstanceState<E> {
     ) -> anyhow::Result<Store<Self>> {
         let mut builder = WasiCtxBuilder::new();
         builder
-            .preopened_dir(base_dir, "/usr/local/lib", DirPerms::READ, FilePerms::READ)
+            .preopened_dir(base_dir, "/lib", DirPerms::READ, FilePerms::READ)
             .map_err(|e| anyhow::anyhow!("Failed to add base_dir to WASI context: {e}"))?;
 
         if let Some(workdir) = workdir {
