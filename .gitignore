@@ -1,6 +1,4 @@
 /target
 /result
-/wasm/downloads
-/wasm/target
 /dist
 __pycache__

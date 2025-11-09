@@ -10,7 +10,7 @@ promptkit-tests-rpc = { workspace = true }
 
 [tool.uv.workspace]
 members = [
-    "wasm/crates/python/bundled",
+    "crates/python/bundled",
     "tests/rpc",
 ]
 
@@ -44,7 +44,7 @@ future-annotations = true
 preview = true
 
 [tool.mypy]
-files = ["wasm/crates/python/bundled"]
+files = ["crates/python/bundled"]
 strict = true
 python_version = "3.12"
 disable_error_code = [
@@ -56,8 +56,8 @@ disable_error_code = [
 [tool.pyright]
 venv = "."
 venvPath = ".venv"
-include = ["wasm/crates/python/bundled"]
-stubPath = "wasm/crates/python/bundled/typings"
+include = ["crates/python/bundled"]
+stubPath = "crates/python/bundled/typings"
 typeCheckingMode = "strict"
 enableExperimentalFeatures = true
 reportMissingModuleSource = false

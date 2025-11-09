@@ -106,10 +106,17 @@ impl<E: Environment> Runtime<E> {
                         let idx = component
                             .get_export_index(Some(&idx), "initialize")
                             .ok_or_else(|| anyhow!("missing promptkit:script/guest.initialize"))?;
-                        let func =
-                            binding.get_typed_func::<(bool, Option<&str>), ()>(&mut store, idx)?;
-                        func.call_async(&mut store, (true, cfg.compile_prelude.as_deref()))
-                            .await?;
+                        let func = binding
+                            .get_typed_func::<(bool, &[&str], Option<&str>), ()>(&mut store, idx)?;
+                        func.call_async(
+                            &mut store,
+                            (
+                                true,
+                                &["/lib/bundle.zip", "/workdir"],
+                                cfg.compile_prelude.as_deref(),
+                            ),
+                        )
+                        .await?;
                         func.post_return_async(&mut store).await?;
 
                         Ok(Box::new(MyInvoker {
@@ -147,7 +154,7 @@ impl<E: Environment> Runtime<E> {
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
         bindings
             .promptkit_script_guest()
-            .call_initialize(&mut store, false, None)
+            .call_initialize(&mut store, false, &[], None)
             .await?;
         Ok(Instance {
             store,

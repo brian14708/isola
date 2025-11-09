@@ -31,12 +31,12 @@ async fn async_main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            _ = VmManager::<VmEnv>::new("wasm/target/promptkit_python.wasm").await?;
+            _ = VmManager::<VmEnv>::new("target/promptkit_python.wasm").await?;
             Ok(())
         }
         None | Some("serve") => {
             let _provider = init_tracing()?;
-            let state = routes::AppState::new("wasm/target/promptkit_python.wasm").await?;
+            let state = routes::AppState::new("target/promptkit_python.wasm").await?;
             let app = routes::router(&state);
 
             let grpc = tonic::service::Routes::default()

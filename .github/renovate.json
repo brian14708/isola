@@ -5,7 +5,8 @@
     ":semanticCommitTypeAll(chore)"
   ],
   "ignorePaths": [
-    "wasm/crates/python/requirements.txt"
+    "crates/python/requirements.txt",
+    "ui/"
   ],
   "packageRules": [
     {
@@ -42,15 +43,6 @@
         "minor"
       ],
       "matchCurrentVersion": "!/^0/",
-      "automerge": true
-    },
-    {
-      "matchPackageNames": [
-        "lucide-react"
-      ],
-      "extends": [
-        "schedule:weekly"
-      ],
       "automerge": true
     },
     {
