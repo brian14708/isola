@@ -46,19 +46,19 @@ add_library(wasi INTERFACE)
 target_link_libraries(
   wasi
   INTERFACE
-    ${WASI_SDK_PATH}/lib/clang/20/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-signal.so
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.so
-    ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so)
+    ${WASI_SDK_PATH}/lib/clang/20/lib/wasm32-unknown-wasip2/libclang_rt.builtins.a
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-signal.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-process-clocks.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-getpid.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libdl.so
+    ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libc.so)
 
 install(
-  FILES ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libdl.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc++.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libc++abi.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-signal.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-getpid.so
-        ${WASMLIB_SYSROOT}/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so
+  FILES ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libc.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libdl.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libc++.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libc++abi.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-signal.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-getpid.so
+        ${WASMLIB_SYSROOT}/lib/wasm32-wasip2/libwasi-emulated-process-clocks.so
   DESTINATION lib)

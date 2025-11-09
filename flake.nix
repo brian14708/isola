@@ -37,7 +37,10 @@
           p:
           p.rust-bin.nightly.latest.default.override {
             extensions = [ "rust-src" ];
-            targets = [ "wasm32-wasip1" ];
+            targets = [
+              "wasm32-wasip1"
+              "wasm32-wasip2"
+            ];
           }
         );
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
@@ -47,6 +50,7 @@
             extensions = [ "rust-src" ];
             targets = [
               "wasm32-wasip1"
+              "wasm32-wasip2"
               "aarch64-linux-android"
             ];
           }

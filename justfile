@@ -18,7 +18,7 @@ bundle-wasm: build-wasm
     rm -rf dist/python/
     mkdir -p dist/python/
     cp wasm/target/promptkit_python.wasm dist/python/
-    cp -r wasm/target/wasm32-wasip1/wasi-deps/usr/local/lib dist/python/lib
+    cp -r wasm/target/wasm32-wasip2/wasi-deps/usr/local/lib dist/python/lib
     find dist/python/ -type f -name "*.so" -exec truncate -s 0 {} \;
     rm -f dist/python/lib/bundle-src.zip
     python -m compileall dist/python/ -q

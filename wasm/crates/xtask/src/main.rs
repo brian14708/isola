@@ -48,7 +48,7 @@ fn build_all(sh: &Shell) -> Result<()> {
 }
 
 fn build_python(sh: &Shell) -> Result<()> {
-    const TARGET: &str = "wasm32-wasip1";
+    const TARGET: &str = "wasm32-wasip2";
 
     cmd!(
         sh,

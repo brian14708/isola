@@ -1,12 +1,12 @@
 use std::{path::PathBuf, process::Command};
 
 fn main() {
-    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasip1";
+    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasip2";
     if is_wasm {
         let outdir = PathBuf::from(format!(
             "{}/{}",
             env!("CARGO_MANIFEST_DIR"),
-            "../../target/wasm32-wasip1/wasi-deps"
+            "../../target/wasm32-wasip2/wasi-deps"
         ));
 
         let odir = std::env::var("OUT_DIR").unwrap();

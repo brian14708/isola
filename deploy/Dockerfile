@@ -52,7 +52,7 @@ RUN pip install --root-user-action=ignore \
 WORKDIR /src/wasm
 COPY specs ../specs
 COPY wasm .
-RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
+RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip2/release \
     --mount=type=cache,target=/src/wasm/target/release \
     --mount=type=cache,target=/src/wasm/target/xtask \
     --mount=type=cache,target=/src/wasm/downloads \
@@ -60,8 +60,8 @@ RUN --mount=type=cache,target=/src/wasm/target/wasm32-wasip1/release \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo xtask build-all
 
-RUN find /src/wasm/target/wasm32-wasip1/wasi-deps/usr/ -type f -name "*.so" -exec truncate -s 0 {} \;
-RUN python -m compileall /src/wasm/target/wasm32-wasip1/wasi-deps/usr/
+RUN find /src/wasm/target/wasm32-wasip2/wasi-deps/usr/ -type f -name "*.so" -exec truncate -s 0 {} \;
+RUN python -m compileall /src/wasm/target/wasm32-wasip2/wasi-deps/usr/
 
 ############################
 # Stage 4: Staging (assemble)
@@ -71,7 +71,7 @@ WORKDIR /app
 COPY --from=server-build --chown=nonroot:nonroot /work/target/promptkit-server .
 COPY --from=ui-build --chown=nonroot:nonroot /src/dist ui/dist
 COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/promptkit_python.wasm ./wasm/target/promptkit_python.wasm
-COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip1/wasi-deps/usr ./wasm/target/wasm32-wasip1/wasi-deps/usr
+COPY --from=wasm-build --chown=nonroot:nonroot /src/wasm/target/wasm32-wasip2/wasi-deps/usr ./wasm/target/wasm32-wasip2/wasi-deps/usr
 RUN ["./promptkit-server", "build"]
 
 ############################
