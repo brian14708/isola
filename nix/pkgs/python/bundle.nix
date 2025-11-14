@@ -59,11 +59,11 @@ let
 
   pydantic = fetchPypi {
     pname = "pydantic";
-    version = "2.12.3";
+    version = "2.12.4";
     format = "wheel";
     python = "py3";
     dist = "py3";
-    hash = "sha256-aYZFSoVLw7xuVEPhNp4Go6RWr50zntpFUQ9RfZ6lxr8=";
+    hash = "sha256-ktPSAqdF1G+b5t9FmsWgZP2qPBxM2K3PozLM88Bfhx4=";
   };
 
   duron = fetchPypi {
