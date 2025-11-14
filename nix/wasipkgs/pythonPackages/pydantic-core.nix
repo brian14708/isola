@@ -15,14 +15,14 @@ let
 in
 stdenv.mkDerivation rec {
   pname = "pydantic-core-wasi";
-  version = "2.41.4";
+  version = "2.41.5";
   src = fetchurl {
     url = "https://github.com/pydantic/pydantic-core/archive/refs/tags/v${version}.tar.gz";
-    hash = "sha256-R7JBqgEDVvz0uUgcdsehWJki+yOAtYayFIKz+UsDDjA=";
+    hash = "sha256-hy9wD35Ccj4XzsUpHQBnfXkMFHaAMPTzfn3nLCk11zE=";
   };
   cargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
-    hash = "sha256-ZCrpIa+AE8CRNiwBGvH07cwMPXepEPB70SBDp9pcIHs=";
+    hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
   };
   dontStrip = true;
 
