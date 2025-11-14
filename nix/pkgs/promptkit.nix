@@ -22,12 +22,12 @@ stdenv.mkDerivation {
     # Create the application directory structure
     mkdir -p app/target
     mkdir -p app/ui/dist
-    mkdir -p app/target/wasm32-wasip2/wasi-deps/usr
+    mkdir -p app/target/wasm32-wasip1/wasi-deps/usr
 
     # Copy all components
     cp ${python}/lib/promptkit_python.wasm app/target/promptkit_python.wasm
     cp -r ${ui}/* app/ui/dist/
-    cp -r ${bundle}/* app/target/wasm32-wasip2/wasi-deps/usr/
+    cp -r ${bundle}/* app/target/wasm32-wasip1/wasi-deps/usr/
 
     runHook postBuild
   '';
@@ -47,11 +47,11 @@ stdenv.mkDerivation {
     mkdir -p $out/bin
     makeWrapper $out/libexec/promptkit/promptkit-server $out/bin/promptkit \
       --chdir $out/share/promptkit \
-      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip2/wasi-deps/usr
+      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr
 
     # Run the build step to pre-initialize the VM
     cd $out/share/promptkit
-    WASI_PYTHON_RUNTIME=$out/share/promptkit/target/wasm32-wasip2/wasi-deps/usr \
+    WASI_PYTHON_RUNTIME=$out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr \
       $out/libexec/promptkit/promptkit-server build
 
     runHook postInstall

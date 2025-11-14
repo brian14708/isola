@@ -33,7 +33,7 @@ stdenv.mkDerivation {
     wasi_sdk_path = '${sdk}'
     wasi_sysroot = wasi_sdk_path / 'share' / 'wasi-sysroot'
     cross_prefix = wasi_sysroot / 'usr' / 'local'
-    wasi_target = 'wasm32-wasip2'
+    wasi_target = 'wasm32-wasip1'
     wasi_args = ['--sysroot=' + wasi_sysroot, '--target=' + wasi_target, '-D__EMSCRIPTEN__=1', '-DNPY_NO_SIGNAL']
     wasi_link_args = ['-L${python}/lib', '-L$PWD', '-lpython3.14']
 

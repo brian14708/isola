@@ -55,7 +55,7 @@ stdenv.mkDerivation rec {
     export RANLIB="${sdk}/bin/llvm-ranlib"
     export LDSHARED="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot"
 
-    export RUSTFLAGS="-Clink-self-contained=no -Crelocation-model=pic -Clink-args=-L${python}/lib -Clink-args=-L${sdk}/share/wasi-sysroot/lib/wasm32-wasip2"
+    export RUSTFLAGS="-Clink-self-contained=no -Crelocation-model=pic -Clink-args=-L${python}/lib -Clink-args=-L${sdk}/share/wasi-sysroot/lib/wasm32-wasip1"
 
     runHook postConfigure
   '';

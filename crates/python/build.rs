@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 fn main() {
-    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasip2";
+    let is_wasm = std::env::var("TARGET").unwrap_or_default() == "wasm32-wasip1";
     if is_wasm {
         let outdir = PathBuf::from(std::env::var("WASI_PYTHON_DEV").unwrap());
         println!("cargo:rustc-link-arg=-shared");

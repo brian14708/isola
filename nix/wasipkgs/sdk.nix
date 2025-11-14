@@ -3,13 +3,12 @@
   fetchurl,
   autoPatchelfHook,
   lib,
-  wasiTarget ? "p2",
   binaryen,
 }:
 
 stdenv.mkDerivation (finalAttrs: rec {
   pname = "wasi-sdk";
-  version = "27";
+  version = "28";
 
   src = fetchurl (
     let
@@ -17,22 +16,22 @@ stdenv.mkDerivation (finalAttrs: rec {
         if stdenv.hostPlatform.system == "x86_64-linux" then
           {
             os = "x86_64-linux";
-            hash = "sha256-t9TZRMiFA+TyHYSvB6wpPjRAsbYhC/1/544K/ZLCO8I=";
+            hash = "sha256-xF3GYb9q/v5z3SrkeuNyyfkNtdQRH+vITJzziZGjI10=";
           }
         else if stdenv.hostPlatform.system == "aarch64-linux" then
           {
             os = "arm64-linux";
-            hash = "sha256-TPTFU8RkDmPngEQhRvh9g/3/Vzf5iMBqbjsvAijjdmU=";
+            hash = "sha256-cu9vYFMIk2FRdy7nD6C/jcp3QrVUq7zW7WO4Aq4hsog=";
           }
         else if stdenv.hostPlatform.system == "aarch64-darwin" then
           {
             os = "arm64-macos";
-            hash = "sha256-BVw9wnZncsOOcaBdNT41wyLHssZFijaiaoNvmAilUPg=";
+            hash = "sha256-CS0YWa1jON5AwW7gd5EC/xnAZ92GOtgWulr9i9jLcJ8=";
           }
         else if stdenv.hostPlatform.system == "x86_64-darwin" then
           {
             os = "x86_64-macos";
-            hash = "sha256-Fj39R/mJsaaCdEwa4fDgmoP/XEu6ydzYVGkJq1TNpaE=";
+            hash = "sha256-JedAqCGYyLSqNE91OG6O+tZH98rgljgk4B9ZLujemfc=";
           }
         else
           throw "Unsupported platform: ${stdenv.hostPlatform.system}";
@@ -70,8 +69,8 @@ stdenv.mkDerivation (finalAttrs: rec {
   '';
 
   passthru = {
-    target = "wasm32-wasi${wasiTarget}";
-    cmakeToolchain = "${finalAttrs.finalPackage}/share/cmake/wasi-sdk-${wasiTarget}.cmake";
+    target = "wasm32-wasip1";
+    cmakeToolchain = "${finalAttrs.finalPackage}/share/cmake/wasi-sdk-p1.cmake";
   };
 
   meta = with lib; {

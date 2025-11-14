@@ -91,7 +91,7 @@ wasmtime = { version = "38.0", default-features = false }
 wasmtime-wasi = "38.0"
 wasmtime-wasi-http = { version = "38.0", default-features = false }
 wit-bindgen = { version = "0.47", default-features = false }
-wit-component = "0.240"
+wit-component = "0.241"
 xshell = "0.2"
 zip = { version = "6.0", default-features = false }
 

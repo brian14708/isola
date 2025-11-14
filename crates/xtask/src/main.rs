@@ -47,7 +47,7 @@ fn build_all(sh: &Shell) -> Result<()> {
 }
 
 fn build_python(sh: &Shell) -> Result<()> {
-    const TARGET: &str = "wasm32-wasip2";
+    const TARGET: &str = "wasm32-wasip1";
 
     let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
 
