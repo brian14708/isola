@@ -41,7 +41,7 @@
           p:
           p.rust-bin.stable.latest.default.override {
             extensions = [ "rust-src" ];
-            targets = [ "wasm32-wasip2" ];
+            targets = [ "wasm32-wasip1" ];
           }
         );
         treefmtEval = treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix;

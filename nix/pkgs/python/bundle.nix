@@ -130,7 +130,7 @@ stdenv.mkDerivation {
     cp --no-preserve=mode -rL ${numpy}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
     cp --no-preserve=mode -rL ${pillow}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
     cp --no-preserve=mode -rL ${pydantic-core}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/*.so $dev/lib
+    cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so $dev/lib
 
     mkdir -p $out/lib/python3.14/site-packages $out/lib/python3.14/lib-dynload
     cp --no-preserve=mode -rL ${numpy}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/

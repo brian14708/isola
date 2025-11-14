@@ -23,11 +23,7 @@ stdenv.mkDerivation {
     "-DCMAKE_TOOLCHAIN_FILE=${sdk.cmakeToolchain}"
     "-DWITH_TURBOJPEG=OFF"
     "-DENABLE_SHARED=OFF"
+    "-DWITH_TOOLS=OFF"
     "-DCMAKE_POSITION_INDEPENDENT_CODE=ON"
   ];
-
-  preConfigure = ''
-    export CFLAGS="$CFLAGS -mllvm -wasm-enable-sjlj"
-    export LDFLAGS="$LDFLAGS -lsetjmp"
-  '';
 }

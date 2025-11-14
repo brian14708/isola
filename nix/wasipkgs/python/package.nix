@@ -88,12 +88,12 @@ stdenv.mkDerivation rec {
       $PWD/Modules/_hacl/libHacl_HMAC.a \
       $PWD/Modules/_decimal/libmpdec/libmpdec.a \
       $PWD/Modules/expat/libexpat.a \
-      ${sdk}/lib/clang/20/lib/wasm32-unknown-wasip2/libclang_rt.builtins.a \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-signal.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-process-clocks.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-getpid.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libdl.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libc.so
+      ${sdk}/lib/clang/21/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-signal.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-getpid.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libdl.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libc.so
     rm $out/lib/libpython3.14.a $out/python-stub.c
 
     rm -rf $out/bin/

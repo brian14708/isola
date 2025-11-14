@@ -49,7 +49,7 @@ stdenv.mkDerivation rec {
     export _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
     export _PYTHON_HOST_PLATFORM=wasi-wasm32
 
-    export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot --target=wasm32-wasip2"
+    export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot --target=wasm32-wasip1"
     export AR="${sdk}/bin/llvm-ar"
     export RANLIB="${sdk}/bin/llvm-ranlib"
     export LD="${sdk}/bin/wasm-ld"

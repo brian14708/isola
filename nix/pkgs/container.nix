@@ -21,7 +21,7 @@ dockerTools.buildLayeredImage {
     Cmd = [ "${promptkit}/bin/promptkit" ];
     WorkingDir = "${promptkit}/share/promptkit";
     Env = [
-      "WASI_PYTHON_RUNTIME=${promptkit}/share/promptkit/target/wasm32-wasip2/wasi-deps/usr"
+      "WASI_PYTHON_RUNTIME=${promptkit}/share/promptkit/target/wasm32-wasip1/wasi-deps/usr"
       "SSL_CERT_FILE=${cacert}/etc/ssl/certs/ca-bundle.crt"
     ];
     ExposedPorts = {

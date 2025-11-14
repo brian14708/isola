@@ -81,7 +81,7 @@ impl ContextHandle {
                     let mut lib_dir = std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
                         |_| {
                             let mut lib_dir = parent.to_owned();
-                            lib_dir.push("wasm32-wasip2");
+                            lib_dir.push("wasm32-wasip1");
                             lib_dir.push("wasi-deps");
                             lib_dir.push("usr");
                             lib_dir.push("local");
