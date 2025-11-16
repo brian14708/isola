@@ -1,6 +1,5 @@
 {
   stdenv,
-  fetchFromGitHub,
   pkg-config,
   wasipkgs,
 }:
@@ -13,22 +12,17 @@ let
     freetype
     python
     ;
-  host = python.host;
+  host = (python.host.withPackages (ps: with ps; [ setuptools ]));
 in
-stdenv.mkDerivation rec {
-  pname = "pillow-wasi";
-  version = "12.0.0";
-  src = fetchFromGitHub {
-    owner = "python-pillow";
-    repo = "pillow";
-    tag = version;
-    hash = "sha256-58mjwHErEZPkkGBVZznkkMQN5Zo4ZBBiXnhqVp1F81g=";
-  };
+stdenv.mkDerivation {
+  pname = "${host.pkgs.pillow.pname}-wasi";
+  version = host.pkgs.pillow.version;
+  src = host.pkgs.pillow.src;
   dontStrip = true;
 
   nativeBuildInputs = [
     wasi-optimize-hook
-    (host.withPackages (ps: with ps; [ setuptools ]))
+    host
     sdk
     pkg-config
   ];
@@ -63,7 +57,7 @@ stdenv.mkDerivation rec {
   installPhase = ''
     runHook preInstall
 
-    python3 setup.py install \
+    ${host}/bin/python3 setup.py install \
       --prefix=$out \
       --single-version-externally-managed \
       --root=/
