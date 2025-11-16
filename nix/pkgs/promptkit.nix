@@ -1,6 +1,7 @@
 {
   stdenv,
-  makeWrapper,
+  makeBinaryWrapper,
+  cacert,
   server,
   python,
   ui,
@@ -14,7 +15,8 @@ stdenv.mkDerivation {
 
   dontUnpack = true;
 
-  nativeBuildInputs = [ makeWrapper ];
+  nativeBuildInputs = [ makeBinaryWrapper ];
+  buildInputs = [ cacert ];
 
   buildPhase = ''
     runHook preBuild
@@ -45,9 +47,10 @@ stdenv.mkDerivation {
 
     # Create wrapper script that runs from the correct directory
     mkdir -p $out/bin
-    makeWrapper $out/libexec/promptkit/promptkit-server $out/bin/promptkit \
+    makeBinaryWrapper $out/libexec/promptkit/promptkit-server $out/bin/promptkit \
       --chdir $out/share/promptkit \
-      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr
+      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr \
+      --set SSL_CERT_FILE ${cacert}/etc/ssl/certs/ca-bundle.crt
 
     # Run the build step to pre-initialize the VM
     cd $out/share/promptkit
