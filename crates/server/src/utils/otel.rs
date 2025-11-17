@@ -85,7 +85,8 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
         .with_default_directive(Level::INFO.into())
         .from_env()
         .expect("failed to read env filter")
-        .add_directive(format!("{TRACE_TARGET_SCRIPT}=off").parse().unwrap());
+        .add_directive(format!("{TRACE_TARGET_SCRIPT}=off").parse().unwrap())
+        .add_directive("rmcp=warn".parse().unwrap());
     let registry = tracing_subscriber::Registry::default()
         .with(
             CollectorLayer::default().with_filter(FilterFn::new(|metadata| {

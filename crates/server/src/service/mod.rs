@@ -1,4 +1,4 @@
-use std::{collections::HashMap, pin::Pin, sync::Arc, time::Duration};
+use std::{collections::HashMap, pin::Pin, time::Duration};
 
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -32,16 +32,11 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub struct ScriptServer {
     state: AppState,
-    base_env: VmEnv,
 }
 
 impl ScriptServer {
-    pub fn new(state: AppState) -> Self {
-        let base_env = VmEnv {
-            client: Arc::new(promptkit_request::Client::new()),
-            log_level: LevelFilter::OFF,
-        };
-        Self { state, base_env }
+    pub const fn new(state: AppState) -> Self {
+        Self { state }
     }
 }
 
@@ -75,7 +70,7 @@ impl ScriptService for ScriptServer {
             span,
             trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.state.base_env)?;
         if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
         }
@@ -150,7 +145,7 @@ impl ScriptService for ScriptServer {
             span,
             mut trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.state.base_env)?;
         if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
         }
@@ -224,7 +219,7 @@ impl ScriptService for ScriptServer {
             span,
             mut trace_events,
             env,
-        } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
+        } = parse_spec(initial.spec.as_mut(), &self.state.base_env)?;
 
         let (md, _, body) = request.into_parts();
         let ns = md
@@ -288,7 +283,7 @@ impl ScriptService for ScriptServer {
             span,
             trace_events,
             env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.base_env)?;
+        } = parse_spec(request.get_mut().spec.as_mut(), &self.state.base_env)?;
         if !stream_tx.is_empty() {
             return Err(Status::invalid_argument("unexpected stream marker"));
         }
@@ -383,7 +378,7 @@ impl ScriptService for ScriptServer {
             span,
             trace_events,
             env,
-        } = parse_spec(initial.spec.as_mut(), &self.base_env)?;
+        } = parse_spec(initial.spec.as_mut(), &self.state.base_env)?;
 
         let deadline = std::time::Instant::now() + timeout;
         let ns = request
@@ -452,7 +447,7 @@ impl ScriptService for ScriptServer {
     }
 }
 
-async fn non_stream_result<S>(
+pub async fn non_stream_result<S>(
     mut stream: Pin<&mut S>,
     content_type: impl IntoIterator<Item = i32>,
 ) -> Result<script::Result, Status>

@@ -1,4 +1,5 @@
 mod env;
+mod mcp;
 mod state;
 mod vm_manager;
 
@@ -27,6 +28,7 @@ pub fn router(state: &AppState) -> axum::Router {
             "/ui",
             ServeDir::new("ui/dist").fallback(ServeFile::new("ui/dist/index.html")),
         )
+        .nest_service("/mcp", mcp::server(state.clone()))
 }
 
 async fn prometheus_upkeep(handle: PrometheusHandle, duration: Duration) {
