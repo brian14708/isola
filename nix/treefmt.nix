@@ -5,7 +5,7 @@
     nixfmt.enable = true;
     rustfmt = {
       enable = true;
-      package = pkgs.rust-bin.stable.latest.default;
+      package = pkgs.rust-bin.nightly.latest.rustfmt;
     };
     ruff-format.enable = true;
     buf.enable = true;

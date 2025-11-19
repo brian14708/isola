@@ -9,12 +9,16 @@
 }:
 let
   bundle = callPackage ./bundle.nix { };
-  craneLib = (crane.mkLib pkgs).overrideToolchain (
+
+  rustToolchainFor = (
     p:
-    p.rust-bin.stable.latest.minimal.override {
+    p.rust-bin.nightly.latest.minimal.override {
+      extensions = [ "rust-src" ];
       targets = [ "wasm32-wasip1" ];
     }
   );
+  rustToolchain = rustToolchainFor pkgs;
+  craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
   src = lib.fileset.toSource {
     root = ../../..;
     fileset = lib.fileset.unions [
@@ -44,6 +48,13 @@ craneLib.buildPackage {
   cargoExtraArgs = "-p xtask";
   cargoBuildCommand = "cargo run -p xtask build-python";
   doCheck = false;
+  cargoVendorDir = craneLib.vendorMultipleCargoDeps {
+    inherit (craneLib.findCargoFiles src) cargoConfigs;
+    cargoLockList = [
+      ../../../Cargo.lock
+      "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library/Cargo.lock"
+    ];
+  };
 
   installPhase = ''
     runHook preInstall

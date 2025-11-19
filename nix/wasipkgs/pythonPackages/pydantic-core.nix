@@ -6,10 +6,12 @@
   pkg-config,
   rust-bin,
   wasipkgs,
+  symlinkJoin,
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
-  rustToolchain = rust-bin.stable.latest.minimal.override {
+  rustToolchain = rust-bin.nightly.latest.minimal.override {
+    extensions = [ "rust-src" ];
     targets = [ "wasm32-wasip1" ];
   };
   rustPlatform = makeRustPlatform {
@@ -24,9 +26,19 @@ stdenv.mkDerivation rec {
     url = "https://github.com/pydantic/pydantic-core/archive/refs/tags/v${version}.tar.gz";
     hash = "sha256-hy9wD35Ccj4XzsUpHQBnfXkMFHaAMPTzfn3nLCk11zE=";
   };
-  cargoDeps = rustPlatform.fetchCargoVendor {
-    inherit src;
-    hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
+  cargoDeps = symlinkJoin {
+    name = "pydantic-core-wasi-deps";
+    paths = [
+      (rustPlatform.fetchCargoVendor {
+        inherit src;
+        hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
+      })
+      (rustPlatform.fetchCargoVendor {
+        name = "rust-std";
+        src = "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library";
+        hash = "sha256-2T3REhIO7Gt3W2mm7WUJbfEtGknkDpsoKhqhi7Q6dYI=";
+      })
+    ];
   };
   dontStrip = true;
 
@@ -68,6 +80,7 @@ stdenv.mkDerivation rec {
     runHook preBuild
 
     maturin build \
+      -Z build-std=std,panic_abort \
       --release \
       --target wasm32-wasip1 \
       -i python3.14 \
