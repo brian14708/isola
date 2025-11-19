@@ -1,13 +1,12 @@
 {
   stdenv,
   makeBinaryWrapper,
-  cacert,
   server,
   python,
   ui,
 }:
 let
-  bundle = python.bundle;
+  inherit (python) bundle;
 in
 stdenv.mkDerivation {
   pname = "promptkit";
@@ -16,7 +15,6 @@ stdenv.mkDerivation {
   dontUnpack = true;
 
   nativeBuildInputs = [ makeBinaryWrapper ];
-  buildInputs = [ cacert ];
 
   buildPhase = ''
     runHook preBuild
@@ -49,8 +47,7 @@ stdenv.mkDerivation {
     mkdir -p $out/bin
     makeBinaryWrapper $out/libexec/promptkit/promptkit-server $out/bin/promptkit \
       --chdir $out/share/promptkit \
-      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr \
-      --set SSL_CERT_FILE ${cacert}/etc/ssl/certs/ca-bundle.crt
+      --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr
 
     # Run the build step to pre-initialize the VM
     cd $out/share/promptkit
@@ -59,4 +56,8 @@ stdenv.mkDerivation {
 
     runHook postInstall
   '';
+
+  meta = {
+    mainProgram = "promptkit";
+  };
 }

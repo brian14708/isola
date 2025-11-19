@@ -6,12 +6,11 @@
   libjpeg,
 }:
 let
-  sdk = wasipkgs.sdk;
+  inherit (wasipkgs) sdk;
 in
 stdenv.mkDerivation {
   pname = "${libjpeg.pname}-wasi";
-  version = libjpeg.version;
-  src = libjpeg.src;
+  inherit (libjpeg) version src;
   dontStrip = true;
 
   nativeBuildInputs = [

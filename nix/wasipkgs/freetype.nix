@@ -9,8 +9,7 @@ let
 in
 stdenv.mkDerivation {
   pname = "${freetype.pname}-wasi";
-  version = freetype.version;
-  src = freetype.src;
+  inherit (freetype) version src;
   enableParallelBuilding = true;
   dontStrip = true;
 

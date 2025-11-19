@@ -1,17 +1,25 @@
 {
-  craneLib,
+  crane,
   pkgs,
   packages,
 }:
 let
-  bundle = packages.python.bundle;
+  inherit (packages.python) bundle;
+  craneLib = (crane.mkLib pkgs).overrideToolchain (
+    p:
+    p.rust-bin.stable.latest.default.override {
+      extensions = [ "rust-src" ];
+      targets = [ "wasm32-wasip1" ];
+    }
+  );
+  python = pkgs.wasipkgs.python.host;
 in
 craneLib.devShell {
   buildInputs = with pkgs; [
     just
     pnpm
     nodejs_24
-    (python314.withPackages (p: with p; [ uv ]))
+    (python.withPackages (p: with p; [ uv ]))
     buf
     protobuf
     cmake
@@ -19,7 +27,7 @@ craneLib.devShell {
   ];
 
   env = {
-    UV_PYTHON = pkgs.python314.interpreter;
+    UV_PYTHON = python.interpreter;
     WASI_PYTHON_DEV = "${bundle.dev}";
     WASI_PYTHON_RUNTIME = "${bundle}";
   };

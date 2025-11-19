@@ -10,10 +10,8 @@ let
 in
 stdenv.mkDerivation {
   pname = "${zlib-ng.pname}-wasi";
-  version = zlib-ng.version;
+  inherit (zlib-ng) version src;
   dontStrip = true;
-
-  src = zlib-ng.src;
 
   nativeBuildInputs = [
     cmake

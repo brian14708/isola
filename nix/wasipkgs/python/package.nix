@@ -9,8 +9,7 @@ let
 in
 stdenv.mkDerivation rec {
   pname = "${python314.pname}-wasi";
-  version = python314.version;
-  src = python314.src;
+  inherit (python314) version src;
   dontStrip = true;
 
   buildInputs = [ zlib ];

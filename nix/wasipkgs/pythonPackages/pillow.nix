@@ -12,12 +12,11 @@ let
     freetype
     python
     ;
-  host = (python.host.withPackages (ps: with ps; [ setuptools ]));
+  host = python.host.withPackages (ps: with ps; [ setuptools ]);
 in
 stdenv.mkDerivation {
   pname = "${host.pkgs.pillow.pname}-wasi";
-  version = host.pkgs.pillow.version;
-  src = host.pkgs.pillow.src;
+  inherit (host.pkgs.pillow) version src;
   dontStrip = true;
 
   nativeBuildInputs = [

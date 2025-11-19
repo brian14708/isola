@@ -1,38 +1,49 @@
 {
   lib,
-  craneLib,
+  pkgs,
+  crane,
   writeShellScriptBin,
-  python314,
+  wasipkgs,
   nukeReferences,
   callPackage,
 }:
 let
   bundle = callPackage ./bundle.nix { };
+  craneLib = (crane.mkLib pkgs).overrideToolchain (
+    p:
+    p.rust-bin.stable.latest.minimal.override {
+      targets = [ "wasm32-wasip1" ];
+    }
+  );
   src = lib.fileset.toSource {
     root = ../../..;
     fileset = lib.fileset.unions [
-      (craneLib.fileset.commonCargoSources ../../..)
       ../../../specs
+      ../../../Cargo.lock
+      ../../../Cargo.toml
+      (craneLib.fileset.commonCargoSources ../../../crates/xtask)
+      (craneLib.fileset.commonCargoSources ../../../crates/python)
     ];
   };
 in
 craneLib.buildPackage {
   pname = "promptkit-python";
-  version = "0.1.0";
-
   inherit src;
-  cargoVendorDir = craneLib.vendorCargoDeps { inherit src; };
-
   nativeBuildInputs = [
     (writeShellScriptBin "cargo-b" "exec cargo build \"$@\"")
-    python314
+    wasipkgs.python.host
     nukeReferences
   ];
 
-  WASI_PYTHON_DEV = bundle.dev;
-  WASI_PYTHON_RUNTIME = bundle;
+  env = {
+    PYO3_PYTHON = "${wasipkgs.python.host}/bin/python3";
+    WASI_PYTHON_DEV = bundle.dev;
+    WASI_PYTHON_RUNTIME = bundle;
+  };
 
-  cargoBuildCommand = "cargo xtask build-python";
+  cargoExtraArgs = "-p xtask";
+  cargoBuildCommand = "cargo run -p xtask build-python";
+  doCheck = false;
 
   installPhase = ''
     runHook preInstall
@@ -42,8 +53,6 @@ craneLib.buildPackage {
 
     runHook postInstall
   '';
-
-  doCheck = false;
 
   passthru = {
     inherit bundle;

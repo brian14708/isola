@@ -37,20 +37,13 @@
           ];
         };
 
-        craneLib = (crane.mkLib pkgs).overrideToolchain (
-          p:
-          p.rust-bin.stable.latest.default.override {
-            extensions = [ "rust-src" ];
-            targets = [ "wasm32-wasip1" ];
-          }
-        );
         treefmtEval = treefmt-nix.lib.evalModule pkgs ./nix/treefmt.nix;
       in
       {
-        packages = import ./nix/pkgs { inherit pkgs craneLib; };
+        packages = import ./nix/pkgs { inherit pkgs crane; };
         devShells = {
           default = import ./nix/devShell.nix {
-            inherit pkgs craneLib;
+            inherit pkgs crane;
             packages = self.packages.${system};
           };
         };

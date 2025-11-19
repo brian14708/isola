@@ -1,4 +1,5 @@
 {
+  lib,
   dockerTools,
   promptkit,
 }:
@@ -7,12 +8,11 @@ dockerTools.buildLayeredImage {
   tag = "latest";
 
   contents = [
-    promptkit
+    dockerTools.caCertificates
   ];
 
   config = {
-    Cmd = [ "${promptkit}/bin/promptkit" ];
-    WorkingDir = "${promptkit}/share/promptkit";
+    Cmd = [ (lib.getExe promptkit) ];
     ExposedPorts = {
       "3000/tcp" = { };
     };

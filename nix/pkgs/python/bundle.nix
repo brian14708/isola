@@ -79,7 +79,7 @@ let
 in
 stdenv.mkDerivation {
   pname = "wasi-python-bundle";
-  version = python.version;
+  inherit (python) version;
   dontUnpack = true;
   dontStrip = true;
 
@@ -139,7 +139,7 @@ stdenv.mkDerivation {
     cp --no-preserve=mode -rL ${python.host.pkgs.tzdata}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/
     touch $out/lib/python3.14/lib-dynload/.empty
 
-    cp $TMPDIR/bundle.zip $TMPDIR/bundle-src.zip ${python}/lib/python314.zip $out/lib/
+    cp $TMPDIR/bundle.zip $TMPDIR/bundle-src.zip ${python}/lib/python*.zip $out/lib/
 
     find $out/ -type f -name "*.so" -exec truncate -s 0 {} \;
     find $out/ -type d -name "__pycache__" -exec rm -rf {} +

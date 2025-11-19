@@ -1,7 +1,7 @@
 {
   stdenv,
   fetchurl,
-  rustPlatform,
+  makeRustPlatform,
   maturin,
   pkg-config,
   rust-bin,
@@ -11,6 +11,10 @@ let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
   rustToolchain = rust-bin.stable.latest.minimal.override {
     targets = [ "wasm32-wasip1" ];
+  };
+  rustPlatform = makeRustPlatform {
+    rustc = rustToolchain;
+    cargo = rustToolchain;
   };
 in
 stdenv.mkDerivation rec {

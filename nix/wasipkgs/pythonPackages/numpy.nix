@@ -5,12 +5,11 @@
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
-  host = python.host;
+  inherit (python) host;
 in
 stdenv.mkDerivation {
   pname = "${host.pkgs.numpy.pname}-wasi";
-  version = host.pkgs.numpy.version;
-  src = host.pkgs.numpy.src;
+  inherit (host.pkgs.numpy) version src;
   dontStrip = true;
 
   nativeBuildInputs = [

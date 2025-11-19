@@ -1,10 +1,10 @@
 {
   pkgs,
-  craneLib,
+  crane,
 }:
 let
   packages = pkgs.lib.packagesFromDirectoryRecursive {
-    callPackage = pkgs.lib.callPackageWith (pkgs // { inherit craneLib; } // packages);
+    callPackage = pkgs.lib.callPackageWith (pkgs // { inherit crane; } // packages);
     directory = ./.;
   };
 in

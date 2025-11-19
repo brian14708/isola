@@ -1,23 +1,29 @@
 {
   lib,
-  craneLib,
+  pkgs,
+  crane,
   protobuf,
 }:
 let
+  craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.minimal);
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
-      (craneLib.fileset.commonCargoSources ../..)
       ../../specs
+      ../../Cargo.lock
+      ../../Cargo.toml
+      (craneLib.fileset.commonCargoSources ../../crates/cbor)
+      (craneLib.fileset.commonCargoSources ../../crates/trace)
+      (craneLib.fileset.commonCargoSources ../../crates/request)
+      (craneLib.fileset.commonCargoSources ../../crates/promptkit)
+      (craneLib.fileset.commonCargoSources ../../crates/server)
     ];
   };
 in
 craneLib.buildPackage {
   pname = "promptkit-server";
-  version = "0.1.0";
-
   inherit src;
-  cargoVendorDir = craneLib.vendorCargoDeps { inherit src; };
+  strictDeps = true;
 
   nativeBuildInputs = [
     protobuf
@@ -25,7 +31,6 @@ craneLib.buildPackage {
 
   CARGO_PROFILE = "release-lto";
   cargoExtraArgs = "-p promptkit-server";
-
   installPhase = ''
     runHook preInstall
 
