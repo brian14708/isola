@@ -36,7 +36,7 @@ stdenv.mkDerivation rec {
       (rustPlatform.fetchCargoVendor {
         name = "rust-std";
         src = "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library";
-        hash = "sha256-2T3REhIO7Gt3W2mm7WUJbfEtGknkDpsoKhqhi7Q6dYI=";
+        hash = "sha256-mFzDKitNv66qzw4CVJsqVcrm/SpHtxF4w288deY+EiM=";
       })
     ];
   };
