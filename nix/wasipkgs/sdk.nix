@@ -8,7 +8,7 @@
 
 stdenv.mkDerivation (finalAttrs: rec {
   pname = "wasi-sdk";
-  version = "28";
+  version = "29";
 
   src = fetchurl (
     let
@@ -16,22 +16,22 @@ stdenv.mkDerivation (finalAttrs: rec {
         if stdenv.hostPlatform.system == "x86_64-linux" then
           {
             os = "x86_64-linux";
-            hash = "sha256-xF3GYb9q/v5z3SrkeuNyyfkNtdQRH+vITJzziZGjI10=";
+            hash = "sha256-h9HRooedE5zcYkuWjvrT1Kl7gHjN/5XmOsiOyv0aAXE=";
           }
         else if stdenv.hostPlatform.system == "aarch64-linux" then
           {
             os = "arm64-linux";
-            hash = "sha256-cu9vYFMIk2FRdy7nD6C/jcp3QrVUq7zW7WO4Aq4hsog=";
+            hash = "sha256-BSrXczl9yeWqmftM/vaUF15rHoG7KtHTyOez/IFEG3w=";
           }
         else if stdenv.hostPlatform.system == "aarch64-darwin" then
           {
             os = "arm64-macos";
-            hash = "sha256-CS0YWa1jON5AwW7gd5EC/xnAZ92GOtgWulr9i9jLcJ8=";
+            hash = "sha256-4RVSkT4/meg01/59ob0IGrr3ZHWe12tgl6NMY/yDZl4=";
           }
         else if stdenv.hostPlatform.system == "x86_64-darwin" then
           {
             os = "x86_64-macos";
-            hash = "sha256-JedAqCGYyLSqNE91OG6O+tZH98rgljgk4B9ZLujemfc=";
+            hash = "sha256-0N4v0+pcVwYO+ofkNWwWS+w2iZcvI4bwyaicWOEM7I0=";
           }
         else
           throw "Unsupported platform: ${stdenv.hostPlatform.system}";
