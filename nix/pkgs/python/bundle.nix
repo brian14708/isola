@@ -6,74 +6,48 @@
 }:
 let
   inherit (wasipkgs) sdk python;
-  inherit (wasipkgs.pythonPackages)
-    numpy
-    pillow
-    pydantic-core
-    ;
+  pythonVersion = python.host.pythonVersion;
+  pythonSitePackages = "lib/python${pythonVersion}/site-packages";
 
-  setuptools = fetchPypi {
-    pname = "setuptools";
-    version = "80.9.0";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-Bi00IirRPgzDEqTALXPwWehqSsv73qj492soyZ8waSI=";
-  };
+  bundlePackages =
+    (builtins.map (pkg: "${pkg}/${pythonSitePackages}") (
+      with python.host.pkgs;
+      [
+        setuptools
+        typing-extensions
+        annotated-types
+        typing-inspection
+        xmltodict
+      ]
+    ))
+    ++ (builtins.map toString [
+      (fetchPypi {
+        pname = "pydantic";
+        version = "2.12.4";
+        format = "wheel";
+        python = "py3";
+        dist = "py3";
+        hash = "sha256-ktPSAqdF1G+b5t9FmsWgZP2qPBxM2K3PozLM88Bfhx4=";
+      })
+      (fetchPypi {
+        pname = "duron";
+        version = "0.0.3";
+        format = "wheel";
+        python = "py3";
+        dist = "py3";
+        hash = "sha256-6clLYJzGSNPzVZESBaAt1lYe16Q6zNL+buMvgobKKo4=";
+      })
+    ]);
 
-  typing-extensions = fetchPypi {
-    pname = "typing_extensions";
-    version = "4.15.0";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-8PoZxoRXWKsIB0oM+ot67LccmZynPWKIO8JcwBjE5Ug=";
-  };
-
-  annotated-types = fetchPypi {
-    pname = "annotated_types";
-    version = "0.7.0";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-HwLotDqPu8Pz4NTw9L/IExvLTuvohJuOXHc/OhxYKlM=";
-  };
-
-  typing-inspection = fetchPypi {
-    pname = "typing_inspection";
-    version = "0.4.2";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-TtHKy9wpjCIPG9JJ7VKHyqFvNNRO9OnD0MutW1IVRec=";
-  };
-
-  xmltodict = fetchPypi {
-    pname = "xmltodict";
-    version = "1.0.2";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-YtD92w3LyfZCdF2Lv02B/RfW367FoVtcGHYwCq2Srw0=";
-  };
-
-  pydantic = fetchPypi {
-    pname = "pydantic";
-    version = "2.12.4";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-ktPSAqdF1G+b5t9FmsWgZP2qPBxM2K3PozLM88Bfhx4=";
-  };
-
-  duron = fetchPypi {
-    pname = "duron";
-    version = "0.0.3";
-    format = "wheel";
-    python = "py3";
-    dist = "py3";
-    hash = "sha256-6clLYJzGSNPzVZESBaAt1lYe16Q6zNL+buMvgobKKo4=";
-  };
+  outPackages =
+    (with wasipkgs.pythonPackages; [
+      numpy
+      pillow
+      pydantic-core
+    ])
+    ++ (with python.host.pkgs; [
+      tzdata
+    ]);
 
   promptkit-py = ../../../crates/python/bundled;
 in
@@ -89,9 +63,6 @@ stdenv.mkDerivation {
   ];
   buildInputs = [
     python
-    numpy
-    pillow
-    pydantic-core
     sdk
   ];
 
@@ -110,43 +81,40 @@ stdenv.mkDerivation {
     chmod -R +w $TMPDIR/py
 
     ${python.host}/bin/python3 ${./bundle.py} $TMPDIR/bundle \
-      ${setuptools} \
-      ${typing-extensions} \
-      ${annotated-types} \
-      ${typing-inspection} \
-      ${xmltodict} \
-      ${pydantic} \
-      ${duron} \
+      ${builtins.concatStringsSep " " bundlePackages} \
       $TMPDIR/py
 
     runHook postBuild
   '';
 
-  installPhase = ''
-    runHook preInstall
+  installPhase =
+    let
+      outPackagesList = builtins.concatStringsSep " " (builtins.map toString outPackages);
+    in
+    ''
+      runHook preInstall
 
-    mkdir -p $dev
-    cp --no-preserve=mode -rL ${python}/lib ${python}/include $dev
-    cp --no-preserve=mode -rL ${numpy}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${pillow}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${pydantic-core}/lib/python3.14/site-packages/* $dev/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so $dev/lib
+      mkdir -p $dev
+      cp --no-preserve=mode -rL ${python}/lib ${python}/include $dev
+      for pkg in ${outPackagesList}; do
+        cp --no-preserve=mode -rL $pkg/${pythonSitePackages}/* $dev/${pythonSitePackages}/
+      done
+      cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so $dev/lib
 
-    mkdir -p $out/lib/python3.14/site-packages $out/lib/python3.14/lib-dynload
-    cp --no-preserve=mode -rL ${numpy}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${pillow}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${pydantic-core}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/
-    cp --no-preserve=mode -rL ${python.host.pkgs.tzdata}/lib/python3.14/site-packages/* $out/lib/python3.14/site-packages/
-    touch $out/lib/python3.14/lib-dynload/.empty
+      mkdir -p $out/${pythonSitePackages} $out/lib/python${pythonVersion}/lib-dynload
+      for pkg in ${outPackagesList}; do
+        cp --no-preserve=mode -rL $pkg/${pythonSitePackages}/* $out/${pythonSitePackages}/
+      done
+      touch $out/lib/python${pythonVersion}/lib-dynload/.empty
 
-    cp $TMPDIR/bundle.zip $TMPDIR/bundle-src.zip ${python}/lib/python*.zip $out/lib/
+      cp $TMPDIR/bundle.zip $TMPDIR/bundle-src.zip ${python}/lib/python*.zip $out/lib/
 
-    find $out/ -type f -name "*.so" -exec truncate -s 0 {} \;
-    find $out/ -type d -name "__pycache__" -exec rm -rf {} +
+      find $out/ -type f -name "*.so" -exec truncate -s 0 {} \;
+      find $out/ -type d -name "__pycache__" -exec rm -rf {} +
 
-    ${python.host}/bin/python3 -m compileall $out/
-    find $out/ -type f -print -exec nuke-refs '{}' +
+      ${python.host}/bin/python3 -m compileall $out/
+      find $out/ -type f -print -exec nuke-refs '{}' +
 
-    runHook postInstall
-  '';
+      runHook postInstall
+    '';
 }

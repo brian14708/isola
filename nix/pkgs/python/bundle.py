@@ -11,6 +11,7 @@ if __name__ == "__main__":
     source_paths = sys.argv[2:]
 
     with zipfile.PyZipFile(pyzip_path, "w") as z:
+        z._strict_timestamps = False  # noqa: SLF001
         for path_str in source_paths:
             path = pathlib.Path(path_str)
 
@@ -36,7 +37,9 @@ if __name__ == "__main__":
                     z.writepy(item)
 
     EXT = {".py", ".pyi", ".typed"}
-    with zipfile.ZipFile(srczip_path, "w", compression=zipfile.ZIP_DEFLATED) as src_zip:
+    with zipfile.ZipFile(
+        srczip_path, "w", compression=zipfile.ZIP_DEFLATED, strict_timestamps=False
+    ) as src_zip:
         for path_str in source_paths:
             path = pathlib.Path(path_str)
 
