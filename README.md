@@ -5,6 +5,7 @@
 Execute the following commands to build and launch PromptKit:
 
 ```
-cd wasm && cargo xtask build-all
-cargo run -p promptkit_server
+nix develop
+cargo xtask build-python
+cargo run -p promptkit-server
 ```
