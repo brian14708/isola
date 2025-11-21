@@ -13,14 +13,14 @@ wasmtime::component::bindgen!({
     with: {
         "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::internal::wasm::logging::bindings,
-        "promptkit:script/host/value-iterator": host::ValueIterator,
-        "promptkit:script/host/future-hostcall": host::FutureHostcall,
-        "promptkit:script/outgoing-websocket/connect-request": outgoing_websocket::ConnectRequest,
-        "promptkit:script/outgoing-websocket/websocket-message": outgoing_websocket::WebsocketMessage,
-        "promptkit:script/outgoing-websocket/read-stream": outgoing_websocket::ReadStream,
-        "promptkit:script/outgoing-websocket/write-stream": outgoing_websocket::WriteStream,
-        "promptkit:script/outgoing-websocket/websocket-connection": outgoing_websocket::WebsocketConnection,
-        "promptkit:script/outgoing-websocket/future-websocket": outgoing_websocket::FutureWebsocket,
+        "promptkit:script/host.value-iterator": host::ValueIterator,
+        "promptkit:script/host.future-hostcall": host::FutureHostcall,
+        "promptkit:script/outgoing-websocket.connect-request": outgoing_websocket::ConnectRequest,
+        "promptkit:script/outgoing-websocket.websocket-message": outgoing_websocket::WebsocketMessage,
+        "promptkit:script/outgoing-websocket.read-stream": outgoing_websocket::ReadStream,
+        "promptkit:script/outgoing-websocket.write-stream": outgoing_websocket::WriteStream,
+        "promptkit:script/outgoing-websocket.websocket-connection": outgoing_websocket::WebsocketConnection,
+        "promptkit:script/outgoing-websocket.future-websocket": outgoing_websocket::FutureWebsocket,
     },
 });
 
