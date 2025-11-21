@@ -20,7 +20,6 @@ axum = "0.8"
 base64 = "0.22"
 bytes = "1.10"
 cbindgen = "0.29"
-component-init-transform = "0.1"
 dashmap = "6.1"
 eventsource = { version = "0.5", default-features = false }
 fastant = "0.1"
@@ -83,6 +82,7 @@ wasmtime-wasi = "41.0"
 wasmtime-wasi-http = { version = "41.0", default-features = false }
 wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
+wasmtime-wizer = "41.0"
 xshell = "0.2"
 zip = { version = "7.0", default-features = false }
 

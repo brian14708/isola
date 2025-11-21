@@ -9,7 +9,6 @@ license.workspace = true
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
-component-init-transform = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -25,6 +24,7 @@ tungstenite = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
+wasmtime-wizer = { workspace = true, features = ["component-model", "wasmtime"] }
 
 [lints]
 workspace = true

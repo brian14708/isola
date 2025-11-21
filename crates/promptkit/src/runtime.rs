@@ -7,15 +7,12 @@ use std::{
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use component_init_transform::Invoker;
-use futures::{FutureExt, Stream};
+use futures::Stream;
 use smallvec::SmallVec;
 use tokio::task::JoinHandle;
 use tracing::info;
-use wasmtime::{
-    Config, Engine, Store,
-    component::{Component, Instance as WasmInstance},
-};
+use wasmtime::{Config, Engine, Store, component::Component};
+use wasmtime_wizer::{WasmtimeWizerComponent, Wizer};
 
 use crate::{
     BoxedStream, Environment, Error, WebsocketMessage,
@@ -79,45 +76,44 @@ impl<E: Environment> Runtime<E> {
         let out = out.to_path_buf();
         tokio::task::spawn_blocking(move || {
             let rt = tokio::runtime::Runtime::new()?;
-            let data = rt.block_on(component_init_transform::initialize(
-                &data,
-                |instrumented| {
-                    async move {
-                        let mut config = Self::engine_config();
-                        config
-                            .epoch_interruption(false)
-                            .cranelift_opt_level(wasmtime::OptLevel::None);
-                        let engine = Engine::new(&config)?;
-                        let component = Component::new(&engine, &instrumented)?;
-                        let linker = InstanceState::<CompileEnv>::new_linker(&engine)?;
-                        let mut store = InstanceState::new(
-                            &engine,
-                            &lib_path,
-                            Some(&lib_path),
-                            cfg.max_memory,
-                            CompileEnv,
-                        )?;
+            let data = rt.block_on(async {
+                let w = Wizer::new();
+                let (cx, instrumented_wasm) = w.instrument_component(&data)?;
 
-                        let pre = linker.instantiate_pre(&component)?;
-                        let binding = pre.instantiate_async(&mut store).await?;
-                        let guest = GuestIndices::new(&pre)?.load(&mut store, &binding)?;
-                        guest
-                            .call_initialize(
-                                &mut store,
-                                true,
-                                &["/lib/bundle.zip", "/workdir"],
-                                cfg.compile_prelude.as_deref(),
-                            )
-                            .await?;
-
-                        Ok(Box::new(MyInvoker {
-                            store,
-                            instance: binding,
-                        }) as Box<dyn Invoker>)
-                    }
-                    .boxed()
-                },
-            ))?;
+                let mut config = Self::engine_config();
+                config
+                    .epoch_interruption(false)
+                    .cranelift_opt_level(wasmtime::OptLevel::None);
+                let engine = Engine::new(&config)?;
+                let mut store = InstanceState::new(
+                    &engine,
+                    &lib_path,
+                    Some(&lib_path),
+                    cfg.max_memory,
+                    CompileEnv,
+                )?;
+                let component = Component::new(&engine, &instrumented_wasm)?;
+                let linker = InstanceState::<CompileEnv>::new_linker(&engine)?;
+                let pre = linker.instantiate_pre(&component)?;
+                let instance = pre.instantiate_async(&mut store).await?;
+                let guest = GuestIndices::new(&pre)?.load(&mut store, &instance)?;
+                guest
+                    .call_initialize(
+                        &mut store,
+                        true,
+                        &["/lib/bundle.zip", "/workdir"],
+                        cfg.compile_prelude.as_deref(),
+                    )
+                    .await?;
+                w.snapshot_component(
+                    cx,
+                    &mut WasmtimeWizerComponent {
+                        store: &mut store,
+                        instance,
+                    },
+                )
+                .await
+            })?;
 
             let config = Self::engine_config();
             let engine = Engine::new(&config)?;
@@ -359,61 +355,6 @@ impl<E: Environment> Instance<E> {
     /// Returns an error if the memory usage cannot be determined.
     pub fn memory_usage(&self) -> Result<usize> {
         Ok(self.store.data().limiter.current())
-    }
-}
-
-// Helper structs
-
-struct MyInvoker<S: Environment> {
-    store: Store<InstanceState<S>>,
-    instance: WasmInstance,
-}
-
-#[async_trait::async_trait]
-impl<S: Environment> Invoker for MyInvoker<S> {
-    async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (i32,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
-        Ok(result)
-    }
-
-    async fn call_s64(&mut self, function: &str) -> anyhow::Result<i64> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (i64,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
-        Ok(result)
-    }
-
-    async fn call_f32(&mut self, function: &str) -> anyhow::Result<f32> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (f32,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
-        Ok(result)
-    }
-
-    async fn call_f64(&mut self, function: &str) -> anyhow::Result<f64> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (f64,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
-        Ok(result)
-    }
-
-    async fn call_list_u8(&mut self, function: &str) -> anyhow::Result<Vec<u8>> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (Vec<u8>,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
-        Ok(result)
     }
 }
 
