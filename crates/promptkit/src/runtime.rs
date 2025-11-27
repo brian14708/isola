@@ -20,7 +20,7 @@ use wasmtime::{
 use crate::{
     BoxedStream, Environment, Error, WebsocketMessage,
     error::Result,
-    internal::vm::{InstanceState, SandboxPre},
+    internal::vm::{InstanceState, SandboxPre, exports::GuestIndices},
 };
 use crate::{
     environment::OutputCallback,
@@ -100,24 +100,15 @@ impl<E: Environment> Runtime<E> {
 
                         let pre = linker.instantiate_pre(&component)?;
                         let binding = pre.instantiate_async(&mut store).await?;
-                        let idx = component
-                            .get_export_index(None, "promptkit:script/guest")
-                            .ok_or_else(|| anyhow!("missing promptkit:script/guest"))?;
-                        let idx = component
-                            .get_export_index(Some(&idx), "initialize")
-                            .ok_or_else(|| anyhow!("missing promptkit:script/guest.initialize"))?;
-                        let func = binding
-                            .get_typed_func::<(bool, &[&str], Option<&str>), ()>(&mut store, idx)?;
-                        func.call_async(
-                            &mut store,
-                            (
+                        let guest = GuestIndices::new(&pre)?.load(&mut store, &binding)?;
+                        guest
+                            .call_initialize(
+                                &mut store,
                                 true,
                                 &["/lib/bundle.zip", "/workdir"],
                                 cfg.compile_prelude.as_deref(),
-                            ),
-                        )
-                        .await?;
-                        func.post_return_async(&mut store).await?;
+                            )
+                            .await?;
 
                         Ok(Box::new(MyInvoker {
                             store,
@@ -152,10 +143,6 @@ impl<E: Environment> Runtime<E> {
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self.instance_pre.instantiate_async(&mut store).await?;
-        bindings
-            .promptkit_script_guest()
-            .call_initialize(&mut store, false, &[], None)
-            .await?;
         Ok(Instance {
             store,
             sandbox: bindings,
