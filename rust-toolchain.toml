@@ -2,3 +2,4 @@
 channel = "nightly-2025-11-29"
 targets = ["wasm32-wasip1"]
 components = ["rust-src"]
+profile = "default"
