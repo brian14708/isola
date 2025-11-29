@@ -135,6 +135,7 @@ pub mod sys_module {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
 export!(Global);
 
 pub struct Global;
