@@ -10,10 +10,7 @@
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
-  rustToolchain = rust-bin.nightly.latest.minimal.override {
-    extensions = [ "rust-src" ];
-    targets = [ "wasm32-wasip1" ];
-  };
+  rustToolchain = (rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml);
   rustPlatform = makeRustPlatform {
     rustc = rustToolchain;
     cargo = rustToolchain;
@@ -33,10 +30,8 @@ stdenv.mkDerivation rec {
         inherit src;
         hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
       })
-      (rustPlatform.fetchCargoVendor {
-        name = "rust-std";
-        src = "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library";
-        hash = "sha256-0CKI9n13B4F4BdLQF/Mni6LFJDskvji9WYfMUNNyKtM=";
+      (rustPlatform.importCargoLock {
+        lockFile = "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library/Cargo.lock";
       })
     ];
   };

@@ -39,8 +39,7 @@ const codeEditorVariants = cva("rounded-md border bg-background text-foreground 
 });
 
 interface CodeEditorProps
-  extends Omit<EditorProps, "className">,
-    VariantProps<typeof codeEditorVariants> {
+  extends Omit<EditorProps, "className">, VariantProps<typeof codeEditorVariants> {
   className?: string;
   enableLsp?: boolean;
   onDiagnostics?: (diagnostics: Monaco.editor.IMarkerData[]) => void;

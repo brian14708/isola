@@ -6,11 +6,7 @@
 let
   inherit (packages.python) bundle;
   craneLib = (crane.mkLib pkgs).overrideToolchain (
-    p:
-    p.rust-bin.nightly.latest.default.override {
-      extensions = [ "rust-src" ];
-      targets = [ "wasm32-wasip1" ];
-    }
+    p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml
   );
   python = pkgs.wasipkgs.python.host;
 in

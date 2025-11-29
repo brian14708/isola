@@ -3,7 +3,6 @@
   stdenv,
   nodejs_24,
   pnpm_10,
-  npmHooks,
 }:
 let
   pnpm = pnpm_10;
@@ -17,13 +16,12 @@ stdenv.mkDerivation (finalAttrs: {
   pnpmDeps = pnpm.fetchDeps {
     inherit (finalAttrs) pname version src;
     fetcherVersion = 2;
-    hash = "sha256-ccB9ci6GM7aJL0sScwhy52HHhzR7Tg2W/V6yxl3r9Zc=";
+    hash = "sha256-FECxZrKcrpjM0wZDqChgdgDBpF4F8f1A93elXhkvmMw=";
   };
 
   nativeBuildInputs = [
     nodejs_24
     pnpm.configHook
-    npmHooks.npmInstallHook
   ];
 
   buildPhase = ''

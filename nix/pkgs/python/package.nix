@@ -9,14 +9,7 @@
 }:
 let
   bundle = callPackage ./bundle.nix { };
-
-  rustToolchainFor = (
-    p:
-    p.rust-bin.nightly.latest.minimal.override {
-      extensions = [ "rust-src" ];
-      targets = [ "wasm32-wasip1" ];
-    }
-  );
+  rustToolchainFor = (p: p.rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml);
   rustToolchain = rustToolchainFor pkgs;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
   src = lib.fileset.toSource {

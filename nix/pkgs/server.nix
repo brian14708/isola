@@ -5,7 +5,9 @@
   protobuf,
 }:
 let
-  craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.nightly.latest.minimal);
+  craneLib = (crane.mkLib pkgs).overrideToolchain (
+    p: p.rust-bin.fromRustupToolchainFile ../../rust-toolchain.toml
+  );
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
