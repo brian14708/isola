@@ -6,6 +6,7 @@
 dockerTools.buildLayeredImage {
   name = "promptkit";
   tag = "latest";
+  compressor = "zstd";
 
   contents = [
     dockerTools.caCertificates
