@@ -35,8 +35,7 @@ jobs:
       - name: Build container image
         run: |
           nix build .#oci
-          IMAGE_PATH=$(readlink -f result)
-          docker load < "$IMAGE_PATH"
+          ./result | docker load
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:

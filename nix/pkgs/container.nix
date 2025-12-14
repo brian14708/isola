@@ -3,10 +3,9 @@
   dockerTools,
   promptkit,
 }:
-dockerTools.buildLayeredImage {
+dockerTools.streamLayeredImage {
   name = "promptkit";
   tag = "latest";
-  compressor = "zstd";
 
   contents = [
     dockerTools.caCertificates

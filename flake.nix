@@ -52,4 +52,12 @@
       }
     );
 
+  nixConfig = {
+    extra-substituters = [
+      "https://promptkit.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "promptkit.cachix.org-1:IHR3VcUtLnWIqLkKk8UbSe0lMYW0C9tNVbqN5FYUYrQ="
+    ];
+  };
 }
