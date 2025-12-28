@@ -1,7 +1,7 @@
 interface host {
-    use wasi:io/poll@0.2.8.{pollable};
-    use wasi:io/error@0.2.8.{error};
-    use wasi:io/streams@0.2.8.{stream-error};
+    use wasi:io/poll@0.2.9.{pollable};
+    use wasi:io/error@0.2.9.{error};
+    use wasi:io/streams@0.2.9.{stream-error};
 
     variant value {
         cbor(list<u8>),
