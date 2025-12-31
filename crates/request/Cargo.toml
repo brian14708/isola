@@ -7,7 +7,7 @@ license.workspace = true
 
 [features]
 default = ["gzip", "tls"]
-tls = ["reqwest/rustls-tls-native-roots"]
+tls = ["reqwest/rustls"]
 gzip = ["reqwest/gzip"]
 
 [dependencies]
