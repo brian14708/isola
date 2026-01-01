@@ -10,6 +10,7 @@
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
+  inherit (python) host;
   rustToolchain = (rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml);
   rustPlatform = makeRustPlatform {
     rustc = rustToolchain;
@@ -17,12 +18,8 @@ let
   };
 in
 stdenv.mkDerivation rec {
-  pname = "pydantic-core-wasi";
-  version = "2.41.5";
-  src = fetchurl {
-    url = "https://github.com/pydantic/pydantic-core/archive/refs/tags/v${version}.tar.gz";
-    hash = "sha256-hy9wD35Ccj4XzsUpHQBnfXkMFHaAMPTzfn3nLCk11zE=";
-  };
+  pname = "${host.pkgs.pydantic-core.pname}-wasi";
+  inherit (host.pkgs.pydantic-core) version src;
   cargoDeps = symlinkJoin {
     name = "pydantic-core-wasi-deps";
     paths = [

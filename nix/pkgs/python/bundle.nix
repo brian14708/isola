@@ -18,17 +18,10 @@ let
         annotated-types
         typing-inspection
         xmltodict
+        pydantic
       ]
     ))
     ++ (builtins.map toString [
-      (fetchPypi {
-        pname = "pydantic";
-        version = "2.12.4";
-        format = "wheel";
-        python = "py3";
-        dist = "py3";
-        hash = "sha256-ktPSAqdF1G+b5t9FmsWgZP2qPBxM2K3PozLM88Bfhx4=";
-      })
       (fetchPypi {
         pname = "duron";
         version = "0.0.3";
