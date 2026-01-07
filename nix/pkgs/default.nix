@@ -9,7 +9,8 @@ let
   };
 in
 {
-  inherit (packages) promptkit server python;
+  inherit (packages) python;
   default = packages.promptkit;
+  lib = packages.library;
   oci = packages.container;
 }

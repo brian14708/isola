@@ -104,6 +104,7 @@ stdenv.mkDerivation {
 
       find $out/ -type f -name "*.so" -exec truncate -s 0 {} \;
       find $out/ -type d -name "__pycache__" -exec rm -rf {} +
+      find $out/ -type d -name "*-info" -exec rm -rf {} +
 
       ${python.host}/bin/python3 -m compileall $out/
       find $out/ -type f -print -exec nuke-refs '{}' +
