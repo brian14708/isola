@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    io::Write,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
@@ -10,21 +9,18 @@ use bytes::Bytes;
 use futures::Stream;
 use parking_lot::Mutex;
 use promptkit::{Environment, Instance, Runtime};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
-use zip::ZipArchive;
 
 use crate::utils::stream::join_with_infallible;
 
 use super::env::{MpscOutputCallback, StreamItem};
 
-pub enum Source {
-    Script { prelude: String, code: String },
-    Bundle(Bytes),
+pub struct Source {
+    pub prelude: String,
+    pub code: String,
 }
 
 pub enum Argument {
@@ -51,15 +47,8 @@ impl Argument {
     }
 }
 
-#[derive(Deserialize)]
-struct Manifest {
-    entrypoint: String,
-    prelude: Option<String>,
-}
-
 struct CachedInstance<E: Environment> {
     instance: Instance<E>,
-    _tempdir: Option<TempDir>,
 }
 
 type CacheMap<E> = Arc<Mutex<HashMap<[u8; 32], Vec<CachedInstance<E>>>>>;
@@ -122,67 +111,13 @@ impl<E: Environment> VmManager<E> {
     fn compute_hash(id: &str, script: &Source) -> [u8; 32] {
         let mut hasher = Sha256::new();
         hasher.update(id);
-        match script {
-            Source::Script { prelude, code } => {
-                hasher.update(prelude);
-                hasher.update(code);
-            }
-            Source::Bundle(b) => hasher.update(b),
-        }
+        hasher.update(&script.prelude);
+        hasher.update(&script.code);
         hasher.finalize().into()
     }
 
     fn get_cached(&self, hash: [u8; 32]) -> Option<CachedInstance<E>> {
         self.cache.lock().get_mut(&hash)?.pop()
-    }
-
-    async fn extract_zip(data: impl AsRef<[u8]>, dest: &Path) -> anyhow::Result<()> {
-        let data = data.as_ref().to_vec();
-        let dest = dest.to_path_buf();
-
-        tokio::task::spawn_blocking(move || {
-            let cursor = std::io::Cursor::new(data);
-            let mut archive = ZipArchive::new(cursor)?;
-            let mut dirs = std::collections::HashSet::new();
-            let mut buffer = vec![0u8; 16384]; // 16KB buffer reused across files
-
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i)?;
-                let outpath = match file.enclosed_name() {
-                    Some(path) => dest.join(path),
-                    None => continue,
-                };
-
-                if file.name().ends_with('/') {
-                    // Directory
-                    if dirs.insert(outpath.clone()) {
-                        std::fs::create_dir_all(&outpath)?;
-                    }
-                } else {
-                    // File
-                    if let Some(p) = outpath.parent()
-                        && !dirs.contains(p)
-                    {
-                        std::fs::create_dir_all(p)?;
-                        dirs.insert(p.to_owned());
-                    }
-
-                    // Stream file contents in chunks
-                    let mut out_file = std::fs::File::create(&outpath)?;
-                    loop {
-                        let bytes_read = std::io::Read::read(&mut file, &mut buffer)?;
-                        if bytes_read == 0 {
-                            break;
-                        }
-                        out_file.write_all(&buffer[..bytes_read])?;
-                    }
-                }
-            }
-            Ok::<_, anyhow::Error>(())
-        })
-        .await??;
-
-        Ok(())
     }
 
     async fn prepare_instance(
@@ -195,47 +130,14 @@ impl<E: Environment> VmManager<E> {
             return Ok(cached);
         }
 
-        let (mut instance, tempdir) = match &script {
-            Source::Script { .. } => {
-                let instance = self.runtime.instantiate(None, env.clone()).await?;
-                (instance, None)
-            }
-            Source::Bundle(bundle) => {
-                let temp = TempDir::with_prefix("vm")?;
-                let base = temp.path();
-                Self::extract_zip(bundle, base).await?;
+        let mut instance = self.runtime.instantiate(None, env.clone()).await?;
 
-                let instance = self.runtime.instantiate(Some(base), env.clone()).await?;
-                (instance, Some(temp))
-            }
-        };
-
-        match script {
-            Source::Script { prelude, code } => {
-                if !prelude.is_empty() {
-                    instance.eval_script(&prelude).await?;
-                }
-                instance.eval_script(&code).await?;
-            }
-            Source::Bundle(_) => {
-                // Bundle was already extracted, now load the manifest and execute
-                let temp_path = tempdir.as_ref().unwrap().path();
-                let manifest: Manifest = serde_json::from_str(
-                    &tokio::fs::read_to_string(temp_path.join("manifest.json")).await?,
-                )?;
-
-                if let Some(prelude) = &manifest.prelude {
-                    instance.eval_script(prelude).await?;
-                }
-
-                instance.eval_file(&manifest.entrypoint).await?;
-            }
+        if !script.prelude.is_empty() {
+            instance.eval_script(&script.prelude).await?;
         }
+        instance.eval_script(&script.code).await?;
 
-        Ok(CachedInstance {
-            instance,
-            _tempdir: tempdir,
-        })
+        Ok(CachedInstance { instance })
     }
 
     pub async fn exec(
@@ -265,7 +167,7 @@ impl<E: Environment> VmManager<E> {
             let result = cached.instance.execute(&func, args, callback).await;
             match result {
                 Ok(()) => {
-                    // Cache the instance for reuse (tempdir stays alive in the cache)
+                    // Cache the instance for reuse
                     let mut cache_lock = cache.lock();
                     cache_lock.entry(hash).or_default().push(cached);
 
@@ -277,13 +179,12 @@ impl<E: Environment> VmManager<E> {
                             && let Some(instances) = cache_lock.get_mut(&key)
                             && !instances.is_empty()
                         {
-                            instances.remove(0); // Remove oldest (tempdir auto-cleaned)
+                            instances.remove(0);
                         }
                     }
                 }
                 Err(err) => {
                     _ = tx.send(StreamItem::Error(err)).await;
-                    // Don't cache on error - let cached (and tempdir) be dropped
                 }
             }
         });

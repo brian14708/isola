@@ -13,9 +13,8 @@ use tracing::{Instrument, Span, info_span, level_filters::LevelFilter};
 
 use crate::{
     proto::script::v1::{
-        self as script, ContentType, ErrorCode, Trace, analyze_response, argument::Marker,
-        execute_client_stream_request, execute_stream_request, result,
-        script_service_server::ScriptService,
+        self as script, ErrorCode, Trace, argument::Marker, execute_client_stream_request,
+        execute_stream_request, result, script_service_server::ScriptService,
     },
     routes::{AppState, Argument, StreamItem, VmEnv},
     service::prost_serde::{argument, parse_source},
@@ -25,7 +24,6 @@ use crate::{
     },
 };
 
-mod ipc;
 mod prost_serde;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_mins(1);
@@ -55,81 +53,6 @@ impl ScriptService for ScriptServer {
             runtimes: vec![script::Runtime {
                 name: "python3".into(),
             }],
-        }))
-    }
-
-    async fn analyze(
-        &self,
-        mut request: tonic::Request<script::AnalyzeRequest>,
-    ) -> Result<tonic::Response<script::AnalyzeResponse>, Status> {
-        let ParsedSpec {
-            method,
-            args,
-            timeout,
-            stream_tx,
-            span,
-            trace_events,
-            env,
-        } = parse_spec(request.get_mut().spec.as_mut(), &self.state.base_env)?;
-        if !stream_tx.is_empty() {
-            return Err(Status::invalid_argument("unexpected stream marker"));
-        }
-        if trace_events.is_some() {
-            return Err(Status::invalid_argument("unexpected trace events"));
-        }
-        if !(method.is_empty() && args.is_empty()) {
-            return Err(Status::invalid_argument("method & args not allowed"));
-        }
-        let script = parse_source(request.get_mut().source.take())?;
-
-        let req = promptkit_cbor::to_cbor(&Into::<ipc::AnalyzeRequest>::into(request.get_ref()))
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let result = async {
-            let run = async {
-                let mut stream = self
-                    .state
-                    .vm
-                    .exec(
-                        "",
-                        script,
-                        "$analyze".to_string(),
-                        vec![(None, Argument::cbor(req))],
-                        env,
-                    )
-                    .await
-                    .map_err(|e| {
-                        Status::invalid_argument(format!("failed to start script: {e}"))
-                    })?;
-                let m =
-                    non_stream_result(Pin::new(&mut stream), [ContentType::Cbor as i32]).await?;
-                match m.result_type {
-                    Some(result::ResultType::Cbor(c)) => {
-                        let r: ipc::AnalyzeResult = promptkit_cbor::from_cbor(&c).map_err(|e| {
-                            Status::internal(format!("failed to decode result: {e}"))
-                        })?;
-                        Ok(analyze_response::ResultType::AnalyzeResult(r.into()))
-                    }
-                    Some(result::ResultType::Error(e)) => {
-                        Ok(analyze_response::ResultType::Error(e))
-                    }
-                    _ => Err(Status::internal("unexpected result type")),
-                }
-            };
-            match tokio::time::timeout(timeout, run).await {
-                Ok(Ok(v)) => Ok(v),
-                Ok(Err(s)) => Err(s),
-                Err(_) => Ok(analyze_response::ResultType::Error(script::Error {
-                    code: i32::from(script::ErrorCode::DeadlineExceeded),
-                    message: "deadline exceeded".to_string(),
-                })),
-            }
-        }
-        .instrument(span)
-        .await?;
-
-        Ok(Response::new(script::AnalyzeResponse {
-            result_type: Some(result),
         }))
     }
 

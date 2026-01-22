@@ -36,7 +36,6 @@ rmcp = { workspace = true, features = ["transport-streamable-http-server"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true, features = ["gzip", "router", "server", "tls-native-roots"] }
@@ -47,7 +46,6 @@ tower-http = { workspace = true, features = ["fs", "trace"] }
 tracing = { workspace = true, features = ["release_max_level_debug"] }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "parking_lot"] }
-zip = { workspace = true, features = ["deflate"] }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

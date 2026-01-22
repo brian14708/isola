@@ -95,7 +95,7 @@ impl Sandbox {
             .vm
             .exec(
                 "",
-                crate::routes::Source::Script {
+                crate::routes::Source {
                     prelude: String::new(),
                     code: params.0.python_code,
                 },

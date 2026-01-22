@@ -24,7 +24,6 @@ import betterproto.lib.google.protobuf as betterproto_lib_google_protobuf
 import grpclib
 from betterproto.grpc.grpclib_server import ServiceBase
 
-
 if TYPE_CHECKING:
     import grpclib.server
     from betterproto.grpc.grpclib_client import MetadataLike
@@ -111,7 +110,6 @@ class ScriptInline(betterproto.Message):
 @dataclass(eq=False, repr=False)
 class Source(betterproto.Message):
     script_inline: "ScriptInline" = betterproto.message_field(1, group="source_type")
-    bundle_inline: bytes = betterproto.bytes_field(2, group="source_type")
 
 
 @dataclass(eq=False, repr=False)
@@ -238,38 +236,6 @@ class Runtime(betterproto.Message):
     name: str = betterproto.string_field(1)
 
 
-@dataclass(eq=False, repr=False)
-class AnalyzeRequest(betterproto.Message):
-    source: "Source" = betterproto.message_field(1)
-    spec: "ExecutionSpec" = betterproto.message_field(2)
-    methods: List[str] = betterproto.string_field(3)
-
-
-@dataclass(eq=False, repr=False)
-class TypeInfo(betterproto.Message):
-    name: str = betterproto.string_field(1)
-    json_schema: str = betterproto.string_field(2)
-
-
-@dataclass(eq=False, repr=False)
-class MethodInfo(betterproto.Message):
-    name: str = betterproto.string_field(1)
-    description: str = betterproto.string_field(2)
-    argument_types: List["TypeInfo"] = betterproto.message_field(3)
-    result_type: "TypeInfo" = betterproto.message_field(4)
-
-
-@dataclass(eq=False, repr=False)
-class AnalyzeResult(betterproto.Message):
-    method_infos: List["MethodInfo"] = betterproto.message_field(1)
-
-
-@dataclass(eq=False, repr=False)
-class AnalyzeResponse(betterproto.Message):
-    analyze_result: "AnalyzeResult" = betterproto.message_field(1, group="result_type")
-    error: "Error" = betterproto.message_field(15, group="result_type")
-
-
 class ScriptServiceStub(betterproto.ServiceStub):
     async def list_runtime(
         self,
@@ -283,23 +249,6 @@ class ScriptServiceStub(betterproto.ServiceStub):
             "/promptkit.script.v1.ScriptService/ListRuntime",
             list_runtime_request,
             ListRuntimeResponse,
-            timeout=timeout,
-            deadline=deadline,
-            metadata=metadata,
-        )
-
-    async def analyze(
-        self,
-        analyze_request: "AnalyzeRequest",
-        *,
-        timeout: Optional[float] = None,
-        deadline: Optional["Deadline"] = None,
-        metadata: Optional["MetadataLike"] = None
-    ) -> "AnalyzeResponse":
-        return await self._unary_unary(
-            "/promptkit.script.v1.ScriptService/Analyze",
-            analyze_request,
-            AnalyzeResponse,
             timeout=timeout,
             deadline=deadline,
             metadata=metadata,
@@ -390,9 +339,6 @@ class ScriptServiceBase(ServiceBase):
     ) -> "ListRuntimeResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
-    async def analyze(self, analyze_request: "AnalyzeRequest") -> "AnalyzeResponse":
-        raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
-
     async def execute(self, execute_request: "ExecuteRequest") -> "ExecuteResponse":
         raise grpclib.GRPCError(grpclib.const.Status.UNIMPLEMENTED)
 
@@ -421,13 +367,6 @@ class ScriptServiceBase(ServiceBase):
     ) -> None:
         request = await stream.recv_message()
         response = await self.list_runtime(request)
-        await stream.send_message(response)
-
-    async def __rpc_analyze(
-        self, stream: "grpclib.server.Stream[AnalyzeRequest, AnalyzeResponse]"
-    ) -> None:
-        request = await stream.recv_message()
-        response = await self.analyze(request)
         await stream.send_message(response)
 
     async def __rpc_execute(
@@ -474,12 +413,6 @@ class ScriptServiceBase(ServiceBase):
                 grpclib.const.Cardinality.UNARY_UNARY,
                 ListRuntimeRequest,
                 ListRuntimeResponse,
-            ),
-            "/promptkit.script.v1.ScriptService/Analyze": grpclib.const.Handler(
-                self.__rpc_analyze,
-                grpclib.const.Cardinality.UNARY_UNARY,
-                AnalyzeRequest,
-                AnalyzeResponse,
             ),
             "/promptkit.script.v1.ScriptService/Execute": grpclib.const.Handler(
                 self.__rpc_execute,
