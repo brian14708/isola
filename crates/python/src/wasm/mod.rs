@@ -212,21 +212,9 @@ impl guest::Guest for Global {
 
     fn call_func(func: String, args: Vec<guest::Argument>) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|vm| {
-            if let Some(vm) = vm.as_ref() {
-                let ret = if func == "$analyze" {
-                    if let Some(guest::Argument {
-                        name: None,
-                        value: host::Value::Cbor(s),
-                    }) = args.first()
-                    {
-                        vm.analyze(InputValue::Cbor(s.into()), |emit_type, data| {
-                            host::blocking_emit(emit_type, data);
-                        })
-                        .map_err(Into::<guest::Error>::into)
-                    } else {
-                        return Err(Error::UnexpectedError("Invalid Value").into());
-                    }
-                } else {
+            vm.as_ref().map_or_else(
+                || Err(Error::UnexpectedError("VM not initialized").into()),
+                |vm| {
                     let mut positional = vec![];
                     let mut named = vec![];
                     for arg in args {
@@ -241,16 +229,15 @@ impl guest::Guest for Global {
                             positional.push(value);
                         }
                     }
-                    vm.run(&func, positional, named, |emit_type, data| {
-                        host::blocking_emit(emit_type, data);
-                    })
-                    .map_err(Into::<guest::Error>::into)
-                };
-                vm.flush();
-                ret
-            } else {
-                Err(Error::UnexpectedError("VM not initialized").into())
-            }
+                    let ret = vm
+                        .run(&func, positional, named, |emit_type, data| {
+                            host::blocking_emit(emit_type, data);
+                        })
+                        .map_err(Into::<guest::Error>::into);
+                    vm.flush();
+                    ret
+                },
+            )
         })
     }
 }

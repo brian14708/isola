@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file promptkit/script/v1/service.proto.
  */
 export const file_promptkit_script_v1_service: GenFile = /*@__PURE__*/
-  fileDesc("CiFwcm9tcHRraXQvc2NyaXB0L3YxL3NlcnZpY2UucHJvdG8SE3Byb21wdGtpdC5zY3JpcHQudjEiRgoMU2NyaXB0SW5saW5lEg4KBnNjcmlwdBgBIAEoCRIPCgdydW50aW1lGAMgASgJEg8KB3ByZWx1ZGUYBCABKAlKBAgCEAMibAoGU291cmNlEjoKDXNjcmlwdF9pbmxpbmUYASABKAsyIS5wcm9tcHRraXQuc2NyaXB0LnYxLlNjcmlwdElubGluZUgAEhcKDWJ1bmRsZV9pbmxpbmUYAiABKAxIAEINCgtzb3VyY2VfdHlwZSKAAgoIQXJndW1lbnQSJwoFdmFsdWUYASABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVIABIOCgRqc29uGAIgASgJSAASDgoEY2JvchgDIAEoDEgAEjYKBm1hcmtlchgPIAEoDjIkLnByb21wdGtpdC5zY3JpcHQudjEuQXJndW1lbnQuTWFya2VySAASDAoEbmFtZRgEIAEoCSJUCgZNYXJrZXISFgoSTUFSS0VSX1VOU1BFQ0lGSUVEEAASEQoNTUFSS0VSX1NUUkVBTRABEh8KG01BUktFUl9TVFJFQU1fQ09OVFJPTF9DTE9TRRACQg8KDWFyZ3VtZW50X3R5cGUiJgoFRXJyb3ISDAoEY29kZRgBIAEoBRIPCgdtZXNzYWdlGAIgASgJIo0BCgZSZXN1bHQSJwoFdmFsdWUYASABKAsyFi5nb29nbGUucHJvdG9idWYuVmFsdWVIABIOCgRqc29uGAIgASgJSAASDgoEY2JvchgDIAEoDEgAEisKBWVycm9yGA8gASgLMhoucHJvbXB0a2l0LnNjcmlwdC52MS5FcnJvckgAQg0KC3Jlc3VsdF90eXBlIrkBCg1FeGVjdXRpb25TcGVjEioKB3RpbWVvdXQYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMAoJYXJndW1lbnRzGAIgAygLMh0ucHJvbXB0a2l0LnNjcmlwdC52MS5Bcmd1bWVudBIOCgZtZXRob2QYAyABKAkSNAoLdHJhY2VfbGV2ZWwYFCABKA4yHy5wcm9tcHRraXQuc2NyaXB0LnYxLlRyYWNlTGV2ZWxKBAgEEAUiPwoRRXhlY3V0aW9uTWV0YWRhdGESKgoGdHJhY2VzGBQgAygLMhoucHJvbXB0a2l0LnNjcmlwdC52MS5UcmFjZSJFChdFeGVjdXRpb25TdHJlYW1NZXRhZGF0YRIqCgZ0cmFjZXMYFCADKAsyGi5wcm9tcHRraXQuc2NyaXB0LnYxLlRyYWNlIq4BCg5FeGVjdXRlUmVxdWVzdBIrCgZzb3VyY2UYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlNvdXJjZRIwCgRzcGVjGAIgASgLMiIucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TcGVjEj0KE3Jlc3VsdF9jb250ZW50X3R5cGUYAyADKA4yIC5wcm9tcHRraXQuc2NyaXB0LnYxLkNvbnRlbnRUeXBlIrUBChVJbml0aWFsRXhlY3V0ZVJlcXVlc3QSKwoGc291cmNlGAEgASgLMhsucHJvbXB0a2l0LnNjcmlwdC52MS5Tb3VyY2USMAoEc3BlYxgCIAEoCzIiLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uU3BlYxI9ChNyZXN1bHRfY29udGVudF90eXBlGAMgAygOMiAucHJvbXB0a2l0LnNjcmlwdC52MS5Db250ZW50VHlwZSK6AQoaRXhlY3V0ZVNlcnZlclN0cmVhbVJlcXVlc3QSKwoGc291cmNlGAEgASgLMhsucHJvbXB0a2l0LnNjcmlwdC52MS5Tb3VyY2USMAoEc3BlYxgCIAEoCzIiLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uU3BlYxI9ChNyZXN1bHRfY29udGVudF90eXBlGAMgAygOMiAucHJvbXB0a2l0LnNjcmlwdC52MS5Db250ZW50VHlwZSLWAQoaRXhlY3V0ZUNsaWVudFN0cmVhbVJlcXVlc3QSRQoPaW5pdGlhbF9yZXF1ZXN0GAEgASgLMioucHJvbXB0a2l0LnNjcmlwdC52MS5Jbml0aWFsRXhlY3V0ZVJlcXVlc3RIABI1CgxzdHJlYW1fdmFsdWUYAiABKAsyHS5wcm9tcHRraXQuc2NyaXB0LnYxLkFyZ3VtZW50SAASKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIOCgxyZXF1ZXN0X3R5cGUi0AEKFEV4ZWN1dGVTdHJlYW1SZXF1ZXN0EkUKD2luaXRpYWxfcmVxdWVzdBgBIAEoCzIqLnByb21wdGtpdC5zY3JpcHQudjEuSW5pdGlhbEV4ZWN1dGVSZXF1ZXN0SAASNQoMc3RyZWFtX3ZhbHVlGAIgASgLMh0ucHJvbXB0a2l0LnNjcmlwdC52MS5Bcmd1bWVudEgAEioKB3RpbWVvdXQYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb25CDgoMcmVxdWVzdF90eXBlIngKD0V4ZWN1dGVSZXNwb25zZRIrCgZyZXN1bHQYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlJlc3VsdBI4CghtZXRhZGF0YRgPIAEoCzImLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uTWV0YWRhdGEihAEKG0V4ZWN1dGVDbGllbnRTdHJlYW1SZXNwb25zZRIrCgZyZXN1bHQYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlJlc3VsdBI4CghtZXRhZGF0YRgPIAEoCzImLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uTWV0YWRhdGEiigEKG0V4ZWN1dGVTZXJ2ZXJTdHJlYW1SZXNwb25zZRIrCgZyZXN1bHQYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlJlc3VsdBI+CghtZXRhZGF0YRgPIAEoCzIsLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uU3RyZWFtTWV0YWRhdGEihAEKFUV4ZWN1dGVTdHJlYW1SZXNwb25zZRIrCgZyZXN1bHQYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlJlc3VsdBI+CghtZXRhZGF0YRgPIAEoCzIsLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0aW9uU3RyZWFtTWV0YWRhdGEiFAoSTGlzdFJ1bnRpbWVSZXF1ZXN0IkUKE0xpc3RSdW50aW1lUmVzcG9uc2USLgoIcnVudGltZXMYASADKAsyHC5wcm9tcHRraXQuc2NyaXB0LnYxLlJ1bnRpbWUiFwoHUnVudGltZRIMCgRuYW1lGAEgASgJIoABCg5BbmFseXplUmVxdWVzdBIrCgZzb3VyY2UYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlNvdXJjZRIwCgRzcGVjGAIgASgLMiIucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TcGVjEg8KB21ldGhvZHMYAyADKAkiLQoIVHlwZUluZm8SDAoEbmFtZRgBIAEoCRITCgtqc29uX3NjaGVtYRgCIAEoCSKaAQoKTWV0aG9kSW5mbxIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEjUKDmFyZ3VtZW50X3R5cGVzGAMgAygLMh0ucHJvbXB0a2l0LnNjcmlwdC52MS5UeXBlSW5mbxIyCgtyZXN1bHRfdHlwZRgEIAEoCzIdLnByb21wdGtpdC5zY3JpcHQudjEuVHlwZUluZm8iRgoNQW5hbHl6ZVJlc3VsdBI1CgxtZXRob2RfaW5mb3MYASADKAsyHy5wcm9tcHRraXQuc2NyaXB0LnYxLk1ldGhvZEluZm8iiwEKD0FuYWx5emVSZXNwb25zZRI8Cg5hbmFseXplX3Jlc3VsdBgBIAEoCzIiLnByb21wdGtpdC5zY3JpcHQudjEuQW5hbHl6ZVJlc3VsdEgAEisKBWVycm9yGA8gASgLMhoucHJvbXB0a2l0LnNjcmlwdC52MS5FcnJvckgAQg0KC3Jlc3VsdF90eXBlKnoKC0NvbnRlbnRUeXBlEhwKGENPTlRFTlRfVFlQRV9VTlNQRUNJRklFRBAAEh8KG0NPTlRFTlRfVFlQRV9QUk9UT0JVRl9WQUxVRRABEhUKEUNPTlRFTlRfVFlQRV9KU09OEAISFQoRQ09OVEVOVF9UWVBFX0NCT1IQAzKNBQoNU2NyaXB0U2VydmljZRJiCgtMaXN0UnVudGltZRInLnByb21wdGtpdC5zY3JpcHQudjEuTGlzdFJ1bnRpbWVSZXF1ZXN0GigucHJvbXB0a2l0LnNjcmlwdC52MS5MaXN0UnVudGltZVJlc3BvbnNlIgASVgoHQW5hbHl6ZRIjLnByb21wdGtpdC5zY3JpcHQudjEuQW5hbHl6ZVJlcXVlc3QaJC5wcm9tcHRraXQuc2NyaXB0LnYxLkFuYWx5emVSZXNwb25zZSIAElYKB0V4ZWN1dGUSIy5wcm9tcHRraXQuc2NyaXB0LnYxLkV4ZWN1dGVSZXF1ZXN0GiQucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRlUmVzcG9uc2UiABJ8ChNFeGVjdXRlQ2xpZW50U3RyZWFtEi8ucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRlQ2xpZW50U3RyZWFtUmVxdWVzdBowLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZUNsaWVudFN0cmVhbVJlc3BvbnNlIgAoARJ8ChNFeGVjdXRlU2VydmVyU3RyZWFtEi8ucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRlU2VydmVyU3RyZWFtUmVxdWVzdBowLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZVNlcnZlclN0cmVhbVJlc3BvbnNlIgAwARJsCg1FeGVjdXRlU3RyZWFtEikucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRlU3RyZWFtUmVxdWVzdBoqLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZVN0cmVhbVJlc3BvbnNlIgAoATABQpUBChdjb20ucHJvbXB0a2l0LnNjcmlwdC52MUIMU2VydmljZVByb3RvUAGiAgNQU1iqAhNQcm9tcHRraXQuU2NyaXB0LlYxygITUHJvbXB0a2l0XFNjcmlwdFxWMeICH1Byb21wdGtpdFxTY3JpcHRcVjFcR1BCTWV0YWRhdGHqAhVQcm9tcHRraXQ6OlNjcmlwdDo6VjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_struct, file_promptkit_script_v1_trace]);
+  fileDesc("CiFwcm9tcHRraXQvc2NyaXB0L3YxL3NlcnZpY2UucHJvdG8SE3Byb21wdGtpdC5zY3JpcHQudjEiRgoMU2NyaXB0SW5saW5lEg4KBnNjcmlwdBgBIAEoCRIPCgdydW50aW1lGAMgASgJEg8KB3ByZWx1ZGUYBCABKAlKBAgCEAMiUwoGU291cmNlEjoKDXNjcmlwdF9pbmxpbmUYASABKAsyIS5wcm9tcHRraXQuc2NyaXB0LnYxLlNjcmlwdElubGluZUgAQg0KC3NvdXJjZV90eXBlIoACCghBcmd1bWVudBInCgV2YWx1ZRgBIAEoCzIWLmdvb2dsZS5wcm90b2J1Zi5WYWx1ZUgAEg4KBGpzb24YAiABKAlIABIOCgRjYm9yGAMgASgMSAASNgoGbWFya2VyGA8gASgOMiQucHJvbXB0a2l0LnNjcmlwdC52MS5Bcmd1bWVudC5NYXJrZXJIABIMCgRuYW1lGAQgASgJIlQKBk1hcmtlchIWChJNQVJLRVJfVU5TUEVDSUZJRUQQABIRCg1NQVJLRVJfU1RSRUFNEAESHwobTUFSS0VSX1NUUkVBTV9DT05UUk9MX0NMT1NFEAJCDwoNYXJndW1lbnRfdHlwZSImCgVFcnJvchIMCgRjb2RlGAEgASgFEg8KB21lc3NhZ2UYAiABKAkijQEKBlJlc3VsdBInCgV2YWx1ZRgBIAEoCzIWLmdvb2dsZS5wcm90b2J1Zi5WYWx1ZUgAEg4KBGpzb24YAiABKAlIABIOCgRjYm9yGAMgASgMSAASKwoFZXJyb3IYDyABKAsyGi5wcm9tcHRraXQuc2NyaXB0LnYxLkVycm9ySABCDQoLcmVzdWx0X3R5cGUiuQEKDUV4ZWN1dGlvblNwZWMSKgoHdGltZW91dBgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIwCglhcmd1bWVudHMYAiADKAsyHS5wcm9tcHRraXQuc2NyaXB0LnYxLkFyZ3VtZW50Eg4KBm1ldGhvZBgDIAEoCRI0Cgt0cmFjZV9sZXZlbBgUIAEoDjIfLnByb21wdGtpdC5zY3JpcHQudjEuVHJhY2VMZXZlbEoECAQQBSI/ChFFeGVjdXRpb25NZXRhZGF0YRIqCgZ0cmFjZXMYFCADKAsyGi5wcm9tcHRraXQuc2NyaXB0LnYxLlRyYWNlIkUKF0V4ZWN1dGlvblN0cmVhbU1ldGFkYXRhEioKBnRyYWNlcxgUIAMoCzIaLnByb21wdGtpdC5zY3JpcHQudjEuVHJhY2UirgEKDkV4ZWN1dGVSZXF1ZXN0EisKBnNvdXJjZRgBIAEoCzIbLnByb21wdGtpdC5zY3JpcHQudjEuU291cmNlEjAKBHNwZWMYAiABKAsyIi5wcm9tcHRraXQuc2NyaXB0LnYxLkV4ZWN1dGlvblNwZWMSPQoTcmVzdWx0X2NvbnRlbnRfdHlwZRgDIAMoDjIgLnByb21wdGtpdC5zY3JpcHQudjEuQ29udGVudFR5cGUitQEKFUluaXRpYWxFeGVjdXRlUmVxdWVzdBIrCgZzb3VyY2UYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlNvdXJjZRIwCgRzcGVjGAIgASgLMiIucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TcGVjEj0KE3Jlc3VsdF9jb250ZW50X3R5cGUYAyADKA4yIC5wcm9tcHRraXQuc2NyaXB0LnYxLkNvbnRlbnRUeXBlIroBChpFeGVjdXRlU2VydmVyU3RyZWFtUmVxdWVzdBIrCgZzb3VyY2UYASABKAsyGy5wcm9tcHRraXQuc2NyaXB0LnYxLlNvdXJjZRIwCgRzcGVjGAIgASgLMiIucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TcGVjEj0KE3Jlc3VsdF9jb250ZW50X3R5cGUYAyADKA4yIC5wcm9tcHRraXQuc2NyaXB0LnYxLkNvbnRlbnRUeXBlItYBChpFeGVjdXRlQ2xpZW50U3RyZWFtUmVxdWVzdBJFCg9pbml0aWFsX3JlcXVlc3QYASABKAsyKi5wcm9tcHRraXQuc2NyaXB0LnYxLkluaXRpYWxFeGVjdXRlUmVxdWVzdEgAEjUKDHN0cmVhbV92YWx1ZRgCIAEoCzIdLnByb21wdGtpdC5zY3JpcHQudjEuQXJndW1lbnRIABIqCgd0aW1lb3V0GAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uQg4KDHJlcXVlc3RfdHlwZSLQAQoURXhlY3V0ZVN0cmVhbVJlcXVlc3QSRQoPaW5pdGlhbF9yZXF1ZXN0GAEgASgLMioucHJvbXB0a2l0LnNjcmlwdC52MS5Jbml0aWFsRXhlY3V0ZVJlcXVlc3RIABI1CgxzdHJlYW1fdmFsdWUYAiABKAsyHS5wcm9tcHRraXQuc2NyaXB0LnYxLkFyZ3VtZW50SAASKgoHdGltZW91dBgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbkIOCgxyZXF1ZXN0X3R5cGUieAoPRXhlY3V0ZVJlc3BvbnNlEisKBnJlc3VsdBgBIAEoCzIbLnByb21wdGtpdC5zY3JpcHQudjEuUmVzdWx0EjgKCG1ldGFkYXRhGA8gASgLMiYucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25NZXRhZGF0YSKEAQobRXhlY3V0ZUNsaWVudFN0cmVhbVJlc3BvbnNlEisKBnJlc3VsdBgBIAEoCzIbLnByb21wdGtpdC5zY3JpcHQudjEuUmVzdWx0EjgKCG1ldGFkYXRhGA8gASgLMiYucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25NZXRhZGF0YSKKAQobRXhlY3V0ZVNlcnZlclN0cmVhbVJlc3BvbnNlEisKBnJlc3VsdBgBIAEoCzIbLnByb21wdGtpdC5zY3JpcHQudjEuUmVzdWx0Ej4KCG1ldGFkYXRhGA8gASgLMiwucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TdHJlYW1NZXRhZGF0YSKEAQoVRXhlY3V0ZVN0cmVhbVJlc3BvbnNlEisKBnJlc3VsdBgBIAEoCzIbLnByb21wdGtpdC5zY3JpcHQudjEuUmVzdWx0Ej4KCG1ldGFkYXRhGA8gASgLMiwucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRpb25TdHJlYW1NZXRhZGF0YSIUChJMaXN0UnVudGltZVJlcXVlc3QiRQoTTGlzdFJ1bnRpbWVSZXNwb25zZRIuCghydW50aW1lcxgBIAMoCzIcLnByb21wdGtpdC5zY3JpcHQudjEuUnVudGltZSIXCgdSdW50aW1lEgwKBG5hbWUYASABKAkqegoLQ29udGVudFR5cGUSHAoYQ09OVEVOVF9UWVBFX1VOU1BFQ0lGSUVEEAASHwobQ09OVEVOVF9UWVBFX1BST1RPQlVGX1ZBTFVFEAESFQoRQ09OVEVOVF9UWVBFX0pTT04QAhIVChFDT05URU5UX1RZUEVfQ0JPUhADMrUECg1TY3JpcHRTZXJ2aWNlEmIKC0xpc3RSdW50aW1lEicucHJvbXB0a2l0LnNjcmlwdC52MS5MaXN0UnVudGltZVJlcXVlc3QaKC5wcm9tcHRraXQuc2NyaXB0LnYxLkxpc3RSdW50aW1lUmVzcG9uc2UiABJWCgdFeGVjdXRlEiMucHJvbXB0a2l0LnNjcmlwdC52MS5FeGVjdXRlUmVxdWVzdBokLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZVJlc3BvbnNlIgASfAoTRXhlY3V0ZUNsaWVudFN0cmVhbRIvLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZUNsaWVudFN0cmVhbVJlcXVlc3QaMC5wcm9tcHRraXQuc2NyaXB0LnYxLkV4ZWN1dGVDbGllbnRTdHJlYW1SZXNwb25zZSIAKAESfAoTRXhlY3V0ZVNlcnZlclN0cmVhbRIvLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZVNlcnZlclN0cmVhbVJlcXVlc3QaMC5wcm9tcHRraXQuc2NyaXB0LnYxLkV4ZWN1dGVTZXJ2ZXJTdHJlYW1SZXNwb25zZSIAMAESbAoNRXhlY3V0ZVN0cmVhbRIpLnByb21wdGtpdC5zY3JpcHQudjEuRXhlY3V0ZVN0cmVhbVJlcXVlc3QaKi5wcm9tcHRraXQuc2NyaXB0LnYxLkV4ZWN1dGVTdHJlYW1SZXNwb25zZSIAKAEwAUKVAQoXY29tLnByb21wdGtpdC5zY3JpcHQudjFCDFNlcnZpY2VQcm90b1ABogIDUFNYqgITUHJvbXB0a2l0LlNjcmlwdC5WMcoCE1Byb21wdGtpdFxTY3JpcHRcVjHiAh9Qcm9tcHRraXRcU2NyaXB0XFYxXEdQQk1ldGFkYXRh6gIVUHJvbXB0a2l0OjpTY3JpcHQ6OlYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_struct, file_promptkit_script_v1_trace]);
 
 /**
  * @generated from message promptkit.script.v1.ScriptInline
@@ -56,12 +56,6 @@ export type Source = Message<"promptkit.script.v1.Source"> & {
      */
     value: ScriptInline;
     case: "scriptInline";
-  } | {
-    /**
-     * @generated from field: bytes bundle_inline = 2;
-     */
-    value: Uint8Array;
-    case: "bundleInline";
   } | { case: undefined; value?: undefined };
 };
 
@@ -560,133 +554,6 @@ export const RuntimeSchema: GenMessage<Runtime> = /*@__PURE__*/
   messageDesc(file_promptkit_script_v1_service, 19);
 
 /**
- * @generated from message promptkit.script.v1.AnalyzeRequest
- */
-export type AnalyzeRequest = Message<"promptkit.script.v1.AnalyzeRequest"> & {
-  /**
-   * @generated from field: promptkit.script.v1.Source source = 1;
-   */
-  source?: Source;
-
-  /**
-   * @generated from field: promptkit.script.v1.ExecutionSpec spec = 2;
-   */
-  spec?: ExecutionSpec;
-
-  /**
-   * @generated from field: repeated string methods = 3;
-   */
-  methods: string[];
-};
-
-/**
- * Describes the message promptkit.script.v1.AnalyzeRequest.
- * Use `create(AnalyzeRequestSchema)` to create a new message.
- */
-export const AnalyzeRequestSchema: GenMessage<AnalyzeRequest> = /*@__PURE__*/
-  messageDesc(file_promptkit_script_v1_service, 20);
-
-/**
- * @generated from message promptkit.script.v1.TypeInfo
- */
-export type TypeInfo = Message<"promptkit.script.v1.TypeInfo"> & {
-  /**
-   * @generated from field: string name = 1;
-   */
-  name: string;
-
-  /**
-   * @generated from field: string json_schema = 2;
-   */
-  jsonSchema: string;
-};
-
-/**
- * Describes the message promptkit.script.v1.TypeInfo.
- * Use `create(TypeInfoSchema)` to create a new message.
- */
-export const TypeInfoSchema: GenMessage<TypeInfo> = /*@__PURE__*/
-  messageDesc(file_promptkit_script_v1_service, 21);
-
-/**
- * @generated from message promptkit.script.v1.MethodInfo
- */
-export type MethodInfo = Message<"promptkit.script.v1.MethodInfo"> & {
-  /**
-   * @generated from field: string name = 1;
-   */
-  name: string;
-
-  /**
-   * @generated from field: string description = 2;
-   */
-  description: string;
-
-  /**
-   * @generated from field: repeated promptkit.script.v1.TypeInfo argument_types = 3;
-   */
-  argumentTypes: TypeInfo[];
-
-  /**
-   * @generated from field: promptkit.script.v1.TypeInfo result_type = 4;
-   */
-  resultType?: TypeInfo;
-};
-
-/**
- * Describes the message promptkit.script.v1.MethodInfo.
- * Use `create(MethodInfoSchema)` to create a new message.
- */
-export const MethodInfoSchema: GenMessage<MethodInfo> = /*@__PURE__*/
-  messageDesc(file_promptkit_script_v1_service, 22);
-
-/**
- * @generated from message promptkit.script.v1.AnalyzeResult
- */
-export type AnalyzeResult = Message<"promptkit.script.v1.AnalyzeResult"> & {
-  /**
-   * @generated from field: repeated promptkit.script.v1.MethodInfo method_infos = 1;
-   */
-  methodInfos: MethodInfo[];
-};
-
-/**
- * Describes the message promptkit.script.v1.AnalyzeResult.
- * Use `create(AnalyzeResultSchema)` to create a new message.
- */
-export const AnalyzeResultSchema: GenMessage<AnalyzeResult> = /*@__PURE__*/
-  messageDesc(file_promptkit_script_v1_service, 23);
-
-/**
- * @generated from message promptkit.script.v1.AnalyzeResponse
- */
-export type AnalyzeResponse = Message<"promptkit.script.v1.AnalyzeResponse"> & {
-  /**
-   * @generated from oneof promptkit.script.v1.AnalyzeResponse.result_type
-   */
-  resultType: {
-    /**
-     * @generated from field: promptkit.script.v1.AnalyzeResult analyze_result = 1;
-     */
-    value: AnalyzeResult;
-    case: "analyzeResult";
-  } | {
-    /**
-     * @generated from field: promptkit.script.v1.Error error = 15;
-     */
-    value: Error;
-    case: "error";
-  } | { case: undefined; value?: undefined };
-};
-
-/**
- * Describes the message promptkit.script.v1.AnalyzeResponse.
- * Use `create(AnalyzeResponseSchema)` to create a new message.
- */
-export const AnalyzeResponseSchema: GenMessage<AnalyzeResponse> = /*@__PURE__*/
-  messageDesc(file_promptkit_script_v1_service, 24);
-
-/**
  * @generated from enum promptkit.script.v1.ContentType
  */
 export enum ContentType {
@@ -728,14 +595,6 @@ export const ScriptService: GenService<{
     methodKind: "unary";
     input: typeof ListRuntimeRequestSchema;
     output: typeof ListRuntimeResponseSchema;
-  },
-  /**
-   * @generated from rpc promptkit.script.v1.ScriptService.Analyze
-   */
-  analyze: {
-    methodKind: "unary";
-    input: typeof AnalyzeRequestSchema;
-    output: typeof AnalyzeResponseSchema;
   },
   /**
    * @generated from rpc promptkit.script.v1.ScriptService.Execute

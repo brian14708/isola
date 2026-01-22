@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime
-import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -103,18 +102,3 @@ async def test_timeout(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> N
         )
     )
     assert response.result.error.code == pb.ErrorCode.DEADLINE_EXCEEDED
-
-
-@pytest.mark.asyncio
-async def test_analyze(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> None:
-    response = await client.analyze(
-        pb.AnalyzeRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            methods=["async_add"],
-        )
-    )
-    method = response.analyze_result.method_infos[0]
-    assert len(method.argument_types) == 3
-    assert json.loads(method.result_type.json_schema)["type"] == "integer"

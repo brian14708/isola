@@ -217,42 +217,6 @@ impl Scope {
             ))
         })
     }
-
-    pub fn analyze(
-        &self,
-        request: InputValue<'_>,
-        callback: impl FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
-    ) -> Result<()> {
-        Python::attach(|py| {
-            let module = py
-                .import(intern!(py, "promptkit._analyze"))
-                .expect("failed to import promptkit._analyze");
-            let dict: &Bound<'_, PyDict> = self
-                .locals
-                .cast_bound(py)
-                .map_err(|e| Error::from_pyerr(py, e))?;
-            let obj = module
-                .getattr(intern!(py, "analyze"))
-                .expect("failed to get analyze")
-                .call(
-                    (
-                        dict,
-                        match request {
-                            InputValue::Iter(_) => {
-                                return Err(Error::UnexpectedError(
-                                    "Iterator input not supported for analyze",
-                                ));
-                            }
-                            InputValue::Cbor(v) => cbor_to_python(py, v.as_ref())
-                                .map_err(|e| Error::from_pyerr(py, e))?,
-                        },
-                    ),
-                    None,
-                )
-                .map_err(|e| Error::from_pyerr(py, e))?;
-            python_to_cbor_emit(obj, EmitType::End, callback).map_err(|e| Error::from_pyerr(py, e))
-        })
-    }
 }
 
 #[cfg(test)]

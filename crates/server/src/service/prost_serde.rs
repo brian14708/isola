@@ -32,13 +32,10 @@ pub fn parse_source(source: Option<Source>) -> Result<ExecSource, Status> {
     match source {
         Some(Source {
             source_type: Some(SourceType::ScriptInline(i)),
-        }) => Ok(ExecSource::Script {
+        }) => Ok(ExecSource {
             prelude: i.prelude,
             code: i.script,
         }),
-        Some(Source {
-            source_type: Some(SourceType::BundleInline(i)),
-        }) => Ok(ExecSource::Bundle(i.into())),
         Some(Source { source_type: None }) | None => {
             Err(Status::invalid_argument("source type is not specified"))
         }

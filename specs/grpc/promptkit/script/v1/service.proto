@@ -16,7 +16,6 @@ message ScriptInline {
 message Source {
   oneof source_type {
     ScriptInline script_inline = 1;
-    bytes bundle_inline = 2;
   }
 }
 
@@ -144,38 +143,8 @@ message Runtime {
   string name = 1;
 }
 
-message AnalyzeRequest {
-  Source source = 1;
-  ExecutionSpec spec = 2;
-  repeated string methods = 3;
-}
-
-message TypeInfo {
-  string name = 1;
-  string json_schema = 2;
-}
-
-message MethodInfo {
-  string name = 1;
-  string description = 2;
-  repeated TypeInfo argument_types = 3;
-  TypeInfo result_type = 4;
-}
-
-message AnalyzeResult {
-  repeated MethodInfo method_infos = 1;
-}
-
-message AnalyzeResponse {
-  oneof result_type {
-    AnalyzeResult analyze_result = 1;
-    Error error = 15;
-  }
-}
-
 service ScriptService {
   rpc ListRuntime(ListRuntimeRequest) returns (ListRuntimeResponse) {}
-  rpc Analyze(AnalyzeRequest) returns (AnalyzeResponse) {}
   rpc Execute(ExecuteRequest) returns (ExecuteResponse) {}
   rpc ExecuteClientStream(stream ExecuteClientStreamRequest) returns (ExecuteClientStreamResponse) {}
   rpc ExecuteServerStream(ExecuteServerStreamRequest) returns (stream ExecuteServerStreamResponse) {}
