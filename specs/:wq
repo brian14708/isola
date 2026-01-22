@@ -1,8 +1,0 @@
-io = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/io" }
-filesystem = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/filesystem" }
-clocks = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/clocks" }
-random = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/random" }
-sockets = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/sockets" }
-cli = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/cli" }
-http = { url = "https://github.com/WebAssembly/wasi/archive/v0.2.9.tar.gz", prefix = "WASI-0.2.9/proposals/http" }
-logging = "https://github.com/WebAssembly/wasi-logging/archive/d31c41d0d9eed81aabe02333d0025d42acf3fb75.tar.gz"
