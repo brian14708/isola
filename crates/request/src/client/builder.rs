@@ -10,7 +10,7 @@ impl Default for ClientBuilder {
     fn default() -> Self {
         Self {
             max_inflight_per_client: 96,
-            client_idle_timeout: std::time::Duration::from_secs(60),
+            client_idle_timeout: std::time::Duration::from_mins(1),
         }
     }
 }

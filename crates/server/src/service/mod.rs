@@ -28,7 +28,7 @@ use crate::{
 mod ipc;
 mod prost_serde;
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+const DEFAULT_TIMEOUT: Duration = Duration::from_mins(1);
 
 pub struct ScriptServer {
     state: AppState,
