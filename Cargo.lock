@@ -1782,9 +1782,9 @@ dependencies = [
 
 [[package]]
 name = "minicbor"
-version = "2.1.3"
+version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9a1119e42fbacc2bb65d860de6eb7c930562bc71d42dca026d06b0228231f77"
+checksum = "22b95c464ffa47c47d1a101546b1b5170dac5ffe72c1aab5ff13a63f69c94d76"
 
 [[package]]
 name = "minicbor-serde"
