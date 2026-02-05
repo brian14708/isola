@@ -25,7 +25,7 @@ const ScriptIndexRoute = ScriptIndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/script': typeof ScriptIndexRoute
+  '/script/': typeof ScriptIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -38,7 +38,7 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/script'
+  fullPaths: '/' | '/script/'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/script'
   id: '__root__' | '/' | '/script/'
@@ -61,7 +61,7 @@ declare module '@tanstack/react-router' {
     '/script/': {
       id: '/script/'
       path: '/script'
-      fullPath: '/script'
+      fullPath: '/script/'
       preLoaderRoute: typeof ScriptIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
