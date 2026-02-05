@@ -1,6 +1,6 @@
 interface outgoing-websocket {
-    use wasi:io/poll@0.2.9.{pollable};
-    use wasi:clocks/monotonic-clock@0.2.9.{duration};
+    use wasi:io/poll@0.2.10.{pollable};
+    use wasi:clocks/monotonic-clock@0.2.10.{duration};
 
     variant error-code {
         closed(tuple<u16, string>),
