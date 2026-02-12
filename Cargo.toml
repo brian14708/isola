@@ -81,7 +81,7 @@ wasi-preview1-component-adapter-provider = "41.0"
 wasmtime = { version = "41.0", default-features = false }
 wasmtime-wasi = "41.0"
 wasmtime-wasi-http = { version = "41.0", default-features = false }
-wit-bindgen = { version = "0.52", default-features = false }
+wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
 xshell = "0.2"
 zip = { version = "7.0", default-features = false }
