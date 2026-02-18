@@ -1,5 +1,5 @@
 [package]
-name = "promptkit-c-api"
+name = "isola-c-api"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -7,11 +7,13 @@ license.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
-promptkit = { workspace = true }
+http-body-util = { workspace = true }
+isola = { workspace = true }
 promptkit-cbor = { workspace = true }
 promptkit-request = { workspace = true }
 thiserror = { workspace = true }

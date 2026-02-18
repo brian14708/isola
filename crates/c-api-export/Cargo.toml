@@ -1,5 +1,5 @@
 [package]
-name = "promptkit-c-api-export"
+name = "isola-c-api-export"
 version.workspace = true
 edition.workspace = true
 publish = false
@@ -13,7 +13,7 @@ test = false
 doctest = false
 
 [dependencies]
-promptkit-c-api = { workspace = true }
+isola-c-api = { workspace = true }
 
 [lints]
 workspace = true

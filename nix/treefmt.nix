@@ -14,7 +14,7 @@
   settings.formatter = {
     clang-format = {
       excludes = [
-        "crates/c-api/include/promptkit.h"
+        "crates/c-api/include/isola.h"
       ];
     };
     ruff-format = {

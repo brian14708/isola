@@ -1578,6 +1578,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "isola-c-api"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bytes",
+ "cbindgen",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "isola",
+ "promptkit-cbor",
+ "promptkit-request",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "isola-c-api-export"
+version = "0.2.0"
+dependencies = [
+ "isola-c-api",
+]
+
+[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2156,31 +2183,6 @@ dependencies = [
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
-]
-
-[[package]]
-name = "promptkit-c-api"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "bytes",
- "cbindgen",
- "futures",
- "http",
- "http-body",
- "promptkit",
- "promptkit-cbor",
- "promptkit-request",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "promptkit-c-api-export"
-version = "0.2.0"
-dependencies = [
- "promptkit-c-api",
 ]
 
 [[package]]

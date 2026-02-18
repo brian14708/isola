@@ -1,11 +1,17 @@
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use promptkit::{Instance, Runtime as PromptRuntime};
+use isola::{
+    AclPolicyBuilder, Arg, CacheConfig, CallOptions, CompileConfig, Module, ModuleBuilder,
+    OutputSink, Sandbox,
+};
+use isola::{module::ArgValue, net::AclRule};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::env::Env;
@@ -29,7 +35,7 @@ macro_rules! c_try {
 
 pub struct ContextHandle {
     rt: Runtime,
-    runtime: Option<PromptRuntime<Env>>,
+    module: Option<Module<Env>>,
 }
 
 impl ContextHandle {
@@ -45,18 +51,18 @@ impl ContextHandle {
                     n.try_into()
                         .map_err(|_| Error::InvalidArgument("Invalid thread count"))?,
                 )
-                .thread_name("promptkit-runner")
+                .thread_name("isola-runner")
                 .enable_all()
                 .build()
                 .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
 
             _ => Builder::new_multi_thread()
-                .thread_name("promptkit-runner")
+                .thread_name("isola-runner")
                 .enable_all()
                 .build()
                 .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
         };
-        Ok(Box::new(Self { rt, runtime: None }))
+        Ok(Box::new(Self { rt, module: None }))
     }
 
     fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
@@ -65,7 +71,7 @@ impl ContextHandle {
     }
 
     fn load(&mut self, mut path: PathBuf) -> Result<()> {
-        if self.runtime.is_some() {
+        if self.module.is_some() {
             return Err(Error::InvalidArgument("Runtime already loaded"));
         }
         path.push("promptkit_python.wasm");
@@ -75,9 +81,13 @@ impl ContextHandle {
             .ok_or_else(|| Error::Internal("Wasm path has no parent directory".to_string()))?;
 
         self.rt.block_on(async {
-            let runtime = PromptRuntime::<Env>::builder()
-                .cache_path(parent.join("cache"))
-                .library_path({
+            let module = ModuleBuilder::new()
+                .compile_config(CompileConfig {
+                    cache: CacheConfig::Dir(parent.join("cache")),
+                    max_memory: 64 * 1024 * 1024,
+                    ..CompileConfig::default()
+                })
+                .lib_dir({
                     let mut lib_dir = std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
                         |_| {
                             let mut lib_dir = parent.to_owned();
@@ -92,40 +102,46 @@ impl ContextHandle {
                     lib_dir.push("lib");
                     lib_dir
                 })
+                .network_policy(Arc::new(
+                    AclPolicyBuilder::new()
+                        .deny_private_ranges(false)
+                        .push(AclRule::allow())
+                        .build(),
+                ))
                 .build(&path)
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to load runtime: {e}")))?;
-            self.runtime = Some(runtime);
+            self.module = Some(module);
             Ok(())
         })
     }
 
     fn new_vm(&self) -> Result<VmHandle<'_>> {
-        let Some(runtime) = &self.runtime else {
+        let Some(module) = &self.module else {
             return Err(Error::InvalidArgument("Runtime not loaded"));
         };
-        let instance = self
+        let sandbox = self
             .rt
-            .block_on(async { runtime.instantiate(None, Env::shared().await).await })
+            .block_on(async { module.instantiate(None, Env::shared().await).await })
             .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
         Ok(VmHandle {
             ctx: self,
             inner: VmInner::Pending {
-                instance,
+                sandbox,
                 callback: None,
             },
         })
     }
 }
 
-/// Creates a new promptkit context with the specified number of threads.
+/// Creates a new isola context with the specified number of threads.
 ///
 /// # Safety
 ///
 /// The caller must ensure that `out_context` is a valid pointer to an
 /// uninitialized `Box<ContextHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_context_create(
+pub unsafe extern "C" fn isola_context_create(
     nr_thread: c_int,
     out_context: *mut Box<ContextHandle>,
 ) -> ErrorCode {
@@ -134,13 +150,13 @@ pub unsafe extern "C" fn promptkit_context_create(
     ErrorCode::Ok
 }
 
-/// Initializes the promptkit context with the specified path.
+/// Initializes the isola context with the specified path.
 ///
 /// # Safety
 ///
 /// The caller must ensure that `path` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_context_initialize(
+pub unsafe extern "C" fn isola_context_initialize(
     ctx: &mut ContextHandle,
     path: *const c_char,
 ) -> ErrorCode {
@@ -153,13 +169,13 @@ pub unsafe extern "C" fn promptkit_context_initialize(
     ErrorCode::Ok
 }
 
-/// Sets a configuration value for the promptkit context.
+/// Sets a configuration value for the isola context.
 ///
 /// # Safety
 ///
 /// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_context_config_set(
+pub unsafe extern "C" fn isola_context_config_set(
     ctx: &mut ContextHandle,
     key: *const c_char,
     value: *const c_char,
@@ -171,7 +187,7 @@ pub unsafe extern "C" fn promptkit_context_config_set(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_context_destroy(_ctx: Box<ContextHandle>) {}
+pub extern "C" fn isola_context_destroy(_ctx: Box<ContextHandle>) {}
 
 #[derive(Clone)]
 pub struct Callback {
@@ -182,12 +198,12 @@ pub struct Callback {
 unsafe impl Send for Callback {}
 unsafe impl Sync for Callback {}
 
-impl promptkit::environment::OutputCallback for Callback {
-    type Error = std::io::Error;
-
-    async fn on_result(&mut self, item: Bytes) -> std::result::Result<(), Self::Error> {
-        let data = promptkit_cbor::cbor_to_json(&item)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+#[async_trait]
+impl OutputSink for Callback {
+    async fn on_partial(&mut self, item: Bytes) -> std::result::Result<(), isola::BoxError> {
+        let data = promptkit_cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        })?;
         (self.callback)(
             CallbackEvent::ResultJson,
             data.as_ptr(),
@@ -197,12 +213,13 @@ impl promptkit::environment::OutputCallback for Callback {
         Ok(())
     }
 
-    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), Self::Error> {
+    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), isola::BoxError> {
         if item.is_empty() {
             (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         } else {
-            let data = promptkit_cbor::cbor_to_json(&item)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let data = promptkit_cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
             (self.callback)(
                 CallbackEvent::EndJson,
                 data.as_ptr(),
@@ -217,11 +234,11 @@ impl promptkit::environment::OutputCallback for Callback {
 enum VmInner {
     Uninitialized,
     Pending {
-        instance: Instance<Env>,
+        sandbox: Sandbox<Env>,
         callback: Option<Callback>,
     },
     Running {
-        instance: Instance<Env>,
+        sandbox: Sandbox<Env>,
         callback: Callback,
     },
 }
@@ -248,10 +265,10 @@ impl VmHandle<'_> {
 
     fn start(&mut self) -> Result<()> {
         match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
-            VmInner::Pending { instance, callback } => {
+            VmInner::Pending { sandbox, callback } => {
                 let callback = callback.ok_or(Error::InvalidArgument("Callback not set"))?;
-                // Instance is already initialized when created
-                self.inner = VmInner::Running { instance, callback };
+                // Sandbox is already initialized when created.
+                self.inner = VmInner::Running { sandbox, callback };
                 Ok(())
             }
             _ => Err(Error::InvalidArgument("Instance not in pending state")),
@@ -260,13 +277,13 @@ impl VmHandle<'_> {
 
     fn load_script(&mut self, input: &str, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            VmInner::Running { instance, .. } => {
+            VmInner::Running { sandbox, .. } => {
                 self.ctx
                     .rt
                     .block_on(async {
                         tokio::time::timeout(
                             Duration::from_millis(timeout_in_ms),
-                            instance.eval_script(input),
+                            sandbox.eval_script(input),
                         )
                         .await
                     })
@@ -282,13 +299,13 @@ impl VmHandle<'_> {
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
         match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
             VmInner::Running {
-                mut instance,
+                mut sandbox,
                 callback,
             } => {
-                // Convert arguments to promptkit format
-                let promptkit_args: Vec<_> = args
+                // Convert arguments to isola format.
+                let isola_args: Vec<_> = args
                     .into_iter()
-                    .map(|arg| -> Result<(Option<String>, promptkit::Argument)> {
+                    .map(|arg| -> Result<Arg> {
                         match arg {
                             RawArgument::Json(name, value) => {
                                 let json_str = std::str::from_utf8(&value).map_err(|_| {
@@ -296,28 +313,40 @@ impl VmHandle<'_> {
                                 })?;
                                 let cbor = promptkit_cbor::json_to_cbor(json_str)
                                     .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
-                                Ok((name, promptkit::Argument::Cbor(cbor)))
+                                Ok(Arg {
+                                    name,
+                                    value: ArgValue::Cbor(cbor),
+                                })
                             }
                             RawArgument::JsonStream(name, receiver) => {
                                 let stream =
                                     Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-                                Ok((name, promptkit::Argument::CborStream(stream)))
+                                Ok(Arg {
+                                    name,
+                                    value: ArgValue::CborStream(stream),
+                                })
                             }
                         }
                     })
                     .collect::<Result<Vec<_>>>()?;
 
                 let func = func.to_string();
+                let timeout = Duration::from_millis(timeout_in_ms);
                 let result = self.ctx.rt.block_on(async {
                     tokio::time::timeout(
-                        Duration::from_millis(timeout_in_ms),
-                        instance.execute(&func, promptkit_args, callback.clone()),
+                        timeout,
+                        sandbox.call(
+                            &func,
+                            isola_args,
+                            callback.clone(),
+                            CallOptions::default().timeout(timeout),
+                        ),
                     )
                     .await
                 });
 
-                // Restore the instance state
-                self.inner = VmInner::Running { instance, callback };
+                // Restore the sandbox state.
+                self.inner = VmInner::Running { sandbox, callback };
 
                 result
                     .map_err(|_| Error::Internal("Operation timeout".to_string()))?
@@ -337,7 +366,7 @@ impl VmHandle<'_> {
 /// The caller must ensure that `out_vm` is a valid pointer to an
 /// uninitialized `Box<VmHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_vm_create<'a>(
+pub unsafe extern "C" fn isola_vm_create<'a>(
     ctx: &'a mut ContextHandle,
     out_vm: *mut Box<VmHandle<'a>>,
 ) -> ErrorCode {
@@ -347,7 +376,7 @@ pub unsafe extern "C" fn promptkit_vm_create<'a>(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_vm_destroy(_vm: Box<VmHandle<'_>>) {}
+pub extern "C" fn isola_vm_destroy(_vm: Box<VmHandle<'_>>) {}
 
 /// Sets a configuration value for the VM.
 ///
@@ -355,7 +384,7 @@ pub extern "C" fn promptkit_vm_destroy(_vm: Box<VmHandle<'_>>) {}
 ///
 /// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_vm_set_config(
+pub unsafe extern "C" fn isola_vm_set_config(
     vm: &mut VmHandle<'_>,
     key: *const c_char,
     value: *const c_char,
@@ -423,7 +452,7 @@ enum RawArgument {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_vm_set_callback(
+pub extern "C" fn isola_vm_set_callback(
     vm: &mut VmHandle<'_>,
     callback: extern "C" fn(CallbackEvent, *const u8, usize, *mut c_void),
     user_data: *mut c_void,
@@ -437,7 +466,7 @@ pub extern "C" fn promptkit_vm_set_callback(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_vm_start(vm: &mut VmHandle<'_>) -> ErrorCode {
+pub extern "C" fn isola_vm_start(vm: &mut VmHandle<'_>) -> ErrorCode {
     c_try!(vm.start());
     ErrorCode::Ok
 }
@@ -448,7 +477,7 @@ pub extern "C" fn promptkit_vm_start(vm: &mut VmHandle<'_>) -> ErrorCode {
 ///
 /// The caller must ensure that `input` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_vm_load_script(
+pub unsafe extern "C" fn isola_vm_load_script(
     vm: &mut VmHandle<'_>,
     input: *const c_char,
     timeout_in_ms: u64,
@@ -476,7 +505,7 @@ pub unsafe extern "C" fn promptkit_vm_load_script(
 ///
 /// This function may panic if argument names contain invalid UTF-8 sequences.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_vm_run(
+pub unsafe extern "C" fn isola_vm_run(
     vm: &mut VmHandle<'_>,
     func: *const c_char,
     args: *const Argument,
@@ -537,7 +566,7 @@ pub unsafe extern "C" fn promptkit_vm_run(
 /// The caller must ensure that `out_stream` is a valid pointer to an
 /// uninitialized `Box<StreamHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_stream_create(out_stream: *mut Box<StreamHandle>) -> ErrorCode {
+pub unsafe extern "C" fn isola_stream_create(out_stream: *mut Box<StreamHandle>) -> ErrorCode {
     let (sender, receiver) = tokio::sync::mpsc::channel(1024);
     let stream = Box::new(StreamHandle {
         sender,
@@ -558,7 +587,7 @@ pub unsafe extern "C" fn promptkit_stream_create(out_stream: *mut Box<StreamHand
 /// * `blocking` - If non-zero, blocks until space is available in the channel.
 ///   If zero, returns immediately with an error if the channel is full.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn promptkit_stream_push(
+pub unsafe extern "C" fn isola_stream_push(
     stream: &StreamHandle,
     data: *const u8,
     len: usize,
@@ -598,10 +627,10 @@ pub unsafe extern "C" fn promptkit_stream_push(
 ///
 /// After calling this function, no more data can be pushed to the stream.
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_stream_end(_stream: Box<StreamHandle>) -> ErrorCode {
+pub extern "C" fn isola_stream_end(_stream: Box<StreamHandle>) -> ErrorCode {
     // Dropping the sender will close the channel
     ErrorCode::Ok
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_stream_destroy(_stream: Box<StreamHandle>) {}
+pub extern "C" fn isola_stream_destroy(_stream: Box<StreamHandle>) {}
