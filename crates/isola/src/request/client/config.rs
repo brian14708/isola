@@ -1,4 +1,4 @@
-use crate::Error;
+use super::super::Error;
 
 const USER_AGENT: &str = "Isola/1.0";
 

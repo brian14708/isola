@@ -1544,22 +1544,35 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "bytes",
  "component-init-transform",
+ "dashmap",
+ "fastant",
  "futures",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
- "isola-cbor",
- "isola-trace",
+ "minicbor",
+ "minicbor-serde",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "pin-project-lite",
+ "rand 0.10.0",
+ "reqwest 0.13.2",
+ "serde",
+ "serde-transcode",
+ "serde_json",
  "sha2",
  "smallvec",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tokio-tungstenite",
  "tracing",
+ "tracing-opentelemetry",
  "tracing-subscriber",
  "tungstenite",
  "url",
@@ -1580,8 +1593,6 @@ dependencies = [
  "http",
  "http-body-util",
  "isola",
- "isola-cbor",
- "isola-request",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -1592,20 +1603,6 @@ name = "isola-c-api-export"
 version = "0.2.0"
 dependencies = [
  "isola-c-api",
-]
-
-[[package]]
-name = "isola-cbor"
-version = "0.2.0"
-dependencies = [
- "base64",
- "bytes",
- "minicbor",
- "minicbor-serde",
- "serde",
- "serde-transcode",
- "serde_json",
- "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1628,29 +1625,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "isola-request"
-version = "0.2.0"
-dependencies = [
- "bytes",
- "dashmap",
- "fastant",
- "futures",
- "http",
- "http-body",
- "http-body-util",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "pin-project-lite",
- "reqwest 0.13.2",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
- "tracing-opentelemetry",
- "url",
-]
-
-[[package]]
 name = "isola-server"
 version = "0.2.0"
 dependencies = [
@@ -1662,9 +1636,6 @@ dependencies = [
  "http",
  "http-body-util",
  "isola",
- "isola-cbor",
- "isola-request",
- "isola-trace",
  "metrics-exporter-prometheus",
  "mimalloc",
  "opentelemetry",
@@ -1682,16 +1653,6 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-opentelemetry",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "isola-trace"
-version = "0.2.0"
-dependencies = [
- "fastant",
- "rand 0.10.0",
- "tracing",
  "tracing-subscriber",
 ]
 

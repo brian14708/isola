@@ -1,6 +1,6 @@
-use isola_trace::{
-    collect::CollectLayer,
-    consts::{TRACE_TARGET_OTEL, TRACE_TARGET_SCRIPT},
+use isola::{
+    TRACE_TARGET_SCRIPT,
+    trace::{collect::CollectLayer, consts::TRACE_TARGET_OTEL},
 };
 use opentelemetry::{
     KeyValue, global,

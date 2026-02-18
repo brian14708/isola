@@ -175,12 +175,12 @@ impl<T: HostView> HostFutureHostcall for super::HostImpl<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "trace"))]
 mod tests {
     use std::sync::{Arc, Mutex};
 
+    use crate::trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
     use bytes::Bytes;
-    use isola_trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
     use tracing::{event, info_span, level_filters::LevelFilter};
     use tracing_subscriber::{Registry, layer::SubscriberExt};
     use wasmtime_wasi::ResourceTable;

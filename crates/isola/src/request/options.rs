@@ -1,6 +1,6 @@
 use tracing::Span;
 
-use crate::{TraceRequest, client::RequestConfig};
+use super::{TraceRequest, client::RequestConfig};
 
 pub struct RequestOptions<C = ()>
 where

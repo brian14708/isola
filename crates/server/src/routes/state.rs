@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use axum::extract::FromRef;
+use isola::request::Client;
 use tracing::level_filters::LevelFilter;
 
 use super::{VmEnv, VmManager};
@@ -14,7 +15,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let base_env = VmEnv {
-            client: Arc::new(isola_request::Client::new()),
+            client: Arc::new(Client::new()),
             log_level: LevelFilter::OFF,
         };
         Ok(Self {

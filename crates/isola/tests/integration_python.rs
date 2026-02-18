@@ -1,3 +1,5 @@
+#![cfg(all(feature = "cbor", feature = "trace"))]
+
 use std::{
     env,
     path::{Path, PathBuf},
@@ -8,14 +10,14 @@ use std::{
 use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
+use isola::cbor::{from_cbor, json_to_cbor};
 use isola::module::ArgValue;
+use isola::trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
 use isola::{
     Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpRequest, HttpResponse,
     Module, ModuleBuilder, OutputSink, Sandbox, TRACE_TARGET_SCRIPT, WebsocketRequest,
     WebsocketResponse,
 };
-use isola_cbor::{from_cbor, json_to_cbor};
-use isola_trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
 use tracing::{info_span, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt};
 

@@ -12,7 +12,7 @@ let
   rustToolchainFor = (p: p.rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml);
   rustToolchain = rustToolchainFor pkgs;
   craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchainFor;
-  src = lib.fileset.toSource {
+  baseSrc = lib.fileset.toSource {
     root = ../../..;
     fileset = lib.fileset.unions [
       ../../../wit
@@ -22,6 +22,34 @@ let
       (craneLib.fileset.commonCargoSources ../../../crates/python)
     ];
   };
+  src = pkgs.runCommand "isola-python-src" { } ''
+        mkdir -p "$out"
+        cp -r --no-preserve=mode ${baseSrc}/. "$out"
+
+        make_dummy_crate() {
+          local crate_dir="$1"
+          local crate_name="$2"
+
+          mkdir -p "$out/$crate_dir/src"
+          cat > "$out/$crate_dir/Cargo.toml" <<EOF
+    [package]
+    name = "$crate_name"
+    version = "0.0.0"
+    edition = "2024"
+
+    [lib]
+    path = "src/lib.rs"
+    EOF
+          cat > "$out/$crate_dir/src/lib.rs" <<EOF
+    pub fn stub() {}
+    EOF
+        }
+
+        make_dummy_crate "crates/c-api" "isola-c-api"
+        make_dummy_crate "crates/c-api-export" "isola-c-api-export"
+        make_dummy_crate "crates/isola" "isola"
+        make_dummy_crate "crates/server" "isola-server"
+  '';
 in
 craneLib.buildPackage {
   pname = "isola-python";
