@@ -13,15 +13,16 @@ endif()
 set(PROMPTKIT_TARGET_DIR
     ${CMAKE_CURRENT_SOURCE_DIR}/../../target/${PROMPTKIT_BUILD_TYPE})
 
-set(PROMPTKIT_SHARED_LIB ${PROMPTKIT_TARGET_DIR}/libpromptkit.so)
+set(PROMPTKIT_SHARED_LIB
+    ${PROMPTKIT_TARGET_DIR}/${CMAKE_SHARED_LIBRARY_PREFIX}promptkit${CMAKE_SHARED_LIBRARY_SUFFIX})
 
 ExternalProject_Add(
-  promptkit-c-api
+  isola-c-api
   DOWNLOAD_COMMAND ""
   CONFIGURE_COMMAND ""
   INSTALL_COMMAND "${PROMPTKIT_INSTALL_COMMAND}"
   BUILD_COMMAND
-    cargo build --package promptkit-c-api-export ${PROMPTKIT_BUILD_TYPE_FLAG}
+    cargo build --package isola-c-api-export ${PROMPTKIT_BUILD_TYPE_FLAG}
     ${PROMPTKIT_FEATURES} ${PROMPTKIT_USER_CARGO_BUILD_OPTIONS}
   USES_TERMINAL_BUILD TRUE
   BINARY_DIR ${CMAKE_CURRENT_SOURCE_DIR}
@@ -29,7 +30,7 @@ ExternalProject_Add(
   BUILD_BYPRODUCTS ${PROMPTKIT_SHARED_LIB})
 
 add_library(promptkit INTERFACE)
-add_dependencies(promptkit promptkit-c-api)
+add_dependencies(promptkit isola-c-api)
 target_include_directories(promptkit
                            INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(promptkit INTERFACE ${PROMPTKIT_SHARED_LIB})

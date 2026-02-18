@@ -24,12 +24,12 @@ let
   };
 in
 craneLib.buildPackage {
-  pname = "promptkit-c-api";
+  pname = "isola-c-api";
   inherit src;
   strictDeps = true;
 
   CARGO_PROFILE = "release-lto";
-  cargoExtraArgs = "-p promptkit-c-api-export";
+  cargoExtraArgs = "-p isola-c-api-export";
   installPhase = ''
     runHook preInstall
 

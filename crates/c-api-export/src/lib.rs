@@ -1,1 +1,1 @@
-pub use promptkit_c_api::*;
+pub use isola_c_api::*;

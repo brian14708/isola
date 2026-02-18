@@ -1,7 +1,12 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use bytes::Bytes;
 use futures::TryStreamExt;
-use promptkit::{BoxedStream, Environment, WebsocketMessage};
+use http_body_util::Full;
+use isola::{
+    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, WebsocketRequest, WebsocketResponse,
+};
 use promptkit_request::{Client, RequestOptions};
 
 #[derive(Clone)]
@@ -26,51 +31,45 @@ impl Env {
     }
 }
 
-impl Environment for Env {
-    type Error = std::io::Error;
-    type Callback = crate::Callback;
-
-    async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
+#[async_trait]
+impl Host for Env {
+    async fn hostcall(&self, call_type: &str, payload: Bytes) -> Result<Bytes, BoxError> {
         match call_type {
             "echo" => {
                 // Simple echo - return the payload as-is
-                Ok(payload.to_vec())
+                Ok(payload)
             }
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::Unsupported,
-                "unknown hostcall type",
-            )),
+            _ => Err(
+                std::io::Error::new(std::io::ErrorKind::Unsupported, "unknown hostcall type")
+                    .into(),
+            ),
         }
     }
 
-    async fn http_request<B>(
-        &self,
-        request: http::Request<B>,
-    ) -> std::result::Result<
-        http::Response<BoxedStream<http_body::Frame<bytes::Bytes>, Self::Error>>,
-        Self::Error,
-    >
-    where
-        B: http_body::Body + Send + 'static,
-        B::Error: std::error::Error + Send + Sync,
-        B::Data: Send,
-    {
+    async fn http_request(&self, req: HttpRequest) -> std::result::Result<HttpResponse, BoxError> {
         let client = self.client.clone();
+        let mut request = http::Request::new(Full::new(req.body.unwrap_or_default()));
+        *request.method_mut() = req.method;
+        *request.uri_mut() = req.uri;
+        *request.headers_mut() = req.headers;
+
         let http = client.http(request, RequestOptions::default());
-        let resp = http.await.map_err(std::io::Error::other)?;
-        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(std::io::Error::other)) }))
+        let resp = http.await.map_err(|e| -> BoxError { Box::new(e) })?;
+        Ok(
+            resp.map(|b| -> HttpBodyStream {
+                Box::pin(b.map_err(|e| -> BoxError { Box::new(e) }))
+            }),
+        )
     }
 
-    async fn websocket_connect<B>(
+    async fn websocket_connect(
         &self,
-        _request: http::Request<B>,
-    ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
-    where
-        B: futures::Stream<Item = WebsocketMessage> + Sync + Send + 'static,
-    {
+        _req: WebsocketRequest,
+    ) -> std::result::Result<WebsocketResponse, BoxError> {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "websocket not implemented in c-api",
-        ))
+        )
+        .into())
     }
 }

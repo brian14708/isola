@@ -9,7 +9,7 @@ thread_local! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn promptkit_last_error() -> *const c_char {
+pub extern "C" fn isola_last_error() -> *const c_char {
     LAST_ERROR.with(|slot| {
         slot.borrow_mut()
             .as_mut()

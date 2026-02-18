@@ -7,7 +7,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../crates/c-api
 
 include(FetchContent)
 FetchContent_Declare(
-  Catch2 URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.8.1.tar.gz)
+  Catch2 URL https://github.com/catchorg/Catch2/archive/refs/tags/v3.13.0.tar.gz)
 FetchContent_MakeAvailable(Catch2)
 
 include(CTest)
@@ -22,4 +22,4 @@ target_link_options(tests PRIVATE ${COMMON_FLAGS})
 target_link_libraries(tests PRIVATE promptkit Catch2::Catch2WithMain)
 catch_discover_tests(
   tests PROPERTIES ENVIRONMENT
-  PROMPTKIT_RUNTIME_PATH=${CMAKE_CURRENT_SOURCE_DIR}/../../target)
+  ISOLA_RUNTIME_PATH=${CMAKE_CURRENT_SOURCE_DIR}/../../target)
