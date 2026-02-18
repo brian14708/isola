@@ -5,23 +5,64 @@ edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
+[features]
+default = []
+cbor = [
+    "dep:base64",
+    "dep:minicbor",
+    "dep:minicbor-serde",
+    "dep:serde",
+    "dep:serde-transcode",
+    "dep:serde_json",
+]
+trace = ["dep:fastant", "dep:rand", "dep:tracing-subscriber"]
+request = [
+    "dep:dashmap",
+    "dep:fastant",
+    "dep:opentelemetry",
+    "dep:opentelemetry-semantic-conventions",
+    "dep:pin-project-lite",
+    "dep:reqwest",
+    "dep:tokio-tungstenite",
+    "dep:tracing-opentelemetry",
+]
+request-gzip = ["request", "reqwest/gzip"]
+request-tls = ["request", "reqwest/rustls"]
+
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+base64 = { workspace = true, optional = true }
 bytes = { workspace = true }
 component-init-transform = { workspace = true }
+dashmap = { workspace = true, optional = true }
+fastant = { workspace = true, features = ["atomic"], optional = true }
 futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
-isola-trace = { workspace = true }
+minicbor = { workspace = true, optional = true }
+minicbor-serde = { workspace = true, features = ["alloc"], optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-semantic-conventions = { workspace = true, features = [
+    "semconv_experimental",
+], optional = true }
+pin-project-lite = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+reqwest = { workspace = true, features = ["http2", "stream", "socks"], optional = true }
+serde = { workspace = true, optional = true }
+serde-transcode = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true }
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time", "macros", "rt"] }
 tokio-stream = { workspace = true }
+tokio-tungstenite = { workspace = true, features = ["handshake"], optional = true }
 tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 tungstenite = { workspace = true }
 url = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
@@ -29,9 +70,7 @@ wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
-isola-cbor = { workspace = true }
 tempfile = { workspace = true }
-tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

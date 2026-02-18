@@ -2,8 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::StreamExt;
-use isola::TRACE_TARGET_SCRIPT;
-use isola_trace::collect::CollectSpanExt;
+use isola::{TRACE_TARGET_SCRIPT, cbor, trace::collect::CollectSpanExt};
 use rmcp::schemars;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -114,14 +113,14 @@ impl Sandbox {
             while let Some(item) = stream.next().await {
                 match item {
                     StreamItem::Data(data) => {
-                        let json_str = isola_cbor::cbor_to_json(&data)
+                        let json_str = cbor::cbor_to_json(&data)
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                         let value: serde_json::Value = serde_json::from_str(&json_str)
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                         results.push(value);
                     }
                     StreamItem::End(Some(data)) => {
-                        let json_str = isola_cbor::cbor_to_json(&data)
+                        let json_str = cbor::cbor_to_json(&data)
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                         let value: serde_json::Value = serde_json::from_str(&json_str)
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;

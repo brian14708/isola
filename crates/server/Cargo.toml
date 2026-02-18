@@ -13,10 +13,7 @@ bytes = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
 http-body-util = { workspace = true }
-isola = { workspace = true }
-isola-cbor = { workspace = true }
-isola-request = { workspace = true }
-isola-trace = { workspace = true }
+isola = { workspace = true, features = ["cbor", "request", "request-gzip", "request-tls", "trace"] }
 metrics-exporter-prometheus = { workspace = true }
 mimalloc = { workspace = true }
 opentelemetry = { workspace = true }

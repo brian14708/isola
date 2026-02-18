@@ -8,15 +8,16 @@ use http_body_util::Full;
 use isola::{
     BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink, WebsocketBodyStream,
     WebsocketRequest, WebsocketResponse,
+    cbor::{from_cbor, to_cbor},
+    request::{Client, RequestContext, RequestOptions, TraceRequest},
+    request_span,
 };
-use isola_cbor::{from_cbor, to_cbor};
-use isola_request::{RequestContext, RequestOptions, TraceRequest, request_span};
 use tokio::sync::mpsc;
 use tracing::{field::Empty, level_filters::LevelFilter};
 
 #[derive(Clone)]
 pub struct VmEnv {
-    pub client: Arc<isola_request::Client>,
+    pub client: Arc<Client>,
     pub log_level: LevelFilter,
 }
 

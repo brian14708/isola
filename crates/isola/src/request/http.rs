@@ -14,7 +14,7 @@ use pin_project_lite::pin_project;
 use tokio_tungstenite::tungstenite;
 use tracing::Span;
 
-use crate::{Error, WebsocketMessage};
+use super::{Error, WebsocketMessage};
 
 pub async fn http_impl<B>(
     client: reqwest::Client,

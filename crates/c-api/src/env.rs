@@ -6,8 +6,8 @@ use futures::TryStreamExt;
 use http_body_util::Full;
 use isola::{
     BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, WebsocketRequest, WebsocketResponse,
+    request::{Client, RequestOptions},
 };
-use isola_request::{Client, RequestOptions};
 
 #[derive(Clone)]
 pub struct Env {

@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU64;
 
-use isola_trace::collect::{Collector, EventRecord, FieldFilter, SpanRecord};
+use isola::trace::collect::{Collector, EventRecord, FieldFilter, SpanRecord};
 use serde::Serialize;
 use tokio::sync::mpsc;
 

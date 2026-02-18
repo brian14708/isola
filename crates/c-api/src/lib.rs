@@ -201,7 +201,7 @@ unsafe impl Sync for Callback {}
 #[async_trait]
 impl OutputSink for Callback {
     async fn on_partial(&mut self, item: Bytes) -> std::result::Result<(), isola::BoxError> {
-        let data = isola_cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+        let data = isola::cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
         (self.callback)(
@@ -217,7 +217,7 @@ impl OutputSink for Callback {
         if item.is_empty() {
             (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         } else {
-            let data = isola_cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+            let data = isola::cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
                 Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
             (self.callback)(
@@ -311,7 +311,7 @@ impl VmHandle<'_> {
                                 let json_str = std::str::from_utf8(&value).map_err(|_| {
                                     Error::InvalidArgument("Invalid UTF-8 in JSON argument")
                                 })?;
-                                let cbor = isola_cbor::json_to_cbor(json_str)
+                                let cbor = isola::cbor::json_to_cbor(json_str)
                                     .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
                                 Ok(Arg {
                                     name,

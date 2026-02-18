@@ -1,6 +1,13 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = [
+    "crates/c-api",
+    "crates/c-api-export",
+    "crates/isola",
+    "crates/python",
+    "crates/server",
+    "crates/xtask",
+]
 
 [workspace.package]
 version = "0.2.0"
@@ -33,9 +40,6 @@ http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
-isola-cbor = { path = "crates/cbor" }
-isola-request = { path = "crates/request" }
-isola-trace = { path = "crates/trace" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"

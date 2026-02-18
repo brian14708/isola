@@ -9,8 +9,7 @@ use axum::{
 };
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use isola::TRACE_TARGET_SCRIPT;
-use isola_trace::collect::CollectSpanExt;
+use isola::{TRACE_TARGET_SCRIPT, cbor, trace::collect::CollectSpanExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -419,12 +418,12 @@ fn extract_stream_marker(value: &serde_json::Value) -> Option<u32> {
 fn json_to_cbor_arg(value: &serde_json::Value) -> Result<Bytes, HttpApiError> {
     let json_str = serde_json::to_string(value)
         .map_err(|e| HttpApiError::invalid_request(format!("Failed to serialize arg: {e}")))?;
-    isola_cbor::json_to_cbor(&json_str)
+    cbor::json_to_cbor(&json_str)
         .map_err(|e| HttpApiError::invalid_request(format!("Failed to convert to CBOR: {e}")))
 }
 
 fn cbor_to_json(data: &Bytes) -> Result<serde_json::Value, HttpApiError> {
-    let json_str = isola_cbor::cbor_to_json(data)
+    let json_str = cbor::cbor_to_json(data)
         .map_err(|e| HttpApiError::internal(format!("Failed to convert CBOR to JSON: {e}")))?;
     serde_json::from_str(&json_str)
         .map_err(|e| HttpApiError::internal(format!("Failed to parse JSON: {e}")))

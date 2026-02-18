@@ -7,9 +7,9 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tracing::{Instrument, Span};
 
-use crate::{
-    Error, RequestOptions, WebsocketMessage, client::pool::ClientPool, options::RequestContext,
-    trace::TraceRequest,
+use self::pool::ClientPool;
+use super::{
+    Error, RequestOptions, WebsocketMessage, options::RequestContext, trace::TraceRequest,
 };
 
 mod builder;
@@ -78,7 +78,7 @@ impl Client {
         C: RequestContext,
     {
         self.with_http_client(request, options, |client, request| {
-            crate::http::http_impl(client, request)
+            super::http::http_impl(client, request)
         })
         .await
     }
@@ -118,7 +118,7 @@ impl Client {
                 HeaderValue::try_from(generate_key()).unwrap(),
             );
 
-            crate::http::websocket_impl(client, request)
+            super::http::websocket_impl(client, request)
         })
         .await
     }

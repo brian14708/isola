@@ -6,7 +6,7 @@ pub enum TraceRequest<'a> {
 macro_rules! request_span {
     ($request:ident, $($field:tt)*) => {
         match $request {
-            $crate::TraceRequest::Http(request) => {
+            $crate::request::TraceRequest::Http(request) => {
                 ::tracing::span!(
                     $($field)*
                     otel.kind = "client",
