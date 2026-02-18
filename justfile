@@ -3,8 +3,11 @@ default: lint test
 run: build
     cargo run --release -p promptkit-server
 
-integration: init-py
+e2e: init-py
     uv run --directory tests/rpc pytest
+
+integration:
+    cargo test --release -p isola --test integration_python -- --ignored --test-threads=1
 
 generate: init-ui
     cd ui && pnpm run generate
