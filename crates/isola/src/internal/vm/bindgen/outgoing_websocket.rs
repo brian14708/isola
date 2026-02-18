@@ -1,6 +1,6 @@
+use crate::TRACE_TARGET_SCRIPT;
 use bytes::Bytes;
 use futures::{FutureExt, Stream, StreamExt};
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use std::pin::Pin;
 use tokio::sync::mpsc::error::TrySendError;
 use tracing::{Instrument, event};

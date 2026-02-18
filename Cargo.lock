@@ -1560,8 +1560,8 @@ dependencies = [
  "http-body",
  "http-body-util",
  "hyper",
+ "isola-trace",
  "promptkit-cbor",
- "promptkit-trace",
  "sha2",
  "smallvec",
  "tempfile",
@@ -1590,8 +1590,8 @@ dependencies = [
  "http-body",
  "http-body-util",
  "isola",
+ "isola-request",
  "promptkit-cbor",
- "promptkit-request",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -1602,6 +1602,39 @@ name = "isola-c-api-export"
 version = "0.2.0"
 dependencies = [
  "isola-c-api",
+]
+
+[[package]]
+name = "isola-request"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "dashmap",
+ "fastant",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "pin-project-lite",
+ "reqwest 0.13.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+ "tracing-opentelemetry",
+ "url",
+]
+
+[[package]]
+name = "isola-trace"
+version = "0.2.0"
+dependencies = [
+ "fastant",
+ "rand 0.10.0",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

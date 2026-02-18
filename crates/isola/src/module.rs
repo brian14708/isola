@@ -1,3 +1,4 @@
+use crate::TRACE_TARGET_SCRIPT;
 use crate::{
     BoxError, Host, NetworkPolicy, OutputSink, Result,
     error::Error,
@@ -11,7 +12,6 @@ use crate::{
 use bytes::Bytes;
 use component_init_transform::Invoker;
 use futures::{FutureExt, Stream};
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use std::sync::Arc;

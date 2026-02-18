@@ -5,6 +5,8 @@ pub mod host;
 pub mod module;
 pub mod net;
 
+pub const TRACE_TARGET_SCRIPT: &str = "isola::script";
+
 pub use error::{Error, GuestErrorCode, Result};
 pub use host::{
     BoxError, BoxedStream, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink,

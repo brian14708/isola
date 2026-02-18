@@ -1,4 +1,4 @@
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
+use crate::TRACE_TARGET_SCRIPT;
 use tracing::event;
 use wasmtime::component::HasData;
 

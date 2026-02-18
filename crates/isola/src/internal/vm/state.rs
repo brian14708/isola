@@ -1,8 +1,8 @@
 use std::{path::Path, sync::Arc};
 
+use crate::TRACE_TARGET_SCRIPT;
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use tokio::time::timeout;
 use tracing::{Instrument, event};
 use url::Url;

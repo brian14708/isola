@@ -15,7 +15,7 @@ http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
-promptkit-trace = { workspace = true }
+isola-trace = { workspace = true }
 sha2 = { workspace = true }
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror = { workspace = true }

@@ -11,13 +11,11 @@ use bytes::Bytes;
 use isola::module::ArgValue;
 use isola::{
     Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpRequest, HttpResponse,
-    Module, ModuleBuilder, OutputSink, Sandbox, WebsocketRequest, WebsocketResponse,
+    Module, ModuleBuilder, OutputSink, Sandbox, TRACE_TARGET_SCRIPT, WebsocketRequest,
+    WebsocketResponse,
 };
+use isola_trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
 use promptkit_cbor::{from_cbor, json_to_cbor};
-use promptkit_trace::{
-    collect::{Collector, CollectorLayer, CollectorSpanExt, EventRecord, SpanRecord},
-    consts::TRACE_TARGET_SCRIPT,
-};
 use tracing::{info_span, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt};
 
@@ -86,11 +84,11 @@ impl TraceCollector {
 }
 
 impl Collector for TraceCollector {
-    fn collect_span_start(&self, _span: SpanRecord) {}
+    fn on_span_start(&self, _span: SpanRecord) {}
 
-    fn collect_span_end(&self, _span: SpanRecord) {}
+    fn on_span_end(&self, _span: SpanRecord) {}
 
-    fn collect_event(&self, event: EventRecord) {
+    fn on_event(&self, event: EventRecord) {
         self.events
             .lock()
             .expect("trace collector event lock poisoned")
@@ -245,7 +243,7 @@ fn cbor_arg(name: Option<&str>, json: &str) -> Result<Arg> {
 #[ignore = "requires integration wasm bundle"]
 async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
     let collector = TraceCollector::default();
-    let subscriber = Registry::default().with(CollectorLayer::default());
+    let subscriber = Registry::default().with(CollectLayer::default());
     let _guard = tracing::subscriber::set_default(subscriber);
 
     let root = info_span!("integration_python_eval_and_call_roundtrip");
