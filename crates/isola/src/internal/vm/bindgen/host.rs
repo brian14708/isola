@@ -180,28 +180,25 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use bytes::Bytes;
-    use promptkit_trace::{
-        collect::{Collector, CollectorLayer, CollectorSpanExt, EventRecord, SpanRecord},
-        consts::TRACE_TARGET_SCRIPT,
-    };
+    use isola_trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
     use tracing::{event, info_span, level_filters::LevelFilter};
     use tracing_subscriber::{Registry, layer::SubscriberExt};
     use wasmtime_wasi::ResourceTable;
 
     use super::{Host as WitHost, HostFutureHostcall as WitHostFutureHostcall, *};
-    use crate::{BoxError, Host as EmbedderHost};
+    use crate::{BoxError, Host as EmbedderHost, TRACE_TARGET_SCRIPT};
 
     #[derive(Clone)]
     struct VecCollector(Arc<Mutex<(Vec<SpanRecord>, Vec<EventRecord>)>>);
 
     impl Collector for VecCollector {
-        fn collect_span_start(&self, v: SpanRecord) {
+        fn on_span_start(&self, v: SpanRecord) {
             self.0.lock().expect("lock poisoned").0.push(v);
         }
 
-        fn collect_span_end(&self, _v: SpanRecord) {}
+        fn on_span_end(&self, _v: SpanRecord) {}
 
-        fn collect_event(&self, v: EventRecord) {
+        fn on_event(&self, v: EventRecord) {
             self.0.lock().expect("lock poisoned").1.push(v);
         }
     }
@@ -272,7 +269,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn hostcall_spawn_preserves_current_span() {
         let collector = VecCollector(Arc::new(Mutex::new((Vec::new(), Vec::new()))));
-        let subscriber = Registry::default().with(CollectorLayer::default());
+        let subscriber = Registry::default().with(CollectLayer::default());
         let _guard = tracing::subscriber::set_default(subscriber);
 
         let root = info_span!("root");

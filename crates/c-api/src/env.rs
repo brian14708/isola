@@ -7,11 +7,11 @@ use http_body_util::Full;
 use isola::{
     BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, WebsocketRequest, WebsocketResponse,
 };
-use promptkit_request::{Client, RequestOptions};
+use isola_request::{Client, RequestOptions};
 
 #[derive(Clone)]
 pub struct Env {
-    pub client: Arc<promptkit_request::Client>,
+    pub client: Arc<Client>,
 }
 
 impl Default for Env {
@@ -53,7 +53,7 @@ impl Host for Env {
         *request.uri_mut() = req.uri;
         *request.headers_mut() = req.headers;
 
-        let http = client.http(request, RequestOptions::default());
+        let http = client.send_http(request, RequestOptions::default());
         let resp = http.await.map_err(|e| -> BoxError { Box::new(e) })?;
         Ok(
             resp.map(|b| -> HttpBodyStream {

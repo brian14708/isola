@@ -14,8 +14,8 @@ http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 isola = { workspace = true }
+isola-request = { workspace = true }
 promptkit-cbor = { workspace = true }
-promptkit-request = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { workspace = true }

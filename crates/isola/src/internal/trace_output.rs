@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
+use crate::TRACE_TARGET_SCRIPT;
 use bytes::Bytes;
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
 use smallvec::SmallVec;
 use tokio::io::AsyncWrite;
 use tracing::event;
