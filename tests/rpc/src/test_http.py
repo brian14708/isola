@@ -4,11 +4,11 @@ import inspect
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from betterproto.lib.google.protobuf import NullValue, Value
-from stub.promptkit.script import v1 as pb
 
 if TYPE_CHECKING:
     import pathlib
+
+    from http_client import HttpClient
 
 all_tests = [
     "simple",
@@ -21,18 +21,16 @@ all_tests = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", all_tests)
 async def test_httpbin(
-    httpbin, client: pb.ScriptServiceStub, datadir: pathlib.Path, method: str
+    httpbin, client: HttpClient, datadir: pathlib.Path, method: str
 ) -> None:
     script_text = (datadir / "http.py").read_text()
-    request = pb.ExecuteRequest(
-        source=pb.Source(script_inline=pb.ScriptInline(script_text)),
-        spec=pb.ExecutionSpec(
-            method=method,
-            arguments=[pb.Argument(value=Value(string_value=httpbin.url))],
-        ),
+    response = await client.execute(
+        script=script_text,
+        function=method,
+        args=[httpbin.url],
     )
-    response = await client.execute(request)
-    assert response.result.value.null_value == NullValue._
+    assert not response.result.is_error
+    assert response.result.value is None
 
 
 @pytest.mark.asyncio

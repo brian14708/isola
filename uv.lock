@@ -927,6 +927,7 @@ source = { editable = "tests/rpc" }
 [package.dev-dependencies]
 dev = [
     { name = "betterproto", extra = ["compiler"] },
+    { name = "httpx" },
     { name = "mcp" },
     { name = "promptkit-py" },
     { name = "pytest" },
@@ -940,6 +941,7 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "betterproto", extras = ["compiler"], specifier = ">=2.0.0b7" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "mcp", specifier = ">=1.21.2" },
     { name = "promptkit-py", editable = "crates/python/bundled" },
     { name = "pytest", specifier = ">=8.3.5" },

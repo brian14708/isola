@@ -7,6 +7,7 @@ dependencies = []
 [dependency-groups]
 dev = [
     "betterproto[compiler]>=2.0.0b7",
+    "httpx>=0.28.1",
     "mcp>=1.21.2",
     "promptkit-py",
     "pytest>=8.3.5",

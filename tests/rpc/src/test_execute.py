@@ -1,104 +1,64 @@
 from __future__ import annotations
 
-import datetime
 from typing import TYPE_CHECKING
 
 import pytest
-from betterproto.lib.google.protobuf import Value
-from stub.promptkit.script import v1 as pb
 
 if TYPE_CHECKING:
     import pathlib
 
-
-@pytest.mark.asyncio
-async def test_simple(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> None:
-    response = await client.execute(
-        pb.ExecuteRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            spec=pb.ExecutionSpec(
-                method="add",
-                arguments=[
-                    pb.Argument(value=Value(number_value=2)),
-                    pb.Argument(value=Value(number_value=3)),
-                ],
-            ),
-        )
-    )
-    assert response.result.value.number_value == (2 + 3)
+    from http_client import HttpClient
 
 
 @pytest.mark.asyncio
-async def test_named_argument(
-    client: pb.ScriptServiceStub, datadir: pathlib.Path
-) -> None:
+async def test_simple(client: HttpClient, datadir: pathlib.Path) -> None:
     response = await client.execute(
-        pb.ExecuteRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            spec=pb.ExecutionSpec(
-                method="add",
-                arguments=[
-                    pb.Argument(name="c", value=Value(number_value=5)),
-                    pb.Argument(value=Value(number_value=2)),
-                    pb.Argument(value=Value(number_value=3)),
-                ],
-            ),
-        )
+        script=(datadir / "basic.py").read_text(),
+        function="add",
+        args=[2, 3],
     )
-    assert response.result.value.number_value == (2 + 3 * 5)
+    assert response.result.value == (2 + 3)
 
 
 @pytest.mark.asyncio
-async def test_async(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> None:
+async def test_named_argument(client: HttpClient, datadir: pathlib.Path) -> None:
     response = await client.execute(
-        pb.ExecuteRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            spec=pb.ExecutionSpec(
-                method="async_add",
-                arguments=[
-                    pb.Argument(value=Value(number_value=2)),
-                    pb.Argument(value=Value(number_value=3)),
-                ],
-            ),
-        )
+        script=(datadir / "basic.py").read_text(),
+        function="add",
+        args=[2, 3],
+        kwargs={"c": 5},
     )
-    assert response.result.value.number_value == (2 + 3)
+    assert response.result.value == (2 + 3 * 5)
 
 
 @pytest.mark.asyncio
-async def test_error(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> None:
+async def test_async(client: HttpClient, datadir: pathlib.Path) -> None:
     response = await client.execute(
-        pb.ExecuteRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            spec=pb.ExecutionSpec(
-                method="raise_exception",
-                arguments=[pb.Argument(value=Value(string_value="Hello"))],
-            ),
-        )
+        script=(datadir / "basic.py").read_text(),
+        function="async_add",
+        args=[2, 3],
     )
-    assert response.result.error.code == pb.ErrorCode.GUEST_ABORTED
-    assert "Hello" in response.result.error.message
+    assert response.result.value == (2 + 3)
 
 
 @pytest.mark.asyncio
-async def test_timeout(client: pb.ScriptServiceStub, datadir: pathlib.Path) -> None:
+async def test_error(client: HttpClient, datadir: pathlib.Path) -> None:
     response = await client.execute(
-        pb.ExecuteRequest(
-            source=pb.Source(
-                script_inline=pb.ScriptInline((datadir / "basic.py").read_text()),
-            ),
-            spec=pb.ExecutionSpec(
-                method="stall",
-                timeout=datetime.timedelta(milliseconds=1),
-            ),
-        )
+        script=(datadir / "basic.py").read_text(),
+        function="raise_exception",
+        args=["Hello"],
     )
-    assert response.result.error.code == pb.ErrorCode.DEADLINE_EXCEEDED
+    assert response.result.is_error
+    assert response.result.error_code == "SCRIPT_ERROR"
+    assert "Hello" in (response.result.error_message or "")
+
+
+@pytest.mark.asyncio
+async def test_timeout(client: HttpClient, datadir: pathlib.Path) -> None:
+    response = await client.execute(
+        script=(datadir / "basic.py").read_text(),
+        function="stall",
+        timeout_ms=1,
+    )
+    assert response.result.is_error
+    assert response.result.error_code == "TIMEOUT"
