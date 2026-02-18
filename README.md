@@ -1,8 +1,8 @@
-# PromptKit
+# Isola
 
 ## Build from source
 
-Execute the following commands to build and launch PromptKit:
+Execute the following commands to build and launch Isola:
 
 ```
 nix develop

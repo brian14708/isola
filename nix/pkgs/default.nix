@@ -10,7 +10,7 @@ let
 in
 {
   inherit (packages) python;
-  default = packages.promptkit;
+  default = packages.isola;
   lib = packages.library;
   oci = packages.container;
 }

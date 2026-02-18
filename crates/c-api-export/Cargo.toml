@@ -6,7 +6,7 @@ publish = false
 license.workspace = true
 
 [lib]
-name = "promptkit"
+name = "isola"
 crate-type = ["cdylib"]
 doc = false
 test = false

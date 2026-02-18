@@ -5,7 +5,7 @@ use tracing_subscriber::{Registry, registry::LookupSpan};
 
 use super::{collector::Collector, tracer::Tracer};
 
-pub trait CollectorSpanExt {
+pub trait CollectSpanExt {
     #[must_use]
     fn collect_into(
         &self,
@@ -15,7 +15,7 @@ pub trait CollectorSpanExt {
     ) -> Option<()>;
 }
 
-impl CollectorSpanExt for tracing::Span {
+impl CollectSpanExt for tracing::Span {
     fn collect_into(
         &self,
         target: &'static str,
@@ -52,23 +52,23 @@ mod tests {
     use super::{
         super::{
             collector::{EventRecord, SpanRecord},
-            layer::CollectorLayer,
+            layer::CollectLayer,
         },
         *,
     };
 
     fn with_layer<T>(f: impl FnOnce() -> T) -> T {
-        tracing::subscriber::with_default(Registry::default().with(CollectorLayer::default()), f)
+        tracing::subscriber::with_default(Registry::default().with(CollectLayer::default()), f)
     }
 
     #[derive(Clone)]
     struct VecCollector(Arc<Mutex<(Vec<SpanRecord>, Vec<EventRecord>)>>);
     impl Collector for VecCollector {
-        fn collect_span_start(&self, v: SpanRecord) {
+        fn on_span_start(&self, v: SpanRecord) {
             self.0.lock().unwrap().0.push(v);
         }
-        fn collect_span_end(&self, _v: SpanRecord) {}
-        fn collect_event(&self, v: EventRecord) {
+        fn on_span_end(&self, _v: SpanRecord) {}
+        fn on_event(&self, v: EventRecord) {
             self.0.lock().unwrap().1.push(v);
         }
     }

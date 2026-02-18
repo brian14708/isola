@@ -5,8 +5,7 @@
     ":semanticCommitTypeAll(chore)"
   ],
   "ignorePaths": [
-    "crates/python/requirements.txt",
-    "ui/"
+    "crates/python/requirements.txt"
   ],
   "packageRules": [
     {

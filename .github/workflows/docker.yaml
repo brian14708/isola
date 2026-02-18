@@ -30,7 +30,7 @@ jobs:
       - name: Setup Cachix
         uses: cachix/cachix-action@v16
         with:
-          name: promptkit
+          name: isola
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - name: Build container image
         run: |
@@ -44,5 +44,5 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Tag and push image
         run: |
-          docker tag promptkit:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker tag isola:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest

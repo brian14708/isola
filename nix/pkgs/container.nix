@@ -1,10 +1,10 @@
 {
   lib,
   dockerTools,
-  promptkit,
+  isola,
 }:
 dockerTools.streamLayeredImage {
-  name = "promptkit";
+  name = "isola";
   tag = "latest";
 
   contents = [
@@ -12,12 +12,12 @@ dockerTools.streamLayeredImage {
   ];
 
   config = {
-    Cmd = [ (lib.getExe promptkit) ];
+    Cmd = [ (lib.getExe isola) ];
     ExposedPorts = {
       "3000/tcp" = { };
     };
     Labels = {
-      "org.opencontainers.image.source" = "https://github.com/brian14708/promptkit";
+      "org.opencontainers.image.source" = "https://github.com/brian14708/isola";
     };
   };
 }

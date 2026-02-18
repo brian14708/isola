@@ -16,7 +16,7 @@ use crate::{
     error::{Error, Result},
     pymeta,
     serde::{cbor_to_python, python_to_cbor_emit},
-    wasm::{ArgIter, promptkit::script::host::EmitType},
+    wasm::{ArgIter, isola::script::host::EmitType},
 };
 
 pub struct Scope {
@@ -87,8 +87,8 @@ impl Scope {
 
         Python::attach(|py| {
             if let Some(meta) = pymeta::parse_pep723(code) {
-                INIT.import(py, "promptkit.importlib", "_initialize_pep723")
-                    .expect("failed to import promptkit.importlib")
+                INIT.import(py, "sandbox.importlib", "_initialize_pep723")
+                    .expect("failed to import sandbox.importlib")
                     .call1((meta,))
                     .map_err(|e| Error::from_pyerr(py, e))?;
             }
@@ -126,7 +126,7 @@ impl Scope {
         name: &str,
         positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
         named: impl IntoIterator<Item = (Cow<'a, str>, InputValue<'a>)>,
-        mut callback: impl FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+        mut callback: impl FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
     ) -> Result<()>
     where
         U: ExactSizeIterator<Item = InputValue<'a>>,
@@ -185,8 +185,8 @@ impl Scope {
             {
                 static ASYNC_RUN: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
                 ASYNC_RUN
-                    .import(py, "promptkit.asyncio", "run")
-                    .expect("failed to import promptkit.asyncio")
+                    .import(py, "sandbox.asyncio", "run")
+                    .expect("failed to import sandbox.asyncio")
                     .call1((obj,))
                     .map_err(|e| Error::from_pyerr(py, e))?
             } else {
@@ -231,8 +231,7 @@ mod tests {
         Python::initialize();
 
         {
-            let emit_fn = |emit_type: crate::wasm::promptkit::script::host::EmitType,
-                           data: &[u8]| {
+            let emit_fn = |emit_type: crate::wasm::isola::script::host::EmitType, data: &[u8]| {
                 emissions.borrow_mut().push((emit_type, data.to_vec()));
             };
 

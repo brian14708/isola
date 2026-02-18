@@ -9,7 +9,7 @@ thread_local! {
 }
 
 #[pymodule]
-#[pyo3(name = "_promptkit_logging")]
+#[pyo3(name = "_isola_logging")]
 pub mod logging_module {
     use pyo3::{
         Bound, PyAny, PyErr, PyResult, pyfunction,

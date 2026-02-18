@@ -1,10 +1,9 @@
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::TryFutureExt;
-use promptkit_trace::collect::CollectorSpanExt;
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
+use futures::StreamExt;
+use isola::TRACE_TARGET_SCRIPT;
+use isola_trace::collect::CollectSpanExt;
 use rmcp::schemars;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
@@ -21,14 +20,10 @@ use serde::Deserialize;
 use serde_json::json;
 use serde_json::value::RawValue;
 use tracing::level_filters::LevelFilter;
-use tracing::{Instrument, Span, info_span};
+use tracing::{Span, info_span};
 
-use crate::proto::script::v1::ContentType;
-use crate::proto::script::v1::result::ResultType;
-use crate::proto::script::v1::trace::TraceType;
-use crate::routes::{AppState, VmEnv};
-use crate::service::non_stream_result;
-use crate::utils::trace::TraceCollector;
+use crate::routes::api::trace::{HttpTraceCollector, TraceData};
+use crate::routes::{AppState, Source, StreamItem, VmEnv};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -76,13 +71,13 @@ impl Sandbox {
             .timeout_secs
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
 
-        let (collector, rx) = TraceCollector::new();
+        let (collector, rx) = HttpTraceCollector::new();
         let s = info_span!(
             target: TRACE_TARGET_SCRIPT,
             parent: Span::current(),
             "script.exec"
         );
-        let (span, mut trace, log_level) = if s
+        let (span, mut trace_rx, log_level) = if s
             .collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
             .is_some()
         {
@@ -90,79 +85,101 @@ impl Sandbox {
         } else {
             (Span::none(), None, LevelFilter::OFF)
         };
-        let exec_future = self
-            .state
-            .vm
-            .exec(
-                "",
-                crate::routes::Source {
-                    prelude: String::new(),
-                    code: params.0.python_code,
-                },
-                "main".to_string(),
-                vec![],
-                VmEnv {
-                    client: self.state.base_env.client.clone(),
-                    log_level,
-                },
-            )
-            .instrument(span.clone());
 
-        match tokio::time::timeout(timeout, exec_future).await {
+        let exec_future = async {
+            let _enter = span.enter();
+            let mut stream = self
+                .state
+                .vm
+                .exec(
+                    "mcp-trace",
+                    Source {
+                        prelude: String::new(),
+                        code: params.0.python_code,
+                    },
+                    "main".to_string(),
+                    vec![],
+                    timeout,
+                    VmEnv {
+                        client: self.state.base_env.client.clone(),
+                        log_level,
+                    },
+                )
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+            let mut results: Vec<serde_json::Value> = Vec::new();
+            let mut final_result: Option<serde_json::Value> = None;
+
+            while let Some(item) = stream.next().await {
+                match item {
+                    StreamItem::Data(data) => {
+                        let json_str = isola_cbor::cbor_to_json(&data)
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        let value: serde_json::Value = serde_json::from_str(&json_str)
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        results.push(value);
+                    }
+                    StreamItem::End(Some(data)) => {
+                        let json_str = isola_cbor::cbor_to_json(&data)
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        let value: serde_json::Value = serde_json::from_str(&json_str)
+                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                        final_result = Some(value);
+                    }
+                    StreamItem::End(None) => {}
+                    StreamItem::Error(err) => {
+                        return Err(McpError::internal_error(err.to_string(), None));
+                    }
+                }
+            }
+
+            #[allow(clippy::option_if_let_else)]
+            let result = if let Some(val) = final_result {
+                val
+            } else if results.len() == 1 {
+                results.remove(0)
+            } else {
+                serde_json::Value::Array(results)
+            };
+
+            Ok::<serde_json::Value, McpError>(result)
+        };
+
+        let result = match tokio::time::timeout(timeout, exec_future).await {
             Err(_) => {
                 return Ok(CallToolResult::structured(json!({
                     "status": "error",
                     "message": "execution timeout exceeded",
                 })));
             }
-            Ok(Err(e)) => {
-                return Err(McpError::internal_error(e.to_string(), None));
-            }
-            Ok(Ok(mut r)) => {
-                let result = non_stream_result(Pin::new(&mut r), [ContentType::Json as _])
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))
-                    .instrument(span)
-                    .await?;
+            Ok(Err(err)) => return Err(err),
+            Ok(Ok(value)) => value,
+        };
 
-                let mut output = String::new();
-                if let Some(trace_events) = trace.as_mut() {
-                    while let Some(event) = trace_events.recv().await {
-                        if let Some(TraceType::Log(l)) = event.trace_type {
-                            output.push_str(&l.content);
-                        }
-                    }
-                }
-                match result.result_type {
-                    Some(ResultType::Json(v)) => {
-                        let mut result = json!({
-                            "status": "success",
-                            "return": RawValue::from_string(v).map_err(|e| {
-                                McpError::internal_error(e.to_string(), None)
-                            })?,
-                        });
-
-                        // Only include output field if there's actual content
-                        if !output.is_empty() {
-                            result["output"] = json!(output);
-                        }
-
-                        return Ok(CallToolResult::structured(result));
-                    }
-                    Some(ResultType::Error(v)) => {
-                        return Ok(CallToolResult::structured(json!({
-                            "status": "error",
-                            "message": v.message,
-                        })));
-                    }
-                    _ => {
-                        return Err(McpError::internal_error(
-                            "Unexpected result type".to_string(),
-                            None,
-                        ));
-                    }
+        let mut output = String::new();
+        if let Some(ref mut trace_events) = trace_rx {
+            while let Ok(event) = trace_events.try_recv() {
+                if let TraceData::Log { message, .. } = event.data {
+                    output.push_str(&message);
                 }
             }
         }
+
+        let result_json = serde_json::to_string(&result)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        let mut response = json!({
+            "status": "success",
+            "return": RawValue::from_string(result_json)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?,
+        });
+
+        if !output.is_empty() {
+            response["output"] = json!(output);
+        }
+
+        Ok(CallToolResult::structured(response))
     }
 }
 
@@ -183,10 +200,10 @@ Sandboxed Python execution environment.
 - `print()` output is captured
 - Exceptions are captured as errors
 
-## HTTP: promptkit.http
+## HTTP: sandbox.http
 
 ```python
-from promptkit.http import fetch
+from sandbox.http import fetch
 
 async def main():
     async with fetch("GET", "https://api.example.com/data") as resp:
@@ -207,7 +224,7 @@ async def main():
 
 **WebSocket:**
 ```python
-from promptkit.http import ws_connect
+from sandbox.http import ws_connect
 
 async def main():
     async with ws_connect("wss://example.com/ws") as ws:

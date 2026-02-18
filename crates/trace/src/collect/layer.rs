@@ -5,11 +5,11 @@ use tracing_subscriber::{Layer, registry::LookupSpan};
 
 use super::tracer::Tracer;
 
-pub struct CollectorLayer<S> {
+pub struct CollectLayer<S> {
     _inner: PhantomData<S>,
 }
 
-impl<S> Default for CollectorLayer<S>
+impl<S> Default for CollectLayer<S>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
@@ -20,7 +20,7 @@ where
     }
 }
 
-impl<S> Layer<S> for CollectorLayer<S>
+impl<S> Layer<S> for CollectLayer<S>
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {

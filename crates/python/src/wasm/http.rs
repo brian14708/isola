@@ -1,5 +1,5 @@
 #[pyo3::pymodule]
-#[pyo3(name = "_promptkit_http")]
+#[pyo3(name = "_isola_http")]
 pub mod http_module {
     use std::borrow::Cow;
     use std::io::{BufWriter, Write};
@@ -15,7 +15,7 @@ pub mod http_module {
         PyPollable,
         body_buffer::{BodyBuffer, Buffer},
         future::create_future,
-        promptkit::script::outgoing_websocket::{
+        isola::script::outgoing_websocket::{
             self, ConnectRequest as WsConnectRequest, ErrorCode as WsErrorCode, FutureWebsocket,
             MessageType, ReadStream, WebsocketConnection, WebsocketMessage, WriteStream,
         },

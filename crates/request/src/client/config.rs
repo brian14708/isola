@@ -1,6 +1,6 @@
 use crate::Error;
 
-const USER_AGENT: &str = "PromptKit/1.0";
+const USER_AGENT: &str = "Isola/1.0";
 
 #[derive(Default, Clone, PartialEq, Eq, Hash)]
 pub struct RequestConfig {

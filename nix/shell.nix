@@ -19,11 +19,7 @@ in
   {
     buildInputs = with pkgs; [
       just
-      pnpm
-      nodejs_24
       (python.withPackages (p: with p; [ uv ]))
-      buf
-      protobuf
       cmake
       ninja
     ];

@@ -2,7 +2,6 @@
   lib,
   pkgs,
   crane,
-  protobuf,
 }:
 let
   craneLib = (crane.mkLib pkgs).overrideToolchain (
@@ -11,14 +10,14 @@ let
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
-      ../../specs
+      ../../wit
       ../../Cargo.lock
       ../../Cargo.toml
       (craneLib.fileset.commonCargoSources ../../crates/cbor)
-      (craneLib.fileset.commonCargoSources ../../crates/isola-trace)
-      (craneLib.fileset.commonCargoSources ../../crates/isola-request)
+      (craneLib.fileset.commonCargoSources ../../crates/trace)
+      (craneLib.fileset.commonCargoSources ../../crates/request)
       (craneLib.fileset.commonCargoSources ../../crates/isola)
-      (craneLib.fileset.commonCargoSources ../../crates/isola-server)
+      (craneLib.fileset.commonCargoSources ../../crates/server)
     ];
   };
 in
@@ -26,10 +25,6 @@ craneLib.buildPackage {
   pname = "isola-server";
   inherit src;
   strictDeps = true;
-
-  nativeBuildInputs = [
-    protobuf
-  ];
 
   CARGO_PROFILE = "release-lto";
   cargoExtraArgs = "-p isola-server";

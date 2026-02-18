@@ -5,5 +5,5 @@ mod tracer;
 mod visit;
 
 pub use collector::{Collector, EventRecord, FieldFilter, SpanRecord};
-pub use layer::CollectorLayer;
-pub use span_ext::CollectorSpanExt;
+pub use layer::CollectLayer;
+pub use span_ext::CollectSpanExt;

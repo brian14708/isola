@@ -33,10 +33,9 @@ http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
-isola-request = { path = "crates/isola-request" }
-isola-trace = { path = "crates/isola-trace" }
-log = "0.4"
-metrics = "0.24"
+isola-cbor = { path = "crates/cbor" }
+isola-request = { path = "crates/request" }
+isola-trace = { path = "crates/trace" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"
@@ -47,12 +46,6 @@ opentelemetry-semantic-conventions = "0.31"
 opentelemetry_sdk = "0.31"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
-promptkit = { path = "crates/promptkit" }
-promptkit-cbor = { path = "crates/cbor" }
-promptkit-request = { path = "crates/request" }
-promptkit-trace = { path = "crates/trace" }
-prost = "0.14"
-prost-types = "0.14"
 pyo3 = "0.28"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false }
@@ -69,12 +62,6 @@ thiserror = "2.0"
 tokio = "1.45"
 tokio-stream = "0.1"
 tokio-tungstenite = { version = "0.28", default-features = false }
-tonic = { version = "0.14", default-features = false }
-tonic-prost = "0.14"
-tonic-prost-build = "0.14"
-tonic-reflection = "0.14"
-tonic-web = "0.14"
-tower-http = "0.6"
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
@@ -87,7 +74,6 @@ wasmtime-wasi-http = { version = "41.0", default-features = false }
 wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
 xshell = "0.2"
-zip = { version = "8.0", default-features = false }
 
 [profile.release-lto]
 inherits = "release"

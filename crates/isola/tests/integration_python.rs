@@ -14,8 +14,8 @@ use isola::{
     Module, ModuleBuilder, OutputSink, Sandbox, TRACE_TARGET_SCRIPT, WebsocketRequest,
     WebsocketResponse,
 };
+use isola_cbor::{from_cbor, json_to_cbor};
 use isola_trace::collect::{CollectLayer, CollectSpanExt, Collector, EventRecord, SpanRecord};
-use promptkit_cbor::{from_cbor, json_to_cbor};
 use tracing::{info_span, level_filters::LevelFilter};
 use tracing_subscriber::{Registry, layer::SubscriberExt};
 
@@ -126,7 +126,7 @@ fn workspace_root() -> Result<PathBuf> {
 }
 
 fn bundle_path(root: &Path) -> PathBuf {
-    root.join("target").join("promptkit_python.wasm")
+    root.join("target").join("isola_python.wasm")
 }
 
 fn resolve_lib_dir(root: &Path) -> PathBuf {
@@ -390,7 +390,7 @@ async fn integration_python_async_hostcall_echo() -> Result<()> {
 
     sandbox
         .eval_script(
-            "import promptkit.asyncio as pk_async\n\
+            "import sandbox.asyncio as pk_async\n\
              async def main():\n\
              \treturn await pk_async.hostcall(\"echo\", [1, 2, 3])",
         )

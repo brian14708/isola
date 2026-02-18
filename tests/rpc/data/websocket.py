@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-from promptkit.http import ws_connect
+from sandbox.http import ws_connect
 
 
 def simple_echo(ws_url: str) -> None:
