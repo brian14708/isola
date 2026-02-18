@@ -63,7 +63,7 @@ impl Client {
     ///
     /// # Errors
     /// Returns error if request fails.
-    pub async fn http<B, C>(
+    pub async fn send_http<B, C>(
         &self,
         request: http::Request<B>,
         options: RequestOptions<C>,
@@ -87,7 +87,7 @@ impl Client {
     ///
     /// # Errors
     /// Returns error if WebSocket connection fails.
-    pub async fn websocket<C: RequestContext, B>(
+    pub async fn connect_websocket<C: RequestContext, B>(
         &self,
         request: http::Request<B>,
         options: RequestOptions<C>,
@@ -131,7 +131,7 @@ impl Client {
     ) -> Result<T, Error> {
         let mut config = options.config;
 
-        if let Some(p) = request.headers_mut().remove("x-promptkit-proxy") {
+        if let Some(p) = request.headers_mut().remove("x-isola-proxy") {
             let proxy_str = p
                 .to_str()
                 .map_err(|_e| Error::Url(url::ParseError::EmptyHost))?;

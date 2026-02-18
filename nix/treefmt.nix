@@ -8,18 +8,12 @@
       package = (pkgs.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml);
     };
     ruff-format.enable = true;
-    buf.enable = true;
     clang-format.enable = true;
   };
   settings.formatter = {
     clang-format = {
       excludes = [
         "crates/c-api/include/isola.h"
-      ];
-    };
-    ruff-format = {
-      excludes = [
-        "tests/rpc/src/stub/*"
       ];
     };
   };

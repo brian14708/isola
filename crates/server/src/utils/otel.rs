@@ -1,3 +1,7 @@
+use isola_trace::{
+    collect::CollectLayer,
+    consts::{TRACE_TARGET_OTEL, TRACE_TARGET_SCRIPT},
+};
 use opentelemetry::{
     KeyValue, global,
     propagation::TextMapCompositePropagator,
@@ -14,10 +18,6 @@ use opentelemetry_sdk::{
     trace::{RandomIdGenerator, Sampler, span_processor_with_async_runtime::BatchSpanProcessor},
 };
 use opentelemetry_semantic_conventions::resource;
-use promptkit_trace::{
-    collect::CollectorLayer,
-    consts::{TRACE_TARGET_OTEL, TRACE_TARGET_SCRIPT},
-};
 use tracing::{Level, Subscriber, level_filters::LevelFilter};
 use tracing_subscriber::{
     Layer, filter::FilterFn, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
@@ -42,7 +42,6 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
             Box::new(BaggagePropagator::new()),
         ]));
 
-        // Set protocol based on environment variables
         let protocol = get_env_var(&[
             "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
             OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -61,7 +60,7 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
             _ => opentelemetry_otlp::SpanExporter::builder()
                 .with_http()
                 .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
-                .build(), // default to http
+                .build(),
         }?;
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
@@ -70,7 +69,7 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
             .with_id_generator(RandomIdGenerator::default())
             .with_resource(
                 Resource::builder()
-                    .with_attribute(KeyValue::new(resource::SERVICE_NAME, "promptkit"))
+                    .with_attribute(KeyValue::new(resource::SERVICE_NAME, "isola-server"))
                     .build(),
             )
             .build();
@@ -87,16 +86,18 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
         .expect("failed to read env filter")
         .add_directive(format!("{TRACE_TARGET_SCRIPT}=off").parse().unwrap())
         .add_directive("rmcp=warn".parse().unwrap());
+
     let registry = tracing_subscriber::Registry::default()
         .with(
-            CollectorLayer::default().with_filter(FilterFn::new(|metadata| {
+            CollectLayer::default().with_filter(FilterFn::new(|metadata| {
                 metadata.target() == TRACE_TARGET_SCRIPT
             })),
         )
         .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter));
+
     match &provider {
         Some(provider) => registry
-            .with(otel_layer(provider.tracer("promptkit")))
+            .with(otel_layer(provider.tracer("isola-server")))
             .init(),
         None => registry.with(otel_layer(NoopTracer::new())).init(),
     }

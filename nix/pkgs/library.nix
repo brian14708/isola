@@ -11,13 +11,13 @@ let
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
-      ../../specs
+      ../../wit
       ../../Cargo.lock
       ../../Cargo.toml
       (craneLib.fileset.commonCargoSources ../../crates/cbor)
       (craneLib.fileset.commonCargoSources ../../crates/trace)
       (craneLib.fileset.commonCargoSources ../../crates/request)
-      (craneLib.fileset.commonCargoSources ../../crates/promptkit)
+      (craneLib.fileset.commonCargoSources ../../crates/isola)
       (craneLib.fileset.commonCargoSources ../../crates/c-api)
       (craneLib.fileset.commonCargoSources ../../crates/c-api-export)
     ];
@@ -33,14 +33,14 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p $out/lib -p $out/share/promptkit
+    mkdir -p $out/lib -p $out/share/isola
 
-    cp target/release-lto/libpromptkit.* $out/lib/
-    rm $out/lib/libpromptkit.d
+    cp target/release-lto/libisola.* $out/lib/
+    rm $out/lib/libisola.d
     runHook postInstall
 
     cp -r ${../../crates/c-api/include} $out/include
-    cp -r ${python.bundle} $out/share/promptkit/python
-    cp ${python}/lib/promptkit_python.wasm $out/share/promptkit/python.wasm
+    cp -r ${python.bundle} $out/share/isola/python
+    cp ${python}/lib/isola_python.wasm $out/share/isola/python.wasm
   '';
 }

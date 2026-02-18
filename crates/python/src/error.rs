@@ -1,7 +1,7 @@
 use pyo3::{PyErr, Python, prelude::PyTracebackMethods};
 use thiserror::Error;
 
-use crate::wasm::exports::{self, promptkit::script::guest::ErrorCode};
+use crate::wasm::exports::{self, isola::script::guest::ErrorCode};
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -27,7 +27,7 @@ impl Error {
     }
 }
 
-impl From<Error> for exports::promptkit::script::guest::Error {
+impl From<Error> for exports::isola::script::guest::Error {
     fn from(value: Error) -> Self {
         match value {
             Error::PythonError {

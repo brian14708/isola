@@ -13,7 +13,7 @@ use wasmtime_wasi::{
 use super::EmitValue;
 use super::{
     HostView,
-    promptkit::script::host::{Host, HostFutureHostcall, HostValueIterator},
+    isola::script::host::{Host, HostFutureHostcall, HostValueIterator},
 };
 use crate::Host as _;
 
@@ -77,15 +77,15 @@ impl Pollable for FutureHostcall {
 impl<T: HostView> Host for super::HostImpl<T> {
     async fn blocking_emit(
         &mut self,
-        emit_type: super::promptkit::script::host::EmitType,
+        emit_type: super::isola::script::host::EmitType,
         cbor: Vec<u8>,
     ) -> wasmtime::Result<()> {
         let emit_value = match emit_type {
-            super::promptkit::script::host::EmitType::Continuation => {
+            super::isola::script::host::EmitType::Continuation => {
                 EmitValue::Continuation(cbor.into())
             }
-            super::promptkit::script::host::EmitType::End => EmitValue::End(cbor.into()),
-            super::promptkit::script::host::EmitType::PartialResult => {
+            super::isola::script::host::EmitType::End => EmitValue::End(cbor.into()),
+            super::isola::script::host::EmitType::PartialResult => {
                 EmitValue::PartialResult(cbor.into())
             }
         };

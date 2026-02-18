@@ -550,11 +550,11 @@ pub fn python_to_cbor(py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
 
 pub fn python_to_cbor_emit<F>(
     py_obj: Bound<'_, PyAny>,
-    emit_type: crate::wasm::promptkit::script::host::EmitType,
+    emit_type: crate::wasm::isola::script::host::EmitType,
     mut emit_fn: F,
 ) -> PyResult<()>
 where
-    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
     let mut serializer = minicbor_serde::Serializer::new(&mut writer);
@@ -567,21 +567,21 @@ where
 /// A buffered writer that emits CBOR data through a callback with streaming control
 pub struct CallbackWriter<'a, F, const N: usize = 1024>
 where
-    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     buffer: heapless::Vec<u8, N>,
     emit_fn: &'a mut F,
-    end_type: crate::wasm::promptkit::script::host::EmitType,
+    end_type: crate::wasm::isola::script::host::EmitType,
 }
 
 impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
 where
-    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     /// Creates a new `CallbackWriter` with the given callback and end type
     pub const fn new(
         emit_fn: &'a mut F,
-        end_type: crate::wasm::promptkit::script::host::EmitType,
+        end_type: crate::wasm::isola::script::host::EmitType,
     ) -> Self {
         Self {
             emit_fn,
@@ -594,7 +594,7 @@ where
     fn flush(&mut self) {
         if !self.buffer.is_empty() {
             (self.emit_fn)(
-                crate::wasm::promptkit::script::host::EmitType::Continuation,
+                crate::wasm::isola::script::host::EmitType::Continuation,
                 &self.buffer,
             );
             self.buffer.clear();
@@ -604,7 +604,7 @@ where
 
 impl<F, const N: usize> minicbor::encode::Write for CallbackWriter<'_, F, N>
 where
-    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     type Error = std::convert::Infallible;
 
@@ -633,7 +633,7 @@ where
 
 impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
 where
-    F: FnMut(crate::wasm::promptkit::script::host::EmitType, &[u8]),
+    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     fn drop(&mut self) {
         (self.emit_fn)(self.end_type, &self.buffer);

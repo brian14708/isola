@@ -53,15 +53,15 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p promptkit-python"
+        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-python"
     )
     .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
     .env("RUSTFLAGS", "-C relocation-model=pic")
     .run()?;
 
     run_if_changed(
-        vec![format!("target/{TARGET}/release-lto/promptkit_python.wasm")],
-        "target/promptkit_python.wasm".to_string(),
+        vec![format!("target/{TARGET}/release-lto/isola_python.wasm")],
+        "target/isola_python.wasm".to_string(),
         |inp, out| -> Result<()> {
             fn lib(
                 name: impl Into<String>,
@@ -72,7 +72,7 @@ fn build_python(sh: &Shell) -> Result<()> {
             }
 
             let mut libs = vec![
-                lib("libpromptkit_python.so", &inp[0], false),
+                lib("libisola_python.so", &inp[0], false),
                 lib("libc.so", format!("{wasi_deps_dir}/lib/libc.so"), false),
                 lib(
                     "libwasi-emulated-signal.so",

@@ -15,7 +15,7 @@ let
   src = lib.fileset.toSource {
     root = ../../..;
     fileset = lib.fileset.unions [
-      ../../../specs
+      ../../../wit
       ../../../Cargo.lock
       ../../../Cargo.toml
       (craneLib.fileset.commonCargoSources ../../../crates/xtask)
@@ -24,7 +24,7 @@ let
   };
 in
 craneLib.buildPackage {
-  pname = "promptkit-python";
+  pname = "isola-python";
   inherit src;
   nativeBuildInputs = [
     (writeShellScriptBin "cargo-b" "exec cargo build \"$@\"")
@@ -52,7 +52,7 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    install -Dm644 target/promptkit_python.wasm $out/lib/promptkit_python.wasm
+    install -Dm644 target/isola_python.wasm $out/lib/isola_python.wasm
     find $out/ -type f -print -exec nuke-refs '{}' +
 
     runHook postInstall

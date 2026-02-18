@@ -1,5 +1,5 @@
 [package]
-name = "promptkit-trace"
+name = "isola-trace"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

@@ -80,7 +80,7 @@ impl Tracer {
                 },
             ));
         }
-        self.inner.collector.collect_span_start(start);
+        self.inner.collector.on_span_start(start);
 
         Some(Self {
             inner: self.inner.clone(),
@@ -103,7 +103,7 @@ impl Tracer {
             .as_nanos()
             .try_into()
             .unwrap_or(u64::MAX);
-        self.inner.collector.collect_span_end(self.record);
+        self.inner.collector.on_span_end(self.record);
     }
 
     pub fn record_fields(&mut self, f: impl FnOnce(&mut dyn Visit)) {
@@ -149,6 +149,6 @@ impl Tracer {
                 },
             ));
         }
-        self.inner.collector.collect_event(e);
+        self.inner.collector.on_event(e);
     }
 }

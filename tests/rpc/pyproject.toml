@@ -1,15 +1,14 @@
 [project]
-name = "promptkit-tests-rpc"
+name = "isola-tests-rpc"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = []
 
 [dependency-groups]
 dev = [
-    "betterproto[compiler]>=2.0.0b7",
     "httpx>=0.28.1",
     "mcp>=1.21.2",
-    "promptkit-py",
+    "isola-py",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pytest-httpbin>=2.1.0",

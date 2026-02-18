@@ -93,7 +93,7 @@ impl InitConfig {
         Self {
             preinit: true,
             bundle_paths: vec!["/lib/bundle.zip".to_string(), "/workdir".to_string()],
-            prelude: Some("import promptkit.asyncio".to_string()),
+            prelude: Some("import sandbox.asyncio".to_string()),
         }
     }
 }
@@ -370,7 +370,7 @@ impl<H: Host + Clone> Module<H> {
                 .map_err(Error::Wasm)?;
 
             bindings
-                .promptkit_script_guest()
+                .isola_script_guest()
                 .call_set_log_level(&mut store, level)
                 .await
                 .map_err(Error::Wasm)?;
@@ -434,7 +434,7 @@ impl<H: Host + Clone> Sandbox<H> {
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "sandbox.eval_script");
         let code = code.as_ref().to_string();
         self.bindings
-            .promptkit_script_guest()
+            .isola_script_guest()
             .call_eval_script(&mut self.store, &code)
             .instrument(span)
             .await
@@ -449,7 +449,7 @@ impl<H: Host + Clone> Sandbox<H> {
         let path = Path::new("/workdir").join(path.as_ref());
         let path = path.to_string_lossy().to_string();
         self.bindings
-            .promptkit_script_guest()
+            .isola_script_guest()
             .call_eval_file(&mut self.store, &path)
             .instrument(span)
             .await
@@ -510,7 +510,7 @@ impl<H: Host + Clone> Sandbox<H> {
             store.data_mut().set_sink(Some(Box::new(sink)));
             let result = self
                 .bindings
-                .promptkit_script_guest()
+                .isola_script_guest()
                 .call_call_func(&mut store, &func, &internal_args)
                 .await;
             store.data_mut().set_sink(None);

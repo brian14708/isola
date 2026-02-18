@@ -1,15 +1,15 @@
+mod api;
 mod env;
 mod mcp;
 mod state;
 mod vm_manager;
 
-use std::{future::ready, time::Duration};
+use std::time::Duration;
 
-use axum::{http::StatusCode, response::Redirect, routing::get};
+use axum::{http::StatusCode, routing::get};
 pub use env::{StreamItem, VmEnv};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 pub use state::AppState;
-use tower_http::services::{ServeDir, ServeFile};
 pub use vm_manager::{Argument, Source, VmManager};
 
 pub fn router(state: &AppState) -> axum::Router {
@@ -20,15 +20,17 @@ pub fn router(state: &AppState) -> axum::Router {
     ));
 
     axum::Router::new()
-        .route("/", get(|| ready(Redirect::temporary("/ui"))))
-        .route("/debug/healthz", get(|| ready(StatusCode::NO_CONTENT)))
-        .route("/debug/metrics", get(move || ready(prometheus.render())))
-        .with_state(state.clone())
-        .nest_service(
-            "/ui",
-            ServeDir::new("ui/dist").fallback(ServeFile::new("ui/dist/index.html")),
+        .route("/debug/healthz", get(|| async { StatusCode::NO_CONTENT }))
+        .route(
+            "/debug/metrics",
+            get(move || {
+                let rendered = prometheus.render();
+                async move { rendered }
+            }),
         )
+        .with_state(state.clone())
         .nest_service("/mcp", mcp::server(state.clone()))
+        .nest("/api/v1", api::router(state))
 }
 
 async fn prometheus_upkeep(handle: PrometheusHandle, duration: Duration) {

@@ -19,16 +19,16 @@ use crate::{
     wasm::future::PyPollable,
 };
 
-use self::{exports::promptkit::script::guest, promptkit::script::host};
+use self::{exports::isola::script::guest, isola::script::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
-    path: "../../specs/wit",
+    path: "../../wit",
     generate_all,
 });
 
 #[pymodule]
-#[pyo3(name = "_promptkit_sys")]
+#[pyo3(name = "_isola_sys")]
 pub mod sys_module {
     use std::{ops::Deref, time::Duration};
 
@@ -42,7 +42,7 @@ pub mod sys_module {
         serde::{cbor_to_python, python_to_cbor, python_to_cbor_emit},
         wasm::{
             future::{Pollable, create_future},
-            promptkit::script::host,
+            isola::script::host,
             wasi,
         },
     };
@@ -271,7 +271,7 @@ impl ArgIter {
     fn __aiter__(slf: Bound<'_, Self>) -> PyResult<Bound<'_, PyAny>> {
         static AITER: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
         AITER
-            .import(slf.py(), "promptkit.asyncio", "_aiter_arg")?
+            .import(slf.py(), "sandbox.asyncio", "_aiter_arg")?
             .call1((slf,))
     }
 

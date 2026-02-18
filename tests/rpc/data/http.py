@@ -2,39 +2,43 @@ import io
 import time
 from typing import cast
 
-from promptkit import http
+from sandbox import http
 
 
-def simple(httpbin_url: str) -> None:
+async def simple(httpbin_url: str) -> None:
     k = str(time.time())
-    result = cast(
-        "dict[str, dict[str, str]]",
-        http.get(httpbin_url + "/get", params={"value": k}, headers={"x-my-test": k}),
-    )
+
+    async with http.fetch(
+        "GET",
+        httpbin_url + "/get",
+        params={"value": k},
+        headers={"x-my-test": k},
+    ) as r:
+        result = cast("dict[str, dict[str, str]]", await r.ajson())
     assert result["args"]["value"] == k
     assert result["headers"]["X-My-Test"] == k
 
-    result = cast(
-        "dict[str, dict[str, str]]",
-        http.post(httpbin_url + "/post", data={"value": k}, headers={"x-my-test": k}),
-    )
+    async with http.fetch(
+        "POST",
+        httpbin_url + "/post",
+        body={"value": k},
+        headers={"x-my-test": k},
+    ) as r:
+        result = cast("dict[str, dict[str, str]]", await r.ajson())
     assert result["headers"]["X-My-Test"] == k
     assert result["json"]["value"] == k
 
 
-def error(httpbin_url: str) -> None:
-    exc = ""
-    try:
-        http.get(httpbin_url + "/status/503")
-    except Exception as e:
-        exc = str(e)
-    assert "503" in exc
-    exc = ""
-    try:
-        http.post(httpbin_url + "/status/500", data={"value": "test"})
-    except Exception as e:
-        exc = str(e)
-    assert "500" in exc
+async def error(httpbin_url: str) -> None:
+    async with http.fetch("GET", httpbin_url + "/status/503") as r:
+        assert r.status == 503
+
+    async with http.fetch(
+        "POST",
+        httpbin_url + "/status/500",
+        body={"value": "test"},
+    ) as r:
+        assert r.status == 500
 
 
 async def multipart(httpbin_url: str) -> None:

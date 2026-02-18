@@ -1,9 +1,9 @@
 use std::cell::Cell;
 
 pub trait Collector: Sync + Send + 'static {
-    fn collect_span_start(&self, span: SpanRecord);
-    fn collect_span_end(&self, span: SpanRecord);
-    fn collect_event(&self, event: EventRecord);
+    fn on_span_start(&self, span: SpanRecord);
+    fn on_span_end(&self, span: SpanRecord);
+    fn on_event(&self, event: EventRecord);
     fn next_id(&self) -> u64 {
         LOCAL_ID_GENERATOR
             .try_with(|g| {

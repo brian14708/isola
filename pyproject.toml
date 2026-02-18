@@ -1,12 +1,12 @@
 [project]
-name = "promptkit"
+name = "isola"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.sources]
-promptkit-py = { workspace = true }
-promptkit-tests-rpc = { workspace = true }
+isola-py = { workspace = true }
+isola-tests-rpc = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -23,7 +23,6 @@ dev = [
 ]
 
 [tool.ruff]
-exclude = ["tests/rpc/src/stub/*"]
 
 [tool.ruff.lint]
 select = ["ALL"]

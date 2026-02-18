@@ -1,171 +1,196 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
-use promptkit::{BoxedStream, Environment, WebsocketMessage};
-use promptkit_cbor::{from_cbor, to_cbor};
-use promptkit_request::{RequestContext, RequestOptions, TraceRequest, request_span};
-use promptkit_trace::consts::TRACE_TARGET_SCRIPT;
+use futures::StreamExt;
+use http::Method;
+use http_body_util::Full;
+use isola::{
+    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink, WebsocketBodyStream,
+    WebsocketRequest, WebsocketResponse,
+};
+use isola_cbor::{from_cbor, to_cbor};
+use isola_request::{RequestContext, RequestOptions, TraceRequest, request_span};
 use tokio::sync::mpsc;
 use tracing::{field::Empty, level_filters::LevelFilter};
 
 #[derive(Clone)]
 pub struct VmEnv {
-    pub client: Arc<promptkit_request::Client>,
+    pub client: Arc<isola_request::Client>,
     pub log_level: LevelFilter,
 }
 
 pub struct Context<F>
 where
-    F: FnOnce(&TraceRequest) -> tracing::Span,
+    F: FnOnce(&TraceRequest<'_>) -> tracing::Span,
 {
     make_span: Option<F>,
 }
 
 impl<F> RequestContext for Context<F>
 where
-    F: FnOnce(&TraceRequest) -> tracing::Span,
+    F: FnOnce(&TraceRequest<'_>) -> tracing::Span,
 {
-    fn make_span(&mut self, r: &TraceRequest) -> tracing::Span {
+    fn make_span(&mut self, request: &TraceRequest<'_>) -> tracing::Span {
         self.make_span
             .take()
-            .map_or_else(tracing::Span::none, |f| f(r))
+            .map_or_else(tracing::Span::none, |f| f(request))
     }
 }
 
 pub enum StreamItem {
     Data(Bytes),
     End(Option<Bytes>),
-    Error(promptkit::Error),
+    Error(isola::Error),
 }
 
-pub struct MpscOutputCallback {
+pub struct MpscOutputSink {
     sender: mpsc::Sender<StreamItem>,
 }
 
-impl MpscOutputCallback {
+impl MpscOutputSink {
     #[must_use]
     pub const fn new(sender: mpsc::Sender<StreamItem>) -> Self {
         Self { sender }
     }
 }
 
-impl promptkit::environment::OutputCallback for MpscOutputCallback {
-    type Error = std::io::Error;
-
-    async fn on_result(&mut self, item: Bytes) -> Result<(), Self::Error> {
+#[async_trait]
+impl OutputSink for MpscOutputSink {
+    async fn on_partial(&mut self, cbor: Bytes) -> Result<(), BoxError> {
         self.sender
-            .send(StreamItem::Data(item))
+            .send(StreamItem::Data(cbor))
             .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Send error"))
+            .map_err(|_e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "output receiver dropped",
+                )) as BoxError
+            })
     }
 
-    async fn on_end(&mut self, item: Bytes) -> Result<(), Self::Error> {
+    async fn on_end(&mut self, cbor: Bytes) -> Result<(), BoxError> {
         self.sender
-            .send(StreamItem::End(if item.is_empty() {
+            .send(StreamItem::End(if cbor.is_empty() {
                 None
             } else {
-                Some(item)
+                Some(cbor)
             }))
             .await
-            .map_err(|_| std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Send error"))
+            .map_err(|_e| {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "output receiver dropped",
+                )) as BoxError
+            })
     }
 }
 
-impl Environment for VmEnv {
-    type Error = std::io::Error;
-    type Callback = MpscOutputCallback;
-
-    fn log_level(&self) -> LevelFilter {
-        self.log_level
-    }
-
-    async fn hostcall(&self, call_type: &str, payload: &[u8]) -> Result<Vec<u8>, Self::Error> {
+#[async_trait]
+impl Host for VmEnv {
+    async fn hostcall(&self, call_type: &str, payload: Bytes) -> Result<Bytes, BoxError> {
         match call_type {
-            "echo" => {
-                // Simple echo - return the payload as-is
-                Ok(payload.to_vec())
-            }
+            "echo" => Ok(payload),
             "add" => {
                 #[derive(serde::Deserialize)]
                 struct AddInput {
                     a: i32,
                     b: i32,
                 }
-                let p: AddInput = from_cbor(payload)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                let result = to_cbor(&(p.a + p.b))
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                Ok(result.to_vec())
+
+                let parsed: AddInput = from_cbor(payload.as_ref()).map_err(|e| {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)) as BoxError
+                })?;
+                let result = to_cbor(&(parsed.a + parsed.b)).map_err(|e| {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e)) as BoxError
+                })?;
+                Ok(result)
             }
-            _ => Err(std::io::Error::new(
+            _ => Err(Box::new(std::io::Error::new(
                 std::io::ErrorKind::Unsupported,
                 "unknown hostcall type",
-            )),
+            ))),
         }
     }
 
-    async fn http_request<B>(
-        &self,
-        request: http::Request<B>,
-    ) -> std::result::Result<
-        http::Response<BoxedStream<http_body::Frame<bytes::Bytes>, Self::Error>>,
-        Self::Error,
-    >
-    where
-        B: http_body::Body + Send + 'static,
-        B::Error: std::error::Error + Send + Sync,
-        B::Data: Send,
-    {
+    async fn http_request(&self, request: HttpRequest) -> Result<HttpResponse, BoxError> {
+        let mut builder = http::Request::builder()
+            .method(request.method)
+            .uri(request.uri);
+
+        if let Some(headers) = builder.headers_mut() {
+            *headers = request.headers;
+        }
+
+        let request = builder
+            .body(Full::new(request.body.unwrap_or_default()))
+            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
+
         let ctx = Context {
-            make_span: Some(|r: &TraceRequest| {
+            make_span: Some(|r: &TraceRequest<'_>| {
                 request_span!(
                     r,
-                    target: TRACE_TARGET_SCRIPT,
+                    target: isola::TRACE_TARGET_SCRIPT,
                     tracing::Level::INFO,
                     "http.request",
                 )
             }),
         };
-        let http = self.client.http(request, RequestOptions::new(ctx));
-        let resp = http.await.map_err(std::io::Error::other)?;
-        Ok(resp.map(|b| -> BoxedStream<_, _> { Box::pin(b.map_err(std::io::Error::other)) }))
+
+        let response = self
+            .client
+            .send_http(request, RequestOptions::new(ctx))
+            .await
+            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
+
+        Ok(response.map(|body| -> HttpBodyStream {
+            Box::pin(
+                body.map(|frame| frame.map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)),
+            )
+        }))
     }
 
-    async fn websocket_connect<B>(
+    async fn websocket_connect(
         &self,
-        request: http::Request<B>,
-    ) -> Result<http::Response<BoxedStream<WebsocketMessage, Self::Error>>, Self::Error>
-    where
-        B: futures::Stream<Item = WebsocketMessage> + Sync + Send + 'static,
-    {
+        request: WebsocketRequest,
+    ) -> Result<WebsocketResponse, BoxError> {
+        let mut builder = http::Request::builder()
+            .method(Method::GET)
+            .uri(request.uri);
+
+        if let Some(headers) = builder.headers_mut() {
+            *headers = request.headers;
+        }
+
+        let request = builder
+            .body(request.outbound)
+            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
+
         let ctx = Context {
-            make_span: Some(|r: &TraceRequest| {
+            make_span: Some(|r: &TraceRequest<'_>| {
                 request_span!(
                     r,
-                    target: TRACE_TARGET_SCRIPT,
+                    target: isola::TRACE_TARGET_SCRIPT,
                     tracing::Level::INFO,
                     "websocket.connect",
                 )
             }),
         };
 
-        let (parts, body) = request.into_parts();
-        Ok(self
+        let response = self
             .client
-            .websocket(
-                http::Request::from_parts(parts, body),
-                RequestOptions::new(ctx),
-            )
+            .connect_websocket(request, RequestOptions::new(ctx))
             .await
-            .map_err(std::io::Error::other)?
-            .map(|b| -> BoxedStream<_, _> {
-                Box::pin(b.filter_map(|msg| async {
-                    match msg {
-                        Ok(s) => Some(Ok(s)),
-                        Err(e) => Some(Err(std::io::Error::other(e))),
-                    }
-                }))
-            }))
+            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
+
+        Ok(response.map(|body| -> WebsocketBodyStream {
+            Box::pin(
+                body.map(|item| item.map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)),
+            )
+        }))
+    }
+
+    fn log_level(&self) -> LevelFilter {
+        self.log_level
     }
 }

@@ -11,11 +11,10 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 http = { workspace = true }
-http-body = { workspace = true }
 http-body-util = { workspace = true }
 isola = { workspace = true }
+isola-cbor = { workspace = true }
 isola-request = { workspace = true }
-promptkit-cbor = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { workspace = true }

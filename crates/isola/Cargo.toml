@@ -29,7 +29,7 @@ wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
-promptkit-cbor = { workspace = true }
+isola-cbor = { workspace = true }
 tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 

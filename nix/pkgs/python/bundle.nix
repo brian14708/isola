@@ -42,7 +42,7 @@ let
       tzdata
     ]);
 
-  promptkit-py = ../../../crates/python/bundled;
+  isolaPy = ../../../crates/python/bundled;
 in
 stdenv.mkDerivation {
   pname = "wasi-python-bundle";
@@ -70,7 +70,7 @@ stdenv.mkDerivation {
     # Run bundle.py similar to xtask/src/main.rs
     mkdir -p $TMPDIR/bundle
 
-    cp -r ${promptkit-py} $TMPDIR/py
+    cp -r ${isolaPy} $TMPDIR/py
     chmod -R +w $TMPDIR/py
 
     ${python.host}/bin/python3 ${./bundle.py} $TMPDIR/bundle \

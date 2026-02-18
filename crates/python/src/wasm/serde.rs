@@ -1,5 +1,5 @@
 #[pyo3::pymodule]
-#[pyo3(name = "_promptkit_serde")]
+#[pyo3(name = "_isola_serde")]
 pub mod serde_module {
     use pyo3::{Bound, PyAny, PyErr, PyResult, Python, pyfunction, types::PyAnyMethods};
 

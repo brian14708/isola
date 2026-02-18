@@ -1,5 +1,5 @@
 [package]
-name = "promptkit-python"
+name = "isola-python"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

@@ -54,10 +54,10 @@
 
   nixConfig = {
     extra-substituters = [
-      "https://promptkit.cachix.org"
+      "https://isola.cachix.org"
     ];
     extra-trusted-public-keys = [
-      "promptkit.cachix.org-1:IHR3VcUtLnWIqLkKk8UbSe0lMYW0C9tNVbqN5FYUYrQ="
+      "isola.cachix.org-1:vf5aVYDkEEgWfG6olmlPZjR0xd0a1XcRWDoHIUh0fZs="
     ];
   };
 }

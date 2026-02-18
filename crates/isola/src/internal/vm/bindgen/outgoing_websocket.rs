@@ -16,7 +16,7 @@ use wasmtime_wasi::{
 
 use super::{
     HostImpl, HostView,
-    promptkit::script::outgoing_websocket::{
+    isola::script::outgoing_websocket::{
         ErrorCode, Headers, Host, HostConnectRequest, HostFutureWebsocket, HostReadStream,
         HostWebsocketConnection, HostWebsocketMessage, HostWriteStream, MessageType,
     },

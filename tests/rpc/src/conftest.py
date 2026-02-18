@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[HttpClient, None]:
-    base_url = os.getenv("PROMPTKIT_BASE_URL", "http://localhost:3000")
+    base_url = os.getenv("ISOLA_BASE_URL", "http://localhost:3000")
     async with HttpClient(base_url) as c:
         yield c
 

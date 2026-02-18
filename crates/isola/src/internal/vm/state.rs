@@ -278,7 +278,7 @@ fn apply_redirect_header_hygiene(headers: &mut http::HeaderMap, origin_changed: 
     if origin_changed {
         headers.remove(http::header::AUTHORIZATION);
         headers.remove(http::header::COOKIE);
-        headers.remove("x-promptkit-proxy");
+        headers.remove("x-isola-proxy");
     }
 }
 
@@ -707,7 +707,7 @@ mod tests {
         );
         headers.insert(http::header::COOKIE, "a=b".parse().expect("header"));
         headers.insert(
-            http::HeaderName::from_static("x-promptkit-proxy"),
+            http::HeaderName::from_static("x-isola-proxy"),
             "http://proxy".parse().expect("header"),
         );
         headers.insert(
@@ -742,7 +742,7 @@ mod tests {
         assert_eq!(calls[1].method, http::Method::GET);
         assert!(calls[1].headers.get(http::header::AUTHORIZATION).is_none());
         assert!(calls[1].headers.get(http::header::COOKIE).is_none());
-        assert!(calls[1].headers.get("x-promptkit-proxy").is_none());
+        assert!(calls[1].headers.get("x-isola-proxy").is_none());
         assert_eq!(
             calls[1]
                 .headers

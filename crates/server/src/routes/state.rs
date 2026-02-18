@@ -14,7 +14,7 @@ pub struct AppState {
 impl AppState {
     pub async fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let base_env = VmEnv {
-            client: Arc::new(promptkit_request::Client::new()),
+            client: Arc::new(isola_request::Client::new()),
             log_level: LevelFilter::OFF,
         };
         Ok(Self {
