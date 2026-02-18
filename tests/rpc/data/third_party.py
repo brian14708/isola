@@ -72,10 +72,9 @@ def pydantic() -> None:
 
 
 def tzdata() -> None:
-    from datetime import datetime
+    from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
     now_tokyo = datetime.now(ZoneInfo("Asia/Tokyo"))
     utc_offset = now_tokyo.utcoffset()
-    tokyo_offset = utc_offset.total_seconds() / 3600 if utc_offset is not None else 0.0
-    assert tokyo_offset == 9.0, f"Asia/Tokyo offset != +9: {tokyo_offset}"
+    assert utc_offset == timedelta(hours=9), f"Asia/Tokyo offset != +9: {utc_offset}"
