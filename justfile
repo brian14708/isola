@@ -1,10 +1,11 @@
 default: lint test
 
 run: build
-    cargo run --release -p promptkit-server
+    cargo run --release -p isola-server
 
-e2e: init-py
-    uv run --directory tests/rpc pytest
+e2e: init-py build-wasm
+    mkdir -p target
+    sh -c 'PORT=3001 cargo run --release -p isola-server > target/e2e-server.log 2>&1 & pid=$!; trap "kill $pid >/dev/null 2>&1 || true" EXIT INT TERM; for _ in $(seq 1 60); do if curl -fsS http://127.0.0.1:3001/debug/healthz >/dev/null 2>&1; then break; fi; sleep 1; done; PROMPTKIT_BASE_URL=http://127.0.0.1:3001 uv run --directory tests/rpc pytest'
 
 integration:
     cargo test --release -p isola --test integration_python -- --ignored --test-threads=1
@@ -14,8 +15,8 @@ generate: init-ui
     cd tests/rpc && buf generate
 
 build: build-wasm build-ui
-    cargo build --release -p promptkit-server
-    cargo run --release -p promptkit-server build
+    cargo build --release -p isola-server
+    cargo run --release -p isola-server build
 
 [private]
 build-wasm:

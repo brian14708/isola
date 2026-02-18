@@ -41,18 +41,18 @@ stdenv.mkDerivation {
 
     # Install the server binary
     mkdir -p $out/libexec/promptkit
-    cp ${server}/bin/promptkit-server $out/libexec/promptkit/promptkit-server
+    cp ${server}/bin/isola-server $out/libexec/promptkit/isola-server
 
     # Create wrapper script that runs from the correct directory
     mkdir -p $out/bin
-    makeBinaryWrapper $out/libexec/promptkit/promptkit-server $out/bin/promptkit \
+    makeBinaryWrapper $out/libexec/promptkit/isola-server $out/bin/promptkit \
       --chdir $out/share/promptkit \
       --set WASI_PYTHON_RUNTIME $out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr
 
     # Run the build step to pre-initialize the VM
     cd $out/share/promptkit
     WASI_PYTHON_RUNTIME=$out/share/promptkit/target/wasm32-wasip1/wasi-deps/usr \
-      $out/libexec/promptkit/promptkit-server build
+      $out/libexec/promptkit/isola-server build
 
     runHook postInstall
   '';

@@ -1,8 +1,18 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
-from stub.promptkit.script import v1 as pb
+
+if TYPE_CHECKING:
+    from http_client import HttpClient
 
 
 @pytest.mark.asyncio
-async def test_runtime(client: pb.ScriptServiceStub) -> None:
-    response = await client.list_runtime(pb.ListRuntimeRequest())
-    assert "python3" in [r.name for r in response.runtimes]
+async def test_unknown_runtime_rejected(client: HttpClient) -> None:
+    response = await client.execute(
+        runtime="python-nope",
+        script="def main():\n    return 1\n",
+    )
+    assert response.result.is_error
+    assert response.result.error_code == "UNKNOWN_RUNTIME"
