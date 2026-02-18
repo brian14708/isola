@@ -42,7 +42,7 @@
       {
         packages = import ./nix/pkgs { inherit pkgs crane; };
         devShells = {
-          default = import ./nix/devShell.nix {
+          default = import ./nix/shell.nix {
             inherit pkgs crane;
             packages = self.packages.${system};
           };
