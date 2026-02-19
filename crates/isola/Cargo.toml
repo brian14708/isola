@@ -6,7 +6,7 @@ publish.workspace = true
 license.workspace = true
 
 [features]
-default = []
+default = ["cbor", "trace", "request", "request-gzip", "request-tls"]
 cbor = [
     "dep:base64",
     "dep:minicbor",
