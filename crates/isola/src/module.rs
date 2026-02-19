@@ -2,7 +2,7 @@ use crate::TRACE_TARGET_SCRIPT;
 use crate::{
     BoxError, Host, NetworkPolicy, OutputSink, Result,
     error::Error,
-    internal::vm::{
+    internal::sandbox::{
         InstanceState, SandboxPre,
         exports::GuestIndices,
         exports::{Argument as RawArgument, Value},
@@ -31,7 +31,7 @@ use wasmtime::{
 };
 
 // For `InstanceState::table()` when pushing iterator resources.
-use crate::internal::vm::HostView as _;
+use crate::internal::sandbox::HostView as _;
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 const DEFAULT_MAX_REDIRECTS: usize = 10;
@@ -334,7 +334,7 @@ impl<H: Host + Clone> Drop for Module<H> {
 
 pub struct Sandbox<H: Host + Clone> {
     store: Store<InstanceState<H>>,
-    bindings: crate::internal::vm::Sandbox,
+    bindings: crate::internal::sandbox::Sandbox,
     /// Keeps the epoch ticker alive for the lifetime of this sandbox.
     _ticker: Arc<EpochTicker>,
 }
@@ -486,7 +486,7 @@ impl<H: Host + Clone> Sandbox<H> {
                         let iter = store
                             .data_mut()
                             .table()
-                            .push(crate::internal::vm::ValueIterator::new(stream))
+                            .push(crate::internal::sandbox::ValueIterator::new(stream))
                             .map_err(|e| Error::Wasm(e.into()))?;
                         RawArgument {
                             name: arg.name.as_deref(),

@@ -16,7 +16,7 @@ use tokio::sync::mpsc;
 use tracing::{field::Empty, level_filters::LevelFilter};
 
 #[derive(Clone)]
-pub struct VmEnv {
+pub struct SandboxEnv {
     pub client: Arc<Client>,
     pub log_level: LevelFilter,
 }
@@ -88,7 +88,7 @@ impl OutputSink for MpscOutputSink {
 }
 
 #[async_trait]
-impl Host for VmEnv {
+impl Host for SandboxEnv {
     async fn hostcall(&self, call_type: &str, payload: Bytes) -> Result<Bytes, BoxError> {
         match call_type {
             "echo" => Ok(payload),

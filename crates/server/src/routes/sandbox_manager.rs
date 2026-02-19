@@ -61,12 +61,12 @@ struct CachedSandbox<E: Host + Clone> {
 
 type CacheMap<E> = Arc<Mutex<HashMap<[u8; 32], Vec<CachedSandbox<E>>>>>;
 
-pub struct VmManager<E: Host + Clone> {
+pub struct SandboxManager<E: Host + Clone> {
     module: Arc<Module<E>>,
     cache: CacheMap<E>,
 }
 
-impl<E: Host + Clone> Clone for VmManager<E> {
+impl<E: Host + Clone> Clone for SandboxManager<E> {
     fn clone(&self) -> Self {
         Self {
             module: self.module.clone(),
@@ -75,15 +75,15 @@ impl<E: Host + Clone> Clone for VmManager<E> {
     }
 }
 
-impl<E: Host + Clone> VmManager<E> {
+impl<E: Host + Clone> SandboxManager<E> {
     pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        info!("Creating VmManager...");
+        info!("Creating SandboxManager...");
         let path = wasm_path.as_ref();
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Wasm path has no parent directory"))?;
 
-        let max_memory = std::env::var("VM_MAX_MEMORY")
+        let max_memory = std::env::var("SANDBOX_MAX_MEMORY")
             .ok()
             .and_then(|f| f.parse().ok())
             .unwrap_or(64 * 1024 * 1024);

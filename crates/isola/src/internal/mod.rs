@@ -1,4 +1,4 @@
 pub mod resource;
+pub mod sandbox;
 pub mod trace_output;
-pub mod vm;
 pub mod wasm;
