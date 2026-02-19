@@ -1,15 +1,19 @@
-import os
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import pytest
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
+if TYPE_CHECKING:
+    from fixtures.server import ServerProcess
+
 
 @pytest.mark.asyncio
-async def test_run() -> None:
-    base_url = os.getenv("ISOLA_BASE_URL", "http://localhost:3000")
+async def test_run(server: ServerProcess) -> None:
     async with (
-        streamable_http_client(f"{base_url}/mcp") as (
+        streamable_http_client(f"{server.base_url}/mcp") as (
             read_stream,
             write_stream,
             _,
