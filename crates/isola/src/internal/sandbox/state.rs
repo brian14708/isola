@@ -73,7 +73,7 @@ async fn collect_outgoing_http_body(
 }
 
 impl<H: Host + Clone> InstanceState<H> {
-    /// Creates a new linker for the VM state.
+    /// Creates a new linker for the sandbox state.
     ///
     /// # Errors
     ///
@@ -87,7 +87,7 @@ impl<H: Host + Clone> InstanceState<H> {
         Ok(linker)
     }
 
-    /// Creates a new VM state with the specified configuration.
+    /// Creates a new sandbox state with the specified configuration.
     ///
     /// # Errors
     ///

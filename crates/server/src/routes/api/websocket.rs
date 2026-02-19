@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{Span, info_span, level_filters::LevelFilter};
 
-use crate::routes::{AppState, Argument, Source, StreamItem, VmEnv};
+use crate::routes::{AppState, Argument, SandboxEnv, Source, StreamItem};
 
 use super::{
     error::HttpApiError,
@@ -227,7 +227,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             (Span::none(), None, LevelFilter::OFF)
         };
 
-        let env = VmEnv {
+        let env = SandboxEnv {
             client: state.base_env.client.clone(),
             log_level,
         };
@@ -236,7 +236,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
         let cache_key = if trace { "trace" } else { "default" };
         let stream_result = state
-            .vm
+            .sandbox_manager
             .exec(cache_key, source, function, converted_args, timeout, env)
             .await;
 

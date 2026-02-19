@@ -13,7 +13,7 @@ use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Span, info_span, level_filters::LevelFilter};
 
-use crate::routes::{AppState, Argument, Source, StreamItem, VmEnv};
+use crate::routes::{AppState, Argument, SandboxEnv, Source, StreamItem};
 
 use super::{
     error::HttpApiError,
@@ -129,7 +129,7 @@ async fn execute_json(
         (Span::none(), None, LevelFilter::OFF)
     };
 
-    let env = VmEnv {
+    let env = SandboxEnv {
         client: state.base_env.client.clone(),
         log_level,
     };
@@ -139,7 +139,7 @@ async fn execute_json(
 
         let cache_key = if req.trace { "trace" } else { "default" };
         let mut stream = state
-            .vm
+            .sandbox_manager
             .exec(cache_key, source, req.function, args, timeout, env)
             .await
             .map_err(map_start_error)?;
@@ -256,7 +256,7 @@ fn execute_sse_inner(
             (Span::none(), None, LevelFilter::OFF)
         };
 
-        let env = VmEnv {
+        let env = SandboxEnv {
             client: state.base_env.client.clone(),
             log_level,
         };
@@ -265,7 +265,7 @@ fn execute_sse_inner(
 
         let cache_key = if req.trace { "trace" } else { "default" };
         let stream_result = state
-            .vm
+            .sandbox_manager
             .exec(cache_key, source, req.function.clone(), args, timeout, env)
             .await;
 

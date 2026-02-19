@@ -116,7 +116,7 @@ impl ContextHandle {
         })
     }
 
-    fn new_vm(&self) -> Result<VmHandle<'_>> {
+    fn new_sandbox(&self) -> Result<SandboxHandle<'_>> {
         let Some(module) = &self.module else {
             return Err(Error::InvalidArgument("Runtime not loaded"));
         };
@@ -124,9 +124,9 @@ impl ContextHandle {
             .rt
             .block_on(async { module.instantiate(None, Env::shared().await).await })
             .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
-        Ok(VmHandle {
+        Ok(SandboxHandle {
             ctx: self,
-            inner: VmInner::Pending {
+            inner: SandboxInner::Pending {
                 sandbox,
                 callback: None,
             },
@@ -231,7 +231,7 @@ impl OutputSink for Callback {
     }
 }
 
-enum VmInner {
+enum SandboxInner {
     Uninitialized,
     Pending {
         sandbox: Sandbox<Env>,
@@ -243,19 +243,19 @@ enum VmInner {
     },
 }
 
-pub struct VmHandle<'a> {
+pub struct SandboxHandle<'a> {
     ctx: &'a ContextHandle,
-    inner: VmInner,
+    inner: SandboxInner,
 }
 
-impl VmHandle<'_> {
+impl SandboxHandle<'_> {
     fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
         todo!()
     }
 
     const fn set_callback(&mut self, callback: Callback) -> Result<()> {
         match &mut self.inner {
-            VmInner::Pending { callback: cb, .. } => {
+            SandboxInner::Pending { callback: cb, .. } => {
                 *cb = Some(callback);
                 Ok(())
             }
@@ -264,11 +264,11 @@ impl VmHandle<'_> {
     }
 
     fn start(&mut self) -> Result<()> {
-        match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
-            VmInner::Pending { sandbox, callback } => {
+        match std::mem::replace(&mut self.inner, SandboxInner::Uninitialized) {
+            SandboxInner::Pending { sandbox, callback } => {
                 let callback = callback.ok_or(Error::InvalidArgument("Callback not set"))?;
                 // Sandbox is already initialized when created.
-                self.inner = VmInner::Running { sandbox, callback };
+                self.inner = SandboxInner::Running { sandbox, callback };
                 Ok(())
             }
             _ => Err(Error::InvalidArgument("Instance not in pending state")),
@@ -277,7 +277,7 @@ impl VmHandle<'_> {
 
     fn load_script(&mut self, input: &str, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            VmInner::Running { sandbox, .. } => {
+            SandboxInner::Running { sandbox, .. } => {
                 self.ctx
                     .rt
                     .block_on(async {
@@ -297,8 +297,8 @@ impl VmHandle<'_> {
     }
 
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
-        match std::mem::replace(&mut self.inner, VmInner::Uninitialized) {
-            VmInner::Running {
+        match std::mem::replace(&mut self.inner, SandboxInner::Uninitialized) {
+            SandboxInner::Running {
                 mut sandbox,
                 callback,
             } => {
@@ -346,11 +346,11 @@ impl VmHandle<'_> {
                 });
 
                 // Restore the sandbox state.
-                self.inner = VmInner::Running { sandbox, callback };
+                self.inner = SandboxInner::Running { sandbox, callback };
 
                 result
                     .map_err(|_| Error::Internal("Operation timeout".to_string()))?
-                    .map_err(|e| Error::Internal(format!("VM execution failed: {e}")))?;
+                    .map_err(|e| Error::Internal(format!("Sandbox execution failed: {e}")))?;
 
                 Ok(())
             }
@@ -359,39 +359,39 @@ impl VmHandle<'_> {
     }
 }
 
-/// Creates a new VM instance from the context.
+/// Creates a new sandbox instance from the context.
 ///
 /// # Safety
 ///
-/// The caller must ensure that `out_vm` is a valid pointer to an
-/// uninitialized `Box<VmHandle>`.
+/// The caller must ensure that `out_sandbox` is a valid pointer to an
+/// uninitialized `Box<SandboxHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_vm_create<'a>(
+pub unsafe extern "C" fn isola_sandbox_create<'a>(
     ctx: &'a mut ContextHandle,
-    out_vm: *mut Box<VmHandle<'a>>,
+    out_sandbox: *mut Box<SandboxHandle<'a>>,
 ) -> ErrorCode {
-    let vm = c_try!(ctx.new_vm());
-    unsafe { out_vm.write(Box::new(vm)) };
+    let sandbox = c_try!(ctx.new_sandbox());
+    unsafe { out_sandbox.write(Box::new(sandbox)) };
     ErrorCode::Ok
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn isola_vm_destroy(_vm: Box<VmHandle<'_>>) {}
+pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle<'_>>) {}
 
-/// Sets a configuration value for the VM.
+/// Sets a configuration value for the sandbox.
 ///
 /// # Safety
 ///
 /// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_vm_set_config(
-    vm: &mut VmHandle<'_>,
+pub unsafe extern "C" fn isola_sandbox_set_config(
+    sandbox: &mut SandboxHandle<'_>,
     key: *const c_char,
     value: *const c_char,
 ) -> ErrorCode {
     let key = unsafe { CStr::from_ptr(key) };
     let value = unsafe { CStr::from_ptr(value) };
-    c_try!(vm.set_config(key, value));
+    c_try!(sandbox.set_config(key, value));
     ErrorCode::Ok
 }
 
@@ -452,8 +452,8 @@ enum RawArgument {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn isola_vm_set_callback(
-    vm: &mut VmHandle<'_>,
+pub extern "C" fn isola_sandbox_set_callback(
+    sandbox: &mut SandboxHandle<'_>,
     callback: extern "C" fn(CallbackEvent, *const u8, usize, *mut c_void),
     user_data: *mut c_void,
 ) -> ErrorCode {
@@ -461,24 +461,24 @@ pub extern "C" fn isola_vm_set_callback(
         callback,
         user_data,
     };
-    c_try!(vm.set_callback(callback));
+    c_try!(sandbox.set_callback(callback));
     ErrorCode::Ok
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn isola_vm_start(vm: &mut VmHandle<'_>) -> ErrorCode {
-    c_try!(vm.start());
+pub extern "C" fn isola_sandbox_start(sandbox: &mut SandboxHandle<'_>) -> ErrorCode {
+    c_try!(sandbox.start());
     ErrorCode::Ok
 }
 
-/// Loads a script into the VM.
+/// Loads a script into the sandbox.
 ///
 /// # Safety
 ///
 /// The caller must ensure that `input` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_vm_load_script(
-    vm: &mut VmHandle<'_>,
+pub unsafe extern "C" fn isola_sandbox_load_script(
+    sandbox: &mut SandboxHandle<'_>,
     input: *const c_char,
     timeout_in_ms: u64,
 ) -> ErrorCode {
@@ -488,11 +488,11 @@ pub unsafe extern "C" fn isola_vm_load_script(
             .to_str()
             .map_or_else(|_| Err(Error::InvalidArgument("Invalid input string")), Ok)
     );
-    c_try!(vm.load_script(input, timeout_in_ms));
+    c_try!(sandbox.load_script(input, timeout_in_ms));
     ErrorCode::Ok
 }
 
-/// Runs a function in the VM with the specified arguments.
+/// Runs a function in the sandbox with the specified arguments.
 ///
 /// # Safety
 ///
@@ -505,8 +505,8 @@ pub unsafe extern "C" fn isola_vm_load_script(
 ///
 /// This function may panic if argument names contain invalid UTF-8 sequences.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_vm_run(
-    vm: &mut VmHandle<'_>,
+pub unsafe extern "C" fn isola_sandbox_run(
+    sandbox: &mut SandboxHandle<'_>,
     func: *const c_char,
     args: *const Argument,
     args_len: usize,
@@ -555,7 +555,7 @@ pub unsafe extern "C" fn isola_vm_run(
         return ErrorCode::InvalidArgument;
     };
 
-    c_try!(vm.run(func, args, timeout_in_ms));
+    c_try!(sandbox.run(func, args, timeout_in_ms));
     ErrorCode::Ok
 }
 

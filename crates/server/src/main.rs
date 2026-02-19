@@ -3,7 +3,7 @@ use std::env::args;
 use anyhow::anyhow;
 use utils::otel::init_tracing;
 
-use crate::routes::{VmEnv, VmManager};
+use crate::routes::{SandboxEnv, SandboxManager};
 
 mod routes;
 mod server;
@@ -27,7 +27,7 @@ async fn async_main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            _ = VmManager::<VmEnv>::new("target/isola_python.wasm").await?;
+            _ = SandboxManager::<SandboxEnv>::new("target/isola_python.wasm").await?;
             Ok(())
         }
         None | Some("serve") => {

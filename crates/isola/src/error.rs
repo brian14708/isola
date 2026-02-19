@@ -11,11 +11,11 @@ pub enum GuestErrorCode {
 }
 
 impl GuestErrorCode {
-    pub(crate) const fn from_wit(code: crate::internal::vm::exports::ErrorCode) -> Self {
+    pub(crate) const fn from_wit(code: crate::internal::sandbox::exports::ErrorCode) -> Self {
         match code {
-            crate::internal::vm::exports::ErrorCode::Unknown => Self::Unknown,
-            crate::internal::vm::exports::ErrorCode::Internal => Self::Internal,
-            crate::internal::vm::exports::ErrorCode::Aborted => Self::Aborted,
+            crate::internal::sandbox::exports::ErrorCode::Unknown => Self::Unknown,
+            crate::internal::sandbox::exports::ErrorCode::Internal => Self::Internal,
+            crate::internal::sandbox::exports::ErrorCode::Aborted => Self::Aborted,
         }
     }
 }
@@ -50,8 +50,8 @@ pub enum Error {
     Host(#[source] BoxError),
 }
 
-impl From<crate::internal::vm::exports::Error> for Error {
-    fn from(value: crate::internal::vm::exports::Error) -> Self {
+impl From<crate::internal::sandbox::exports::Error> for Error {
+    fn from(value: crate::internal::sandbox::exports::Error) -> Self {
         Self::Guest {
             code: GuestErrorCode::from_wit(value.code),
             message: value.message,

@@ -22,7 +22,7 @@ use tracing::level_filters::LevelFilter;
 use tracing::{Span, info_span};
 
 use crate::routes::api::trace::{HttpTraceCollector, TraceData};
-use crate::routes::{AppState, Source, StreamItem, VmEnv};
+use crate::routes::{AppState, SandboxEnv, Source, StreamItem};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -89,7 +89,7 @@ impl Sandbox {
             let _enter = span.enter();
             let mut stream = self
                 .state
-                .vm
+                .sandbox_manager
                 .exec(
                     "mcp-trace",
                     Source {
@@ -99,7 +99,7 @@ impl Sandbox {
                     "main".to_string(),
                     vec![],
                     timeout,
-                    VmEnv {
+                    SandboxEnv {
                         client: self.state.base_env.client.clone(),
                         log_level,
                     },

@@ -9,7 +9,7 @@ prefix = "isola_"
 
 [export.rename]
 ContextHandle = "context_handle"
-VmHandle = "vm_handle"
+SandboxHandle = "sandbox_handle"
 Argument = "argument"
 ErrorCode = "error_code"
 CallbackEvent = "callback_event"

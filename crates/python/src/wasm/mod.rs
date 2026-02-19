@@ -190,31 +190,37 @@ impl guest::Guest for Global {
     }
 
     fn eval_script(script: String) -> Result<(), guest::Error> {
-        GLOBAL_SCOPE.with_borrow(|vm| {
-            vm.as_ref().map_or_else(
-                || Err(Error::UnexpectedError("VM not initialized").into()),
-                |vm| vm.load_script(&script).map_err(Into::<guest::Error>::into),
+        GLOBAL_SCOPE.with_borrow(|sandbox| {
+            sandbox.as_ref().map_or_else(
+                || Err(Error::UnexpectedError("Sandbox not initialized").into()),
+                |sandbox| {
+                    sandbox
+                        .load_script(&script)
+                        .map_err(Into::<guest::Error>::into)
+                },
             )
         })
     }
 
     fn eval_file(path: String) -> Result<(), guest::Error> {
-        GLOBAL_SCOPE.with_borrow(|vm| {
-            if let Some(vm) = vm.as_ref() {
+        GLOBAL_SCOPE.with_borrow(|sandbox| {
+            if let Some(sandbox) = sandbox.as_ref() {
                 let script = std::fs::read_to_string(std::path::Path::new(&path))
                     .map_err(|_e| Error::UnexpectedError("fail to read script"))?;
-                vm.load_script(&script).map_err(Into::<guest::Error>::into)
+                sandbox
+                    .load_script(&script)
+                    .map_err(Into::<guest::Error>::into)
             } else {
-                Err(Error::UnexpectedError("VM not initialized").into())
+                Err(Error::UnexpectedError("Sandbox not initialized").into())
             }
         })
     }
 
     fn call_func(func: String, args: Vec<guest::Argument>) -> Result<(), guest::Error> {
-        GLOBAL_SCOPE.with_borrow(|vm| {
-            vm.as_ref().map_or_else(
-                || Err(Error::UnexpectedError("VM not initialized").into()),
-                |vm| {
+        GLOBAL_SCOPE.with_borrow(|sandbox| {
+            sandbox.as_ref().map_or_else(
+                || Err(Error::UnexpectedError("Sandbox not initialized").into()),
+                |sandbox| {
                     let mut positional = vec![];
                     let mut named = vec![];
                     for arg in args {
@@ -229,12 +235,12 @@ impl guest::Guest for Global {
                             positional.push(value);
                         }
                     }
-                    let ret = vm
+                    let ret = sandbox
                         .run(&func, positional, named, |emit_type, data| {
                             host::blocking_emit(emit_type, data);
                         })
                         .map_err(Into::<guest::Error>::into);
-                    vm.flush();
+                    sandbox.flush();
                     ret
                 },
             )

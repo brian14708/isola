@@ -21,29 +21,29 @@ TEST_CASE("Context") {
   REQUIRE(isola_context_create(0, &ctx) == 0);
   const char *path = std::getenv("ISOLA_RUNTIME_PATH");
   REQUIRE(isola_context_initialize(ctx, path) == 0);
-  isola_vm_handle *vm;
-  REQUIRE(isola_vm_create(ctx, &vm) == 0);
+  isola_sandbox_handle *sandbox;
+  REQUIRE(isola_sandbox_create(ctx, &sandbox) == 0);
   std::vector<std::string> outputs;
-  REQUIRE(isola_vm_set_callback(vm, callback, &outputs) == 0);
-  REQUIRE(isola_vm_start(vm) == 0);
+  REQUIRE(isola_sandbox_set_callback(sandbox, callback, &outputs) == 0);
+  REQUIRE(isola_sandbox_start(sandbox) == 0);
 
-  REQUIRE(isola_vm_load_script(
-              vm, "def main():\n\tfor i in range(100): yield i", 1000) == 0);
-  REQUIRE(isola_vm_run(vm, "main", nullptr, 0, 1000) == 0);
+  REQUIRE(isola_sandbox_load_script(
+              sandbox, "def main():\n\tfor i in range(100): yield i", 1000) == 0);
+  REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 1000) == 0);
 
-  REQUIRE(isola_vm_load_script(vm, "def main(i):\n\treturn i", 1000) == 0);
+  REQUIRE(isola_sandbox_load_script(sandbox, "def main(i):\n\treturn i", 1000) == 0);
   isola_argument args[1];
   args[0].type = ISOLA_ARGUMENT_TYPE_JSON;
   args[0].name = nullptr;
   args[0].value.data.data = reinterpret_cast<const uint8_t *>("100");
   args[0].value.data.len = 3;
-  REQUIRE(isola_vm_run(vm, "main", args, 1, 1000) == 0);
+  REQUIRE(isola_sandbox_run(sandbox, "main", args, 1, 1000) == 0);
 
   REQUIRE(outputs.size() == 101);
   for (size_t i = 0; i < outputs.size(); ++i) {
     REQUIRE(outputs[i] == std::to_string(i));
   }
 
-  isola_vm_destroy(vm);
+  isola_sandbox_destroy(sandbox);
   isola_context_destroy(ctx);
 }

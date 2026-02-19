@@ -4,29 +4,29 @@ use axum::extract::FromRef;
 use isola::request::Client;
 use tracing::level_filters::LevelFilter;
 
-use super::{VmEnv, VmManager};
+use super::{SandboxEnv, SandboxManager};
 
 #[derive(Clone)]
 pub struct AppState {
-    pub vm: Arc<VmManager<VmEnv>>,
-    pub base_env: VmEnv,
+    pub sandbox_manager: Arc<SandboxManager<SandboxEnv>>,
+    pub base_env: SandboxEnv,
 }
 
 impl AppState {
-    pub async fn new(vm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        let base_env = VmEnv {
+    pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let base_env = SandboxEnv {
             client: Arc::new(Client::new()),
             log_level: LevelFilter::OFF,
         };
         Ok(Self {
-            vm: Arc::new(VmManager::new(vm_path.as_ref()).await?),
+            sandbox_manager: Arc::new(SandboxManager::new(wasm_path.as_ref()).await?),
             base_env,
         })
     }
 }
 
-impl FromRef<AppState> for Arc<VmManager<VmEnv>> {
+impl FromRef<AppState> for Arc<SandboxManager<SandboxEnv>> {
     fn from_ref(state: &AppState) -> Self {
-        state.vm.clone()
+        state.sandbox_manager.clone()
     }
 }

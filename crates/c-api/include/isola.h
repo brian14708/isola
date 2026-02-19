@@ -32,9 +32,9 @@ typedef enum isola_argument_type {
 
 typedef struct isola_context_handle isola_context_handle;
 
-typedef struct isola_stream_handle isola_stream_handle;
+typedef struct isola_sandbox_handle isola_sandbox_handle;
 
-typedef struct isola_vm_handle isola_vm_handle;
+typedef struct isola_stream_handle isola_stream_handle;
 
 typedef struct isola_blob {
   const uint8_t *data;
@@ -90,51 +90,51 @@ enum isola_error_code isola_context_config_set(struct isola_context_handle *ctx,
 void isola_context_destroy(struct isola_context_handle *_ctx);
 
 /**
- * Creates a new VM instance from the context.
+ * Creates a new sandbox instance from the context.
  *
  * # Safety
  *
- * The caller must ensure that `out_vm` is a valid pointer to an
- * uninitialized `Box<VmHandle>`.
+ * The caller must ensure that `out_sandbox` is a valid pointer to an
+ * uninitialized `Box<SandboxHandle>`.
  */
-enum isola_error_code isola_vm_create(struct isola_context_handle *ctx,
-                                      struct isola_vm_handle **out_vm);
+enum isola_error_code isola_sandbox_create(struct isola_context_handle *ctx,
+                                           struct isola_sandbox_handle **out_sandbox);
 
-void isola_vm_destroy(struct isola_vm_handle *_vm);
+void isola_sandbox_destroy(struct isola_sandbox_handle *_sandbox);
 
 /**
- * Sets a configuration value for the VM.
+ * Sets a configuration value for the sandbox.
  *
  * # Safety
  *
  * The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
  */
-enum isola_error_code isola_vm_set_config(struct isola_vm_handle *vm,
-                                          const char *key,
-                                          const char *value);
+enum isola_error_code isola_sandbox_set_config(struct isola_sandbox_handle *sandbox,
+                                               const char *key,
+                                               const char *value);
 
-enum isola_error_code isola_vm_set_callback(struct isola_vm_handle *vm,
-                                            void (*callback)(enum isola_callback_event,
-                                                             const uint8_t*,
-                                                             size_t,
-                                                             void*),
-                                            void *user_data);
+enum isola_error_code isola_sandbox_set_callback(struct isola_sandbox_handle *sandbox,
+                                                 void (*callback)(enum isola_callback_event,
+                                                                  const uint8_t*,
+                                                                  size_t,
+                                                                  void*),
+                                                 void *user_data);
 
-enum isola_error_code isola_vm_start(struct isola_vm_handle *vm);
+enum isola_error_code isola_sandbox_start(struct isola_sandbox_handle *sandbox);
 
 /**
- * Loads a script into the VM.
+ * Loads a script into the sandbox.
  *
  * # Safety
  *
  * The caller must ensure that `input` is a valid, null-terminated C string.
  */
-enum isola_error_code isola_vm_load_script(struct isola_vm_handle *vm,
-                                           const char *input,
-                                           uint64_t timeout_in_ms);
+enum isola_error_code isola_sandbox_load_script(struct isola_sandbox_handle *sandbox,
+                                                const char *input,
+                                                uint64_t timeout_in_ms);
 
 /**
- * Runs a function in the VM with the specified arguments.
+ * Runs a function in the sandbox with the specified arguments.
  *
  * # Safety
  *
@@ -147,11 +147,11 @@ enum isola_error_code isola_vm_load_script(struct isola_vm_handle *vm,
  *
  * This function may panic if argument names contain invalid UTF-8 sequences.
  */
-enum isola_error_code isola_vm_run(struct isola_vm_handle *vm,
-                                   const char *func,
-                                   const struct isola_argument *args,
-                                   size_t args_len,
-                                   uint64_t timeout_in_ms);
+enum isola_error_code isola_sandbox_run(struct isola_sandbox_handle *sandbox,
+                                        const char *func,
+                                        const struct isola_argument *args,
+                                        size_t args_len,
+                                        uint64_t timeout_in_ms);
 
 /**
  * Creates a new stream handle for streaming arguments.

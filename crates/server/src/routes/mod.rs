@@ -1,16 +1,16 @@
 mod api;
 mod env;
 mod mcp;
+mod sandbox_manager;
 mod state;
-mod vm_manager;
 
 use std::time::Duration;
 
 use axum::{http::StatusCode, routing::get};
-pub use env::{StreamItem, VmEnv};
+pub use env::{SandboxEnv, StreamItem};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+pub use sandbox_manager::{Argument, SandboxManager, Source};
 pub use state::AppState;
-pub use vm_manager::{Argument, Source, VmManager};
 
 pub fn router(state: &AppState) -> axum::Router {
     let prometheus = PrometheusBuilder::new().install_recorder().unwrap();
