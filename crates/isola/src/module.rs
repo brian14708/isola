@@ -340,14 +340,6 @@ pub struct Module<H: Host + Clone> {
     _marker: std::marker::PhantomData<H>,
 }
 
-impl<H: Host + Clone> Drop for Module<H> {
-    fn drop(&mut self) {
-        // Final epoch bump so any in-flight epoch waits on this engine resolve
-        // even if other Sandbox clones still hold the ticker alive.
-        self.engine.increment_epoch();
-    }
-}
-
 pub struct Sandbox<H: Host + Clone> {
     store: Store<InstanceState<H>>,
     bindings: crate::internal::sandbox::Sandbox,
