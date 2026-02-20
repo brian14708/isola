@@ -1,0 +1,52 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - main
+      - renovate/**
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: isola
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        run: nix --accept-flake-config develop --command cargo test
+      - name: Clippy
+        run: nix --accept-flake-config develop --command cargo clippy --all-features
+  integration:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: isola
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Run integration test
+        run: nix --accept-flake-config develop --command just integration

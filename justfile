@@ -3,11 +3,8 @@ default: lint test
 run: build
     cargo run --release -p isola-server
 
-e2e: init-py build-wasm
-    uv run --directory tests/rpc pytest
-
 integration: build-wasm
-    cargo test --release
+    cargo test --release -p isola
 
 build: build-wasm
     cargo build --release -p isola-server

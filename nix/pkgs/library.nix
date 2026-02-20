@@ -2,7 +2,6 @@
   lib,
   pkgs,
   crane,
-  python,
 }:
 let
   craneLib = (crane.mkLib pkgs).overrideToolchain (
@@ -30,14 +29,12 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    mkdir -p $out/lib -p $out/share/isola
+    mkdir -p $out/lib
 
     cp target/release-lto/libisola.* $out/lib/
     rm $out/lib/libisola.d
     runHook postInstall
 
     cp -r ${../../crates/c-api/include} $out/include
-    cp -r ${python.bundle} $out/share/isola/python
-    cp ${python}/lib/isola_python.wasm $out/share/isola/python.wasm
   '';
 }
