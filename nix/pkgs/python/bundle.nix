@@ -100,7 +100,7 @@ stdenv.mkDerivation {
       done
       touch $out/lib/python${pythonVersion}/lib-dynload/.empty
 
-      cp $TMPDIR/bundle.zip $TMPDIR/bundle-src.zip ${python}/lib/python*.zip $out/lib/
+      cp $TMPDIR/bundle.zip ${python}/lib/python*.zip $out/lib/
 
       find $out/ -type f -name "*.so" -exec truncate -s 0 {} \;
       find $out/ -type d -name "__pycache__" -exec rm -rf {} +

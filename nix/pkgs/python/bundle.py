@@ -7,7 +7,6 @@ import zipfile
 
 if __name__ == "__main__":
     pyzip_path = sys.argv[1] + ".zip"
-    srczip_path = sys.argv[1] + "-src.zip"
     source_paths = sys.argv[2:]
 
     with zipfile.PyZipFile(pyzip_path, "w") as z:
@@ -35,31 +34,3 @@ if __name__ == "__main__":
                     if item.is_file() and item.suffix != ".py":
                         continue
                     z.writepy(item)
-
-    EXT = {".py", ".pyi", ".typed"}
-    with zipfile.ZipFile(
-        srczip_path, "w", compression=zipfile.ZIP_DEFLATED, strict_timestamps=False
-    ) as src_zip:
-        for path_str in source_paths:
-            path = pathlib.Path(path_str)
-
-            # Handle wheel files
-            if path.is_file() and path.suffix == ".whl":
-                with zipfile.ZipFile(path, "r") as whl:
-                    for name in whl.namelist():
-                        if any(name.endswith(ext) for ext in EXT):
-                            src_zip.writestr(name, whl.read(name))
-            # Handle directories
-            elif path.is_dir():
-                for item in path.iterdir():
-                    if item.name.startswith("."):
-                        continue
-                    if item.is_file():
-                        if item.suffix in EXT:
-                            arcname = str(item.relative_to(path))
-                            src_zip.write(item, arcname=arcname)
-                    else:
-                        for file_path in item.rglob("*"):
-                            if file_path.is_file() and file_path.suffix in EXT:
-                                arcname = str(file_path.relative_to(path))
-                                src_zip.write(file_path, arcname=arcname)

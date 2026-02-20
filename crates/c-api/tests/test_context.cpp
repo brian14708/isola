@@ -28,10 +28,12 @@ TEST_CASE("Context") {
   REQUIRE(isola_sandbox_start(sandbox) == 0);
 
   REQUIRE(isola_sandbox_load_script(
-              sandbox, "def main():\n\tfor i in range(100): yield i", 1000) == 0);
+              sandbox, "def main():\n\tfor i in range(100): yield i", 1000) ==
+          0);
   REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 1000) == 0);
 
-  REQUIRE(isola_sandbox_load_script(sandbox, "def main(i):\n\treturn i", 1000) == 0);
+  REQUIRE(isola_sandbox_load_script(sandbox, "def main(i):\n\treturn i",
+                                    1000) == 0);
   isola_argument args[1];
   args[0].type = ISOLA_ARGUMENT_TYPE_JSON;
   args[0].name = nullptr;

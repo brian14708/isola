@@ -5,7 +5,7 @@
     nixfmt.enable = true;
     rustfmt = {
       enable = true;
-      package = (pkgs.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml);
+      package = pkgs.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     };
     ruff-format.enable = true;
     clang-format.enable = true;

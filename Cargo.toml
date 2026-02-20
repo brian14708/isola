@@ -1,12 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/c-api",
-    "crates/c-api-export",
-    "crates/isola",
-    "crates/python",
-    "crates/server",
-    "crates/xtask",
+    "crates/*",
 ]
 
 [workspace.package]

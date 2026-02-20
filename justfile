@@ -27,7 +27,7 @@ lint: init-py
     uv run basedpyright
 
 integration-c:
-    cmake -B target/c -G Ninja tests/c
+    cmake -B target/c -G Ninja crates/c-api/tests
     cmake --build target/c
     cmake --build target/c --target test
 

@@ -6,12 +6,10 @@ dependencies = []
 
 [tool.uv.sources]
 isola-py = { workspace = true }
-isola-tests-rpc = { workspace = true }
 
 [tool.uv.workspace]
 members = [
     "crates/python/bundled",
-    "tests/rpc",
 ]
 
 [dependency-groups]
@@ -37,7 +35,6 @@ future-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["BLE001", "PLC0415", "DOC", "INP001", "ANN001"]
-"tests/rpc/data/**/*.py" = ["PT"]
 
 [tool.ruff.format]
 preview = true
