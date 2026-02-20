@@ -4,9 +4,6 @@
   server,
   python,
 }:
-let
-  inherit (python) bundle;
-in
 stdenv.mkDerivation {
   pname = "isola";
   version = "0.1.0";
@@ -18,13 +15,12 @@ stdenv.mkDerivation {
   buildPhase = ''
     runHook preBuild
 
-    # Create the application directory structure
-    mkdir -p app/target
-    mkdir -p app/target/wasm32-wasip1/wasi-deps/usr
-
-    # Copy all components
-    cp ${python}/lib/isola_python.wasm app/target/isola_python.wasm
-    cp -r ${bundle}/* app/target/wasm32-wasip1/wasi-deps/usr/
+    # Copy the complete Python runtime output.
+    mkdir -p app
+    cp -r ${python}/* app/
+    mkdir -p app/target/wasm32-wasip1/wasi-deps
+    ln -s ../bin/isola_python.wasm app/target/isola_python.wasm
+    ln -s ../../.. app/target/wasm32-wasip1/wasi-deps/usr
 
     runHook postBuild
   '';
@@ -44,11 +40,11 @@ stdenv.mkDerivation {
     mkdir -p $out/bin
     makeBinaryWrapper $out/libexec/isola/isola-server $out/bin/isola \
       --chdir $out/share/isola \
-      --set WASI_PYTHON_RUNTIME $out/share/isola/target/wasm32-wasip1/wasi-deps/usr
+      --set WASI_PYTHON_RUNTIME $out/share/isola
 
     # Run the build step to pre-initialize the VM
     cd $out/share/isola
-    WASI_PYTHON_RUNTIME=$out/share/isola/target/wasm32-wasip1/wasi-deps/usr \
+    WASI_PYTHON_RUNTIME=$out/share/isola \
       $out/libexec/isola/isola-server build
 
     runHook postInstall

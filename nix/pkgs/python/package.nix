@@ -80,7 +80,8 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    install -Dm644 target/isola_python.wasm $out/lib/isola_python.wasm
+    install -Dm644 target/isola_python.wasm $out/bin/isola_python.wasm
+    cp --no-preserve=mode -rL ${bundle}/. $out/
     find $out/ -type f -print -exec nuke-refs '{}' +
 
     runHook postInstall

@@ -2,7 +2,7 @@
 name = "isola-server"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 license.workspace = true
 
 [dependencies]

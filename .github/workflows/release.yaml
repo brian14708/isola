@@ -1,0 +1,249 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  schedule:
+    - cron: "30 4 * * 2"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  targets:
+    runs-on: ubuntu-latest
+    outputs:
+      oci_tag: ${{ steps.resolve.outputs.oci_tag }}
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+    steps:
+      - name: Resolve publish targets
+        id: resolve
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
+        run: |
+          tag=""
+          if [ -n "$RELEASE_TAG" ]; then
+            tag="$RELEASE_TAG"
+          elif [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+
+          if [ -n "$tag" ]; then
+            oci_tag="$tag"
+            release_tag="$tag"
+          else
+            oci_tag="latest"
+            release_tag="nightly"
+          fi
+
+          echo "oci_tag=${oci_tag}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${release_tag}" >> "$GITHUB_OUTPUT"
+
+  ensure_release:
+    needs: targets
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Ensure target release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.targets.outputs.release_tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            if [ "$RELEASE_TAG" = "nightly" ]; then
+              gh release create "$RELEASE_TAG" --title Nightly --notes "Automated nightly artifacts." --prerelease
+            else
+              gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes "Automated release artifacts."
+            fi
+          fi
+
+  oci:
+    needs: targets
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - nix_system: x86_64-linux
+            oci_arch: amd64
+            extra_args: ""
+            requires_qemu: "false"
+          - nix_system: aarch64-linux
+            oci_arch: arm64
+            extra_args: "--option extra-platforms aarch64-linux"
+            requires_qemu: "true"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      id-token: write
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Set up QEMU
+        if: matrix.requires_qemu == 'true'
+        uses: docker/setup-qemu-action@v3
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: isola
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Build container image
+        run: |
+          nix --accept-flake-config build .#packages.${{ matrix.nix_system }}.oci ${{ matrix.extra_args }}
+          ./result | docker load
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag and push image
+        run: |
+          docker tag isola:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }}-${{ matrix.oci_arch }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }}-${{ matrix.oci_arch }}
+
+  oci_manifest:
+    needs:
+      - targets
+      - oci
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: "Clean up OCI images"
+        uses: dataaxiom/ghcr-cleanup-action@v1
+        with:
+          delete-untagged: true
+          delete-partial-images: true
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Set up OCI Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Create and push multi-arch manifest
+        run: |
+          docker buildx imagetools create \
+            --tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }} \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }}-amd64 \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }}-arm64
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.oci_tag }}
+
+  python:
+    needs:
+      - targets
+      - ensure_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+      - name: Setup Cachix
+        uses: cachix/cachix-action@v16
+        with:
+          name: isola
+          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - name: Build Python package
+        run: nix --accept-flake-config build .#python
+      - name: Package release artifacts
+        run: |
+          mkdir -p dist
+          test -f result/bin/isola_python.wasm
+          test -d result/lib
+
+          tar -C result -czf dist/isola-python.tar.gz .
+      - name: Upload artifacts to target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.targets.outputs.release_tag }}" \
+            dist/isola-python.tar.gz \
+            --clobber
+
+  library:
+    needs:
+      - targets
+      - ensure_release
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Package library artifact
+        id: package_lib
+        run: |
+          mkdir -p dist
+
+          cargo build --profile release-lto -p isola-c-api-export
+
+          os="$(uname -s)"
+          arch="$(uname -m)"
+
+          case "$os" in
+            Linux)
+              os_part="unknown-linux-gnu"
+              lib_ext="so"
+              ;;
+            Darwin)
+              os_part="apple-darwin"
+              lib_ext="dylib"
+              ;;
+            *) echo "Unsupported OS: $os" >&2; exit 1 ;;
+          esac
+
+          case "$arch" in
+            x86_64|amd64) arch_part="x86_64" ;;
+            arm64|aarch64) arch_part="aarch64" ;;
+            *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
+          esac
+
+          triple="${arch_part}-${os_part}"
+          mkdir -p dist/libisola/lib
+
+          cp "target/release-lto/libisola.${lib_ext}" dist/libisola/lib/
+          cp -r crates/c-api/include dist/libisola/
+
+          echo "triple=${triple}" >> "$GITHUB_OUTPUT"
+          tar -C dist/libisola -czf "dist/libisola-${triple}.tar.gz" .
+      - name: Upload library artifact to target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.targets.outputs.release_tag }}" \
+            dist/libisola-${{ steps.package_lib.outputs.triple }}.tar.gz \
+            --clobber
+
+  cargo_publish:
+    if: github.event_name == 'release' && github.event.action == 'published'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Publish isola to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --locked -p isola
