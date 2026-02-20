@@ -71,6 +71,12 @@ wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+wiremock = { workspace = true }
 
 [lints]
 workspace = true
+
+[[test]]
+name = "integration_python"
+path = "tests/python/mod.rs"
+required-features = ["cbor", "trace", "request"]
