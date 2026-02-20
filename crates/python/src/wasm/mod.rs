@@ -1,4 +1,4 @@
-#![expect(clippy::collection_is_never_read, clippy::same_length_and_capacity)]
+#![expect(clippy::same_length_and_capacity)]
 
 mod body_buffer;
 mod future;

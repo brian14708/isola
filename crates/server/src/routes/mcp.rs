@@ -220,16 +220,6 @@ async def main():
 - `await resp.ajson()`, `await resp.atext()`, `await resp.aread()`
 - `async for line in resp.aiter_lines()`, `async for chunk in resp.aiter_bytes()`
 - `async for event in resp.aiter_sse()` (SSE: `.id`, `.event`, `.data`)
-
-**WebSocket:**
-```python
-from sandbox.http import ws_connect
-
-async def main():
-    async with ws_connect("wss://example.com/ws") as ws:
-        await ws.asend("Hello")
-        return await ws.arecv()
-```
                 "#
                 .to_string(),
             ),

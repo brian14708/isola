@@ -4,13 +4,10 @@ use bytes::Bytes;
 use futures::Stream;
 use http::{HeaderName, HeaderValue};
 use tokio::task::JoinHandle;
-use tokio_tungstenite::tungstenite::handshake::client::generate_key;
 use tracing::{Instrument, Span};
 
 use self::pool::ClientPool;
-use super::{
-    Error, RequestOptions, WebsocketMessage, options::RequestContext, trace::TraceRequest,
-};
+use super::{Error, RequestOptions, options::RequestContext, trace::TraceRequest};
 
 mod builder;
 mod config;
@@ -79,46 +76,6 @@ impl Client {
     {
         self.with_http_client(request, options, |client, request| {
             super::http::http_impl(client, request)
-        })
-        .await
-    }
-
-    /// Send a WebSocket request.
-    ///
-    /// # Errors
-    /// Returns error if WebSocket connection fails.
-    pub async fn connect_websocket<C: RequestContext, B>(
-        &self,
-        request: http::Request<B>,
-        options: RequestOptions<C>,
-    ) -> Result<http::Response<impl Stream<Item = Result<WebsocketMessage, Error>> + 'static>, Error>
-    where
-        B: Stream<Item = WebsocketMessage> + Send + 'static,
-    {
-        self.with_http_client(request, options, |client, mut request: http::Request<B>| {
-            let headers = request.headers_mut();
-            headers.insert(
-                HeaderName::from_static("connection"),
-                HeaderValue::from_static("Upgrade"),
-            );
-            headers.insert(
-                HeaderName::from_static("upgrade"),
-                HeaderValue::from_static("websocket"),
-            );
-            headers.insert(
-                HeaderName::from_static("sec-websocket-version"),
-                HeaderValue::from_static("13"),
-            );
-            headers.insert(
-                HeaderName::from_static("sec-websocket-key"),
-                #[expect(
-                    clippy::missing_panics_doc,
-                    reason = "generate_key only returns base64"
-                )]
-                HeaderValue::try_from(generate_key()).unwrap(),
-            );
-
-            super::http::websocket_impl(client, request)
         })
         .await
     }

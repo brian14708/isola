@@ -19,17 +19,6 @@ pub struct HttpRequest {
     pub body: Option<Bytes>,
 }
 
-pub type WebsocketMessage = tungstenite::protocol::Message;
-pub type WebsocketBodyStream = BoxedStream<core::result::Result<WebsocketMessage, BoxError>>;
-pub type WebsocketResponse = http::Response<WebsocketBodyStream>;
-pub type WebsocketOutboundStream = BoxedStream<WebsocketMessage>;
-
-pub struct WebsocketRequest {
-    pub uri: Uri,
-    pub headers: HeaderMap,
-    pub outbound: WebsocketOutboundStream,
-}
-
 #[async_trait::async_trait]
 pub trait OutputSink: Send + 'static {
     async fn on_partial(&mut self, cbor: Bytes) -> core::result::Result<(), BoxError>;
@@ -49,14 +38,6 @@ pub trait Host: Send + Sync + 'static {
     /// Safety contract: this MUST NOT follow redirects internally.
     async fn http_request(&self, req: HttpRequest) -> core::result::Result<HttpResponse, BoxError>;
 
-    /// Perform a single WebSocket connect attempt.
-    ///
-    /// Safety contract: this MUST NOT follow redirects internally.
-    async fn websocket_connect(
-        &self,
-        req: WebsocketRequest,
-    ) -> core::result::Result<WebsocketResponse, BoxError>;
-
     fn log_level(&self) -> LevelFilter {
         LevelFilter::OFF
     }
@@ -74,13 +55,6 @@ impl<T: Host + ?Sized> Host for Arc<T> {
 
     async fn http_request(&self, req: HttpRequest) -> core::result::Result<HttpResponse, BoxError> {
         (**self).http_request(req).await
-    }
-
-    async fn websocket_connect(
-        &self,
-        req: WebsocketRequest,
-    ) -> core::result::Result<WebsocketResponse, BoxError> {
-        (**self).websocket_connect(req).await
     }
 
     fn log_level(&self) -> LevelFilter {

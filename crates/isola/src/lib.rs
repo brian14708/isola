@@ -18,7 +18,6 @@ pub use trace::consts::TRACE_TARGET_OTEL;
 pub use error::{Error, GuestErrorCode, Result};
 pub use host::{
     BoxError, BoxedStream, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink,
-    WebsocketBodyStream, WebsocketMessage, WebsocketRequest, WebsocketResponse,
 };
 pub use module::{
     Arg, Args, CacheConfig, CallOptions, CompileConfig, InitConfig, Module, ModuleBuilder, Sandbox,

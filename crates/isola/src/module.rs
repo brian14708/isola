@@ -805,11 +805,4 @@ impl Host for CompileHost {
     ) -> core::result::Result<crate::HttpResponse, BoxError> {
         Err(std::io::Error::other("unsupported during compilation").into())
     }
-
-    async fn websocket_connect(
-        &self,
-        _req: crate::WebsocketRequest,
-    ) -> core::result::Result<crate::WebsocketResponse, BoxError> {
-        Err(std::io::Error::other("unsupported during compilation").into())
-    }
 }
