@@ -6,9 +6,8 @@ use std::{
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use isola::module::ArgValue;
 use isola::{
-    Arg, CacheConfig, CallOptions, CompileConfig, Module, ModuleBuilder, OutputSink, Sandbox,
+    Arg, DirectoryMapping, Module, ModuleBuilder, ModuleConfig, OutputSink, Sandbox, SandboxOptions,
 };
 use tokio::runtime::{Builder, Runtime};
 
@@ -77,28 +76,26 @@ impl ContextHandle {
         let parent = path
             .parent()
             .ok_or_else(|| Error::Internal("Wasm path has no parent directory".to_string()))?;
+        let mut lib_dir = std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
+            |_| {
+                let mut lib_dir = parent.to_owned();
+                lib_dir.push("wasm32-wasip1");
+                lib_dir.push("wasi-deps");
+                lib_dir.push("usr");
+                lib_dir.push("local");
+                lib_dir
+            },
+            PathBuf::from,
+        );
+        lib_dir.push("lib");
 
         self.rt.block_on(async {
             let module = ModuleBuilder::new()
-                .compile_config(CompileConfig {
-                    cache: CacheConfig::Dir(parent.join("cache")),
+                .config(ModuleConfig {
+                    cache: Some(parent.join("cache")),
                     max_memory: 64 * 1024 * 1024,
-                    ..CompileConfig::default()
-                })
-                .lib_dir({
-                    let mut lib_dir = std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
-                        |_| {
-                            let mut lib_dir = parent.to_owned();
-                            lib_dir.push("wasm32-wasip1");
-                            lib_dir.push("wasi-deps");
-                            lib_dir.push("usr");
-                            lib_dir.push("local");
-                            lib_dir
-                        },
-                        PathBuf::from,
-                    );
-                    lib_dir.push("lib");
-                    lib_dir
+                    directory_mappings: vec![DirectoryMapping::new(lib_dir.clone(), "/lib")],
+                    ..ModuleConfig::python()
                 })
                 .build(&path)
                 .await
@@ -114,7 +111,11 @@ impl ContextHandle {
         };
         let sandbox = self
             .rt
-            .block_on(async { module.instantiate(None, Env::shared().await).await })
+            .block_on(async {
+                module
+                    .instantiate(Env::shared().await, SandboxOptions::default())
+                    .await
+            })
             .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
         Ok(SandboxHandle {
             ctx: self,
@@ -305,17 +306,17 @@ impl SandboxHandle<'_> {
                                 })?;
                                 let cbor = isola::cbor::json_to_cbor(json_str)
                                     .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
-                                Ok(Arg {
-                                    name,
-                                    value: ArgValue::Cbor(cbor),
+                                Ok(match name {
+                                    Some(name) => Arg::cbor(cbor).with_name(name),
+                                    None => Arg::cbor(cbor),
                                 })
                             }
                             RawArgument::JsonStream(name, receiver) => {
                                 let stream =
                                     Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-                                Ok(Arg {
-                                    name,
-                                    value: ArgValue::CborStream(stream),
+                                Ok(match name {
+                                    Some(name) => Arg::cbor_stream(stream).with_name(name),
+                                    None => Arg::cbor_stream(stream),
                                 })
                             }
                         }
@@ -325,24 +326,15 @@ impl SandboxHandle<'_> {
                 let func = func.to_string();
                 let timeout = Duration::from_millis(timeout_in_ms);
                 let result = self.ctx.rt.block_on(async {
-                    tokio::time::timeout(
-                        timeout,
-                        sandbox.call(
-                            &func,
-                            isola_args,
-                            callback.clone(),
-                            CallOptions::default().timeout(timeout),
-                        ),
-                    )
-                    .await
+                    sandbox
+                        .call_with_timeout(&func, isola_args, callback.clone(), timeout)
+                        .await
                 });
 
                 // Restore the sandbox state.
                 self.inner = SandboxInner::Running { sandbox, callback };
 
-                result
-                    .map_err(|_| Error::Internal("Operation timeout".to_string()))?
-                    .map_err(|e| Error::Internal(format!("Sandbox execution failed: {e}")))?;
+                result.map_err(|e| Error::Internal(format!("Sandbox execution failed: {e}")))?;
 
                 Ok(())
             }

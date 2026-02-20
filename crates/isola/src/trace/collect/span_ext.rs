@@ -5,14 +5,29 @@ use tracing_subscriber::{Registry, registry::LookupSpan};
 
 use super::{collector::Collector, tracer::Tracer};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum CollectError {
+    #[error("span has no attached subscriber")]
+    NoSubscriber,
+    #[error("collect_into requires tracing_subscriber::Registry")]
+    UnsupportedSubscriber,
+    #[error("span not found in subscriber registry")]
+    SpanNotFound,
+    #[error("nested collectors are not supported")]
+    NestedCollectorsNotSupported,
+}
+
 pub trait CollectSpanExt {
-    #[must_use]
+    /// # Errors
+    /// Returns [`CollectError`] if the span has no subscriber, the subscriber is
+    /// not a `Registry`, the span cannot be found, or a collector is already
+    /// installed in the span scope.
     fn collect_into(
         &self,
         target: &'static str,
         level: LevelFilter,
         collector: impl Collector,
-    ) -> Option<()>;
+    ) -> core::result::Result<(), CollectError>;
 }
 
 impl CollectSpanExt for tracing::Span {
@@ -21,24 +36,28 @@ impl CollectSpanExt for tracing::Span {
         target: &'static str,
         level: LevelFilter,
         c: impl Collector,
-    ) -> Option<()> {
-        self.with_subscriber(|(id, subscriber)| -> Option<()> {
-            subscriber.downcast_ref::<Registry>().and_then(|registry| {
-                registry.span(id).and_then(|span| {
-                    if span
-                        .scope()
-                        .any(|s| s.extensions().get::<Tracer>().is_some())
-                    {
-                        // nesting is not supported
-                        None
-                    } else {
-                        span.extensions_mut().insert(Tracer::new(c, target, level));
-                        Some(())
-                    }
-                })
-            })
-        })
-        .flatten()
+    ) -> core::result::Result<(), CollectError> {
+        self.with_subscriber(
+            |(id, subscriber)| -> core::result::Result<(), CollectError> {
+                let Some(registry) = subscriber.downcast_ref::<Registry>() else {
+                    return Err(CollectError::UnsupportedSubscriber);
+                };
+                let Some(span) = registry.span(id) else {
+                    return Err(CollectError::SpanNotFound);
+                };
+
+                if span
+                    .scope()
+                    .any(|s| s.extensions().get::<Tracer>().is_some())
+                {
+                    return Err(CollectError::NestedCollectorsNotSupported);
+                }
+
+                span.extensions_mut().insert(Tracer::new(c, target, level));
+                Ok(())
+            },
+        )
+        .ok_or(CollectError::NoSubscriber)?
     }
 }
 
@@ -79,7 +98,7 @@ mod tests {
             let s = info_span!("hello");
             let spans = VecCollector(Arc::new(Mutex::new((Vec::new(), Vec::new()))));
             s.collect_into("a", LevelFilter::INFO, spans.clone())
-                .unwrap();
+                .expect("collect_into");
             {
                 let _s = s.enter();
 

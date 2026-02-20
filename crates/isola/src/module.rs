@@ -14,17 +14,18 @@ use futures::{FutureExt, Stream};
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
+    Arc, Mutex, OnceLock,
+    atomic::{AtomicU64, Ordering},
 };
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{HashMap, hash_map::DefaultHasher},
     fmt::Write as _,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     pin::Pin,
     time::Duration,
 };
+use tokio::time::timeout;
 use tracing::{Instrument, info_span, warn};
 use wasmtime::{
     Config, Engine, Store,
@@ -35,79 +36,69 @@ use wasmtime::{
 use crate::internal::sandbox::HostView as _;
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
-// Wasmtime epoch deadlines are relative deltas (`current_epoch + delta`).
-// Using `u64::MAX` can wrap and cause immediate interrupts.
-const NO_DEADLINE_TICKS: u64 = u64::MAX / 2;
+const ASYNC_YIELD_DEADLINE_TICKS: u64 = 1;
 
 #[derive(Clone, Debug)]
-pub enum CacheConfig {
-    /// Use `<wasm_parent>/cache`.
-    Default,
-    /// Disable `.cwasm` caching (compile every time).
-    Disabled,
-    /// Store cached artifacts in this directory.
-    Dir(PathBuf),
+pub struct DirectoryMapping {
+    pub host: PathBuf,
+    pub guest: String,
+    pub writable: bool,
 }
 
-#[derive(Clone, Debug)]
-pub struct CompileConfig {
-    pub opt_level: wasmtime::OptLevel,
-    pub cache: CacheConfig,
-    pub max_memory: usize,
-}
-
-impl Default for CompileConfig {
-    fn default() -> Self {
+impl DirectoryMapping {
+    #[must_use]
+    pub fn new(host: impl Into<PathBuf>, guest: impl Into<String>) -> Self {
         Self {
-            opt_level: wasmtime::OptLevel::Speed,
-            cache: CacheConfig::Default,
-            max_memory: 64 * 1024 * 1024,
+            host: host.into(),
+            guest: guest.into(),
+            writable: false,
         }
+    }
+
+    #[must_use]
+    pub const fn writable(mut self, writable: bool) -> Self {
+        self.writable = writable;
+        self
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct InitConfig {
-    pub preinit: bool,
-    pub bundle_paths: Vec<String>,
+pub struct ModuleConfig {
+    /// Directory to store `.cwasm` artifacts. `None` disables caching.
+    pub cache: Option<PathBuf>,
+    pub max_memory: usize,
+    /// Additional preopened directories for guest access.
+    pub directory_mappings: Vec<DirectoryMapping>,
     pub prelude: Option<String>,
 }
 
-impl InitConfig {
-    #[must_use]
-    pub fn default_python() -> Self {
-        Self {
-            preinit: true,
-            bundle_paths: vec!["/lib/bundle.zip".to_string(), "/workdir".to_string()],
-            prelude: Some("import sandbox.asyncio".to_string()),
-        }
-    }
-}
+impl ModuleConfig {
+    pub const DEFAULT_MAX_MEMORY: usize = 64 * 1024 * 1024;
 
-impl Default for InitConfig {
-    fn default() -> Self {
+    /// Minimal defaults without language-specific prelude setup.
+    #[must_use]
+    pub const fn minimal() -> Self {
         Self {
-            preinit: true,
-            bundle_paths: Vec::new(),
+            cache: None,
+            max_memory: Self::DEFAULT_MAX_MEMORY,
+            directory_mappings: Vec::new(),
             prelude: None,
         }
     }
-}
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct CallOptions {
-    timeout: Option<Duration>,
-}
-
-impl CallOptions {
+    /// Defaults for Python guest execution.
     #[must_use]
-    pub const fn timeout(mut self, d: Duration) -> Self {
-        self.timeout = Some(d);
-        self
+    pub fn python() -> Self {
+        Self {
+            prelude: Some("import sandbox.asyncio".to_string()),
+            ..Self::minimal()
+        }
     }
+}
 
-    pub(crate) const fn timeout_opt(self) -> Option<Duration> {
-        self.timeout
+impl Default for ModuleConfig {
+    fn default() -> Self {
+        Self::minimal()
     }
 }
 
@@ -122,6 +113,40 @@ pub struct Arg {
 }
 
 pub type Args = Vec<Arg>;
+
+impl Arg {
+    #[must_use]
+    pub fn cbor(value: impl Into<Bytes>) -> Self {
+        Self {
+            name: None,
+            value: ArgValue::Cbor(value.into()),
+        }
+    }
+
+    /// Serialize a value into CBOR and use it as an unnamed argument.
+    ///
+    /// # Errors
+    /// Returns an error if serialization fails.
+    #[cfg(feature = "serde")]
+    pub fn value<T: serde::Serialize>(value: &T) -> core::result::Result<Self, crate::cbor::Error> {
+        let value = crate::cbor::to_cbor(value)?;
+        Ok(Self::cbor(value))
+    }
+
+    #[must_use]
+    pub fn cbor_stream(stream: impl Stream<Item = Bytes> + Send + 'static) -> Self {
+        Self {
+            name: None,
+            value: ArgValue::CborStream(Box::pin(stream)),
+        }
+    }
+
+    #[must_use]
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+}
 
 impl core::fmt::Debug for ArgValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -141,32 +166,10 @@ impl core::fmt::Debug for Arg {
     }
 }
 
-#[derive(Clone)]
-struct ModuleConfig {
-    max_memory: usize,
-    wasm_path: PathBuf,
-    lib_dir: PathBuf,
-    cache_dir: Option<PathBuf>,
-    init: InitConfig,
-    compile: CompileConfig,
-}
-
+#[derive(Default)]
 pub struct ModuleBuilder {
-    init: InitConfig,
-    compile: CompileConfig,
-    lib_dir: Option<PathBuf>,
+    config: ModuleConfig,
     engine_config: Option<Config>,
-}
-
-impl Default for ModuleBuilder {
-    fn default() -> Self {
-        Self {
-            init: InitConfig::default_python(),
-            compile: CompileConfig::default(),
-            lib_dir: None,
-            engine_config: None,
-        }
-    }
 }
 
 impl ModuleBuilder {
@@ -176,20 +179,8 @@ impl ModuleBuilder {
     }
 
     #[must_use]
-    pub fn init(mut self, init: InitConfig) -> Self {
-        self.init = init;
-        self
-    }
-
-    #[must_use]
-    pub fn compile_config(mut self, cfg: CompileConfig) -> Self {
-        self.compile = cfg;
-        self
-    }
-
-    #[must_use]
-    pub fn lib_dir(mut self, p: impl Into<PathBuf>) -> Self {
-        self.lib_dir = Some(p.into());
+    pub fn config(mut self, cfg: ModuleConfig) -> Self {
+        self.config = cfg;
         self
     }
 
@@ -201,29 +192,9 @@ impl ModuleBuilder {
 
     /// # Errors
     /// Returns an error if the module cannot be built or compiled.
-    pub async fn build<H: Host + Clone>(self, wasm: impl AsRef<Path>) -> Result<Module<H>> {
+    pub async fn build<H: Host>(self, wasm: impl AsRef<Path>) -> Result<Module<H>> {
         let wasm_path = std::fs::canonicalize(wasm.as_ref()).map_err(Error::Io)?;
-        let parent = wasm_path
-            .parent()
-            .ok_or_else(|| Error::Wasm(anyhow::anyhow!("wasm path has no parent directory")))?
-            .to_path_buf();
-
-        let lib_dir = self.lib_dir.unwrap_or_else(|| parent.join("lib"));
-
-        let cache_dir = match &self.compile.cache {
-            CacheConfig::Default => Some(parent.join("cache")),
-            CacheConfig::Disabled => None,
-            CacheConfig::Dir(p) => Some(p.clone()),
-        };
-
-        let cfg = ModuleConfig {
-            max_memory: self.compile.max_memory,
-            wasm_path,
-            lib_dir,
-            cache_dir,
-            init: self.init,
-            compile: self.compile,
-        };
+        let cfg = self.config;
 
         let custom_engine_config = self.engine_config.is_some();
         let mut engine_cfg = self.engine_config.unwrap_or_default();
@@ -232,106 +203,186 @@ impl ModuleBuilder {
                 "custom wasmtime::Config provided; isola will force required fields (component model, async support, epoch interruption)"
             );
         }
-        configure_engine(&mut engine_cfg, cfg.compile.opt_level, true);
+        configure_engine(&mut engine_cfg);
         let engine = Engine::new(&engine_cfg).map_err(Error::Wasm)?;
 
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "module.build");
-        let component = async { load_or_compile_component(&engine, &cfg).await }
-            .instrument(span)
-            .await?;
+        let component = async {
+            load_or_compile_component(&engine, &wasm_path, &cfg.directory_mappings, &cfg).await
+        }
+        .instrument(span)
+        .await?;
 
         let linker = InstanceState::<H>::new_linker(&engine).map_err(Error::Wasm)?;
         let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
         Engine::tls_eager_initialize();
+        let ticker = global_epoch_ticker()
+            .map_err(Error::Io)?
+            .register(engine.clone());
 
-        let epoch_engine = engine.clone();
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_bg = Arc::clone(&stop);
-        let epoch_ticker = std::thread::Builder::new()
+        Ok(Module {
+            max_memory: cfg.max_memory,
+            directory_mappings: cfg.directory_mappings,
+            pre: SandboxPre::new(pre).map_err(Error::Wasm)?,
+            ticker,
+            engine,
+        })
+    }
+}
+
+/// Shared global epoch ticker state.
+struct EpochTickerShared {
+    engines: Mutex<HashMap<u64, Engine>>,
+    next_id: AtomicU64,
+}
+
+struct GlobalEpochTicker {
+    shared: Arc<EpochTickerShared>,
+}
+
+/// Registration that keeps epoch ticks active for a specific engine.
+struct EpochTickerRegistration {
+    id: u64,
+    shared: Arc<EpochTickerShared>,
+}
+
+impl GlobalEpochTicker {
+    fn new() -> std::io::Result<Self> {
+        let shared = Arc::new(EpochTickerShared {
+            engines: Mutex::new(HashMap::new()),
+            next_id: AtomicU64::new(1),
+        });
+
+        let shared_bg = Arc::clone(&shared);
+        std::thread::Builder::new()
             .name("isola-epoch-ticker".to_string())
             .spawn(move || {
                 // Keep epoch progression independent of Tokio scheduling.
                 // This avoids timeout starvation in current-thread runtimes.
                 loop {
-                    if stop_bg.load(Ordering::Relaxed) {
-                        break;
-                    }
                     std::thread::park_timeout(EPOCH_TICK);
-                    epoch_engine.increment_epoch();
+                    let engines: Vec<Engine> = match shared_bg.engines.lock() {
+                        Ok(engines) => engines.values().cloned().collect(),
+                        Err(poisoned) => poisoned.into_inner().values().cloned().collect(),
+                    };
+                    for engine in engines {
+                        engine.increment_epoch();
+                    }
                 }
-            })
-            .map_err(Error::Io)?;
+            })?;
 
-        Ok(Module {
-            config: cfg,
-            pre: SandboxPre::new(pre).map_err(Error::Wasm)?,
-            ticker: Arc::new(EpochTicker {
-                handle: Some(epoch_ticker),
-                stop,
-                engine: engine.clone(),
-            }),
-            engine,
-            _marker: std::marker::PhantomData,
+        Ok(Self { shared })
+    }
+
+    fn register(&self, engine: Engine) -> Arc<EpochTickerRegistration> {
+        let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
+        let mut engines = self
+            .shared
+            .engines
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        engines.insert(id, engine);
+        drop(engines);
+
+        Arc::new(EpochTickerRegistration {
+            id,
+            shared: Arc::clone(&self.shared),
         })
     }
 }
 
-/// Shared epoch ticker that keeps incrementing the engine epoch as long as any
-/// `Module` or `Sandbox` holds a reference.
-struct EpochTicker {
-    handle: Option<std::thread::JoinHandle<()>>,
-    stop: Arc<AtomicBool>,
-    engine: Engine,
-}
-
-impl Drop for EpochTicker {
+impl Drop for EpochTickerRegistration {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.handle.take() {
-            handle.thread().unpark();
-            let _ = handle.join();
-        }
-        // One final increment so any in-flight epoch waits resolve immediately.
-        self.engine.increment_epoch();
+        let mut engines = self
+            .shared
+            .engines
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        engines.remove(&self.id);
     }
 }
 
-pub struct Module<H: Host + Clone> {
-    config: ModuleConfig,
+fn global_epoch_ticker() -> std::io::Result<&'static GlobalEpochTicker> {
+    static GLOBAL_EPOCH_TICKER: OnceLock<
+        core::result::Result<GlobalEpochTicker, (std::io::ErrorKind, String)>,
+    > = OnceLock::new();
+
+    let ticker = GLOBAL_EPOCH_TICKER
+        .get_or_init(|| GlobalEpochTicker::new().map_err(|e| (e.kind(), e.to_string())));
+    match ticker {
+        Ok(ticker) => Ok(ticker),
+        Err((kind, message)) => Err(std::io::Error::new(*kind, message.clone())),
+    }
+}
+
+pub struct Module<H: Host> {
+    max_memory: usize,
+    directory_mappings: Vec<DirectoryMapping>,
     engine: Engine,
     pre: SandboxPre<InstanceState<H>>,
-    ticker: Arc<EpochTicker>,
-    _marker: std::marker::PhantomData<H>,
+    ticker: Arc<EpochTickerRegistration>,
 }
 
-pub struct Sandbox<H: Host + Clone> {
+pub struct Sandbox<H: Host> {
     store: Store<InstanceState<H>>,
     bindings: crate::internal::sandbox::Sandbox,
+    call_timeout: Option<Duration>,
     /// Keeps the epoch ticker alive for the lifetime of this sandbox.
-    _ticker: Arc<EpochTicker>,
+    _ticker: Arc<EpochTickerRegistration>,
 }
 
-impl<H: Host + Clone> Module<H> {
+#[derive(Clone, Copy)]
+pub struct SandboxOptions<'a> {
+    pub log_level: tracing::level_filters::LevelFilter,
+    pub directory_mappings: &'a [DirectoryMapping],
+    pub call_timeout: Option<Duration>,
+}
+
+impl Default for SandboxOptions<'_> {
+    fn default() -> Self {
+        Self {
+            log_level: tracing::level_filters::LevelFilter::OFF,
+            directory_mappings: &[],
+            call_timeout: None,
+        }
+    }
+}
+
+impl<'a> SandboxOptions<'a> {
+    #[must_use]
+    pub const fn log_level(mut self, log_level: tracing::level_filters::LevelFilter) -> Self {
+        self.log_level = log_level;
+        self
+    }
+
+    #[must_use]
+    pub const fn directory_mappings(mut self, directory_mappings: &'a [DirectoryMapping]) -> Self {
+        self.directory_mappings = directory_mappings;
+        self
+    }
+
+    #[must_use]
+    pub const fn call_timeout(mut self, timeout: Duration) -> Self {
+        self.call_timeout = Some(timeout);
+        self
+    }
+}
+
+impl<H: Host> Module<H> {
     /// # Errors
     /// Returns an error if instantiation fails.
-    pub async fn instantiate(&self, workdir: Option<&Path>, host: H) -> Result<Sandbox<H>> {
+    pub async fn instantiate(&self, host: H, options: SandboxOptions<'_>) -> Result<Sandbox<H>> {
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "sandbox.instantiate");
         let ticker = Arc::clone(&self.ticker);
         async move {
-            // Host controls guest log verbosity.
-            let level = level_filter_to_wasi(host.log_level());
+            let level = level_filter_to_wasi(options.log_level);
+            let directory_mappings =
+                merge_directory_mappings(&self.directory_mappings, options.directory_mappings);
 
-            let mut store = InstanceState::new(
-                &self.engine,
-                &self.config.lib_dir,
-                workdir,
-                self.config.max_memory,
-                host,
-            )
-            .map_err(Error::Wasm)?;
-
-            store.epoch_deadline_trap();
-            store.set_epoch_deadline(NO_DEADLINE_TICKS);
+            let mut store =
+                InstanceState::new(&self.engine, &directory_mappings, self.max_memory, host)
+                    .map_err(Error::Wasm)?;
+            store.epoch_deadline_async_yield_and_update(ASYNC_YIELD_DEADLINE_TICKS);
 
             let bindings = self
                 .pre
@@ -348,6 +399,7 @@ impl<H: Host + Clone> Module<H> {
             Ok(Sandbox {
                 store,
                 bindings,
+                call_timeout: options.call_timeout,
                 _ticker: ticker,
             })
         }
@@ -356,20 +408,34 @@ impl<H: Host + Clone> Module<H> {
     }
 }
 
-/// RAII guard that resets the epoch deadline and clears the output sink when
-/// dropped, even if the call panics or returns early.
-struct CallCleanup<'a, H: Host + Clone> {
+fn merge_directory_mappings(
+    base: &[DirectoryMapping],
+    extra: &[DirectoryMapping],
+) -> Vec<DirectoryMapping> {
+    let mut merged = base.to_vec();
+    for mapping in extra {
+        if let Some(existing) = merged.iter_mut().find(|m| m.guest == mapping.guest) {
+            *existing = mapping.clone();
+        } else {
+            merged.push(mapping.clone());
+        }
+    }
+    merged
+}
+
+/// RAII guard that clears the output sink when dropped, even if the call panics
+/// or returns early.
+struct CallCleanup<'a, H: Host> {
     store: &'a mut Store<InstanceState<H>>,
 }
 
-impl<H: Host + Clone> Drop for CallCleanup<'_, H> {
+impl<H: Host> Drop for CallCleanup<'_, H> {
     fn drop(&mut self) {
         self.store.data_mut().set_sink(None);
-        self.store.set_epoch_deadline(NO_DEADLINE_TICKS);
     }
 }
 
-impl<H: Host + Clone> std::ops::Deref for CallCleanup<'_, H> {
+impl<H: Host> std::ops::Deref for CallCleanup<'_, H> {
     type Target = Store<InstanceState<H>>;
 
     fn deref(&self) -> &Self::Target {
@@ -377,13 +443,13 @@ impl<H: Host + Clone> std::ops::Deref for CallCleanup<'_, H> {
     }
 }
 
-impl<H: Host + Clone> std::ops::DerefMut for CallCleanup<'_, H> {
+impl<H: Host> std::ops::DerefMut for CallCleanup<'_, H> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.store
     }
 }
 
-impl<H: Host + Clone> wasmtime::AsContext for CallCleanup<'_, H> {
+impl<H: Host> wasmtime::AsContext for CallCleanup<'_, H> {
     type Data = InstanceState<H>;
 
     fn as_context(&self) -> wasmtime::StoreContext<'_, Self::Data> {
@@ -391,36 +457,78 @@ impl<H: Host + Clone> wasmtime::AsContext for CallCleanup<'_, H> {
     }
 }
 
-impl<H: Host + Clone> wasmtime::AsContextMut for CallCleanup<'_, H> {
+impl<H: Host> wasmtime::AsContextMut for CallCleanup<'_, H> {
     fn as_context_mut(&mut self) -> wasmtime::StoreContextMut<'_, Self::Data> {
         wasmtime::AsContextMut::as_context_mut(&mut *self.store)
     }
 }
 
-impl<H: Host + Clone> Sandbox<H> {
+#[derive(Debug, Default)]
+pub struct CallOutput {
+    pub partials: Vec<Bytes>,
+    pub result: Bytes,
+}
+
+struct CollectOutputSink {
+    output: Arc<Mutex<CallOutput>>,
+}
+
+impl CollectOutputSink {
+    const fn new(output: Arc<Mutex<CallOutput>>) -> Self {
+        Self { output }
+    }
+
+    fn lock_output(&self) -> core::result::Result<std::sync::MutexGuard<'_, CallOutput>, BoxError> {
+        self.output
+            .lock()
+            .map_err(|_| std::io::Error::other("collect output lock poisoned").into())
+    }
+}
+
+#[async_trait::async_trait]
+impl OutputSink for CollectOutputSink {
+    async fn on_partial(&mut self, cbor: Bytes) -> core::result::Result<(), BoxError> {
+        self.lock_output()?.partials.push(cbor);
+        Ok(())
+    }
+
+    async fn on_end(&mut self, cbor: Bytes) -> core::result::Result<(), BoxError> {
+        self.lock_output()?.result = cbor;
+        Ok(())
+    }
+}
+
+impl<H: Host> Sandbox<H> {
     /// # Errors
     /// Returns an error if the script evaluation fails.
     pub async fn eval_script(&mut self, code: impl AsRef<str>) -> Result<()> {
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "sandbox.eval_script");
         let code = code.as_ref().to_string();
+        let mut store = CallCleanup {
+            store: &mut self.store,
+        };
         self.bindings
             .isola_script_guest()
-            .call_eval_script(&mut self.store, &code)
+            .call_eval_script(&mut store, &code)
             .instrument(span)
             .await
             .map_err(Error::Wasm)??;
         Ok(())
     }
 
+    /// Evaluate a file using its exact guest-visible path.
+    ///
     /// # Errors
     /// Returns an error if the file evaluation fails.
     pub async fn eval_file(&mut self, path: impl AsRef<Path>) -> Result<()> {
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "sandbox.eval_file");
-        let path = Path::new("/workdir").join(path.as_ref());
-        let path = path.to_string_lossy().to_string();
+        let path = path.as_ref().to_string_lossy().to_string();
+        let mut store = CallCleanup {
+            store: &mut self.store,
+        };
         self.bindings
             .isola_script_guest()
-            .call_eval_file(&mut self.store, &path)
+            .call_eval_file(&mut store, &path)
             .instrument(span)
             .await
             .map_err(Error::Wasm)??;
@@ -429,15 +537,71 @@ impl<H: Host + Clone> Sandbox<H> {
 
     /// # Errors
     /// Returns an error if the function execution fails.
-    pub async fn call(
+    pub async fn call(&mut self, function: &str, args: Args, sink: impl OutputSink) -> Result<()> {
+        self.call_impl(function, args, sink, self.call_timeout)
+            .await
+    }
+
+    /// # Errors
+    /// Returns an error if the function execution fails or times out.
+    pub async fn call_with_timeout(
+        &mut self,
+        function: &str,
+        args: Args,
+        sink: impl OutputSink,
+        timeout_duration: Duration,
+    ) -> Result<()> {
+        self.call_impl(function, args, sink, Some(timeout_duration))
+            .await
+    }
+
+    /// # Errors
+    /// Returns an error if the function execution fails.
+    pub async fn call_collect(&mut self, function: &str, args: Args) -> Result<CallOutput> {
+        self.call_collect_impl(function, args, self.call_timeout)
+            .await
+    }
+
+    /// # Errors
+    /// Returns an error if the function execution fails or times out.
+    pub async fn call_collect_with_timeout(
+        &mut self,
+        function: &str,
+        args: Args,
+        timeout_duration: Duration,
+    ) -> Result<CallOutput> {
+        self.call_collect_impl(function, args, Some(timeout_duration))
+            .await
+    }
+
+    async fn call_collect_impl(
+        &mut self,
+        function: &str,
+        args: Args,
+        timeout_duration: Option<Duration>,
+    ) -> Result<CallOutput> {
+        let output = Arc::new(Mutex::new(CallOutput::default()));
+        let sink = CollectOutputSink::new(Arc::clone(&output));
+        self.call_impl(function, args, sink, timeout_duration)
+            .await?;
+
+        let output = Arc::try_unwrap(output).map_err(|_| {
+            Error::Host(std::io::Error::other("collect output still in use").into())
+        })?;
+        output
+            .into_inner()
+            .map_err(|_| Error::Host(std::io::Error::other("collect output lock poisoned").into()))
+    }
+
+    async fn call_impl(
         &mut self,
         function: &str,
         mut args: Args,
         sink: impl OutputSink,
-        opts: CallOptions,
+        timeout_duration: Option<Duration>,
     ) -> Result<()> {
         let span = info_span!(target: TRACE_TARGET_SCRIPT, "sandbox.call");
-        async move {
+        let call = async move {
             let mut store = CallCleanup {
                 store: &mut self.store,
             };
@@ -469,14 +633,6 @@ impl<H: Host + Clone> Sandbox<H> {
 
             let func = function.to_string();
 
-            // Configure per-call epoch deadline.
-            if let Some(d) = opts.timeout_opt() {
-                let ticks = duration_to_epoch_ticks(d);
-                store.set_epoch_deadline(ticks);
-            } else {
-                store.set_epoch_deadline(NO_DEADLINE_TICKS);
-            }
-
             store.data_mut().set_sink(Some(Box::new(sink)));
             let result = self
                 .bindings
@@ -487,26 +643,25 @@ impl<H: Host + Clone> Sandbox<H> {
 
             result.map_err(Error::Wasm)??;
             Ok(())
+        };
+
+        let call = call.instrument(span);
+        if let Some(timeout_duration) = timeout_duration {
+            timeout(timeout_duration, call).await.map_err(|_| {
+                Error::Wasm(anyhow::anyhow!(
+                    "sandbox call timed out after {}ms",
+                    timeout_duration.as_millis()
+                ))
+            })?
+        } else {
+            call.await
         }
-        .instrument(span)
-        .await
     }
 
     #[must_use]
     pub fn memory_usage(&self) -> usize {
         self.store.data().limiter.current()
     }
-}
-
-fn duration_to_epoch_ticks(d: Duration) -> u64 {
-    // EPOCH_TICK is 10ms; ensure at least 1 tick for non-zero deadlines.
-    let nanos = d.as_nanos();
-    if nanos == 0 {
-        return 1;
-    }
-    let tick = EPOCH_TICK.as_nanos();
-    let ticks = nanos.div_ceil(tick);
-    u64::try_from(ticks).unwrap_or(u64::MAX)
 }
 
 const fn level_filter_to_wasi(
@@ -523,22 +678,28 @@ const fn level_filter_to_wasi(
     }
 }
 
-fn configure_engine(cfg: &mut Config, opt_level: wasmtime::OptLevel, epoch_interruption: bool) {
+fn configure_engine(cfg: &mut Config) {
     cfg.wasm_component_model(true);
     cfg.async_support(true);
-    cfg.epoch_interruption(epoch_interruption);
+    cfg.epoch_interruption(true);
     cfg.table_lazy_init(false);
     cfg.generate_address_map(false);
     cfg.wasm_backtrace(false);
     cfg.native_unwind_info(false);
-    cfg.cranelift_opt_level(opt_level);
+    cfg.cranelift_opt_level(wasmtime::OptLevel::Speed);
 }
 
-async fn load_or_compile_component(engine: &Engine, cfg: &ModuleConfig) -> Result<Component> {
-    let wasm_bytes = tokio::fs::read(&cfg.wasm_path).await.map_err(Error::Io)?;
+async fn load_or_compile_component(
+    engine: &Engine,
+    wasm_path: &Path,
+    directory_mappings: &[DirectoryMapping],
+    cfg: &ModuleConfig,
+) -> Result<Component> {
+    let wasm_bytes = tokio::fs::read(wasm_path).await.map_err(Error::Io)?;
 
-    let Some(cache_dir) = &cfg.cache_dir else {
-        let bytes = compile_serialized_component(engine, cfg, &wasm_bytes).await?;
+    let Some(cache_dir) = &cfg.cache else {
+        let bytes =
+            compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
         // SAFETY: bytes are produced by wasmtime for the same version/config; if incompatible,
         // deserialization will fail and surface as an error.
         let component = unsafe { Component::deserialize(engine, &bytes) }.map_err(Error::Wasm)?;
@@ -548,21 +709,43 @@ async fn load_or_compile_component(engine: &Engine, cfg: &ModuleConfig) -> Resul
     tokio::fs::create_dir_all(cache_dir)
         .await
         .map_err(Error::Io)?;
-    let key = cache_key(engine, cfg, &wasm_bytes).await?;
+    let key = cache_key(engine, cfg, &wasm_bytes);
     let cache_path = cache_dir.join(format!("{key}.cwasm"));
 
     if let Ok(component) = unsafe { Component::deserialize_file(engine, &cache_path) } {
         return Ok(component);
     }
 
-    let bytes = compile_serialized_component(engine, cfg, &wasm_bytes).await?;
-    tokio::fs::write(&cache_path, &bytes)
-        .await
-        .map_err(Error::Io)?;
+    let bytes = compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
+    write_cache_file_atomic(&cache_path, &bytes).await?;
 
     let component =
         unsafe { Component::deserialize_file(engine, &cache_path) }.map_err(Error::Wasm)?;
     Ok(component)
+}
+
+async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<()> {
+    static CACHE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+    let sequence = CACHE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let tmp_path =
+        cache_path.with_extension(format!("cwasm.tmp-{}-{sequence}", std::process::id()));
+
+    tokio::fs::write(&tmp_path, bytes)
+        .await
+        .map_err(Error::Io)?;
+    match tokio::fs::rename(&tmp_path, cache_path).await {
+        Ok(()) => Ok(()),
+        // Windows doesn't atomically replace by default; treat a concurrent winner as success.
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            Err(Error::Io(e))
+        }
+    }
 }
 
 fn engine_fingerprint(engine: &Engine) -> u64 {
@@ -571,63 +754,54 @@ fn engine_fingerprint(engine: &Engine) -> u64 {
     hasher.finish()
 }
 
-async fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Result<String> {
+fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> String {
     let mut wasm_h = Sha256::new();
     wasm_h.update(wasm_bytes);
     let wasm_digest = wasm_h.finalize();
 
     let mut h = Sha256::new();
-    h.update(b"isola-cache-v2\0");
+    h.update(b"isola-cache-v0\0");
     h.update(wasm_digest);
     h.update(engine_fingerprint(engine).to_le_bytes());
 
-    h.update([u8::from(cfg.init.preinit)]);
-    h.update((cfg.init.bundle_paths.len() as u64).to_le_bytes());
-    for p in &cfg.init.bundle_paths {
-        h.update(p.as_bytes());
+    h.update((cfg.directory_mappings.len() as u64).to_le_bytes());
+    for mapping in &cfg.directory_mappings {
+        h.update(mapping.guest.as_bytes());
         h.update([0]);
-        if let Some(rest) = p.strip_prefix("/lib/") {
-            let full = cfg.lib_dir.join(rest);
-            let bytes = tokio::fs::read(&full).await.map_err(Error::Io)?;
-            let mut fh = Sha256::new();
-            fh.update(&bytes);
-            let file_digest = fh.finalize();
-            h.update(rest.as_bytes());
-            h.update([0]);
-            h.update(file_digest);
-        }
+        let host = mapping.host.to_string_lossy();
+        h.update(host.as_bytes());
+        h.update([0]);
+        h.update([u8::from(mapping.writable)]);
     }
 
-    if let Some(prelude) = &cfg.init.prelude {
+    if let Some(prelude) = &cfg.prelude {
         h.update([1]);
         h.update(prelude.as_bytes());
     } else {
         h.update([0]);
     }
 
-    h.update((cfg.compile.max_memory as u64).to_le_bytes());
-    h.update(match cfg.compile.opt_level {
-        wasmtime::OptLevel::None => &[0u8] as &[u8],
-        wasmtime::OptLevel::Speed => &[1],
-        wasmtime::OptLevel::SpeedAndSize => &[2],
-        _ => &[255],
-    });
+    h.update((cfg.max_memory as u64).to_le_bytes());
+    // Optimization level is fixed in `configure_engine`.
+    h.update([1]);
 
     let digest = h.finalize();
     let mut out = String::with_capacity(digest.len() * 2);
     for b in digest {
         let _ = write!(&mut out, "{b:02x}");
     }
-    Ok(out)
+    out
 }
 
 async fn compile_serialized_component(
     engine: &Engine,
     cfg: &ModuleConfig,
+    directory_mappings: &[DirectoryMapping],
     wasm_bytes: &[u8],
 ) -> Result<Vec<u8>> {
     let engine = engine.clone();
     let cfg = cfg.clone();
+    let directory_mappings = directory_mappings.to_vec();
     let wasm_bytes = wasm_bytes.to_vec();
 
     tokio::task::spawn_blocking(move || {
@@ -643,13 +817,12 @@ async fn compile_serialized_component(
                         InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
                     let mut store = InstanceState::new(
                         &engine,
-                        &cfg.lib_dir,
-                        Some(&cfg.lib_dir),
-                        cfg.compile.max_memory,
+                        &directory_mappings,
+                        cfg.max_memory,
                         CompileHost,
                     )
                     .map_err(Error::Wasm)?;
-                    store.epoch_deadline_async_yield_and_update(1);
+                    store.epoch_deadline_async_yield_and_update(ASYNC_YIELD_DEADLINE_TICKS);
 
                     let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
                     let binding = pre
@@ -661,15 +834,8 @@ async fn compile_serialized_component(
                         .load(&mut store, &binding)
                         .map_err(Error::Wasm)?;
 
-                    let bundle: Vec<&str> =
-                        cfg.init.bundle_paths.iter().map(String::as_str).collect();
                     guest
-                        .call_initialize(
-                            &mut store,
-                            cfg.init.preinit,
-                            &bundle,
-                            cfg.init.prelude.as_deref(),
-                        )
+                        .call_initialize(&mut store, true, cfg.prelude.as_deref())
                         .await
                         .map_err(Error::Wasm)?;
 
@@ -693,13 +859,13 @@ async fn compile_serialized_component(
 
 // Helper structs for compilation pre-init.
 
-struct MyInvoker<S: Host + Clone> {
+struct MyInvoker<S: Host> {
     store: Store<InstanceState<S>>,
     instance: WasmInstance,
 }
 
 #[async_trait::async_trait]
-impl<S: Host + Clone> Invoker for MyInvoker<S> {
+impl<S: Host> Invoker for MyInvoker<S> {
     async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
         let func = self
             .instance
@@ -746,7 +912,6 @@ impl<S: Host + Clone> Invoker for MyInvoker<S> {
     }
 }
 
-#[derive(Clone)]
 struct CompileHost;
 
 #[async_trait::async_trait]

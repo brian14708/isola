@@ -9,13 +9,11 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::TryStreamExt;
-use http_body_util::Full;
 use isola::cbor::json_to_cbor;
-use isola::module::ArgValue;
 use isola::trace::collect::{Collector, EventRecord, SpanRecord};
 use isola::{
-    Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpBodyStream, HttpRequest,
-    HttpResponse, Module, ModuleBuilder, OutputSink, Sandbox,
+    Arg, BoxError, DirectoryMapping, Host, HttpBodyStream, HttpRequest, HttpResponse, Module,
+    ModuleBuilder, ModuleConfig, OutputSink, Sandbox,
     request::{Client, RequestOptions},
 };
 
@@ -46,10 +44,10 @@ impl Host for TestHost {
     }
 
     async fn http_request(&self, req: HttpRequest) -> std::result::Result<HttpResponse, BoxError> {
-        let mut request = http::Request::new(Full::new(req.body.unwrap_or_default()));
-        *request.method_mut() = req.method;
-        *request.uri_mut() = req.uri;
-        *request.headers_mut() = req.headers;
+        let mut request = http::Request::new(req.body().clone().unwrap_or_default());
+        *request.method_mut() = req.method().clone();
+        *request.uri_mut() = req.uri().clone();
+        *request.headers_mut() = req.headers().clone();
 
         let response = self
             .client
@@ -195,13 +193,16 @@ async fn build_module_with_policy() -> Result<Option<Module<TestHost>>> {
     let Some((wasm, lib_dir)) = resolve_prereqs()? else {
         return Ok(None);
     };
+    let cache_dir = wasm
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
+        .join("cache");
 
-    let builder = ModuleBuilder::new()
-        .compile_config(CompileConfig {
-            cache: CacheConfig::Default,
-            ..CompileConfig::default()
-        })
-        .lib_dir(lib_dir);
+    let builder = ModuleBuilder::new().config(ModuleConfig {
+        cache: Some(cache_dir),
+        directory_mappings: vec![DirectoryMapping::new(lib_dir, "/lib")],
+        ..ModuleConfig::python()
+    });
 
     let module = builder
         .build(&wasm)
@@ -224,12 +225,7 @@ pub(crate) async fn call_collect(
     let state = Arc::new(Mutex::new(SinkState::default()));
     let sink = CollectSink::new(Arc::clone(&state));
     sandbox
-        .call(
-            function,
-            args,
-            sink,
-            CallOptions::default().timeout(timeout),
-        )
+        .call_with_timeout(function, args, sink, timeout)
         .await?;
     Ok(state.lock().expect("sink state mutex poisoned").clone())
 }
@@ -237,8 +233,8 @@ pub(crate) async fn call_collect(
 pub(crate) fn cbor_arg(name: Option<&str>, json: &str) -> Result<Arg> {
     let value =
         json_to_cbor(json).with_context(|| format!("failed to convert json to cbor: {json}"))?;
-    Ok(Arg {
-        name: name.map(str::to_owned),
-        value: ArgValue::Cbor(value),
+    Ok(match name {
+        Some(name) => Arg::cbor(value).with_name(name),
+        None => Arg::cbor(value),
     })
 }

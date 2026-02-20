@@ -1,7 +1,6 @@
-use std::path::Path;
-
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
+use std::sync::Arc;
 use tokio::time::timeout;
 use tracing::Instrument;
 use wasmtime::{
@@ -21,14 +20,15 @@ use crate::{
     Host, OutputSink,
     host::HttpRequest,
     internal::{resource::MemoryLimiter, trace_output::TraceOutput, wasm},
+    module::DirectoryMapping,
 };
 
-pub struct InstanceState<H: Host + Clone> {
+pub struct InstanceState<H: Host> {
     pub(crate) limiter: MemoryLimiter,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     table: ResourceTable,
-    host: H,
+    host: Arc<H>,
 
     sink: Option<Box<dyn OutputSink>>,
     output_buffer: OutputBuffer,
@@ -68,7 +68,7 @@ async fn collect_outgoing_http_body(
     Ok(if bytes.is_empty() { None } else { Some(bytes) })
 }
 
-impl<H: Host + Clone> InstanceState<H> {
+impl<H: Host> InstanceState<H> {
     /// Creates a new linker for the sandbox state.
     ///
     /// # Errors
@@ -90,20 +90,31 @@ impl<H: Host + Clone> InstanceState<H> {
     /// Returns an error if the preopened directories cannot be added to the WASI context.
     pub fn new(
         engine: &Engine,
-        lib_dir: &Path,
-        workdir: Option<&Path>,
+        directory_mappings: &[DirectoryMapping],
         max_memory: usize,
         host: H,
     ) -> anyhow::Result<Store<Self>> {
         let mut builder = WasiCtxBuilder::new();
-        builder
-            .preopened_dir(lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
-            .map_err(|e| anyhow::anyhow!("Failed to add lib_dir to WASI context: {e}"))?;
 
-        if let Some(workdir) = workdir {
+        for mapping in directory_mappings {
+            let (dir_perms, file_perms) = if mapping.writable {
+                (
+                    DirPerms::READ | DirPerms::MUTATE,
+                    FilePerms::READ | FilePerms::WRITE,
+                )
+            } else {
+                (DirPerms::READ, FilePerms::READ)
+            };
+
             builder
-                .preopened_dir(workdir, "/workdir", DirPerms::READ, FilePerms::READ)
-                .map_err(|e| anyhow::anyhow!("Failed to add workdir to WASI context: {e}"))?;
+                .preopened_dir(&mapping.host, &mapping.guest, dir_perms, file_perms)
+                .map_err(|e| {
+                    anyhow::anyhow!(
+                        "Failed to add directory mapping '{}' -> '{}': {e}",
+                        mapping.host.display(),
+                        mapping.guest
+                    )
+                })?;
         }
         let wasi = builder
             .allow_tcp(false)
@@ -120,7 +131,7 @@ impl<H: Host + Clone> InstanceState<H> {
                 wasi,
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
-                host,
+                host: Arc::new(host),
                 sink: None,
                 output_buffer: OutputBuffer::new(),
             },
@@ -137,7 +148,7 @@ impl<H: Host + Clone> InstanceState<H> {
     }
 }
 
-impl<H: Host + Clone> WasiView for InstanceState<H> {
+impl<H: Host> WasiView for InstanceState<H> {
     fn ctx(&mut self) -> WasiCtxView<'_> {
         WasiCtxView {
             ctx: &mut self.wasi,
@@ -146,7 +157,7 @@ impl<H: Host + Clone> WasiView for InstanceState<H> {
     }
 }
 
-impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
+impl<H: Host> WasiHttpView for InstanceState<H> {
     fn ctx(&mut self) -> &mut WasiHttpCtx {
         &mut self.http
     }
@@ -160,7 +171,7 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
         request: hyper::Request<HyperOutgoingBody>,
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
-        let host = self.host.clone();
+        let host = Arc::clone(&self.host);
 
         let handle = wasmtime_wasi::runtime::spawn(
             async move {
@@ -184,12 +195,10 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
                     collect_outgoing_http_body(body, MAX_OUTGOING_HTTP_BODY_BYTES, body_timeout)
                         .await?;
 
-                let req = HttpRequest {
-                    method: parts.method,
-                    uri: parts.uri,
-                    headers,
-                    body,
-                };
+                let mut req = HttpRequest::new(body);
+                *req.method_mut() = parts.method;
+                *req.uri_mut() = parts.uri;
+                *req.headers_mut() = headers;
                 let resp = timeout(config.first_byte_timeout, host.http_request(req))
                     .await
                     .map_err(|_e| ErrorCode::HttpResponseTimeout)?
@@ -218,15 +227,15 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
     }
 }
 
-impl<H: Host + Clone> HostView for InstanceState<H> {
+impl<H: Host> HostView for InstanceState<H> {
     type Host = H;
 
     fn table(&mut self) -> &mut ResourceTable {
         &mut self.table
     }
 
-    fn host(&mut self) -> &mut Self::Host {
-        &mut self.host
+    fn host(&mut self) -> &Arc<Self::Host> {
+        &self.host
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
@@ -242,16 +251,14 @@ impl<H: Host + Clone> HostView for InstanceState<H> {
             EmitValue::End(new_data) => {
                 self.output_buffer.append(new_data.as_ref())?;
                 let output = self.output_buffer.take();
-                sink.on_end(output)
-                    .await
-                    .map_err(|e| anyhow::Error::msg(e.to_string()))
+                sink.on_end(output).await.map_err(anyhow::Error::from_boxed)
             }
             EmitValue::PartialResult(new_data) => {
                 self.output_buffer.append(new_data.as_ref())?;
                 let output = self.output_buffer.take();
                 sink.on_partial(output)
                     .await
-                    .map_err(|e| anyhow::Error::msg(e.to_string()))
+                    .map_err(anyhow::Error::from_boxed)
             }
         }
     }
@@ -329,7 +336,7 @@ mod tests {
         ) -> core::result::Result<crate::HttpResponse, BoxError> {
             self.calls.lock().expect("lock poisoned").push(req.clone());
 
-            let uri = req.uri.to_string();
+            let uri = req.uri().to_string();
             let resp = match uri.as_str() {
                 "http://a.example/" => http::Response::builder()
                     .status(http::StatusCode::FOUND)
@@ -357,7 +364,7 @@ mod tests {
             wasi: WasiCtxBuilder::new().build(),
             http: WasiHttpCtx::new(),
             table: ResourceTable::new(),
-            host: host.clone(),
+            host: Arc::new(host.clone()),
             sink: None,
             output_buffer: OutputBuffer::new(),
         };
@@ -418,7 +425,7 @@ mod tests {
             wasi: WasiCtxBuilder::new().build(),
             http: WasiHttpCtx::new(),
             table: ResourceTable::new(),
-            host: host.clone(),
+            host: Arc::new(host.clone()),
             sink: None,
             output_buffer: OutputBuffer::new(),
         };
@@ -460,13 +467,13 @@ mod tests {
 
         let calls = host.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].method, http::Method::POST);
-        assert_eq!(calls[0].uri, "http://a.example/");
-        assert_eq!(calls[0].body.as_deref(), None);
+        assert_eq!(calls[0].method(), http::Method::POST);
+        assert_eq!(calls[0].uri(), "http://a.example/");
+        assert_eq!(calls[0].body().as_deref(), None);
 
         assert_eq!(
             calls[0]
-                .headers
+                .headers()
                 .get("x-other")
                 .expect("x-other forwarded")
                 .to_str()
@@ -475,7 +482,7 @@ mod tests {
         );
         assert_eq!(
             calls[0]
-                .headers
+                .headers()
                 .get(http::header::HOST)
                 .expect("host forwarded")
                 .to_str()

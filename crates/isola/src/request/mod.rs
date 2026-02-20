@@ -7,5 +7,5 @@ mod trace;
 pub use error::Error;
 
 pub use client::{Client, ClientBuilder};
-pub use options::{RequestContext, RequestOptions};
+pub use options::RequestOptions;
 pub use trace::TraceRequest;

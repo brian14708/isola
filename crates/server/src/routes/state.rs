@@ -2,7 +2,6 @@ use std::{path::Path, sync::Arc};
 
 use axum::extract::FromRef;
 use isola::request::Client;
-use tracing::level_filters::LevelFilter;
 
 use super::{SandboxEnv, SandboxManager};
 
@@ -16,7 +15,6 @@ impl AppState {
     pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let base_env = SandboxEnv {
             client: Arc::new(Client::new()),
-            log_level: LevelFilter::OFF,
         };
         Ok(Self {
             sandbox_manager: Arc::new(SandboxManager::new(wasm_path.as_ref()).await?),

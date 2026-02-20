@@ -6,9 +6,6 @@ pub enum Error {
     #[error("URL parsing error: {0}")]
     Url(#[from] url::ParseError),
 
-    #[error("Request body error: {0}")]
-    RequestBody(#[source] Box<dyn std::error::Error + Send + Sync>),
-
     #[error("Internal error: {0}")]
     Internal(#[source] Box<dyn std::error::Error + Send + Sync>),
 }

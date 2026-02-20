@@ -9,7 +9,7 @@ use std::time::Duration;
 use axum::{http::StatusCode, routing::get};
 pub use env::{SandboxEnv, StreamItem};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
-pub use sandbox_manager::{Argument, SandboxManager, Source};
+pub use sandbox_manager::{Argument, ExecOptions, SandboxManager, Source};
 pub use state::AppState;
 
 pub fn router(state: &AppState) -> axum::Router {

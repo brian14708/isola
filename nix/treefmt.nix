@@ -9,6 +9,7 @@
     };
     ruff-format.enable = true;
     clang-format.enable = true;
+    actionlint.enable = true;
   };
   settings.formatter = {
     clang-format = {

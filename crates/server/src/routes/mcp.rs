@@ -22,7 +22,7 @@ use tracing::level_filters::LevelFilter;
 use tracing::{Span, info_span};
 
 use crate::routes::api::trace::{HttpTraceCollector, TraceData};
-use crate::routes::{AppState, SandboxEnv, Source, StreamItem};
+use crate::routes::{AppState, ExecOptions, SandboxEnv, Source, StreamItem};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -78,7 +78,7 @@ impl Sandbox {
         );
         let (span, mut trace_rx, log_level) = if s
             .collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
-            .is_some()
+            .is_ok()
         {
             (s, Some(rx), LevelFilter::DEBUG)
         } else {
@@ -98,11 +98,10 @@ impl Sandbox {
                     },
                     "main".to_string(),
                     vec![],
-                    timeout,
                     SandboxEnv {
                         client: self.state.base_env.client.clone(),
-                        log_level,
                     },
+                    ExecOptions { timeout, log_level },
                 )
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;

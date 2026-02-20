@@ -30,7 +30,7 @@ async fn integration_python_http_client_roundtrip() -> Result<()> {
         .await;
 
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -95,7 +95,7 @@ async fn integration_python_http_status_errors_surface() -> Result<()> {
         .await;
 
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -160,7 +160,7 @@ async fn integration_python_http_multipart_files() -> Result<()> {
         .await;
 
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -223,7 +223,7 @@ async fn integration_python_http_read_twice_errors() -> Result<()> {
         .await;
 
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .context("failed to instantiate sandbox")?;
 

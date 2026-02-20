@@ -6,8 +6,8 @@ publish = true
 license.workspace = true
 
 [features]
-default = ["cbor", "trace", "request", "request-gzip", "request-tls"]
-cbor = [
+default = ["serde", "trace", "request", "request-gzip", "request-tls"]
+serde = [
     "dep:base64",
     "dep:minicbor",
     "dep:minicbor-serde",
@@ -56,7 +56,7 @@ serde_json = { workspace = true, optional = true }
 sha2 = { workspace = true }
 smallvec = { workspace = true, features = ["const_new"] }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["fs", "time", "macros", "rt"] }
+tokio = { workspace = true, features = ["fs", "time", "macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, optional = true }
@@ -76,4 +76,4 @@ workspace = true
 [[test]]
 name = "integration_python"
 path = "tests/python/mod.rs"
-required-features = ["cbor", "trace", "request"]
+required-features = ["serde", "trace", "request"]
