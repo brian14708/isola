@@ -1,20 +1,18 @@
 use std::{
-    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 
 use bytes::Bytes;
-use futures::{Stream, StreamExt, TryFutureExt};
+use futures::{Stream, StreamExt};
 use http::header::HOST;
 use http_body::Frame;
 use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project_lite::pin_project;
-use tokio_tungstenite::tungstenite;
 use tracing::Span;
 
-use super::{Error, WebsocketMessage};
+use super::Error;
 
 pub async fn http_impl<B>(
     client: reqwest::Client,
@@ -71,73 +69,6 @@ where
     builder.body(b).map_err(|e| Error::Internal(Box::new(e)))
 }
 
-pub async fn websocket_impl(
-    client: reqwest::Client,
-    mut request: http::Request<impl Stream<Item = WebsocketMessage>>,
-) -> Result<http::Response<impl Stream<Item = Result<WebsocketMessage, Error>>>, Error> {
-    let mut url = reqwest::Url::parse(&request.uri().to_string())?;
-    let _ = match url.scheme() {
-        "ws" => url.set_scheme("http"),
-        "wss" => url.set_scheme("https"),
-        _ => Ok(()),
-    };
-
-    let r = client
-        .request(std::mem::take(request.method_mut()), url)
-        .version(request.version())
-        .headers(std::mem::take(request.headers_mut()));
-
-    let span = Span::current();
-    let (builder, conn) = match r
-        .send()
-        .and_then(|mut resp| async {
-            span.record(trace::HTTP_RESPONSE_STATUS_CODE, resp.status().as_u16());
-            let mut builder = http::response::Builder::new()
-                .status(resp.status())
-                .version(resp.version());
-            if let Some(h) = builder.headers_mut() {
-                *h = std::mem::take(resp.headers_mut());
-            }
-            Ok((builder, resp.upgrade().await?))
-        })
-        .and_then(|(builder, response)| async {
-            Ok((
-                builder,
-                tokio_tungstenite::WebSocketStream::from_raw_socket(
-                    response,
-                    tungstenite::protocol::Role::Client,
-                    None,
-                )
-                .await,
-            ))
-        })
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => {
-            span.record(trace::OTEL_STATUS_CODE, "ERROR");
-            return Err(Error::Http(e));
-        }
-    };
-
-    let (tx, rx) = conn.split();
-    let write = request
-        .into_body()
-        .map(Ok)
-        .forward(tx)
-        .map_err(std::convert::Into::into);
-    builder
-        .body(InstrumentJoinStream::new(
-            span,
-            rx.map(|f| match f {
-                Ok(m) => Ok(m),
-                Err(e) => Err(e.into()),
-            }),
-            write,
-        ))
-        .map_err(|e| Error::Internal(Box::new(e)))
-}
-
 pin_project! {
     struct InstrumentStream<S> {
         #[pin]
@@ -185,69 +116,6 @@ impl<S: Stream<Item = Result<http_body::Frame<Bytes>, E>>, E> Stream for Instrum
                 Poll::Ready(Some(Err(e)))
             }
             Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-pin_project! {
-    struct InstrumentJoinStream<S, F> {
-        #[pin]
-        stream: Option<S>,
-        #[pin]
-        fut: Option<F>,
-        span: tracing::Span,
-    }
-}
-
-impl<S, F> InstrumentJoinStream<S, F> {
-    const fn new(span: Span, stream: S, fut: F) -> Self {
-        Self {
-            stream: Some(stream),
-            span,
-            fut: Some(fut),
-        }
-    }
-}
-
-impl<S: Stream<Item = Result<M, E>>, F: Future<Output = Result<(), E>>, M, E> Stream
-    for InstrumentJoinStream<S, F>
-{
-    type Item = S::Item;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut this = self.project();
-        let span = &this.span;
-        let enter = span.enter();
-        if let Some(stream) = this.stream.as_mut().as_pin_mut() {
-            match stream.poll_next(cx) {
-                Poll::Ready(None) => this.stream.set(None),
-                v @ Poll::Ready(Some(_)) => return v,
-                Poll::Pending => {}
-            }
-        }
-
-        if let Some(task) = this.fut.as_mut().as_pin_mut() {
-            match task.poll(cx) {
-                Poll::Ready(Ok(())) => this.fut.set(None),
-                Poll::Ready(Err(err)) => {
-                    span.record(trace::OTEL_STATUS_CODE, "ERROR");
-                    drop(enter);
-                    this.stream.set(None);
-                    this.fut.set(None);
-                    *this.span = tracing::Span::none();
-                    return Poll::Ready(Some(Err(err)));
-                }
-                Poll::Pending => return Poll::Pending,
-            }
-        }
-
-        if this.stream.is_none() && this.fut.is_none() {
-            span.record(trace::OTEL_STATUS_CODE, "OK");
-            drop(enter);
-            *this.span = tracing::Span::none();
-            Poll::Ready(None)
-        } else {
-            Poll::Pending
         }
     }
 }

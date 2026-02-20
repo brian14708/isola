@@ -228,19 +228,11 @@ mod tests {
         ) -> core::result::Result<crate::HttpResponse, BoxError> {
             Err(std::io::Error::other("unsupported").into())
         }
-
-        async fn websocket_connect(
-            &self,
-            _req: crate::WebsocketRequest,
-        ) -> core::result::Result<crate::WebsocketResponse, BoxError> {
-            Err(std::io::Error::other("unsupported").into())
-        }
     }
 
     struct TestView {
         table: ResourceTable,
         host: TestHost,
-        policy: crate::net::AllowAllPolicy,
     }
 
     impl super::super::HostView for TestView {
@@ -252,10 +244,6 @@ mod tests {
 
         fn host(&mut self) -> &mut Self::Host {
             &mut self.host
-        }
-
-        fn network_policy(&self) -> &dyn crate::NetworkPolicy {
-            &self.policy
         }
 
         fn emit(
@@ -283,7 +271,6 @@ mod tests {
         let mut view = TestView {
             table: ResourceTable::new(),
             host: TestHost,
-            policy: crate::net::AllowAllPolicy,
         };
 
         let future = {

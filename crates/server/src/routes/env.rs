@@ -3,11 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
-use http::Method;
 use http_body_util::Full;
 use isola::{
-    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink, WebsocketBodyStream,
-    WebsocketRequest, WebsocketResponse,
+    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink,
     cbor::{from_cbor, to_cbor},
     request::{Client, RequestContext, RequestOptions, TraceRequest},
     request_span,
@@ -147,46 +145,6 @@ impl Host for SandboxEnv {
         Ok(response.map(|body| -> HttpBodyStream {
             Box::pin(
                 body.map(|frame| frame.map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)),
-            )
-        }))
-    }
-
-    async fn websocket_connect(
-        &self,
-        request: WebsocketRequest,
-    ) -> Result<WebsocketResponse, BoxError> {
-        let mut builder = http::Request::builder()
-            .method(Method::GET)
-            .uri(request.uri);
-
-        if let Some(headers) = builder.headers_mut() {
-            *headers = request.headers;
-        }
-
-        let request = builder
-            .body(request.outbound)
-            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
-
-        let ctx = Context {
-            make_span: Some(|r: &TraceRequest<'_>| {
-                request_span!(
-                    r,
-                    target: isola::TRACE_TARGET_SCRIPT,
-                    tracing::Level::INFO,
-                    "websocket.connect",
-                )
-            }),
-        };
-
-        let response = self
-            .client
-            .connect_websocket(request, RequestOptions::new(ctx))
-            .await
-            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
-
-        Ok(response.map(|body| -> WebsocketBodyStream {
-            Box::pin(
-                body.map(|item| item.map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)),
             )
         }))
     }

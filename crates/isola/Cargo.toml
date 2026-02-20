@@ -23,7 +23,6 @@ request = [
     "dep:opentelemetry-semantic-conventions",
     "dep:pin-project-lite",
     "dep:reqwest",
-    "dep:tokio-tungstenite",
     "dep:tracing-opentelemetry",
 ]
 request-gzip = ["request", "reqwest/gzip"]
@@ -59,11 +58,9 @@ smallvec = { workspace = true, features = ["const_new"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time", "macros", "rt"] }
 tokio-stream = { workspace = true }
-tokio-tungstenite = { workspace = true, features = ["handshake"], optional = true }
 tracing = { workspace = true }
 tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber = { workspace = true, optional = true }
-tungstenite = { workspace = true }
 url = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
 wasmtime-wasi = { workspace = true }

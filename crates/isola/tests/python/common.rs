@@ -17,7 +17,6 @@ use isola::trace::collect::{Collector, EventRecord, SpanRecord};
 use isola::{
     AclPolicyBuilder, Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpBodyStream,
     HttpRequest, HttpResponse, Module, ModuleBuilder, NetworkPolicy, OutputSink, Sandbox,
-    WebsocketRequest, WebsocketResponse,
     request::{Client, RequestOptions},
 };
 
@@ -62,16 +61,6 @@ impl Host for TestHost {
         Ok(response.map(|body| -> HttpBodyStream {
             Box::pin(body.map_err(|e| -> BoxError { Box::new(e) }))
         }))
-    }
-
-    async fn websocket_connect(
-        &self,
-        _req: WebsocketRequest,
-    ) -> std::result::Result<WebsocketResponse, BoxError> {
-        Err(std::io::Error::other(
-            "websocket_connect is not implemented in integration-bundle tests",
-        )
-        .into())
     }
 }
 

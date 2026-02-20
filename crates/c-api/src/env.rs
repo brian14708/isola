@@ -5,7 +5,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use http_body_util::Full;
 use isola::{
-    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, WebsocketRequest, WebsocketResponse,
+    BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse,
     request::{Client, RequestOptions},
 };
 
@@ -60,16 +60,5 @@ impl Host for Env {
                 Box::pin(b.map_err(|e| -> BoxError { Box::new(e) }))
             }),
         )
-    }
-
-    async fn websocket_connect(
-        &self,
-        _req: WebsocketRequest,
-    ) -> std::result::Result<WebsocketResponse, BoxError> {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "websocket not implemented in c-api",
-        )
-        .into())
     }
 }

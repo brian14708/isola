@@ -410,10 +410,6 @@ impl<H: Host + Clone> HostView for InstanceState<H> {
         &mut self.host
     }
 
-    fn network_policy(&self) -> &dyn NetworkPolicy {
-        &*self.policy
-    }
-
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
         let Some(sink) = self.sink.as_mut() else {
             return Err(anyhow::anyhow!("output sink missing"));
@@ -530,13 +526,6 @@ mod tests {
                 }
             };
             Ok(resp)
-        }
-
-        async fn websocket_connect(
-            &self,
-            _req: crate::WebsocketRequest,
-        ) -> core::result::Result<crate::WebsocketResponse, BoxError> {
-            Err(std::io::Error::other("unsupported").into())
         }
     }
 

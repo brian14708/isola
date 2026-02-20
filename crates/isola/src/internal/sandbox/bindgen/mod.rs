@@ -15,12 +15,6 @@ wasmtime::component::bindgen!({
         "wasi:logging": crate::internal::wasm::logging::bindings,
         "isola:script/host.value-iterator": host::ValueIterator,
         "isola:script/host.future-hostcall": host::FutureHostcall,
-        "isola:script/outgoing-websocket.connect-request": outgoing_websocket::ConnectRequest,
-        "isola:script/outgoing-websocket.websocket-message": outgoing_websocket::WebsocketMessage,
-        "isola:script/outgoing-websocket.read-stream": outgoing_websocket::ReadStream,
-        "isola:script/outgoing-websocket.write-stream": outgoing_websocket::WriteStream,
-        "isola:script/outgoing-websocket.websocket-connection": outgoing_websocket::WebsocketConnection,
-        "isola:script/outgoing-websocket.future-websocket": outgoing_websocket::FutureWebsocket,
     },
 });
 
@@ -32,7 +26,6 @@ use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 
 pub mod host;
-pub mod outgoing_websocket;
 
 pub enum EmitValue {
     Continuation(Bytes),
@@ -46,8 +39,6 @@ pub trait HostView: Send {
     fn table(&mut self) -> &mut ResourceTable;
 
     fn host(&mut self) -> &mut Self::Host;
-
-    fn network_policy(&self) -> &dyn crate::NetworkPolicy;
 
     fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
@@ -63,10 +54,6 @@ impl<T: ?Sized + HostView> HostView for &mut T {
         T::host(self)
     }
 
-    fn network_policy(&self) -> &dyn crate::NetworkPolicy {
-        T::network_policy(self)
-    }
-
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
         T::emit(self, data).await
     }
@@ -80,6 +67,5 @@ pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
         type Data<'a> = HostImpl<&'a mut T>;
     }
     self::isola::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
-    self::isola::script::outgoing_websocket::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
     Ok(())
 }
