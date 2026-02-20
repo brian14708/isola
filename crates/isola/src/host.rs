@@ -33,9 +33,10 @@ pub trait Host: Send + Sync + 'static {
         payload: Bytes,
     ) -> core::result::Result<Bytes, BoxError>;
 
-    /// Perform a single-hop HTTP request.
+    /// Perform an HTTP request.
     ///
-    /// Safety contract: this MUST NOT follow redirects internally.
+    /// Implementations own redirect behavior and header hygiene. In particular,
+    /// remove any caller-supplied `Host` header before dispatching.
     async fn http_request(&self, req: HttpRequest) -> core::result::Result<HttpResponse, BoxError>;
 
     fn log_level(&self) -> LevelFilter {

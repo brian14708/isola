@@ -1,17 +1,15 @@
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
     path::PathBuf,
-    sync::Arc,
     time::Duration,
 };
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use isola::module::ArgValue;
 use isola::{
-    AclPolicyBuilder, Arg, CacheConfig, CallOptions, CompileConfig, Module, ModuleBuilder,
-    OutputSink, Sandbox,
+    Arg, CacheConfig, CallOptions, CompileConfig, Module, ModuleBuilder, OutputSink, Sandbox,
 };
-use isola::{module::ArgValue, net::AclRule};
 use tokio::runtime::{Builder, Runtime};
 
 use crate::env::Env;
@@ -102,12 +100,6 @@ impl ContextHandle {
                     lib_dir.push("lib");
                     lib_dir
                 })
-                .network_policy(Arc::new(
-                    AclPolicyBuilder::new()
-                        .deny_private_ranges(false)
-                        .push(AclRule::allow())
-                        .build(),
-                ))
                 .build(&path)
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to load runtime: {e}")))?;

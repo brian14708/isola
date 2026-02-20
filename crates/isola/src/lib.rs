@@ -5,7 +5,6 @@ pub mod cbor;
 pub mod error;
 pub mod host;
 pub mod module;
-pub mod net;
 #[cfg(feature = "request")]
 pub mod request;
 #[cfg(feature = "trace")]
@@ -22,4 +21,3 @@ pub use host::{
 pub use module::{
     Arg, Args, CacheConfig, CallOptions, CompileConfig, InitConfig, Module, ModuleBuilder, Sandbox,
 };
-pub use net::{AclPolicy, AclPolicyBuilder, NetworkPolicy};
