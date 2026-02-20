@@ -14,7 +14,10 @@ use component_init_transform::Invoker;
 use futures::{FutureExt, Stream};
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::{
     collections::hash_map::DefaultHasher,
     fmt::Write as _,
@@ -23,7 +26,6 @@ use std::{
     pin::Pin,
     time::Duration,
 };
-use tokio::task::JoinHandle;
 use tracing::{Instrument, info_span, warn};
 use wasmtime::{
     Config, Engine, Store,
@@ -279,19 +281,29 @@ impl ModuleBuilder {
         Engine::tls_eager_initialize();
 
         let epoch_engine = engine.clone();
-        let epoch_handle = tokio::task::spawn(async move {
-            let mut interval = tokio::time::interval(EPOCH_TICK);
-            loop {
-                interval.tick().await;
-                epoch_engine.increment_epoch();
-            }
-        });
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_bg = Arc::clone(&stop);
+        let epoch_ticker = std::thread::Builder::new()
+            .name("isola-epoch-ticker".to_string())
+            .spawn(move || {
+                // Keep epoch progression independent of Tokio scheduling.
+                // This avoids timeout starvation in current-thread runtimes.
+                loop {
+                    if stop_bg.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    std::thread::park_timeout(EPOCH_TICK);
+                    epoch_engine.increment_epoch();
+                }
+            })
+            .map_err(Error::Io)?;
 
         Ok(Module {
             config: cfg,
             pre: SandboxPre::new(pre).map_err(Error::Wasm)?,
             ticker: Arc::new(EpochTicker {
-                handle: epoch_handle,
+                handle: Some(epoch_ticker),
+                stop,
                 engine: engine.clone(),
             }),
             engine,
@@ -301,16 +313,20 @@ impl ModuleBuilder {
 }
 
 /// Shared epoch ticker that keeps incrementing the engine epoch as long as any
-/// `Module` or `Sandbox` holds a reference.  Aborts the background task when
-/// the last reference is dropped.
+/// `Module` or `Sandbox` holds a reference.
 struct EpochTicker {
-    handle: JoinHandle<()>,
+    handle: Option<std::thread::JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
     engine: Engine,
 }
 
 impl Drop for EpochTicker {
     fn drop(&mut self) {
-        self.handle.abort();
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.handle.take() {
+            handle.thread().unpark();
+            let _ = handle.join();
+        }
         // One final increment so any in-flight epoch waits resolve immediately.
         self.engine.increment_epoch();
     }

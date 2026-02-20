@@ -6,8 +6,8 @@ run: build
 e2e: init-py build-wasm
     uv run --directory tests/rpc pytest
 
-integration:
-    cargo test --release -p isola --test integration_python -- --ignored --test-threads=1
+integration: build-wasm
+    cargo test --release
 
 build: build-wasm
     cargo build --release -p isola-server
