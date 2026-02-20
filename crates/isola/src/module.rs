@@ -1,13 +1,12 @@
 use crate::TRACE_TARGET_SCRIPT;
 use crate::{
-    BoxError, Host, NetworkPolicy, OutputSink, Result,
+    BoxError, Host, OutputSink, Result,
     error::Error,
     internal::sandbox::{
         InstanceState, SandboxPre,
         exports::GuestIndices,
         exports::{Argument as RawArgument, Value},
     },
-    net::{AclPolicyBuilder, AclRule, AclScheme, AllowAllPolicy},
 };
 use bytes::Bytes;
 use component_init_transform::Invoker;
@@ -36,24 +35,9 @@ use wasmtime::{
 use crate::internal::sandbox::HostView as _;
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
-const DEFAULT_MAX_REDIRECTS: usize = 10;
 // Wasmtime epoch deadlines are relative deltas (`current_epoch + delta`).
 // Using `u64::MAX` can wrap and cause immediate interrupts.
 const NO_DEADLINE_TICKS: u64 = u64::MAX / 2;
-
-fn default_network_policy() -> Arc<dyn NetworkPolicy> {
-    Arc::new(
-        AclPolicyBuilder::new()
-            .deny_private_ranges(true)
-            .push(AclRule::allow().schemes([
-                AclScheme::Http,
-                AclScheme::Https,
-                AclScheme::Ws,
-                AclScheme::Wss,
-            ]))
-            .build(),
-    )
-}
 
 #[derive(Clone, Debug)]
 pub enum CacheConfig {
@@ -165,16 +149,12 @@ struct ModuleConfig {
     cache_dir: Option<PathBuf>,
     init: InitConfig,
     compile: CompileConfig,
-    policy: std::sync::Arc<dyn NetworkPolicy>,
-    max_redirects: usize,
 }
 
 pub struct ModuleBuilder {
     init: InitConfig,
     compile: CompileConfig,
     lib_dir: Option<PathBuf>,
-    policy: std::sync::Arc<dyn NetworkPolicy>,
-    max_redirects: usize,
     engine_config: Option<Config>,
 }
 
@@ -184,8 +164,6 @@ impl Default for ModuleBuilder {
             init: InitConfig::default_python(),
             compile: CompileConfig::default(),
             lib_dir: None,
-            policy: default_network_policy(),
-            max_redirects: DEFAULT_MAX_REDIRECTS,
             engine_config: None,
         }
     }
@@ -212,18 +190,6 @@ impl ModuleBuilder {
     #[must_use]
     pub fn lib_dir(mut self, p: impl Into<PathBuf>) -> Self {
         self.lib_dir = Some(p.into());
-        self
-    }
-
-    #[must_use]
-    pub fn network_policy(mut self, policy: std::sync::Arc<dyn NetworkPolicy>) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    #[must_use]
-    pub const fn max_redirects(mut self, max: usize) -> Self {
-        self.max_redirects = max;
         self
     }
 
@@ -257,8 +223,6 @@ impl ModuleBuilder {
             cache_dir,
             init: self.init,
             compile: self.compile,
-            policy: self.policy,
-            max_redirects: self.max_redirects,
         };
 
         let custom_engine_config = self.engine_config.is_some();
@@ -363,8 +327,6 @@ impl<H: Host + Clone> Module<H> {
                 workdir,
                 self.config.max_memory,
                 host,
-                self.config.policy.clone(),
-                self.config.max_redirects,
             )
             .map_err(Error::Wasm)?;
 
@@ -685,8 +647,6 @@ async fn compile_serialized_component(
                         Some(&cfg.lib_dir),
                         cfg.compile.max_memory,
                         CompileHost,
-                        std::sync::Arc::new(AllowAllPolicy),
-                        cfg.max_redirects,
                     )
                     .map_err(Error::Wasm)?;
                     store.epoch_deadline_async_yield_and_update(1);

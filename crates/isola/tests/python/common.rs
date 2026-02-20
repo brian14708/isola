@@ -12,11 +12,10 @@ use futures::TryStreamExt;
 use http_body_util::Full;
 use isola::cbor::json_to_cbor;
 use isola::module::ArgValue;
-use isola::net::{AclRule, AclScheme};
 use isola::trace::collect::{Collector, EventRecord, SpanRecord};
 use isola::{
-    AclPolicyBuilder, Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpBodyStream,
-    HttpRequest, HttpResponse, Module, ModuleBuilder, NetworkPolicy, OutputSink, Sandbox,
+    Arg, BoxError, CacheConfig, CallOptions, CompileConfig, Host, HttpBodyStream, HttpRequest,
+    HttpResponse, Module, ModuleBuilder, OutputSink, Sandbox,
     request::{Client, RequestOptions},
 };
 
@@ -190,25 +189,19 @@ fn build_module_lock() -> &'static tokio::sync::Mutex<()> {
     BUILD_MODULE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-async fn build_module_with_policy(
-    policy: Option<Arc<dyn NetworkPolicy>>,
-) -> Result<Option<Module<TestHost>>> {
+async fn build_module_with_policy() -> Result<Option<Module<TestHost>>> {
     // Serialize compilation because tests can run in parallel and share cache paths.
     let _build_guard = build_module_lock().lock().await;
     let Some((wasm, lib_dir)) = resolve_prereqs()? else {
         return Ok(None);
     };
 
-    let mut builder = ModuleBuilder::new()
+    let builder = ModuleBuilder::new()
         .compile_config(CompileConfig {
             cache: CacheConfig::Default,
             ..CompileConfig::default()
         })
         .lib_dir(lib_dir);
-
-    if let Some(policy) = policy {
-        builder = builder.network_policy(policy);
-    }
 
     let module = builder
         .build(&wasm)
@@ -219,23 +212,7 @@ async fn build_module_with_policy(
 }
 
 pub(crate) async fn build_module() -> Result<Option<Module<TestHost>>> {
-    build_module_with_policy(None).await
-}
-
-pub(crate) async fn build_module_allow_private_ranges() -> Result<Option<Module<TestHost>>> {
-    let policy: Arc<dyn NetworkPolicy> = Arc::new(
-        AclPolicyBuilder::new()
-            .deny_private_ranges(false)
-            .push(AclRule::allow().schemes([
-                AclScheme::Http,
-                AclScheme::Https,
-                AclScheme::Ws,
-                AclScheme::Wss,
-            ]))
-            .build(),
-    );
-
-    build_module_with_policy(Some(policy)).await
+    build_module_with_policy().await
 }
 
 pub(crate) async fn call_collect(

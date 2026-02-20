@@ -29,14 +29,6 @@ pub enum Error {
         message: String,
     },
 
-    /// Network policy denied the request.
-    #[error("network denied: {url}: {reason}")]
-    NetworkDenied { url: String, reason: String },
-
-    /// Redirect limit exceeded.
-    #[error("redirect limit exceeded: {url}")]
-    RedirectLimit { url: String },
-
     /// Wasmtime engine error (instantiation, trap, epoch interrupt).
     #[error("wasm error: {0}")]
     Wasm(#[source] anyhow::Error),

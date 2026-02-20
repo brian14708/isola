@@ -79,12 +79,6 @@ impl From<isola::Error> for HttpApiError {
                     Self::internal(message)
                 }
             },
-            isola::Error::NetworkDenied { url, reason } => {
-                Self::script_error(format!("network denied for {url}: {reason}"))
-            }
-            isola::Error::RedirectLimit { url } => {
-                Self::script_error(format!("redirect limit exceeded: {url}"))
-            }
             isola::Error::Wasm(err) => {
                 let message = err.to_string();
                 if message.contains("interrupt") {

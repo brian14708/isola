@@ -23,7 +23,7 @@ where
     B::Error: std::error::Error + Send + Sync + 'static,
     B::Data: Send,
 {
-    // custom Host header messes with redirects
+    // Host contract: drop caller-supplied `Host` and let the HTTP client set it.
     request.headers_mut().remove(HOST);
     let url = url::Url::parse(&request.uri().to_string())?;
     let (parts, body) = request.into_parts();

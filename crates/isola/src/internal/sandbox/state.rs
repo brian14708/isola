@@ -1,11 +1,9 @@
-use std::{path::Path, sync::Arc};
+use std::path::Path;
 
-use crate::TRACE_TARGET_SCRIPT;
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
 use tokio::time::timeout;
-use tracing::{Instrument, event};
-use url::Url;
+use tracing::Instrument;
 use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
@@ -20,8 +18,8 @@ use wasmtime_wasi_http::{
 
 use super::bindgen::{EmitValue, HostView, add_to_linker};
 use crate::{
-    Host, NetworkPolicy, OutputSink,
-    host::{HttpRequest, HttpResponse},
+    Host, OutputSink,
+    host::HttpRequest,
     internal::{resource::MemoryLimiter, trace_output::TraceOutput, wasm},
 };
 
@@ -31,8 +29,6 @@ pub struct InstanceState<H: Host + Clone> {
     http: WasiHttpCtx,
     table: ResourceTable,
     host: H,
-    policy: Arc<dyn NetworkPolicy>,
-    max_redirects: usize,
 
     sink: Option<Box<dyn OutputSink>>,
     output_buffer: OutputBuffer,
@@ -98,8 +94,6 @@ impl<H: Host + Clone> InstanceState<H> {
         workdir: Option<&Path>,
         max_memory: usize,
         host: H,
-        policy: Arc<dyn NetworkPolicy>,
-        max_redirects: usize,
     ) -> anyhow::Result<Store<Self>> {
         let mut builder = WasiCtxBuilder::new();
         builder
@@ -127,8 +121,6 @@ impl<H: Host + Clone> InstanceState<H> {
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
                 host,
-                policy,
-                max_redirects,
                 sink: None,
                 output_buffer: OutputBuffer::new(),
             },
@@ -169,33 +161,11 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
         config: OutgoingRequestConfig,
     ) -> HttpResult<HostFutureIncomingResponse> {
         let host = self.host.clone();
-        let policy = Arc::clone(&self.policy);
-        let max_redirects = self.max_redirects;
 
         let handle = wasmtime_wasi::runtime::spawn(
             async move {
                 let (parts, body) = request.into_parts();
-                let mut headers = parts.headers;
-
-                // `isola` owns redirect-following, so `Host` must not be influenced by stale host headers.
-                headers.remove(http::header::HOST);
-
-                // Enforce policy before reading the (potentially unbounded) request body.
-                let meta = crate::net::HttpMeta {
-                    method: parts.method.clone(),
-                    uri: parts.uri.clone(),
-                };
-                if let Err(reason) = policy.check_http(&meta).await {
-                    event!(
-                        name: "net.deny",
-                        target: TRACE_TARGET_SCRIPT,
-                        tracing::Level::DEBUG,
-                        net.kind = "http",
-                        net.reason = &reason,
-                        url.full = parts.uri.to_string(),
-                    );
-                    return Err(ErrorCode::HttpRequestDenied.into());
-                }
+                let headers = parts.headers;
 
                 // Fast-path reject based on `Content-Length` if present.
                 if let Some(len) = headers.get(http::header::CONTENT_LENGTH)
@@ -214,17 +184,16 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
                     collect_outgoing_http_body(body, MAX_OUTGOING_HTTP_BODY_BYTES, body_timeout)
                         .await?;
 
-                let req = HttpFollowRequest {
+                let req = HttpRequest {
                     method: parts.method,
                     uri: parts.uri,
                     headers,
                     body,
                 };
-                let follow_cfg = HttpFollowConfig {
-                    max_redirects,
-                    first_byte_timeout: config.first_byte_timeout,
-                };
-                let resp = http_with_redirects(&host, &*policy, req, follow_cfg).await?;
+                let resp = timeout(config.first_byte_timeout, host.http_request(req))
+                    .await
+                    .map_err(|_e| ErrorCode::HttpResponseTimeout)?
+                    .map_err(|e| ErrorCode::InternalError(Some(format!("request error: {e}"))))?;
 
                 let (part, body) = resp
                     .map(|b| {
@@ -247,156 +216,6 @@ impl<H: Host + Clone> WasiHttpView for InstanceState<H> {
         );
         Ok(HostFutureIncomingResponse::pending(handle))
     }
-}
-
-fn method_rewrite_and_body_drop(
-    status: http::StatusCode,
-    method: &http::Method,
-) -> (http::Method, bool) {
-    match status.as_u16() {
-        303 => (http::Method::GET, true),
-        301 | 302 => {
-            if *method == http::Method::GET || *method == http::Method::HEAD {
-                (method.clone(), false)
-            } else {
-                (http::Method::GET, true)
-            }
-        }
-        _ => (method.clone(), false),
-    }
-}
-
-fn same_origin(a: &Url, b: &Url) -> bool {
-    a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.port_or_known_default() == b.port_or_known_default()
-}
-
-fn apply_redirect_header_hygiene(headers: &mut http::HeaderMap, origin_changed: bool) {
-    // `Host` is stripped per-hop in the main loop before handing to the embedder,
-    // so we only need to remove cross-origin sensitive headers here.
-    if origin_changed {
-        headers.remove(http::header::AUTHORIZATION);
-        headers.remove(http::header::COOKIE);
-        headers.remove("x-isola-proxy");
-    }
-}
-
-async fn http_with_redirects(
-    host: &impl Host,
-    policy: &dyn NetworkPolicy,
-    mut req: HttpFollowRequest,
-    cfg: HttpFollowConfig,
-) -> Result<HttpResponse, ErrorCode> {
-    let mut redirects = 0usize;
-
-    loop {
-        let meta = crate::net::HttpMeta {
-            method: req.method.clone(),
-            uri: req.uri.clone(),
-        };
-        if let Err(reason) = policy.check_http(&meta).await {
-            event!(
-                name: "net.deny",
-                target: TRACE_TARGET_SCRIPT,
-                tracing::Level::DEBUG,
-                net.kind = "http",
-                net.reason = &reason,
-                url.full = req.uri.to_string(),
-            );
-            return Err(ErrorCode::HttpRequestDenied);
-        }
-
-        let http_req = HttpRequest {
-            method: req.method.clone(),
-            uri: req.uri.clone(),
-            headers: {
-                let mut headers = req.headers.clone();
-                // Always drop `Host` before handing the request to the embedder.
-                headers.remove(http::header::HOST);
-                headers
-            },
-            body: req.body.clone(),
-        };
-
-        let resp = timeout(cfg.first_byte_timeout, host.http_request(http_req))
-            .await
-            .map_err(|_e| ErrorCode::HttpResponseTimeout)?
-            .map_err(|e| ErrorCode::InternalError(Some(format!("request error: {e}"))))?;
-
-        if !resp.status().is_redirection() {
-            return Ok(resp);
-        }
-
-        let status = resp.status();
-        let location = resp.headers().get(http::header::LOCATION).cloned();
-        let Some(location) = location else {
-            // No `Location`, so there's nothing to follow.
-            return Ok(resp);
-        };
-
-        let Ok(location_str) = location.to_str() else {
-            // Invalid `Location`, return the response as-is.
-            return Ok(resp);
-        };
-
-        let Ok(base_url) = Url::parse(&req.uri.to_string()) else {
-            return Ok(resp);
-        };
-
-        let Ok(next_url) = Url::parse(location_str).or_else(|_| base_url.join(location_str)) else {
-            // Invalid `Location`, return the response as-is.
-            return Ok(resp);
-        };
-
-        if next_url.scheme() != "http" && next_url.scheme() != "https" {
-            // Only http/https redirects are supported.
-            return Ok(resp);
-        }
-
-        let redirect_uri: http::Uri = match next_url.as_str().parse() {
-            Ok(u) => u,
-            Err(_) => return Ok(resp),
-        };
-
-        if redirects >= cfg.max_redirects {
-            return Err(ErrorCode::LoopDetected);
-        }
-        redirects += 1;
-
-        event!(
-            name: "http.redirect",
-            target: TRACE_TARGET_SCRIPT,
-            tracing::Level::DEBUG,
-            http.status = status.as_u16(),
-            url.from = base_url.as_str(),
-            url.to = next_url.as_str(),
-        );
-
-        let (new_method, drop_body) = method_rewrite_and_body_drop(status, &req.method);
-        req.method = new_method;
-        if drop_body {
-            req.body = None;
-            req.headers.remove(http::header::CONTENT_LENGTH);
-        }
-
-        let origin_changed = !same_origin(&base_url, &next_url);
-        apply_redirect_header_hygiene(&mut req.headers, origin_changed);
-
-        req.uri = redirect_uri;
-    }
-}
-
-struct HttpFollowConfig {
-    max_redirects: usize,
-    first_byte_timeout: std::time::Duration,
-}
-
-struct HttpFollowRequest {
-    method: http::Method,
-    uri: http::Uri,
-    headers: http::HeaderMap,
-    body: Option<Bytes>,
 }
 
 impl<H: Host + Clone> HostView for InstanceState<H> {
@@ -529,97 +348,6 @@ mod tests {
         }
     }
 
-    struct DenySecondHop;
-
-    #[async_trait::async_trait]
-    impl NetworkPolicy for DenySecondHop {
-        async fn check_http(
-            &self,
-            meta: &crate::net::HttpMeta,
-        ) -> core::result::Result<(), String> {
-            if meta.uri.host() == Some("b.example") {
-                return Err("denied".to_string());
-            }
-            Ok(())
-        }
-
-        async fn check_websocket(
-            &self,
-            _meta: &crate::net::WebsocketMeta,
-        ) -> core::result::Result<(), String> {
-            Ok(())
-        }
-    }
-
-    struct DenyAllPolicy;
-
-    #[async_trait::async_trait]
-    impl NetworkPolicy for DenyAllPolicy {
-        async fn check_http(
-            &self,
-            _meta: &crate::net::HttpMeta,
-        ) -> core::result::Result<(), String> {
-            Err("denied".to_string())
-        }
-
-        async fn check_websocket(
-            &self,
-            _meta: &crate::net::WebsocketMeta,
-        ) -> core::result::Result<(), String> {
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn send_request_checks_policy_before_reading_body() {
-        let host = ScriptedHost::default();
-
-        let mut state = InstanceState {
-            limiter: MemoryLimiter::new(1024),
-            wasi: WasiCtxBuilder::new().build(),
-            http: WasiHttpCtx::new(),
-            table: ResourceTable::new(),
-            host: host.clone(),
-            policy: Arc::new(DenyAllPolicy),
-            max_redirects: 10,
-            sink: None,
-            output_buffer: OutputBuffer::new(),
-        };
-
-        // A body that never completes. Before the fix, this would hang forever because the body
-        // was read before policy enforcement.
-        let body: HyperOutgoingBody = http_body_util::StreamBody::new(futures::stream::pending::<
-            Result<Frame<Bytes>, TypesErrorCode>,
-        >())
-        .boxed_unsync();
-
-        let req = hyper::Request::builder()
-            .method(http::Method::POST)
-            .uri("http://a.example/")
-            .body(body)
-            .expect("request build");
-
-        let cfg = OutgoingRequestConfig {
-            use_tls: false,
-            connect_timeout: Duration::from_millis(10),
-            first_byte_timeout: Duration::from_secs(1),
-            between_bytes_timeout: Duration::from_secs(1),
-        };
-
-        let mut fut = state.send_request(req, cfg).expect("send_request");
-        timeout(Duration::from_millis(200), fut.ready())
-            .await
-            .expect("ready in time");
-
-        let err = match fut.unwrap_ready() {
-            Ok(Ok(_)) => panic!("expected deny"),
-            Ok(Err(e)) => e,
-            Err(e) => e.downcast::<ErrorCode>().expect("downcast ErrorCode"),
-        };
-        assert!(matches!(err, ErrorCode::HttpRequestDenied));
-        assert!(host.calls().is_empty());
-    }
-
     #[tokio::test]
     async fn send_request_body_timeout_is_enforced() {
         let host = ScriptedHost::default();
@@ -630,8 +358,6 @@ mod tests {
             http: WasiHttpCtx::new(),
             table: ResourceTable::new(),
             host: host.clone(),
-            policy: Arc::new(crate::net::AllowAllPolicy),
-            max_redirects: 10,
             sink: None,
             output_buffer: OutputBuffer::new(),
         };
@@ -684,89 +410,78 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn follows_redirect_and_sanitizes_headers() {
+    async fn send_request_delegates_redirect_and_host_handling_to_host() {
         let host = ScriptedHost::default();
-        let policy = crate::net::AllowAllPolicy;
-        let mut headers = http::HeaderMap::new();
 
-        headers.insert(http::header::HOST, "a.example".parse().expect("header"));
-        headers.insert(
-            http::header::AUTHORIZATION,
-            "Bearer secret".parse().expect("header"),
-        );
-        headers.insert(http::header::COOKIE, "a=b".parse().expect("header"));
-        headers.insert(
-            http::HeaderName::from_static("x-isola-proxy"),
-            "http://proxy".parse().expect("header"),
-        );
-        headers.insert(
-            http::HeaderName::from_static("x-other"),
-            "keep".parse().expect("header"),
-        );
-
-        let req = HttpFollowRequest {
-            method: http::Method::POST,
-            uri: "http://a.example/".parse().expect("uri"),
-            headers,
-            body: Some(Bytes::from_static(b"body")),
+        let mut state = InstanceState {
+            limiter: MemoryLimiter::new(1024),
+            wasi: WasiCtxBuilder::new().build(),
+            http: WasiHttpCtx::new(),
+            table: ResourceTable::new(),
+            host: host.clone(),
+            sink: None,
+            output_buffer: OutputBuffer::new(),
         };
 
-        let cfg = HttpFollowConfig {
-            max_redirects: 10,
+        let body: HyperOutgoingBody = http_body_util::StreamBody::new(futures::stream::empty::<
+            Result<Frame<Bytes>, TypesErrorCode>,
+        >())
+        .boxed_unsync();
+
+        let req = hyper::Request::builder()
+            .method(http::Method::POST)
+            .uri("http://a.example/")
+            .header(http::header::HOST, "a.example")
+            .header(http::header::AUTHORIZATION, "Bearer secret")
+            .header(http::header::COOKIE, "a=b")
+            .header("x-isola-proxy", "http://proxy")
+            .header("x-other", "keep")
+            .body(body)
+            .expect("request build");
+
+        let cfg = OutgoingRequestConfig {
+            use_tls: false,
+            connect_timeout: Duration::from_secs(1),
             first_byte_timeout: Duration::from_secs(1),
+            between_bytes_timeout: Duration::from_secs(1),
         };
 
-        let resp = http_with_redirects(&host, &policy, req, cfg)
+        let mut fut = state.send_request(req, cfg).expect("send_request");
+        timeout(Duration::from_millis(500), fut.ready())
             .await
-            .expect("redirect follow");
-        assert_eq!(resp.status(), http::StatusCode::OK);
+            .expect("ready in time");
+
+        let incoming = match fut.unwrap_ready() {
+            Ok(Ok(v)) => v,
+            Ok(Err(e)) => panic!("expected response, got outgoing handler error: {e:?}"),
+            Err(e) => panic!("expected response, got transport error: {e:?}"),
+        };
+        assert_eq!(incoming.resp.status(), http::StatusCode::FOUND);
 
         let calls = host.calls();
-        assert_eq!(calls.len(), 2);
-
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].method, http::Method::POST);
-        assert!(calls[0].headers.get(http::header::HOST).is_none());
-        assert_eq!(calls[0].body.as_deref(), Some(&b"body"[..]));
+        assert_eq!(calls[0].uri, "http://a.example/");
+        assert_eq!(calls[0].body.as_deref(), None);
 
-        assert_eq!(calls[1].method, http::Method::GET);
-        assert!(calls[1].headers.get(http::header::AUTHORIZATION).is_none());
-        assert!(calls[1].headers.get(http::header::COOKIE).is_none());
-        assert!(calls[1].headers.get("x-isola-proxy").is_none());
         assert_eq!(
-            calls[1]
+            calls[0]
                 .headers
                 .get("x-other")
-                .expect("x-other preserved")
+                .expect("x-other forwarded")
                 .to_str()
                 .expect("valid header value"),
             "keep"
         );
-        assert!(calls[1].body.is_none());
-    }
-
-    #[tokio::test]
-    async fn policy_applies_to_every_hop() {
-        let host = ScriptedHost::default();
-        let policy = DenySecondHop;
-
-        let req = HttpFollowRequest {
-            method: http::Method::GET,
-            uri: "http://a.example/".parse().expect("uri"),
-            headers: http::HeaderMap::new(),
-            body: None,
-        };
-
-        let cfg = HttpFollowConfig {
-            max_redirects: 10,
-            first_byte_timeout: Duration::from_secs(1),
-        };
-
-        let err = match http_with_redirects(&host, &policy, req, cfg).await {
-            Ok(_) => panic!("expected deny"),
-            Err(e) => e,
-        };
-        assert!(matches!(err, ErrorCode::HttpRequestDenied));
-        assert_eq!(host.calls().len(), 1);
+        assert_eq!(
+            calls[0]
+                .headers
+                .get(http::header::HOST)
+                .expect("host forwarded")
+                .to_str()
+                .expect("valid header value"),
+            "a.example"
+        );
     }
 
     #[test]
@@ -784,22 +499,5 @@ mod tests {
         buf.append(&at_limit).expect("append at hard limit");
         assert!(buf.append(b"x").is_err());
         assert!(buf.take().is_empty());
-    }
-
-    #[test]
-    fn method_rewrite_behavior() {
-        let (m, drop) =
-            method_rewrite_and_body_drop(http::StatusCode::SEE_OTHER, &http::Method::POST);
-        assert_eq!(m, http::Method::GET);
-        assert!(drop);
-
-        let (m, drop) = method_rewrite_and_body_drop(http::StatusCode::FOUND, &http::Method::GET);
-        assert_eq!(m, http::Method::GET);
-        assert!(!drop);
-
-        let (m, drop) =
-            method_rewrite_and_body_drop(http::StatusCode::TEMPORARY_REDIRECT, &http::Method::POST);
-        assert_eq!(m, http::Method::POST);
-        assert!(!drop);
     }
 }

@@ -9,9 +9,7 @@ use std::{
 use bytes::Bytes;
 use futures::Stream;
 use isola::{
-    AclPolicyBuilder, CacheConfig, CallOptions, CompileConfig, Host, Module, ModuleBuilder,
-    module::ArgValue,
-    net::{AclRule, AclScheme},
+    CacheConfig, CallOptions, CompileConfig, Host, Module, ModuleBuilder, module::ArgValue,
 };
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
@@ -107,17 +105,6 @@ impl<E: Host + Clone> SandboxManager<E> {
                 max_memory,
                 ..CompileConfig::default()
             })
-            .network_policy(Arc::new(
-                AclPolicyBuilder::new()
-                    .deny_private_ranges(false)
-                    .push(AclRule::allow().schemes([
-                        AclScheme::Http,
-                        AclScheme::Https,
-                        AclScheme::Ws,
-                        AclScheme::Wss,
-                    ]))
-                    .build(),
-            ))
             .lib_dir(lib_dir)
             .build(path)
             .await?;
