@@ -8,14 +8,13 @@ use std::{
 
 use bytes::Bytes;
 use futures::Stream;
-use isola::{
-    CacheConfig, CallOptions, CompileConfig, Host, Module, ModuleBuilder, module::ArgValue,
-};
+use isola::{DirectoryMapping, Host, Module, ModuleBuilder, ModuleConfig, SandboxOptions};
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::info;
+use tracing::level_filters::LevelFilter;
 
 use crate::utils::stream::join_with_infallible;
 
@@ -24,6 +23,12 @@ use super::env::{MpscOutputSink, StreamItem};
 pub struct Source {
     pub prelude: String,
     pub code: String,
+}
+
+#[derive(Clone, Copy)]
+pub struct ExecOptions {
+    pub timeout: Duration,
+    pub log_level: LevelFilter,
 }
 
 pub enum Argument {
@@ -43,12 +48,13 @@ impl Argument {
     }
 
     fn into_isola(self, name: Option<String>) -> isola::Arg {
-        isola::Arg {
-            name,
-            value: match self {
-                Self::Cbor(data) => ArgValue::Cbor(data),
-                Self::CborStream(stream) => ArgValue::CborStream(stream),
-            },
+        match (name, self) {
+            (Some(name), Self::Cbor(data)) => isola::Arg::cbor(data).with_name(name),
+            (None, Self::Cbor(data)) => isola::Arg::cbor(data),
+            (Some(name), Self::CborStream(stream)) => {
+                isola::Arg::cbor_stream(stream).with_name(name)
+            }
+            (None, Self::CborStream(stream)) => isola::Arg::cbor_stream(stream),
         }
     }
 }
@@ -100,12 +106,12 @@ impl<E: Host + Clone> SandboxManager<E> {
         lib_dir.push("lib");
 
         let module = ModuleBuilder::new()
-            .compile_config(CompileConfig {
-                cache: CacheConfig::Default,
+            .config(ModuleConfig {
+                cache: Some(parent.join("cache")),
                 max_memory,
-                ..CompileConfig::default()
+                directory_mappings: vec![DirectoryMapping::new(lib_dir, "/lib")],
+                ..ModuleConfig::python()
             })
-            .lib_dir(lib_dir)
             .build(path)
             .await?;
 
@@ -132,12 +138,16 @@ impl<E: Host + Clone> SandboxManager<E> {
         hash: [u8; 32],
         script: Source,
         env: E,
+        log_level: LevelFilter,
     ) -> anyhow::Result<CachedSandbox<E>> {
         if let Some(cached) = self.get_cached(hash) {
             return Ok(cached);
         }
 
-        let mut sandbox = self.module.instantiate(None, env).await?;
+        let mut sandbox = self
+            .module
+            .instantiate(env, SandboxOptions::default().log_level(log_level))
+            .await?;
 
         if !script.prelude.is_empty() {
             sandbox.eval_script(&script.prelude).await?;
@@ -153,11 +163,13 @@ impl<E: Host + Clone> SandboxManager<E> {
         script: Source,
         func: String,
         args: Vec<(Option<String>, Argument)>,
-        timeout: Duration,
         env: E,
+        options: ExecOptions,
     ) -> anyhow::Result<impl Stream<Item = StreamItem> + use<E>> {
         let hash = Self::compute_hash(id, &script);
-        let mut cached = self.prepare_sandbox(hash, script, env.clone()).await?;
+        let mut cached = self
+            .prepare_sandbox(hash, script, env.clone(), options.log_level)
+            .await?;
 
         let (tx, rx) = mpsc::channel(4);
         let sink = MpscOutputSink::new(tx.clone());
@@ -167,11 +179,12 @@ impl<E: Host + Clone> SandboxManager<E> {
             .map(|(name, argument)| argument.into_isola(name))
             .collect();
 
+        let timeout = options.timeout;
         let cache = self.cache.clone();
         let task = Box::pin(async move {
             let result = cached
                 .sandbox
-                .call(&func, args, sink, CallOptions::default().timeout(timeout))
+                .call_with_timeout(&func, args, sink, timeout)
                 .await;
             match result {
                 Ok(()) => {

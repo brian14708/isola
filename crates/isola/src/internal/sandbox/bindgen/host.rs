@@ -1,4 +1,4 @@
-use std::pin::Pin;
+use std::{pin::Pin, sync::Arc};
 
 use bytes::Bytes;
 use futures::{FutureExt, StreamExt};
@@ -97,7 +97,7 @@ impl<T: HostView> Host for super::HostImpl<T> {
         call_type: String,
         payload: Vec<u8>,
     ) -> wasmtime::Result<Resource<FutureHostcall>> {
-        let host = self.0.host().clone();
+        let host = Arc::clone(self.0.host());
 
         let s = wasmtime_wasi::runtime::spawn(
             async move {
@@ -105,7 +105,7 @@ impl<T: HostView> Host for super::HostImpl<T> {
                 host.hostcall(&call_type, payload)
                     .await
                     .map(|b| b.to_vec())
-                    .map_err(|e| anyhow::Error::msg(e.to_string()))
+                    .map_err(anyhow::Error::from_boxed)
             }
             .in_current_span(),
         );
@@ -232,7 +232,7 @@ mod tests {
 
     struct TestView {
         table: ResourceTable,
-        host: TestHost,
+        host: Arc<TestHost>,
     }
 
     impl super::super::HostView for TestView {
@@ -242,15 +242,12 @@ mod tests {
             &mut self.table
         }
 
-        fn host(&mut self) -> &mut Self::Host {
-            &mut self.host
+        fn host(&mut self) -> &Arc<Self::Host> {
+            &self.host
         }
 
-        fn emit(
-            &mut self,
-            _data: super::super::EmitValue,
-        ) -> impl core::future::Future<Output = wasmtime::Result<()>> + Send {
-            async { Ok(()) }
+        async fn emit(&mut self, _data: super::super::EmitValue) -> wasmtime::Result<()> {
+            Ok(())
         }
     }
 
@@ -270,7 +267,7 @@ mod tests {
 
         let mut view = TestView {
             table: ResourceTable::new(),
-            host: TestHost,
+            host: Arc::new(TestHost),
         };
 
         let future = {

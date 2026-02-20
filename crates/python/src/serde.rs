@@ -728,7 +728,7 @@ mod tests {
                 // Basic types
                 42i32.into_pyobject(py).unwrap().into_any(),
                 "hello world".into_pyobject(py).unwrap().into_any(),
-                3.14f64.into_pyobject(py).unwrap().into_any(),
+                std::f64::consts::PI.into_pyobject(py).unwrap().into_any(),
                 // Collections
                 PyList::new(py, [1, 2, 3]).unwrap().into_any(),
                 PyTuple::new(py, [1, 2, 3]).unwrap().into_any(),
@@ -750,7 +750,7 @@ mod tests {
             test_cases.push(dict.into_any());
 
             // Test set
-            let set = PySet::new(py, &[1, 2, 3, 2, 1]).unwrap();
+            let set = PySet::new(py, [1, 2, 3, 2, 1]).unwrap();
             test_cases.push(set.into_any());
 
             // Test nested structures

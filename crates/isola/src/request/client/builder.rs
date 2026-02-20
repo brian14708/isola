@@ -25,6 +25,11 @@ impl ClientBuilder {
         self
     }
 
+    pub const fn client_idle_timeout(mut self, client_idle_timeout: std::time::Duration) -> Self {
+        self.client_idle_timeout = client_idle_timeout;
+        self
+    }
+
     #[must_use]
     pub fn build(self) -> Client {
         Client::build(&self)

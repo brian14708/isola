@@ -18,7 +18,7 @@ wasmtime::component::bindgen!({
     },
 });
 
-use std::future::Future;
+use std::{future::Future, sync::Arc};
 
 use bytes::Bytes;
 pub use exports::isola::script::guest;
@@ -34,11 +34,11 @@ pub enum EmitValue {
 }
 
 pub trait HostView: Send {
-    type Host: crate::Host + Clone;
+    type Host: crate::Host;
 
     fn table(&mut self) -> &mut ResourceTable;
 
-    fn host(&mut self) -> &mut Self::Host;
+    fn host(&mut self) -> &Arc<Self::Host>;
 
     fn emit(&mut self, data: EmitValue) -> impl Future<Output = wasmtime::Result<()>> + Send;
 }
@@ -50,7 +50,7 @@ impl<T: ?Sized + HostView> HostView for &mut T {
         T::table(self)
     }
 
-    fn host(&mut self) -> &mut Self::Host {
+    fn host(&mut self) -> &Arc<Self::Host> {
         T::host(self)
     }
 

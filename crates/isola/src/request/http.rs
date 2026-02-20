@@ -7,43 +7,34 @@ use bytes::Bytes;
 use futures::{Stream, StreamExt};
 use http::header::HOST;
 use http_body::Frame;
-use http_body_util::BodyExt;
 use opentelemetry_semantic_conventions::attribute as trace;
 use pin_project_lite::pin_project;
 use tracing::Span;
 
 use super::Error;
 
-pub async fn http_impl<B>(
+pub async fn http_impl(
     client: reqwest::Client,
-    mut request: http::Request<B>,
-) -> Result<http::Response<impl Stream<Item = Result<Frame<Bytes>, Error>>>, Error>
-where
-    B: http_body::Body,
-    B::Error: std::error::Error + Send + Sync + 'static,
-    B::Data: Send,
-{
+    mut request: http::Request<Bytes>,
+) -> Result<http::Response<impl Stream<Item = Result<Frame<Bytes>, Error>>>, Error> {
     // Host contract: drop caller-supplied `Host` and let the HTTP client set it.
     request.headers_mut().remove(HOST);
     let url = url::Url::parse(&request.uri().to_string())?;
     let (parts, body) = request.into_parts();
-    let body = body
-        .collect()
-        .await
-        .map_err(|e| Error::RequestBody(Box::new(e)))?
-        .to_bytes();
     let r = client
         .request(parts.method, url)
         .version(parts.version)
         .headers(parts.headers)
         .body(body);
     let span = Span::current();
+    let mut error_recorded = false;
     let mut resp = match r.send().await {
         Ok(r) => {
             let status = r.status();
             span.record(trace::HTTP_RESPONSE_STATUS_CODE, status.as_u16());
             if status.is_server_error() || status.is_client_error() {
                 span.record(trace::OTEL_STATUS_CODE, "ERROR");
+                error_recorded = true;
             }
             r
         }
@@ -61,6 +52,7 @@ where
     }
     let b = InstrumentStream::new(
         span,
+        error_recorded,
         resp.bytes_stream().map(|f| match f {
             Ok(d) => Ok(Frame::data(d)),
             Err(e) => Err(e.into()),
@@ -75,15 +67,17 @@ pin_project! {
         stream: S,
         span: tracing::Span,
         size: usize,
+        error_recorded: bool,
     }
 }
 
 impl<S> InstrumentStream<S> {
-    const fn new(span: Span, stream: S) -> Self {
+    const fn new(span: Span, error_recorded: bool, stream: S) -> Self {
         Self {
             stream,
             span,
             size: 0,
+            error_recorded,
         }
     }
 }
@@ -97,7 +91,9 @@ impl<S: Stream<Item = Result<http_body::Frame<Bytes>, E>>, E> Stream for Instrum
         let enter = span.enter();
         match this.stream.poll_next(cx) {
             Poll::Ready(None) => {
-                span.record(trace::OTEL_STATUS_CODE, "OK");
+                if !*this.error_recorded {
+                    span.record(trace::OTEL_STATUS_CODE, "OK");
+                }
                 span.record(trace::HTTP_RESPONSE_BODY_SIZE, *this.size as u64);
                 drop(enter);
                 *this.span = tracing::Span::none();
@@ -111,6 +107,7 @@ impl<S: Stream<Item = Result<http_body::Frame<Bytes>, E>>, E> Stream for Instrum
             }
             Poll::Ready(Some(Err(e))) => {
                 span.record(trace::OTEL_STATUS_CODE, "ERROR");
+                *this.error_recorded = true;
                 drop(enter);
                 *this.span = tracing::Span::none();
                 Poll::Ready(Some(Err(e)))

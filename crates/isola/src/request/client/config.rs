@@ -9,8 +9,8 @@ pub struct RequestConfig {
 
 impl RequestConfig {
     #[must_use]
-    pub fn with_proxy(mut self, proxy: String) -> Self {
-        self.proxy = Some(proxy);
+    pub fn with_proxy(mut self, proxy: impl Into<String>) -> Self {
+        self.proxy = Some(proxy.into());
         self
     }
 

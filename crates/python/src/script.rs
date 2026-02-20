@@ -30,7 +30,7 @@ pub enum InputValue<'a> {
 }
 
 impl Scope {
-    pub fn new(paths: &[String]) -> Self {
+    pub fn new() -> Self {
         Python::initialize();
         Python::attach(|py| {
             let locals = PyDict::new(py);
@@ -47,9 +47,7 @@ impl Scope {
                     if let Ok(path) = sys.getattr(intern!(py, "path")) {
                         let path = path.cast_exact::<PyList>().ok();
                         if let Some(path) = path {
-                            for p in paths.iter().rev() {
-                                let _ = path.insert(1, p);
-                            }
+                            let _ = path.insert(1, "/lib/bundle.zip");
                         }
                     }
                     match (
@@ -236,9 +234,8 @@ mod tests {
             };
 
             // Test the python_to_cbor_emit function with a simple value
-            use pyo3::{Python, types::PyString};
-            Python::attach(|py| {
-                let test_string = PyString::new(py, "test");
+            pyo3::Python::attach(|py| {
+                let test_string = pyo3::types::PyString::new(py, "test");
                 let test_value = test_string.as_any();
                 python_to_cbor_emit(test_value.clone(), EmitType::End, emit_fn).unwrap();
             });
@@ -271,7 +268,7 @@ def gen():
     for i in range(10):
         yield i
 "#;
-        let s = Scope::new(&[]);
+        let s = Scope::new();
         s.load_script(content).unwrap();
         let mut x = vec![];
         s.run(

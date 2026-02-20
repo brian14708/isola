@@ -2,42 +2,46 @@ use tracing::Span;
 
 use super::{TraceRequest, client::RequestConfig};
 
-pub struct RequestOptions<C = ()>
-where
-    C: RequestContext,
-{
-    pub(crate) context: C,
+type MakeSpan = Box<dyn for<'a> FnMut(&TraceRequest<'a>) -> Span + Send + 'static>;
+
+pub struct RequestOptions {
+    pub(crate) make_span: Option<MakeSpan>,
     pub(crate) config: RequestConfig,
 }
 
-impl Default for RequestOptions<()> {
+impl Default for RequestOptions {
     fn default() -> Self {
-        Self::new(())
+        Self::new()
     }
 }
 
-impl<C: RequestContext> RequestOptions<C> {
+impl RequestOptions {
     #[must_use]
-    pub fn new(c: C) -> Self {
+    pub fn new() -> Self {
         Self {
-            context: c,
+            make_span: None,
             config: RequestConfig::default(),
         }
     }
 
     #[must_use]
-    pub fn with_proxy(mut self, proxy: String) -> Self {
+    pub fn with_make_span<F>(mut self, make_span: F) -> Self
+    where
+        F: for<'a> FnMut(&TraceRequest<'a>) -> Span + Send + 'static,
+    {
+        self.make_span = Some(Box::new(make_span));
+        self
+    }
+
+    #[must_use]
+    pub fn with_proxy(mut self, proxy: impl Into<String>) -> Self {
         self.config = self.config.with_proxy(proxy);
         self
     }
-}
 
-pub trait RequestContext {
-    fn make_span(&mut self, _: &TraceRequest) -> Span;
-}
-
-impl RequestContext for () {
-    fn make_span(&mut self, _: &TraceRequest) -> Span {
-        Span::none()
+    pub(crate) fn make_span(&mut self, request: &TraceRequest<'_>) -> Span {
+        self.make_span
+            .as_mut()
+            .map_or_else(Span::none, |make_span| make_span(request))
     }
 }

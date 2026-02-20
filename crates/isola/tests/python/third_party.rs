@@ -11,7 +11,7 @@ async fn run_case(method: &str, script: &str) -> Result<()> {
     };
 
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .with_context(|| format!("failed to instantiate sandbox for `{method}`"))?;
 

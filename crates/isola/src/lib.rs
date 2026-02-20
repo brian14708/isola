@@ -1,6 +1,6 @@
 mod internal;
 
-#[cfg(feature = "cbor")]
+#[cfg(feature = "serde")]
 pub mod cbor;
 pub mod error;
 pub mod host;
@@ -19,5 +19,6 @@ pub use host::{
     BoxError, BoxedStream, Host, HttpBodyStream, HttpRequest, HttpResponse, OutputSink,
 };
 pub use module::{
-    Arg, Args, CacheConfig, CallOptions, CompileConfig, InitConfig, Module, ModuleBuilder, Sandbox,
+    Arg, Args, CallOutput, DirectoryMapping, Module, ModuleBuilder, ModuleConfig, Sandbox,
+    SandboxOptions,
 };

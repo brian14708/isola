@@ -6,4 +6,4 @@ mod visit;
 
 pub use collector::{Collector, EventRecord, FieldFilter, SpanRecord};
 pub use layer::CollectLayer;
-pub use span_ext::CollectSpanExt;
+pub use span_ext::{CollectError, CollectSpanExt};

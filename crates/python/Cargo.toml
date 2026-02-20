@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 publish = false
 license.workspace = true
-exclude = ["/bundled", "bundle.py"]
+exclude = ["/bundled"]
 
 [lib]
 crate-type = ["cdylib"]

@@ -30,7 +30,9 @@ where
         id: &span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
         for parent in span.scope().skip(1) {
             if let Some(tracer) = parent.extensions().get::<Tracer>() {
                 if let Some(tracer) = tracer.new_child(attrs) {
@@ -65,14 +67,18 @@ where
         values: &span::Record<'_>,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
+        let Some(span) = ctx.span(id) else {
+            return;
+        };
         if let Some(tracer) = span.extensions_mut().get_mut::<Tracer>() {
             tracer.record_fields(|visit| values.record(visit));
         }
     }
 
     fn on_close(&self, id: span::Id, ctx: tracing_subscriber::layer::Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
+        let Some(span) = ctx.span(&id) else {
+            return;
+        };
         let mut ext = span.extensions_mut();
         if let Some(tracer) = ext.remove::<Tracer>() {
             tracer.finalize();

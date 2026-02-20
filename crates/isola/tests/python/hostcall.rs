@@ -11,7 +11,7 @@ async fn integration_python_async_hostcall_echo() -> Result<()> {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(None, TestHost::default())
+        .instantiate(TestHost::default(), Default::default())
         .await
         .context("failed to instantiate sandbox")?;
 
