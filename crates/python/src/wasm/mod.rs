@@ -23,7 +23,7 @@ use self::{exports::isola::script::guest, isola::script::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
-    path: "../../wit",
+    path: "../isola/wit",
     generate_all,
 });
 

@@ -1,6 +1,6 @@
 wasmtime::component::bindgen!({
     world: "sandbox",
-    path: "../../wit",
+    path: "wit",
     imports: {
         default: async | trappable,
     },

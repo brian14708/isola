@@ -10,7 +10,7 @@ let
   src = lib.fileset.toSource {
     root = ../..;
     fileset = lib.fileset.unions [
-      ../../wit
+      ../../crates/isola/wit
       ../../Cargo.lock
       ../../Cargo.toml
       (craneLib.fileset.commonCargoSources ../../crates/isola)

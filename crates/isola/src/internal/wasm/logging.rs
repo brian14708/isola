@@ -3,7 +3,7 @@ use tracing::event;
 use wasmtime::component::HasData;
 
 wasmtime::component::bindgen!({
-    path: "../../wit/deps/logging",
+    path: "wit/deps/logging",
 });
 
 pub use wasi::logging as bindings;
