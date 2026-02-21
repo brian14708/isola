@@ -1,56 +1,30 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    ":semanticCommitTypeAll(chore)"
-  ],
-  "ignorePaths": [
-    "crates/python/requirements.txt"
-  ],
+  "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
+  "ignorePaths": ["crates/python/requirements.txt"],
   "packageRules": [
     {
       "groupName": "opentelemetry",
-      "matchPackageNames": [
-        "/^opentelemetry/",
-        "/^tracing-opentelemetry/"
-      ],
-      "matchUpdateTypes": [
-        "minor"
-      ]
+      "matchPackageNames": ["/^opentelemetry/", "/^tracing-opentelemetry/"],
+      "matchUpdateTypes": ["minor"]
     },
     {
       "groupName": "wasmtime",
-      "matchPackageNames": [
-        "/^wasi-/",
-        "/^wasmtime/"
-      ],
-      "matchUpdateTypes": [
-        "major"
-      ]
+      "matchPackageNames": ["/^wasi-/", "/^wasmtime/"],
+      "matchUpdateTypes": ["major"]
     },
     {
       "groupName": "wit",
-      "matchPackageNames": [
-        "/^wit-/"
-      ],
-      "matchUpdateTypes": [
-        "minor"
-      ]
+      "matchPackageNames": ["/^wit-/"],
+      "matchUpdateTypes": ["minor"]
     },
     {
-      "matchUpdateTypes": [
-        "minor"
-      ],
+      "matchUpdateTypes": ["minor"],
       "matchCurrentVersion": "!/^0/",
       "automerge": true
     },
     {
-      "matchUpdateTypes": [
-        "patch",
-        "pin",
-        "digest",
-        "lockFileMaintenance"
-      ],
+      "matchUpdateTypes": ["patch", "pin", "digest", "lockFileMaintenance"],
       "groupName": "patch updates",
       "automerge": true
     }

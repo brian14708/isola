@@ -19,6 +19,7 @@ in
   {
     buildInputs = with pkgs; [
       just
+      mdbook
       (python.withPackages (p: with p; [ uv ]))
       cmake
       ninja

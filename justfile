@@ -10,6 +10,9 @@ build: build-wasm
     cargo build --release -p isola-server
     cargo run --release -p isola-server build
 
+docs:
+    mdbook build docs
+
 [private]
 build-wasm:
     cargo xtask build-all

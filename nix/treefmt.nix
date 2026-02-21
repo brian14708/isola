@@ -10,6 +10,7 @@
     ruff-format.enable = true;
     clang-format.enable = true;
     actionlint.enable = true;
+    prettier.enable = true;
   };
   settings.formatter = {
     clang-format = {
