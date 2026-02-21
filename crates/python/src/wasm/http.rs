@@ -1,8 +1,10 @@
 #[pyo3::pymodule]
 #[pyo3(name = "_isola_http")]
 pub mod http_module {
-    use std::borrow::Cow;
-    use std::io::{BufWriter, Write};
+    use std::{
+        borrow::Cow,
+        io::{BufWriter, Write},
+    };
 
     use pyo3::{
         prelude::*,
@@ -10,21 +12,23 @@ pub mod http_module {
     };
     use url::Url;
 
-    use crate::serde::python_to_json_writer;
-    use crate::wasm::{
-        PyPollable,
-        body_buffer::{BodyBuffer, Buffer},
-        future::create_future,
-        wasi::{
-            http::{
-                outgoing_handler::{
-                    ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
+    use crate::{
+        serde::python_to_json_writer,
+        wasm::{
+            PyPollable,
+            body_buffer::{BodyBuffer, Buffer},
+            future::create_future,
+            wasi::{
+                http::{
+                    outgoing_handler::{
+                        ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
+                    },
+                    types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
                 },
-                types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
-            },
-            io::{
-                poll::Pollable,
-                streams::{InputStream, StreamError},
+                io::{
+                    poll::Pollable,
+                    streams::{InputStream, StreamError},
+                },
             },
         },
     };

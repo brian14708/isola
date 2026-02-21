@@ -6,22 +6,20 @@ use axum::{
     http::header,
     response::{IntoResponse, Response, Sse, sse::Event},
 };
-use bytes::Bytes;
 use futures::{Stream, StreamExt};
-use isola::{TRACE_TARGET_SCRIPT, cbor, trace::collect::CollectSpanExt};
+use isola::value::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{Span, info_span, level_filters::LevelFilter};
-
-use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
 
 use super::{
     error::HttpApiError,
-    trace::{HttpTrace, HttpTraceCollector},
+    trace::{HttpTraceBuilder, SCRIPT_EXEC_SPAN_NAME},
     types::{
         ErrorCode, ExecuteRequest, ExecuteResponse, SseDataEvent, SseDoneEvent, SseErrorEvent,
+        SseLogEvent,
     },
 };
+use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
 
 fn convert_args(
     args: &[serde_json::Value],
@@ -30,36 +28,29 @@ fn convert_args(
     let mut result = Vec::with_capacity(args.len() + kwargs.len());
 
     for arg in args {
-        let json_str = serde_json::to_string(arg)
-            .map_err(|e| HttpApiError::invalid_request(format!("Failed to serialize arg: {e}")))?;
-        let cbor = cbor::json_to_cbor(&json_str).map_err(|e| {
-            HttpApiError::invalid_request(format!("Failed to convert to CBOR: {e}"))
+        let value = Value::from_json_value(arg).map_err(|e| {
+            HttpApiError::invalid_request(format!("Failed to convert to Value: {e}"))
         })?;
-        result.push((None, Argument::cbor(cbor)));
+        result.push((None, Argument::value(value)));
     }
 
     for (name, value) in kwargs {
-        let json_str = serde_json::to_string(value).map_err(|e| {
-            HttpApiError::invalid_request(format!("Failed to serialize kwarg {name}: {e}"))
+        let value = Value::from_json_value(value).map_err(|e| {
+            HttpApiError::invalid_request(format!("Failed to convert kwarg {name} to Value: {e}"))
         })?;
-        let cbor = cbor::json_to_cbor(&json_str).map_err(|e| {
-            HttpApiError::invalid_request(format!("Failed to convert kwarg {name} to CBOR: {e}"))
-        })?;
-        result.push((Some(name.clone()), Argument::cbor(cbor)));
+        result.push((Some(name.clone()), Argument::value(value)));
     }
 
     Ok(result)
 }
 
-fn cbor_to_json(data: &Bytes) -> Result<serde_json::Value, HttpApiError> {
-    let json_str = cbor::cbor_to_json(data)
-        .map_err(|e| HttpApiError::internal(format!("Failed to convert CBOR to JSON: {e}")))?;
-    serde_json::from_str(&json_str)
-        .map_err(|e| HttpApiError::internal(format!("Failed to parse JSON: {e}")))
+fn value_to_json(data: &Value) -> Result<serde_json::Value, HttpApiError> {
+    data.to_json_value()
+        .map_err(|e| HttpApiError::internal(format!("Failed to convert Value to JSON: {e}")))
 }
 
 fn map_start_error(err: anyhow::Error) -> HttpApiError {
-    match err.downcast::<isola::Error>() {
+    match err.downcast::<isola::sandbox::Error>() {
         Ok(err) => HttpApiError::from(err),
         Err(err) => HttpApiError::invalid_request(format!("Failed to start script: {err}")),
     }
@@ -111,31 +102,11 @@ async fn execute_json(
     };
     let timeout = Duration::from_millis(req.timeout_ms);
 
-    let (span, mut trace_rx, log_level) = if req.trace {
-        let (collector, rx) = HttpTraceCollector::new();
-        let s = info_span!(
-            target: TRACE_TARGET_SCRIPT,
-            parent: Span::current(),
-            "script.exec"
-        );
-        if s.collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
-            .is_ok()
-        {
-            (s, Some(rx), LevelFilter::DEBUG)
-        } else {
-            (Span::none(), None, LevelFilter::DEBUG)
-        }
-    } else {
-        (Span::none(), None, LevelFilter::OFF)
-    };
-
     let env = SandboxEnv {
         client: state.base_env.client.clone(),
     };
 
     let result = async {
-        let _enter = span.enter();
-
         let cache_key = if req.trace { "trace" } else { "default" };
         let mut stream = state
             .sandbox_manager
@@ -145,10 +116,19 @@ async fn execute_json(
                 req.function,
                 args,
                 env,
-                ExecOptions { timeout, log_level },
+                ExecOptions { timeout },
             )
             .await
             .map_err(map_start_error)?;
+
+        let trace_builder = req.trace.then(HttpTraceBuilder::new);
+        let mut traces = Vec::new();
+        let span_parent_id = trace_builder.as_ref().map(|builder| {
+            let trace = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
+            let parent_id = trace.id;
+            traces.push(trace);
+            parent_id
+        });
 
         let mut results: Vec<serde_json::Value> = Vec::new();
         let mut final_result: Option<serde_json::Value> = None;
@@ -156,17 +136,30 @@ async fn execute_json(
         while let Some(item) = stream.next().await {
             match item {
                 StreamItem::Data(data) => {
-                    let value = cbor_to_json(&data)?;
+                    let value = value_to_json(&data)?;
                     results.push(value);
                 }
                 StreamItem::End(Some(data)) => {
-                    final_result = Some(cbor_to_json(&data)?);
+                    final_result = Some(value_to_json(&data)?);
                 }
                 StreamItem::End(None) => {}
+                StreamItem::Log {
+                    level,
+                    context: _context,
+                    message,
+                } => {
+                    if let Some(builder) = trace_builder.as_ref() {
+                        traces.push(builder.log(&level, message));
+                    }
+                }
                 StreamItem::Error(err) => {
                     return Err(HttpApiError::from(err));
                 }
             }
+        }
+
+        if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+            traces.push(builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id));
         }
 
         #[allow(clippy::option_if_let_else)]
@@ -178,27 +171,16 @@ async fn execute_json(
             serde_json::Value::Array(results)
         };
 
-        Ok::<_, HttpApiError>(result)
+        Ok::<_, HttpApiError>((result, traces))
     };
 
-    let result = match tokio::time::timeout(timeout, result).await {
+    let (result, traces) = match tokio::time::timeout(timeout, result).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => return Err(e),
         Err(_) => return Err(HttpApiError::timeout(req.timeout_ms)),
     };
 
-    let mut traces = Vec::new();
-    if let Some(ref mut rx) = trace_rx {
-        while let Ok(trace) = rx.try_recv() {
-            traces.push(trace);
-        }
-    }
-
     Ok(Json(ExecuteResponse { result, traces }))
-}
-
-enum SseItem {
-    Trace(HttpTrace),
 }
 
 #[allow(clippy::unused_async)]
@@ -244,29 +226,9 @@ fn execute_sse_inner(
         };
         let timeout = Duration::from_millis(req.timeout_ms);
 
-        let (span, trace_rx, log_level) = if req.trace {
-            let (collector, rx) = HttpTraceCollector::new();
-            let s = info_span!(
-                target: TRACE_TARGET_SCRIPT,
-                parent: Span::current(),
-                "script.exec"
-            );
-            if s.collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
-                .is_ok()
-            {
-                (s, Some(rx), LevelFilter::DEBUG)
-            } else {
-                (Span::none(), None, LevelFilter::DEBUG)
-            }
-        } else {
-            (Span::none(), None, LevelFilter::OFF)
-        };
-
         let env = SandboxEnv {
             client: state.base_env.client.clone(),
         };
-
-        let _enter = span.enter();
 
         let cache_key = if req.trace { "trace" } else { "default" };
         let stream_result = state
@@ -277,7 +239,7 @@ fn execute_sse_inner(
                 req.function.clone(),
                 args,
                 env,
-                ExecOptions { timeout, log_level },
+                ExecOptions { timeout },
             )
             .await;
 
@@ -294,28 +256,34 @@ fn execute_sse_inner(
             }
         };
 
-        let (merged_tx, mut merged_rx) = mpsc::unbounded_channel::<SseItem>();
-
-        let trace_tx = merged_tx.clone();
-        let trace_handle = trace_rx.map(|trace_rx| {
-            tokio::spawn(async move {
-                let mut rx = trace_rx;
-                while let Some(trace) = rx.recv().await {
-                    if trace_tx.send(SseItem::Trace(trace)).is_err() {
-                        break;
-                    }
-                }
-            })
-        });
+        let trace_builder = req.trace.then(HttpTraceBuilder::new);
+        let mut pending_traces = Vec::new();
+        let span_parent_id = if let Some(builder) = trace_builder.as_ref() {
+            let trace = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
+            if !emit_event(&tx, make_json_event("trace", trace.clone())) {
+                return;
+            }
+            let parent_id = trace.id;
+            pending_traces.push(trace);
+            Some(parent_id)
+        } else {
+            None
+        };
 
         let deadline = tokio::time::Instant::now() + timeout;
-        let mut pending_traces = Vec::new();
 
         loop {
             tokio::select! {
                 biased;
 
                 () = tokio::time::sleep_until(deadline) => {
+                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                        pending_traces.push(trace.clone());
+                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                            break;
+                        }
+                    }
                     let err = SseErrorEvent {
                         code: ErrorCode::Timeout,
                         message: format!("Execution timed out after {}ms", req.timeout_ms),
@@ -327,7 +295,7 @@ fn execute_sse_inner(
                 item = data_stream.next() => {
                     match item {
                         Some(StreamItem::Data(data)) => {
-                            match cbor_to_json(&data) {
+                            match value_to_json(&data) {
                                 Ok(value) => {
                                     let event = SseDataEvent { value };
                                     if !emit_event(&tx, make_json_event("data", event)) {
@@ -335,6 +303,13 @@ fn execute_sse_inner(
                                     }
                                 }
                                 Err(e) => {
+                                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace.clone());
+                                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                                            break;
+                                        }
+                                    }
                                     let err = SseErrorEvent {
                                         code: ErrorCode::Internal,
                                         message: e.message,
@@ -345,7 +320,7 @@ fn execute_sse_inner(
                             }
                         }
                         Some(StreamItem::End(Some(data))) => {
-                            match cbor_to_json(&data) {
+                            match value_to_json(&data) {
                                 Ok(value) => {
                                     let event = SseDataEvent { value };
                                     if !emit_event(&tx, make_json_event("data", event)) {
@@ -353,6 +328,13 @@ fn execute_sse_inner(
                                     }
                                 }
                                 Err(e) => {
+                                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace.clone());
+                                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                                            break;
+                                        }
+                                    }
                                     let err = SseErrorEvent {
                                         code: ErrorCode::Internal,
                                         message: e.message,
@@ -361,14 +343,27 @@ fn execute_sse_inner(
                                     break;
                                 }
                             }
-                            while let Ok(SseItem::Trace(t)) = merged_rx.try_recv() {
-                                pending_traces.push(t);
+
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace.clone());
+                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                    break;
+                                }
                             }
+
                             let done = SseDoneEvent { traces: pending_traces };
                             let _ = emit_event(&tx, make_json_event("done", done));
                             break;
                         }
                         Some(StreamItem::Error(err)) => {
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace.clone());
+                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                    break;
+                                }
+                            }
                             let api_err = HttpApiError::from(err);
                             let err = SseErrorEvent {
                                 code: api_err.code,
@@ -377,9 +372,34 @@ fn execute_sse_inner(
                             let _ = emit_event(&tx, make_json_event("error", err));
                             break;
                         }
+                        Some(StreamItem::Log {
+                            level,
+                            context,
+                            message,
+                        }) => {
+                            let event = SseLogEvent {
+                                level: level.clone(),
+                                context: context.clone(),
+                                message: message.clone(),
+                            };
+                            if !emit_event(&tx, make_json_event("log", event)) {
+                                break;
+                            }
+                            if let Some(builder) = trace_builder.as_ref() {
+                                let trace = builder.log(&level, message);
+                                pending_traces.push(trace.clone());
+                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                    break;
+                                }
+                            }
+                        }
                         Some(StreamItem::End(None)) | None => {
-                            while let Ok(SseItem::Trace(t)) = merged_rx.try_recv() {
-                                pending_traces.push(t);
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace.clone());
+                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                    break;
+                                }
                             }
                             let done = SseDoneEvent { traces: pending_traces };
                             let _ = emit_event(&tx, make_json_event("done", done));
@@ -387,17 +407,7 @@ fn execute_sse_inner(
                         }
                     }
                 }
-
-                Some(SseItem::Trace(trace)) = merged_rx.recv() => {
-                    if !emit_event(&tx, make_json_event("trace", trace)) {
-                        break;
-                    }
-                }
             }
-        }
-
-        if let Some(handle) = trace_handle {
-            handle.abort();
         }
     });
 

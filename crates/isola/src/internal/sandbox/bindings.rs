@@ -1,3 +1,6 @@
+#[path = "host_bindings.rs"]
+pub mod host_bindings;
+
 wasmtime::component::bindgen!({
     world: "sandbox",
     path: "wit",
@@ -13,8 +16,8 @@ wasmtime::component::bindgen!({
     with: {
         "wasi:io": wasmtime_wasi::p2::bindings::io,
         "wasi:logging": crate::internal::wasm::logging::bindings,
-        "isola:script/host.value-iterator": host::ValueIterator,
-        "isola:script/host.future-hostcall": host::FutureHostcall,
+        "isola:script/host.value-iterator": host_bindings::ValueIterator,
+        "isola:script/host.future-hostcall": host_bindings::FutureHostcall,
     },
 });
 
@@ -25,8 +28,6 @@ pub use exports::isola::script::guest;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 
-pub mod host;
-
 pub enum EmitValue {
     Continuation(Bytes),
     PartialResult(Bytes),
@@ -34,7 +35,7 @@ pub enum EmitValue {
 }
 
 pub trait HostView: Send {
-    type Host: crate::Host;
+    type Host: crate::host::Host;
 
     fn table(&mut self) -> &mut ResourceTable;
 
@@ -59,7 +60,7 @@ impl<T: ?Sized + HostView> HostView for &mut T {
     }
 }
 
-struct HostImpl<T>(T);
+pub struct HostImpl<T>(pub T);
 
 pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
     struct Host<T>(T);

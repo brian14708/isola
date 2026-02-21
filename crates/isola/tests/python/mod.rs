@@ -1,5 +1,3 @@
-#![cfg(not(debug_assertions))]
-
 mod common;
 mod core;
 mod hostcall;

@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
+use isola::sandbox::Error as IsolaError;
 
 use super::types::{ErrorCode, ErrorResponse, HttpError};
 
@@ -70,16 +71,11 @@ impl IntoResponse for HttpApiError {
     }
 }
 
-impl From<isola::Error> for HttpApiError {
-    fn from(err: isola::Error) -> Self {
+impl From<IsolaError> for HttpApiError {
+    fn from(err: IsolaError) -> Self {
         match err {
-            isola::Error::Guest { code, message } => match code {
-                isola::GuestErrorCode::Aborted => Self::script_error(message),
-                isola::GuestErrorCode::Unknown | isola::GuestErrorCode::Internal => {
-                    Self::internal(message)
-                }
-            },
-            isola::Error::Wasm(err) => {
+            IsolaError::Guest { message } => Self::script_error(message),
+            IsolaError::Runtime(err) => {
                 let message = err.to_string();
                 if message.contains("interrupt") {
                     Self::new(ErrorCode::Timeout, "Execution timed out")
@@ -87,8 +83,6 @@ impl From<isola::Error> for HttpApiError {
                     Self::internal(message)
                 }
             }
-            isola::Error::Io(err) => Self::internal(err.to_string()),
-            isola::Error::Host(err) => Self::internal(err.to_string()),
         }
     }
 }

@@ -1,6 +1,5 @@
-mod bindgen;
-mod state;
+pub mod bindings;
+pub mod state;
 
-pub use bindgen::host::ValueIterator;
-pub use bindgen::{HostView, Sandbox, SandboxPre, guest as exports};
+pub use bindings::{HostView, Sandbox, SandboxPre, guest as exports, host_bindings::ValueIterator};
 pub use state::InstanceState;

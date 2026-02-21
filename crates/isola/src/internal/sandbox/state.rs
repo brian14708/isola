@@ -1,13 +1,14 @@
+use std::sync::Arc;
+
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
-use std::sync::Arc;
 use tokio::time::timeout;
 use tracing::Instrument;
 use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
 };
-use wasmtime_wasi::{DirPerms, FilePerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     HttpResult, WasiHttpCtx, WasiHttpView,
     bindings::http::outgoing_handler::ErrorCode,
@@ -15,22 +16,27 @@ use wasmtime_wasi_http::{
     types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
 };
 
-use super::bindgen::{EmitValue, HostView, add_to_linker};
+use super::bindings::{EmitValue, HostView, add_to_linker};
 use crate::{
-    Host, OutputSink,
-    host::HttpRequest,
-    internal::{resource::MemoryLimiter, trace_output::TraceOutput, wasm},
-    module::DirectoryMapping,
+    host::{Host, HttpRequest, LogContext, LogLevel, OutputSink},
+    internal::{
+        resource::MemoryLimiter,
+        trace_output::{LogSinkStore, TraceOutput, new_log_sink_store, set_log_sink},
+        wasm,
+    },
+    sandbox::DirectoryMapping,
+    value::Value,
 };
 
 pub struct InstanceState<H: Host> {
-    pub(crate) limiter: MemoryLimiter,
+    pub limiter: MemoryLimiter,
     wasi: WasiCtx,
     http: WasiHttpCtx,
     table: ResourceTable,
     host: Arc<H>,
 
-    sink: Option<Box<dyn OutputSink>>,
+    sink: Option<Arc<dyn OutputSink>>,
+    log_sink_store: LogSinkStore,
     output_buffer: OutputBuffer,
 }
 
@@ -87,27 +93,26 @@ impl<H: Host> InstanceState<H> {
     ///
     /// # Errors
     ///
-    /// Returns an error if the preopened directories cannot be added to the WASI context.
+    /// Returns an error if the preopened directories cannot be added to the
+    /// WASI context.
     pub fn new(
         engine: &Engine,
         directory_mappings: &[DirectoryMapping],
+        env: &[(String, String)],
         max_memory: usize,
         host: H,
     ) -> anyhow::Result<Store<Self>> {
+        let log_sink_store = new_log_sink_store();
         let mut builder = WasiCtxBuilder::new();
 
         for mapping in directory_mappings {
-            let (dir_perms, file_perms) = if mapping.writable {
-                (
-                    DirPerms::READ | DirPerms::MUTATE,
-                    FilePerms::READ | FilePerms::WRITE,
-                )
-            } else {
-                (DirPerms::READ, FilePerms::READ)
-            };
-
             builder
-                .preopened_dir(&mapping.host, &mapping.guest, dir_perms, file_perms)
+                .preopened_dir(
+                    &mapping.host,
+                    &mapping.guest,
+                    mapping.dir_perms,
+                    mapping.file_perms,
+                )
                 .map_err(|e| {
                     anyhow::anyhow!(
                         "Failed to add directory mapping '{}' -> '{}': {e}",
@@ -116,11 +121,22 @@ impl<H: Host> InstanceState<H> {
                     )
                 })?;
         }
+        for (k, v) in env {
+            builder.env(k, v);
+        }
         let wasi = builder
             .allow_tcp(false)
             .allow_udp(false)
-            .stdout(TraceOutput::new("stdout"))
-            .stderr(TraceOutput::new("stderr"))
+            .stdout(TraceOutput::new(
+                LogLevel::Stdout,
+                LogContext::Stdout,
+                Arc::clone(&log_sink_store),
+            ))
+            .stderr(TraceOutput::new(
+                LogLevel::Stderr,
+                LogContext::Stderr,
+                Arc::clone(&log_sink_store),
+            ))
             .build();
         let limiter = MemoryLimiter::new(max_memory);
 
@@ -133,6 +149,7 @@ impl<H: Host> InstanceState<H> {
                 table: ResourceTable::new(),
                 host: Arc::new(host),
                 sink: None,
+                log_sink_store,
                 output_buffer: OutputBuffer::new(),
             },
         );
@@ -140,11 +157,17 @@ impl<H: Host> InstanceState<H> {
         Ok(s)
     }
 
-    pub(crate) fn set_sink(&mut self, sink: Option<Box<dyn OutputSink>>) {
+    pub fn set_sink(&mut self, sink: Option<Arc<dyn OutputSink>>) {
         // Prevent cross-call output leakage and avoid retaining large buffers if
         // the call traps or is interrupted mid-output.
         self.output_buffer.reset();
+        set_log_sink(&self.log_sink_store, sink.clone());
         self.sink = sink;
+    }
+
+    #[allow(clippy::needless_pass_by_ref_mut, clippy::unused_async)]
+    pub async fn flush_logs(&mut self) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 
@@ -239,7 +262,7 @@ impl<H: Host> HostView for InstanceState<H> {
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
-        let Some(sink) = self.sink.as_mut() else {
+        let Some(sink) = self.sink.as_ref() else {
             return Err(anyhow::anyhow!("output sink missing"));
         };
 
@@ -251,16 +274,57 @@ impl<H: Host> HostView for InstanceState<H> {
             EmitValue::End(new_data) => {
                 self.output_buffer.append(new_data.as_ref())?;
                 let output = self.output_buffer.take();
-                sink.on_end(output).await.map_err(anyhow::Error::from_boxed)
+                let output = if output.is_empty() {
+                    None
+                } else {
+                    Some(Value::from(output))
+                };
+                sink.on_complete(output)
+                    .await
+                    .map_err(anyhow::Error::from_boxed)
             }
             EmitValue::PartialResult(new_data) => {
                 self.output_buffer.append(new_data.as_ref())?;
                 let output = self.output_buffer.take();
-                sink.on_partial(output)
+                sink.on_item(Value::from(output))
                     .await
                     .map_err(anyhow::Error::from_boxed)
             }
         }
+    }
+}
+
+impl<H: Host> wasm::logging::HostView for InstanceState<H> {
+    async fn emit_log(
+        &mut self,
+        log_level: wasm::logging::bindings::logging::Level,
+        context: &str,
+        message: &str,
+    ) -> wasmtime::Result<()> {
+        let sink_level = match log_level {
+            wasm::logging::bindings::logging::Level::Trace => LogLevel::Trace,
+            wasm::logging::bindings::logging::Level::Debug => LogLevel::Debug,
+            wasm::logging::bindings::logging::Level::Info => LogLevel::Info,
+            wasm::logging::bindings::logging::Level::Warn => LogLevel::Warn,
+            wasm::logging::bindings::logging::Level::Error => LogLevel::Error,
+            wasm::logging::bindings::logging::Level::Critical => LogLevel::Critical,
+        };
+        let sink_context = match context {
+            "stdout" => LogContext::Stdout,
+            "stderr" => LogContext::Stderr,
+            _ => LogContext::Other(context),
+        };
+        let sink_level = match sink_context {
+            LogContext::Stdout => LogLevel::Stdout,
+            LogContext::Stderr => LogLevel::Stderr,
+            LogContext::Other(_) => sink_level,
+        };
+        if let Some(sink) = self.sink.clone() {
+            sink.on_log(sink_level, sink_context, message)
+                .await
+                .map_err(anyhow::Error::from_boxed)?;
+        }
+        Ok(())
     }
 }
 
@@ -296,27 +360,29 @@ impl OutputBuffer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{BoxError, Host};
+    use std::{sync::Arc, time::Duration};
+
     use http_body::Frame;
     use http_body_util::BodyExt as _;
-    use std::sync::{Arc, Mutex};
-    use std::time::Duration;
+    use parking_lot::Mutex;
     use wasmtime_wasi::p2::Pollable as _;
     use wasmtime_wasi_http::bindings::http::types::ErrorCode as TypesErrorCode;
 
+    use super::*;
+    use crate::host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse};
+
     #[derive(Clone, Default)]
     struct ScriptedHost {
-        calls: Arc<Mutex<Vec<crate::HttpRequest>>>,
+        calls: Arc<Mutex<Vec<HttpRequest>>>,
     }
 
     impl ScriptedHost {
-        fn calls(&self) -> Vec<crate::HttpRequest> {
-            self.calls.lock().expect("lock poisoned").clone()
+        fn calls(&self) -> Vec<HttpRequest> {
+            self.calls.lock().clone()
         }
     }
 
-    fn empty_body() -> crate::HttpBodyStream {
+    fn empty_body() -> HttpBodyStream {
         Box::pin(futures::stream::empty::<Result<Frame<Bytes>, BoxError>>())
     }
 
@@ -325,16 +391,16 @@ mod tests {
         async fn hostcall(
             &self,
             _call_type: &str,
-            _payload: Bytes,
-        ) -> core::result::Result<Bytes, BoxError> {
+            _payload: Value,
+        ) -> core::result::Result<Value, BoxError> {
             Err(std::io::Error::other("unsupported").into())
         }
 
         async fn http_request(
             &self,
-            req: crate::HttpRequest,
-        ) -> core::result::Result<crate::HttpResponse, BoxError> {
-            self.calls.lock().expect("lock poisoned").push(req.clone());
+            req: HttpRequest,
+        ) -> core::result::Result<HttpResponse, BoxError> {
+            self.calls.lock().push(req.clone());
 
             let uri = req.uri().to_string();
             let resp = match uri.as_str() {
@@ -366,6 +432,7 @@ mod tests {
             table: ResourceTable::new(),
             host: Arc::new(host.clone()),
             sink: None,
+            log_sink_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
         };
 
@@ -427,6 +494,7 @@ mod tests {
             table: ResourceTable::new(),
             host: Arc::new(host.clone()),
             sink: None,
+            log_sink_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
         };
 

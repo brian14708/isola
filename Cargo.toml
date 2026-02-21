@@ -9,6 +9,9 @@ version = "0.2.0"
 edition = "2024"
 publish = false
 license = "Apache-2.0"
+documentation = "https://brian14708.github.io/isola/"
+homepage = "https://brian14708.github.io/isola/"
+repository = "https://github.com/brian14708/isola"
 
 [workspace.lints.clippy]
 all = "warn"
@@ -35,6 +38,7 @@ http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
+isola-request = { path = "crates/request" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"

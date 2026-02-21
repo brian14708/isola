@@ -1,24 +1,21 @@
 use std::{
     env,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, Once, OnceLock},
-    time::Duration,
+    sync::{Arc, Once, OnceLock},
 };
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use bytes::Bytes;
 use futures::TryStreamExt;
-use isola::cbor::json_to_cbor;
-use isola::trace::collect::{Collector, EventRecord, SpanRecord};
 use isola::{
-    Arg, BoxError, DirectoryMapping, Host, HttpBodyStream, HttpRequest, HttpResponse, Module,
-    ModuleBuilder, ModuleConfig, OutputSink, Sandbox,
-    request::{Client, RequestOptions},
+    host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
+    sandbox::{DirPerms, FilePerms, SandboxTemplate},
+    value::Value,
 };
+use isola_request::{Client, RequestOptions};
 
 #[derive(Clone)]
-pub(crate) struct TestHost {
+pub struct TestHost {
     client: Arc<Client>,
 }
 
@@ -35,8 +32,8 @@ impl Host for TestHost {
     async fn hostcall(
         &self,
         call_type: &str,
-        payload: Bytes,
-    ) -> std::result::Result<Bytes, BoxError> {
+        payload: Value,
+    ) -> std::result::Result<Value, BoxError> {
         match call_type {
             "echo" => Ok(payload),
             _ => Err(std::io::Error::other(format!("unsupported hostcall: {call_type}")).into()),
@@ -58,70 +55,6 @@ impl Host for TestHost {
         Ok(response.map(|body| -> HttpBodyStream {
             Box::pin(body.map_err(|e| -> BoxError { Box::new(e) }))
         }))
-    }
-}
-
-#[derive(Debug, Default, Clone)]
-pub(crate) struct SinkState {
-    pub(crate) partial: Vec<Bytes>,
-    pub(crate) end: Vec<Bytes>,
-}
-
-struct CollectSink {
-    state: Arc<Mutex<SinkState>>,
-}
-
-impl CollectSink {
-    fn new(state: Arc<Mutex<SinkState>>) -> Self {
-        Self { state }
-    }
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct TraceCollector {
-    events: Arc<Mutex<Vec<EventRecord>>>,
-}
-
-impl TraceCollector {
-    pub(crate) fn events(&self) -> Vec<EventRecord> {
-        self.events
-            .lock()
-            .expect("trace collector event lock poisoned")
-            .clone()
-    }
-}
-
-impl Collector for TraceCollector {
-    fn on_span_start(&self, _span: SpanRecord) {}
-
-    fn on_span_end(&self, _span: SpanRecord) {}
-
-    fn on_event(&self, event: EventRecord) {
-        self.events
-            .lock()
-            .expect("trace collector event lock poisoned")
-            .push(event);
-    }
-}
-
-#[async_trait]
-impl OutputSink for CollectSink {
-    async fn on_partial(&mut self, cbor: Bytes) -> std::result::Result<(), BoxError> {
-        self.state
-            .lock()
-            .expect("sink state mutex poisoned")
-            .partial
-            .push(cbor);
-        Ok(())
-    }
-
-    async fn on_end(&mut self, cbor: Bytes) -> std::result::Result<(), BoxError> {
-        self.state
-            .lock()
-            .expect("sink state mutex poisoned")
-            .end
-            .push(cbor);
-        Ok(())
     }
 }
 
@@ -151,7 +84,7 @@ fn resolve_lib_dir(root: &Path) -> PathBuf {
     )
 }
 
-fn print_skip_once(message: String) {
+fn print_skip_once(message: &str) {
     static SKIP_MESSAGE_ONCE: Once = Once::new();
     SKIP_MESSAGE_ONCE.call_once(|| {
         eprintln!("{message}");
@@ -164,18 +97,20 @@ fn resolve_prereqs() -> Result<Option<(PathBuf, PathBuf)>> {
     let lib_dir = resolve_lib_dir(&root);
 
     if !wasm.is_file() {
-        print_skip_once(format!(
+        let message = format!(
             "skipping integration_python tests: missing integration wasm bundle at '{}'. Build it with `cargo xtask build-all`.",
             wasm.display()
-        ));
+        );
+        print_skip_once(&message);
         return Ok(None);
     }
 
     if !lib_dir.is_dir() {
-        print_skip_once(format!(
+        let message = format!(
             "skipping integration_python tests: missing WASI runtime libraries at '{}'. Run in the dev shell or set WASI_PYTHON_RUNTIME, then build with `cargo xtask build-all`.",
             lib_dir.display()
-        ));
+        );
+        print_skip_once(&message);
         return Ok(None);
     }
 
@@ -187,8 +122,11 @@ fn build_module_lock() -> &'static tokio::sync::Mutex<()> {
     BUILD_MODULE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-async fn build_module_with_policy() -> Result<Option<Module<TestHost>>> {
-    // Serialize compilation because tests can run in parallel and share cache paths.
+async fn build_module_with_policy(
+    max_memory: Option<usize>,
+) -> Result<Option<SandboxTemplate<TestHost>>> {
+    // Serialize compilation because tests can run in parallel and share cache
+    // paths.
     let _build_guard = build_module_lock().lock().await;
     let Some((wasm, lib_dir)) = resolve_prereqs()? else {
         return Ok(None);
@@ -198,11 +136,13 @@ async fn build_module_with_policy() -> Result<Option<Module<TestHost>>> {
         .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
         .join("cache");
 
-    let builder = ModuleBuilder::new().config(ModuleConfig {
-        cache: Some(cache_dir),
-        directory_mappings: vec![DirectoryMapping::new(lib_dir, "/lib")],
-        ..ModuleConfig::python()
-    });
+    let mut builder = SandboxTemplate::<TestHost>::builder()
+        .prelude(Some("import sandbox.asyncio".to_string()))
+        .cache(Some(cache_dir))
+        .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
+    if let Some(max_memory) = max_memory {
+        builder = builder.max_memory(max_memory);
+    }
 
     let module = builder
         .build(&wasm)
@@ -212,29 +152,12 @@ async fn build_module_with_policy() -> Result<Option<Module<TestHost>>> {
     Ok(Some(module))
 }
 
-pub(crate) async fn build_module() -> Result<Option<Module<TestHost>>> {
-    build_module_with_policy().await
+pub async fn build_module() -> Result<Option<SandboxTemplate<TestHost>>> {
+    build_module_with_policy(None).await
 }
 
-pub(crate) async fn call_collect(
-    sandbox: &mut Sandbox<TestHost>,
-    function: &str,
-    args: Vec<Arg>,
-    timeout: Duration,
-) -> std::result::Result<SinkState, isola::Error> {
-    let state = Arc::new(Mutex::new(SinkState::default()));
-    let sink = CollectSink::new(Arc::clone(&state));
-    sandbox
-        .call_with_timeout(function, args, sink, timeout)
-        .await?;
-    Ok(state.lock().expect("sink state mutex poisoned").clone())
-}
-
-pub(crate) fn cbor_arg(name: Option<&str>, json: &str) -> Result<Arg> {
-    let value =
-        json_to_cbor(json).with_context(|| format!("failed to convert json to cbor: {json}"))?;
-    Ok(match name {
-        Some(name) => Arg::cbor(value).with_name(name),
-        None => Arg::cbor(value),
-    })
+pub async fn build_module_with_max_memory(
+    max_memory: usize,
+) -> Result<Option<SandboxTemplate<TestHost>>> {
+    build_module_with_policy(Some(max_memory)).await
 }

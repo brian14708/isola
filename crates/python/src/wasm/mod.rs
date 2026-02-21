@@ -8,18 +8,15 @@ mod serde;
 
 use std::cell::RefCell;
 
-use self::wasi::io::streams::StreamError;
-use self::wasi::logging::logging::Level;
 use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
 
+use self::{exports::isola::script::guest, isola::script::host, wasi::io::streams::StreamError};
 use crate::{
     error::Error,
     script::{InputValue, Scope},
     serde::cbor_to_python,
     wasm::future::PyPollable,
 };
-
-use self::{exports::isola::script::guest, isola::script::host};
 
 wit_bindgen::generate!({
     world: "sandbox",
@@ -38,6 +35,12 @@ pub mod sys_module {
     };
     use smallvec::{SmallVec, smallvec};
 
+    #[pymodule_export]
+    use super::future::PyPollable;
+    use super::wasi::{
+        clocks::monotonic_clock::{now, subscribe_duration},
+        io::poll::poll as host_poll,
+    };
     use crate::{
         serde::{cbor_to_python, python_to_cbor, python_to_cbor_emit},
         wasm::{
@@ -46,14 +49,6 @@ pub mod sys_module {
             wasi,
         },
     };
-
-    use super::wasi::{
-        clocks::monotonic_clock::{now, subscribe_duration},
-        io::poll::poll as host_poll,
-    };
-
-    #[pymodule_export]
-    use super::future::PyPollable;
 
     fn cbor_convert(
         py: Python<'_>,
@@ -171,7 +166,8 @@ impl guest::Guest for Global {
                 fn reset_adapter_state();
             }
 
-            // This tells wasi-libc to reset its preopen state, forcing re-initialization at runtime.
+            // This tells wasi-libc to reset its preopen state, forcing re-initialization at
+            // runtime.
             #[link(wasm_import_module = "env")]
             unsafe extern "C" {
                 #[cfg_attr(target_arch = "wasm32", link_name = "__wasilibc_reset_preopens")]
@@ -185,18 +181,16 @@ impl guest::Guest for Global {
         }
     }
 
-    fn set_log_level(level: Option<Level>) {
-        logging::set_log_level(level);
-    }
-
     fn eval_script(script: String) -> Result<(), guest::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
                 |sandbox| {
-                    sandbox
+                    let result = sandbox
                         .load_script(&script)
-                        .map_err(Into::<guest::Error>::into)
+                        .map_err(Into::<guest::Error>::into);
+                    sandbox.flush();
+                    result
                 },
             )
         })
@@ -207,9 +201,11 @@ impl guest::Guest for Global {
             if let Some(sandbox) = sandbox.as_ref() {
                 let script = std::fs::read_to_string(std::path::Path::new(&path))
                     .map_err(|_e| Error::UnexpectedError("fail to read script"))?;
-                sandbox
+                let result = sandbox
                     .load_script(&script)
-                    .map_err(Into::<guest::Error>::into)
+                    .map_err(Into::<guest::Error>::into);
+                sandbox.flush();
+                result
             } else {
                 Err(Error::UnexpectedError("Sandbox not initialized").into())
             }

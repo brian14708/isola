@@ -4,9 +4,13 @@ version.workspace = true
 edition.workspace = true
 publish = true
 license.workspace = true
+description = "Isola runtime"
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [features]
-default = ["serde", "trace", "request", "request-gzip", "request-tls"]
+default = ["serde"]
 serde = [
     "dep:base64",
     "dep:minicbor",
@@ -15,18 +19,6 @@ serde = [
     "dep:serde-transcode",
     "dep:serde_json",
 ]
-trace = ["dep:fastant", "dep:rand", "dep:tracing-subscriber"]
-request = [
-    "dep:dashmap",
-    "dep:fastant",
-    "dep:opentelemetry",
-    "dep:opentelemetry-semantic-conventions",
-    "dep:pin-project-lite",
-    "dep:reqwest",
-    "dep:tracing-opentelemetry",
-]
-request-gzip = ["request", "reqwest/gzip"]
-request-tls = ["request", "reqwest/rustls"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -34,8 +26,6 @@ async-trait = { workspace = true }
 base64 = { workspace = true, optional = true }
 bytes = { workspace = true }
 component-init-transform = { workspace = true }
-dashmap = { workspace = true, optional = true }
-fastant = { workspace = true, features = ["atomic"], optional = true }
 futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
@@ -43,13 +33,7 @@ http-body-util = { workspace = true }
 hyper = { workspace = true }
 minicbor = { workspace = true, optional = true }
 minicbor-serde = { workspace = true, features = ["alloc"], optional = true }
-opentelemetry = { workspace = true, optional = true }
-opentelemetry-semantic-conventions = { workspace = true, features = [
-    "semconv_experimental",
-], optional = true }
-pin-project-lite = { workspace = true, optional = true }
-rand = { workspace = true, optional = true }
-reqwest = { workspace = true, features = ["http2", "stream", "socks"], optional = true }
+parking_lot = { workspace = true }
 serde = { workspace = true, optional = true }
 serde-transcode = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
@@ -59,14 +43,12 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time", "macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true, optional = true }
-tracing-subscriber = { workspace = true, optional = true }
-url = { workspace = true }
 wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation"] }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
+isola-request = { workspace = true }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
 
@@ -76,4 +58,4 @@ workspace = true
 [[test]]
 name = "integration_python"
 path = "tests/python/mod.rs"
-required-features = ["serde", "trace", "request"]
+required-features = ["serde"]

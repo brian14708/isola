@@ -1,3 +1,4 @@
+pub mod module;
 pub mod resource;
 pub mod sandbox;
 pub mod trace_output;

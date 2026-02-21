@@ -14,6 +14,7 @@ let
       ../../Cargo.lock
       ../../Cargo.toml
       (craneLib.fileset.commonCargoSources ../../crates/isola)
+      (craneLib.fileset.commonCargoSources ../../crates/request)
       (craneLib.fileset.commonCargoSources ../../crates/server)
     ];
   };

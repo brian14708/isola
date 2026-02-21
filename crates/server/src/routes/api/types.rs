@@ -63,6 +63,13 @@ pub struct SseDataEvent {
 }
 
 #[derive(Debug, Serialize)]
+pub struct SseLogEvent {
+    pub level: String,
+    pub context: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct SseDoneEvent {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub traces: Vec<HttpTrace>,

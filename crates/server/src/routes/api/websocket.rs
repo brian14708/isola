@@ -7,21 +7,18 @@ use axum::{
     },
     response::Response,
 };
-use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
-use isola::{TRACE_TARGET_SCRIPT, cbor, trace::collect::CollectSpanExt};
+use isola::value::Value;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tracing::{Span, info_span, level_filters::LevelFilter};
-
-use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
 
 use super::{
     error::HttpApiError,
-    trace::{HttpTrace, HttpTraceCollector},
+    trace::{HttpTrace, HttpTraceBuilder, SCRIPT_EXEC_SPAN_NAME},
     types::ErrorCode,
 };
+use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -66,6 +63,11 @@ enum ServerMessage {
     Data {
         value: serde_json::Value,
     },
+    Log {
+        level: String,
+        context: String,
+        message: String,
+    },
     Trace(HttpTrace),
     Done {
         #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -82,7 +84,7 @@ fn make_text_message(msg: &ServerMessage) -> Message {
 }
 
 fn map_start_error(err: anyhow::Error) -> HttpApiError {
-    match err.downcast::<isola::Error>() {
+    match err.downcast::<isola::sandbox::Error>() {
         Ok(err) => HttpApiError::from(err),
         Err(err) => HttpApiError::invalid_request(format!("Failed to start script: {err}")),
     }
@@ -155,17 +157,17 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             continue;
         }
 
-        let mut stream_channels: HashMap<u32, mpsc::Sender<Bytes>> = HashMap::new();
+        let mut stream_channels: HashMap<u32, mpsc::Sender<Value>> = HashMap::new();
         let mut converted_args: Vec<(Option<String>, Argument)> = Vec::new();
 
         for arg in &args {
             if let Some(stream_id) = extract_stream_marker(arg) {
                 let (tx, rx) = mpsc::channel(64);
                 stream_channels.insert(stream_id, tx);
-                converted_args.push((None, Argument::cbor_stream(ReceiverStream::new(rx))));
+                converted_args.push((None, Argument::stream(ReceiverStream::new(rx))));
             } else {
-                match json_to_cbor_arg(arg) {
-                    Ok(cbor) => converted_args.push((None, Argument::cbor(cbor))),
+                match json_to_value_arg(arg) {
+                    Ok(value) => converted_args.push((None, Argument::value(value))),
                     Err(e) => {
                         let msg = ServerMessage::Error {
                             code: ErrorCode::InvalidRequest,
@@ -185,11 +187,11 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 stream_channels.insert(stream_id, tx);
                 converted_args.push((
                     Some(name.clone()),
-                    Argument::cbor_stream(ReceiverStream::new(rx)),
+                    Argument::stream(ReceiverStream::new(rx)),
                 ));
             } else {
-                match json_to_cbor_arg(value) {
-                    Ok(cbor) => converted_args.push((Some(name.clone()), Argument::cbor(cbor))),
+                match json_to_value_arg(value) {
+                    Ok(v) => converted_args.push((Some(name.clone()), Argument::value(v))),
                     Err(e) => {
                         let msg = ServerMessage::Error {
                             code: ErrorCode::InvalidRequest,
@@ -209,29 +211,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         };
         let timeout = Duration::from_millis(timeout_ms);
 
-        let (span, trace_rx, log_level) = if trace {
-            let (collector, rx) = HttpTraceCollector::new();
-            let s = info_span!(
-                target: TRACE_TARGET_SCRIPT,
-                parent: Span::current(),
-                "script.exec"
-            );
-            if s.collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
-                .is_ok()
-            {
-                (s, Some(rx), LevelFilter::DEBUG)
-            } else {
-                (Span::none(), None, LevelFilter::DEBUG)
-            }
-        } else {
-            (Span::none(), None, LevelFilter::OFF)
-        };
-
         let env = SandboxEnv {
             client: state.base_env.client.clone(),
         };
-
-        let _enter = span.enter();
 
         let cache_key = if trace { "trace" } else { "default" };
         let stream_result = state
@@ -242,7 +224,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 function,
                 converted_args,
                 env,
-                ExecOptions { timeout, log_level },
+                ExecOptions { timeout },
             )
             .await;
 
@@ -261,27 +243,40 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             }
         };
 
-        let (trace_tx, mut trace_rx_merged) = mpsc::unbounded_channel::<HttpTrace>();
-
-        let trace_handle = trace_rx.map(|mut rx| {
-            let tx = trace_tx.clone();
-            tokio::spawn(async move {
-                while let Some(trace) = rx.recv().await {
-                    if tx.send(trace).is_err() {
-                        break;
-                    }
-                }
-            })
-        });
+        let trace_builder = trace.then(HttpTraceBuilder::new);
+        let mut pending_traces = Vec::new();
+        let span_parent_id = if let Some(builder) = trace_builder.as_ref() {
+            let trace_event = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
+            if sender
+                .send(make_text_message(&ServerMessage::Trace(
+                    trace_event.clone(),
+                )))
+                .await
+                .is_err()
+            {
+                return;
+            }
+            let parent_id = trace_event.id;
+            pending_traces.push(trace_event);
+            Some(parent_id)
+        } else {
+            None
+        };
 
         let deadline = tokio::time::Instant::now() + timeout;
-        let mut pending_traces = Vec::new();
 
         loop {
             tokio::select! {
                 biased;
 
                 () = tokio::time::sleep_until(deadline) => {
+                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                        pending_traces.push(trace_event.clone());
+                        if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                            return;
+                        }
+                    }
                     let msg = ServerMessage::Error {
                         code: ErrorCode::Timeout,
                         message: format!("Execution timed out after {timeout_ms}ms"),
@@ -295,6 +290,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         Some(Ok(Message::Text(text))) => {
                             match serde_json::from_str::<ClientMessage>(&text) {
                                 Ok(ClientMessage::Cancel) => {
+                                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace_event.clone());
+                                        if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                            return;
+                                        }
+                                    }
                                     let msg = ServerMessage::Error {
                                         code: ErrorCode::Cancelled,
                                         message: "Execution cancelled".to_string(),
@@ -304,9 +306,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                 }
                                 Ok(ClientMessage::Push { stream, value }) => {
                                     if let Some(tx) = stream_channels.get(&stream)
-                                        && let Ok(cbor) = json_to_cbor_arg(&value)
+                                        && let Ok(v) = json_to_value_arg(&value)
                                     {
-                                        let _ = tx.send(cbor).await;
+                                        let _ = tx.send(v).await;
                                     }
                                 }
                                 Ok(ClientMessage::Close { stream }) => {
@@ -332,7 +334,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 item = data_stream.next() => {
                     match item {
                         Some(StreamItem::Data(data)) => {
-                            match cbor_to_json(&data) {
+                            match value_to_json(&data) {
                                 Ok(value) => {
                                     let msg = ServerMessage::Data { value };
                                     if sender.send(make_text_message(&msg)).await.is_err() {
@@ -340,6 +342,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     }
                                 }
                                 Err(e) => {
+                                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace_event.clone());
+                                        if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                            return;
+                                        }
+                                    }
                                     let msg = ServerMessage::Error {
                                         code: ErrorCode::Internal,
                                         message: e.message,
@@ -350,7 +359,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             }
                         }
                         Some(StreamItem::End(Some(data))) => {
-                            match cbor_to_json(&data) {
+                            match value_to_json(&data) {
                                 Ok(value) => {
                                     let msg = ServerMessage::Data { value };
                                     if sender.send(make_text_message(&msg)).await.is_err() {
@@ -358,6 +367,13 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     }
                                 }
                                 Err(e) => {
+                                    if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace_event.clone());
+                                        if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                            return;
+                                        }
+                                    }
                                     let msg = ServerMessage::Error {
                                         code: ErrorCode::Internal,
                                         message: e.message,
@@ -366,9 +382,15 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                                     break;
                                 }
                             }
-                            while let Ok(trace) = trace_rx_merged.try_recv() {
-                                pending_traces.push(trace);
+
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                    return;
+                                }
                             }
+
                             let msg = ServerMessage::Done {
                                 traces: std::mem::take(&mut pending_traces),
                             };
@@ -376,8 +398,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             break;
                         }
                         Some(StreamItem::End(None)) | None => {
-                            while let Ok(trace) = trace_rx_merged.try_recv() {
-                                pending_traces.push(trace);
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                    return;
+                                }
                             }
                             let msg = ServerMessage::Done {
                                 traces: std::mem::take(&mut pending_traces),
@@ -385,7 +411,36 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             let _ = sender.send(make_text_message(&msg)).await;
                             break;
                         }
+                        Some(StreamItem::Log {
+                            level,
+                            context,
+                            message,
+                        }) => {
+                            let msg = ServerMessage::Log {
+                                level: level.clone(),
+                                context: context.clone(),
+                                message: message.clone(),
+                            };
+                            if sender.send(make_text_message(&msg)).await.is_err() {
+                                return;
+                            }
+
+                            if let Some(builder) = trace_builder.as_ref() {
+                                let trace_event = builder.log(&level, message);
+                                pending_traces.push(trace_event.clone());
+                                if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                    return;
+                                }
+                            }
+                        }
                         Some(StreamItem::Error(err)) => {
+                            if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if sender.send(make_text_message(&ServerMessage::Trace(trace_event))).await.is_err() {
+                                    return;
+                                }
+                            }
                             let api_err = HttpApiError::from(err);
                             let msg = ServerMessage::Error {
                                 code: api_err.code,
@@ -396,18 +451,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         }
                     }
                 }
-
-                Some(trace) = trace_rx_merged.recv() => {
-                    let msg = ServerMessage::Trace(trace);
-                    if sender.send(make_text_message(&msg)).await.is_err() {
-                        return;
-                    }
-                }
             }
-        }
-
-        if let Some(handle) = trace_handle {
-            handle.abort();
         }
     }
 }
@@ -421,16 +465,12 @@ fn extract_stream_marker(value: &serde_json::Value) -> Option<u32> {
         .map(|v| v as u32)
 }
 
-fn json_to_cbor_arg(value: &serde_json::Value) -> Result<Bytes, HttpApiError> {
-    let json_str = serde_json::to_string(value)
-        .map_err(|e| HttpApiError::invalid_request(format!("Failed to serialize arg: {e}")))?;
-    cbor::json_to_cbor(&json_str)
-        .map_err(|e| HttpApiError::invalid_request(format!("Failed to convert to CBOR: {e}")))
+fn json_to_value_arg(value: &serde_json::Value) -> Result<Value, HttpApiError> {
+    Value::from_json_value(value)
+        .map_err(|e| HttpApiError::invalid_request(format!("Failed to convert to Value: {e}")))
 }
 
-fn cbor_to_json(data: &Bytes) -> Result<serde_json::Value, HttpApiError> {
-    let json_str = cbor::cbor_to_json(data)
-        .map_err(|e| HttpApiError::internal(format!("Failed to convert CBOR to JSON: {e}")))?;
-    serde_json::from_str(&json_str)
-        .map_err(|e| HttpApiError::internal(format!("Failed to parse JSON: {e}")))
+fn value_to_json(data: &Value) -> Result<serde_json::Value, HttpApiError> {
+    data.to_json_value()
+        .map_err(|e| HttpApiError::internal(format!("Failed to convert Value to JSON: {e}")))
 }

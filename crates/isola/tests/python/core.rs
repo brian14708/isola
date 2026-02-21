@@ -1,131 +1,316 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
-use isola::cbor::from_cbor;
-use isola::trace::collect::{CollectLayer, CollectSpanExt};
-use isola::{DirectoryMapping, ModuleConfig, TRACE_TARGET_SCRIPT};
+use isola::{
+    host::{BoxError, LogContext, LogLevel, NoopOutputSink, OutputSink},
+    sandbox::{
+        Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
+    },
+};
+use parking_lot::Mutex;
 use tempfile::tempdir;
-use tracing::{info_span, level_filters::LevelFilter};
-use tracing_subscriber::{Registry, layer::SubscriberExt};
 
-use super::common::{TestHost, TraceCollector, build_module, call_collect, cbor_arg};
+use super::common::{TestHost, build_module, build_module_with_max_memory};
+
+const CAP_NEIGHBORHOOD_BYTES: usize = 1024 * 1024;
+const MEMORY_CAP_BYTES: usize = 64 * 1024 * 1024;
+const LARGE_STDOUT_BYTES: usize = 256 * 1024;
+
+struct CollectLogsSink {
+    logs: Arc<Mutex<Vec<(String, String)>>>,
+}
+
+impl CollectLogsSink {
+    const fn new(logs: Arc<Mutex<Vec<(String, String)>>>) -> Self {
+        Self { logs }
+    }
+}
+
+#[async_trait::async_trait]
+impl OutputSink for CollectLogsSink {
+    async fn on_item(&self, _value: isola::value::Value) -> std::result::Result<(), BoxError> {
+        Ok(())
+    }
+
+    async fn on_complete(
+        &self,
+        _value: Option<isola::value::Value>,
+    ) -> std::result::Result<(), BoxError> {
+        Ok(())
+    }
+
+    async fn on_log(
+        &self,
+        level: LogLevel,
+        _log_context: LogContext<'_>,
+        message: &str,
+    ) -> std::result::Result<(), BoxError> {
+        self.logs
+            .lock()
+            .push((level.as_str().to_string(), message.to_string()));
+        Ok(())
+    }
+}
+
+async fn call_with_timeout<I>(
+    sandbox: &mut Sandbox<TestHost>,
+    function: &str,
+    args: I,
+    timeout: Duration,
+) -> std::result::Result<CallOutput, IsolaError>
+where
+    I: IntoIterator<Item = Arg>,
+{
+    tokio::time::timeout(timeout, sandbox.call(function, args))
+        .await
+        .unwrap_or_else(|_| {
+            Err(IsolaError::Runtime(anyhow::anyhow!(
+                "sandbox call timed out after {}ms",
+                timeout.as_millis()
+            )))
+        })
+}
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
-    let collector = TraceCollector::default();
-    let subscriber = Registry::default().with(CollectLayer::default());
-    let _guard = tracing::subscriber::set_default(subscriber);
-
-    let root = info_span!("integration_python_eval_and_call_roundtrip");
-    root.collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector.clone())
-        .context("failed to install trace collector")?;
-    let _root = root.enter();
-
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main():\n\tprint('trace-print')\n\treturn 42")
+        .eval_script(
+            "def main():\n\tprint('trace-print')\n\treturn 42",
+            NoopOutputSink::shared(),
+        )
         .await
         .context("failed to evaluate script")?;
 
-    let state = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .context("failed to call function")?;
 
-    assert!(state.partial.is_empty(), "expected no partial outputs");
-    assert_eq!(state.end.len(), 1, "expected exactly one end output");
-    let value: i64 = from_cbor(state.end[0].as_ref()).context("failed to decode end output")?;
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let value: i64 = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode end output")?;
     assert_eq!(value, 42);
 
-    let events = collector.events();
-    let has_print = events.iter().any(|e| {
-        e.name == "log"
-            && e.properties
-                .iter()
-                .any(|(k, v)| *k == "log.context" && v == "stdout")
-            && e.properties
-                .iter()
-                .any(|(k, v)| *k == "log.output" && v.contains("trace-print"))
-    });
-    assert!(
-        has_print,
-        "expected trace event for print output, events: {events:?}"
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_call_with_sink_does_not_retain_refs() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script("def main():\n\treturn 42", NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate script")?;
+
+    let sink: Arc<dyn OutputSink> = Arc::new(NoopOutputSink);
+    let initial = Arc::strong_count(&sink);
+    assert_eq!(initial, 1, "unexpected initial sink refcount");
+
+    sandbox
+        .call_with_sink("main", [], Arc::clone(&sink))
+        .await
+        .context("failed to call function with sink")?;
+    assert_eq!(
+        Arc::strong_count(&sink),
+        initial,
+        "sink refcount changed after call_with_sink",
+    );
+
+    sandbox
+        .call_with_sink("main", [], Arc::clone(&sink))
+        .await
+        .context("failed to call function with sink on second call")?;
+    assert_eq!(
+        Arc::strong_count(&sink),
+        initial,
+        "sink refcount changed after repeated call_with_sink",
     );
 
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_streaming_output() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main():\n\tfor i in range(3):\n\t\tyield i")
+        .eval_script(
+            "def main():\n\tfor i in range(3):\n\t\tyield i",
+            NoopOutputSink::shared(),
+        )
         .await
         .context("failed to evaluate streaming script")?;
 
-    let state = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .context("failed to call streaming function")?;
 
-    assert_eq!(state.partial.len(), 3, "expected three partial outputs");
-    let mut values = Vec::with_capacity(state.partial.len());
-    for item in &state.partial {
-        values.push(from_cbor::<i64>(item.as_ref()).context("failed to decode partial output")?);
+    assert_eq!(output.items.len(), 3, "expected three partial outputs");
+    let mut values = Vec::with_capacity(output.items.len());
+    for item in &output.items {
+        values.push(
+            item.to_serde::<i64>()
+                .context("failed to decode partial output")?,
+        );
     }
     assert_eq!(values, vec![0, 1, 2]);
 
-    assert_eq!(state.end.len(), 1, "expected exactly one end output");
-    if !state.end[0].is_empty() {
-        let end_value: Option<i64> =
-            from_cbor(state.end[0].as_ref()).context("failed to decode end output")?;
-        assert_eq!(end_value, None, "expected empty end output or null value");
+    assert!(output.result.is_none(), "expected null end output");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_eval_script_logs_to_sink() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let logs = Arc::new(Mutex::new(Vec::new()));
+    let sink = CollectLogsSink::new(logs.clone());
+    match tokio::time::timeout(
+        Duration::from_secs(2),
+        sandbox.eval_script(
+            "print('eval-stdout')\nimport sandbox.logging\nsandbox.logging.info('eval-log')",
+            Arc::new(sink),
+        ),
+    )
+    .await
+    {
+        Ok(result) => result.context("failed to evaluate script")?,
+        Err(_) => {
+            return Err(anyhow::anyhow!("sandbox eval timed out after {}ms", 2_000));
+        }
+    }
+    {
+        let logs = logs.lock();
+
+        assert!(
+            logs.iter()
+                .any(|(context, message)| context == "stdout" && message.contains("eval-stdout")),
+            "expected eval stdout log in sink, logs: {:?}",
+            *logs
+        );
+        assert!(
+            logs.iter()
+                .any(|(context, message)| context == "info" && message.contains("eval-log")),
+            "expected eval logging event in sink, logs: {:?}",
+            *logs
+        );
+        drop(logs);
     }
 
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_large_stdout_output_is_not_truncated() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            format!(
+                "def main():\n\
+                 \tpayload = 'x' * {LARGE_STDOUT_BYTES}\n\
+                 \tprint(payload, end='')\n\
+                 \treturn len(payload)"
+            ),
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate large stdout script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(10))
+        .await
+        .context("failed to call large stdout function")?;
+
+    let emitted_len: usize = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode end output")?;
+    assert_eq!(emitted_len, LARGE_STDOUT_BYTES);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_argument_cbor_path() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main(i, s):\n\treturn (i + 1, s.upper())")
+        .eval_script(
+            "def main(i, s):\n\treturn (i + 1, s.upper())",
+            NoopOutputSink::shared(),
+        )
         .await
         .context("failed to evaluate argument script")?;
 
-    let args = vec![cbor_arg(None, "41")?, cbor_arg(Some("s"), "\"hello\"")?];
-    let state = call_collect(&mut sandbox, "main", args, Duration::from_secs(2))
+    let args = args![41_i64, s = "hello"]?;
+    let output = call_with_timeout(&mut sandbox, "main", args, Duration::from_secs(2))
         .await
         .context("failed to call argument function")?;
 
-    assert!(state.partial.is_empty(), "expected no partial outputs");
-    assert_eq!(state.end.len(), 1, "expected exactly one end output");
-    let value: (i64, String) =
-        from_cbor(state.end[0].as_ref()).context("failed to decode argument result")?;
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let value: (i64, String) = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode argument result")?;
     assert_eq!(value, (42, "HELLO".to_string()));
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_reinstantiate_smoke() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -133,21 +318,27 @@ async fn integration_python_reinstantiate_smoke() -> Result<()> {
 
     for expected in [7_i64, 11_i64] {
         let mut sandbox = module
-            .instantiate(TestHost::default(), Default::default())
+            .instantiate(TestHost::default(), SandboxOptions::default())
             .await
             .context("failed to instantiate sandbox")?;
 
         sandbox
-            .eval_script(format!("def main():\n\treturn {expected}"))
+            .eval_script(
+                format!("def main():\n\treturn {expected}"),
+                NoopOutputSink::shared(),
+            )
             .await
             .context("failed to evaluate script")?;
 
-        let state = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+        let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
             .await
             .context("failed to call function")?;
-        assert_eq!(state.end.len(), 1, "expected exactly one end output");
-        let value: i64 =
-            from_cbor(state.end[0].as_ref()).context("failed to decode roundtrip output")?;
+        let value: i64 = output
+            .result
+            .as_ref()
+            .context("expected exactly one end output")?
+            .to_serde()
+            .context("failed to decode roundtrip output")?;
         assert_eq!(value, expected);
     }
 
@@ -155,41 +346,46 @@ async fn integration_python_reinstantiate_smoke() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_guest_exception_surface() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main():\n\traise RuntimeError(\"boom\")")
+        .eval_script(
+            "def main():\n\traise RuntimeError(\"boom\")",
+            NoopOutputSink::shared(),
+        )
         .await
         .context("failed to evaluate exception script")?;
 
-    let err = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+    let err = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .expect_err("expected exception from guest function");
-    let isola::Error::Guest { message, .. } = err else {
+    let IsolaError::Guest { message } = err else {
         panic!("expected guest error, got {err:?}");
     };
     assert!(
         message.contains("boom"),
-        "unexpected error message: {message}"
+        "unexpected error message: {message}",
     );
 
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_state_persists_within_sandbox() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -200,26 +396,30 @@ async fn integration_python_state_persists_within_sandbox() -> Result<()> {
              \tglobal counter\n\
              \tcounter += 1\n\
              \treturn counter",
+            NoopOutputSink::shared(),
         )
         .await
         .context("failed to evaluate stateful script")?;
 
-    let first = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+    let first = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .context("failed first stateful call")?;
-    let second = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(2))
+    let second = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .context("failed second stateful call")?;
 
-    assert_eq!(first.end.len(), 1, "expected exactly one first end output");
-    assert_eq!(
-        second.end.len(),
-        1,
-        "expected exactly one second end output"
-    );
-    let first_v: i64 = from_cbor(first.end[0].as_ref()).context("failed to decode first value")?;
-    let second_v: i64 =
-        from_cbor(second.end[0].as_ref()).context("failed to decode second value")?;
+    let first_v: i64 = first
+        .result
+        .as_ref()
+        .context("expected exactly one first end output")?
+        .to_serde()
+        .context("failed to decode first value")?;
+    let second_v: i64 = second
+        .result
+        .as_ref()
+        .context("expected exactly one second end output")?
+        .to_serde()
+        .context("failed to decode second value")?;
     assert_eq!(first_v, 1);
     assert_eq!(second_v, 2);
 
@@ -227,25 +427,29 @@ async fn integration_python_state_persists_within_sandbox() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_call_timeout() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main():\n\twhile True:\n\t\tpass")
+        .eval_script(
+            "def main():\n\twhile True:\n\t\tpass",
+            NoopOutputSink::shared(),
+        )
         .await
         .context("failed to evaluate timeout script")?;
 
-    let err = call_collect(&mut sandbox, "main", vec![], Duration::from_millis(1))
+    let err = call_with_timeout(&mut sandbox, "main", [], Duration::from_millis(1))
         .await
         .expect_err("expected timeout while executing guest function");
-    let isola::Error::Wasm(cause) = err else {
-        panic!("expected wasm timeout error, got {err:?}");
+    let IsolaError::Runtime(cause) = err else {
+        panic!("expected runtime timeout error, got {err:?}");
     };
     let message = cause.to_string().to_ascii_lowercase();
     assert!(
@@ -257,12 +461,13 @@ async fn integration_python_call_timeout() -> Result<()> {
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
-    let Some(module) = build_module().await? else {
+    let Some(module) = build_module_with_max_memory(MEMORY_CAP_BYTES).await? else {
         return Ok(());
     };
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -273,20 +478,20 @@ async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
              \tfor _ in range(1024):\n\
              \t\tchunks.append(bytes(1024 * 1024))\n\
              \treturn len(chunks)",
+            NoopOutputSink::shared(),
         )
         .await
         .context("failed to evaluate memory pressure script")?;
 
     let memory_before = sandbox.memory_usage();
-    let err = call_collect(&mut sandbox, "main", vec![], Duration::from_secs(10))
+    let err = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(10))
         .await
         .expect_err("expected memory limit error while allocating guest memory");
     let memory_after = sandbox.memory_usage();
 
     let message = match err {
-        isola::Error::Guest { message, .. } => message.to_ascii_lowercase(),
-        isola::Error::Wasm(cause) => cause.to_string().to_ascii_lowercase(),
-        other => panic!("expected guest/wasm memory error, got {other:?}"),
+        IsolaError::Guest { message } => message.to_ascii_lowercase(),
+        IsolaError::Runtime(cause) => cause.to_string().to_ascii_lowercase(),
     };
     assert!(
         message.contains("memory")
@@ -301,21 +506,19 @@ async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
         "expected memory usage to grow during allocation, before={memory_before}, after={memory_after}",
     );
     assert!(
-        memory_after <= ModuleConfig::DEFAULT_MAX_MEMORY,
-        "memory usage exceeded configured cap: used={memory_after}, cap={}",
-        ModuleConfig::DEFAULT_MAX_MEMORY,
+        memory_after <= MEMORY_CAP_BYTES,
+        "memory usage exceeded configured cap: used={memory_after}, cap={MEMORY_CAP_BYTES}",
     );
-    const CAP_NEIGHBORHOOD_BYTES: usize = 1024 * 1024;
     assert!(
-        memory_after >= ModuleConfig::DEFAULT_MAX_MEMORY.saturating_sub(CAP_NEIGHBORHOOD_BYTES),
-        "expected usage to reach memory cap neighborhood, used={memory_after}, cap={}",
-        ModuleConfig::DEFAULT_MAX_MEMORY,
+        memory_after >= MEMORY_CAP_BYTES.saturating_sub(CAP_NEIGHBORHOOD_BYTES),
+        "expected usage to reach memory cap neighborhood, used={memory_after}, cap={MEMORY_CAP_BYTES}",
     );
 
     Ok(())
 }
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_writable_directory_mapping_filesystem_roundtrip() -> Result<()> {
     let temp = tempdir().context("failed to create temp directory")?;
     let mapped_dir = temp.path().to_path_buf();
@@ -323,12 +526,15 @@ async fn integration_python_writable_directory_mapping_filesystem_roundtrip() ->
     let Some(module) = build_module().await? else {
         return Ok(());
     };
-    let directory_mappings = [DirectoryMapping::new(&mapped_dir, "/fs").writable(true)];
+    let mut options = SandboxOptions::default();
+    options.mount(
+        &mapped_dir,
+        "/fs",
+        DirPerms::READ | DirPerms::MUTATE,
+        FilePerms::READ | FilePerms::WRITE,
+    );
     let mut sandbox = module
-        .instantiate(
-            TestHost::default(),
-            isola::SandboxOptions::default().directory_mappings(&directory_mappings),
-        )
+        .instantiate(TestHost::default(), options)
         .await
         .context("failed to instantiate sandbox")?;
 
@@ -340,19 +546,23 @@ async fn integration_python_writable_directory_mapping_filesystem_roundtrip() ->
              \t\tfh.write(text)\n\
              \twith open(path, 'r', encoding='utf-8') as fh:\n\
              \t\treturn fh.read()",
+            NoopOutputSink::shared(),
         )
         .await
         .context("failed to evaluate filesystem script")?;
 
-    let args = vec![cbor_arg(None, "\"hello-fs\"")?];
-    let state = call_collect(&mut sandbox, "main", args, Duration::from_secs(2))
+    let args = args!["hello-fs"]?;
+    let output = call_with_timeout(&mut sandbox, "main", args, Duration::from_secs(2))
         .await
         .context("failed to call filesystem function")?;
 
-    assert!(state.partial.is_empty(), "expected no partial outputs");
-    assert_eq!(state.end.len(), 1, "expected exactly one end output");
-    let result: String =
-        from_cbor(state.end[0].as_ref()).context("failed to decode filesystem result")?;
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let result: String = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode filesystem result")?;
     assert_eq!(result, "hello-fs");
 
     let host_file = mapped_dir.join("output.txt");

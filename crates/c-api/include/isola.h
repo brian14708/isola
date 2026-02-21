@@ -23,6 +23,7 @@ typedef enum isola_callback_event {
   ISOLA_CALLBACK_EVENT_STDOUT = 1,
   ISOLA_CALLBACK_EVENT_STDERR = 2,
   ISOLA_CALLBACK_EVENT_ERROR = 3,
+  ISOLA_CALLBACK_EVENT_LOG = 5,
 } isola_callback_event;
 
 typedef enum isola_argument_type {
@@ -81,7 +82,8 @@ enum isola_error_code isola_context_initialize(struct isola_context_handle *ctx,
  *
  * # Safety
  *
- * The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+ * The caller must ensure that both `key` and `value` are valid,
+ * null-terminated C strings.
  */
 enum isola_error_code isola_context_config_set(struct isola_context_handle *ctx,
                                                const char *key,
@@ -107,7 +109,8 @@ void isola_sandbox_destroy(struct isola_sandbox_handle *_sandbox);
  *
  * # Safety
  *
- * The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+ * The caller must ensure that both `key` and `value` are valid,
+ * null-terminated C strings.
  */
 enum isola_error_code isola_sandbox_set_config(struct isola_sandbox_handle *sandbox,
                                                const char *key,
@@ -140,7 +143,8 @@ enum isola_error_code isola_sandbox_load_script(struct isola_sandbox_handle *san
  *
  * The caller must ensure that:
  * - `func` is a valid, null-terminated C string
- * - `args` is a valid pointer to an array of `Argument` structs of length `args_len`
+ * - `args` is a valid pointer to an array of `Argument` structs of length
+ *   `args_len`
  * - Each `Argument` in the array has valid pointers and data
  *
  * # Panics

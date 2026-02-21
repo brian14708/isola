@@ -1,0 +1,34 @@
+[package]
+name = "isola-request"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[features]
+default = ["gzip", "tls"]
+gzip = ["reqwest/gzip"]
+tls = ["reqwest/rustls"]
+
+[dependencies]
+bytes = { workspace = true }
+dashmap = { workspace = true }
+fastant = { workspace = true, features = ["atomic"] }
+futures = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true, features = ["semconv_experimental"] }
+pin-project-lite = { workspace = true }
+reqwest = { workspace = true, features = ["http2", "stream", "socks"] }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["time", "rt", "sync"] }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+url = { workspace = true }
+
+[lints]
+workspace = true

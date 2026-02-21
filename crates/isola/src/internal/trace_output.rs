@@ -1,22 +1,39 @@
-use std::borrow::Cow;
-
-use crate::TRACE_TARGET_SCRIPT;
-use bytes::Bytes;
-use smallvec::SmallVec;
-use tokio::io::AsyncWrite;
-use tracing::event;
-use wasmtime_wasi::{
-    cli::{IsTerminal, StdoutStream},
-    p2::{OutputStream, Pollable, StreamResult},
+use std::{
+    borrow::Cow,
+    future::Future,
+    sync::Arc,
+    task::{Context, Poll},
 };
 
+use bytes::Bytes;
+use futures::task::noop_waker_ref;
+use parking_lot::Mutex;
+use smallvec::SmallVec;
+use tokio::io::AsyncWrite;
+use wasmtime_wasi::{
+    cli::{IsTerminal, StdoutStream},
+    p2::{OutputStream, Pollable, StreamError, StreamResult},
+};
+
+use crate::host::{LogContext, LogLevel, OutputSink};
+
 pub struct TraceOutput {
-    context: &'static str,
+    level: LogLevel,
+    context: LogContext<'static>,
+    sink_store: LogSinkStore,
 }
 
 impl TraceOutput {
-    pub const fn new(context: &'static str) -> Self {
-        Self { context }
+    pub const fn new(
+        level: LogLevel,
+        context: LogContext<'static>,
+        sink_store: LogSinkStore,
+    ) -> Self {
+        Self {
+            level,
+            context,
+            sink_store,
+        }
     }
 }
 
@@ -28,8 +45,12 @@ impl StdoutStream for TraceOutput {
 
     fn p2_stream(&self) -> Box<dyn OutputStream> {
         Box::new(TraceOutputStream {
+            level: self.level,
             context: self.context,
+            sink_store: Arc::clone(&self.sink_store),
             buffer: SmallVec::new(),
+            in_flight: None,
+            last_error: None,
         })
     }
 }
@@ -41,8 +62,12 @@ impl IsTerminal for TraceOutput {
 }
 
 pub struct TraceOutputStream {
-    context: &'static str,
+    level: LogLevel,
+    context: LogContext<'static>,
+    sink_store: LogSinkStore,
     buffer: SmallVec<[u8; MAX_BUFFER + MAX_UTF8_BYTES]>,
+    in_flight: Option<wasmtime_wasi::runtime::AbortOnDropJoinHandle<anyhow::Result<()>>>,
+    last_error: Option<anyhow::Error>,
 }
 
 const MIN_BUFFER: usize = 64;
@@ -50,20 +75,50 @@ const MAX_BUFFER: usize = 1024;
 const MAX_UTF8_BYTES: usize = 4;
 
 impl TraceOutputStream {
-    fn record(&self, s: &str) {
-        event!(
-            name: "log",
-            target: TRACE_TARGET_SCRIPT,
-            tracing::Level::DEBUG,
-            log.context = self.context,
-            log.output = s,
-        );
+    fn record(&mut self, s: &str) -> StreamResult<()> {
+        if self.in_flight.is_some() {
+            return Err(StreamError::Trap(anyhow::anyhow!(
+                "write not permitted while emit pending"
+            )));
+        }
+
+        if s.is_empty() {
+            return Ok(());
+        }
+
+        let Some(sink) = self.sink_store.lock().clone() else {
+            return Ok(());
+        };
+
+        let level = self.level;
+        let context = self.context;
+        let message = s.to_string();
+        let mut future = Box::pin(async move {
+            sink.on_log(level, context, &message)
+                .await
+                .map_err(anyhow::Error::from_boxed)
+        });
+        let waker = noop_waker_ref();
+        let mut cx = Context::from_waker(waker);
+        match future.as_mut().poll(&mut cx) {
+            Poll::Ready(result) => result.map_err(StreamError::LastOperationFailed),
+            Poll::Pending => {
+                self.in_flight = Some(wasmtime_wasi::runtime::spawn(future));
+                Ok(())
+            }
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl Pollable for TraceOutputStream {
-    async fn ready(&mut self) {}
+    async fn ready(&mut self) {
+        if let Some(task) = self.in_flight.take()
+            && let Err(error) = task.await
+        {
+            self.last_error = Some(error);
+        }
+    }
 }
 
 /// Decode as much valid UTF-8 as possible, returning the decoded string and any
@@ -94,6 +149,16 @@ fn decode_utf8(buf: &[u8]) -> (Cow<'_, str>, SmallVec<[u8; MAX_UTF8_BYTES]>) {
 
 impl OutputStream for TraceOutputStream {
     fn write(&mut self, bytes: Bytes) -> StreamResult<()> {
+        if let Some(error) = self.last_error.take() {
+            return Err(StreamError::LastOperationFailed(error));
+        }
+
+        if self.in_flight.is_some() {
+            return Err(StreamError::Trap(anyhow::anyhow!(
+                "write not permitted while emit pending"
+            )));
+        }
+
         if bytes.len() + self.buffer.len() < MIN_BUFFER {
             self.buffer.extend(bytes);
             return Ok(());
@@ -106,8 +171,13 @@ impl OutputStream for TraceOutputStream {
             &self.buffer
         };
         let (s, remainder) = decode_utf8(buf);
-        if !s.is_empty() {
-            self.record(&s);
+        let message = if s.is_empty() {
+            None
+        } else {
+            Some(s.into_owned())
+        };
+        if let Some(message) = message {
+            self.record(&message)?;
         }
         self.buffer.clear();
         if !remainder.is_empty() {
@@ -117,28 +187,59 @@ impl OutputStream for TraceOutputStream {
     }
 
     fn flush(&mut self) -> StreamResult<()> {
-        if self.buffer.is_empty() {
+        if let Some(error) = self.last_error.take() {
+            return Err(StreamError::LastOperationFailed(error));
+        }
+
+        // `flush` can be called immediately after `write`; don't trap while a
+        // previous emit is still in flight. Backpressure is enforced via
+        // `check_write` returning 0 until `ready` observes completion.
+        if self.in_flight.is_some() {
             return Ok(());
         }
 
-        let (s, remainder) = decode_utf8(&self.buffer);
-        if !s.is_empty() {
-            self.record(&s);
-        }
-        self.buffer.clear();
-        if !remainder.is_empty() {
-            self.buffer.extend(remainder);
+        if !self.buffer.is_empty() {
+            let (s, remainder) = decode_utf8(&self.buffer);
+            let message = if s.is_empty() {
+                None
+            } else {
+                Some(s.into_owned())
+            };
+            if let Some(message) = message {
+                self.record(&message)?;
+            }
+            self.buffer.clear();
+            if !remainder.is_empty() {
+                self.buffer.extend(remainder);
+            }
         }
         Ok(())
     }
 
     fn check_write(&mut self) -> StreamResult<usize> {
-        if MAX_BUFFER > self.buffer.len() {
-            Ok(MAX_BUFFER - self.buffer.len())
-        } else {
-            Ok(0)
+        if let Some(error) = self.last_error.take() {
+            return Err(StreamError::LastOperationFailed(error));
         }
+
+        if self.in_flight.is_some() {
+            return Ok(0);
+        }
+
+        let local_capacity = MAX_BUFFER.saturating_sub(self.buffer.len());
+        Ok(local_capacity)
     }
+}
+
+pub type LogSinkStore = Arc<Mutex<Option<Arc<dyn OutputSink>>>>;
+
+#[must_use]
+pub fn new_log_sink_store() -> LogSinkStore {
+    Arc::new(Mutex::new(None))
+}
+
+pub fn set_log_sink(store: &LogSinkStore, sink: Option<Arc<dyn OutputSink>>) {
+    let mut guard = store.lock();
+    *guard = sink;
 }
 
 #[cfg(test)]
@@ -147,8 +248,12 @@ mod tests {
 
     fn new_stream() -> TraceOutputStream {
         TraceOutputStream {
-            context: "test",
+            level: LogLevel::Info,
+            context: LogContext::Other("test"),
+            sink_store: new_log_sink_store(),
             buffer: SmallVec::new(),
+            in_flight: None,
+            last_error: None,
         }
     }
 
@@ -221,7 +326,8 @@ mod tests {
     #[test]
     fn invalid_utf8_uses_lossy() {
         let mut s = new_stream();
-        // Invalid UTF-8: continuation bytes without start byte, enough to exceed MAX_UTF8_BYTES
+        // Invalid UTF-8: continuation bytes without start byte, enough to exceed
+        // MAX_UTF8_BYTES
         let data = vec![0xFF; MAX_UTF8_BYTES + MIN_BUFFER + 1];
         s.write(Bytes::from(data)).unwrap();
         assert!(s.buffer.is_empty());

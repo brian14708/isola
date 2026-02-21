@@ -564,7 +564,8 @@ where
     Ok(())
 }
 
-/// A buffered writer that emits CBOR data through a callback with streaming control
+/// A buffered writer that emits CBOR data through a callback with streaming
+/// control
 pub struct CallbackWriter<'a, F, const N: usize = 1024>
 where
     F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
@@ -698,9 +699,10 @@ impl serde_json::ser::Formatter for Base64Formatter {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use pyo3::types::PyBytes;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_pyobject_serializer() {

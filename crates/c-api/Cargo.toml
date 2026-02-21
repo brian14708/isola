@@ -4,15 +4,16 @@ version.workspace = true
 edition.workspace = true
 publish = false
 license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-bytes = { workspace = true }
-futures = { workspace = true }
 http = { workspace = true }
-http-body-util = { workspace = true }
-isola = { workspace = true, features = ["serde", "request", "request-gzip", "request-tls"] }
+isola = { workspace = true, features = ["serde"] }
+isola-request = { workspace = true, features = ["gzip", "tls"] }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-stream = { workspace = true }

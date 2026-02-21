@@ -1,7 +1,7 @@
 use std::{path::Path, sync::Arc};
 
 use axum::extract::FromRef;
-use isola::request::Client;
+use isola_request::Client;
 
 use super::{SandboxEnv, SandboxManager};
 

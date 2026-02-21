@@ -1,7 +1,3 @@
-use isola::{
-    TRACE_TARGET_SCRIPT,
-    trace::{collect::CollectLayer, consts::TRACE_TARGET_OTEL},
-};
 use opentelemetry::{
     KeyValue, global,
     propagation::TextMapCompositePropagator,
@@ -22,6 +18,8 @@ use tracing::{Level, Subscriber, level_filters::LevelFilter};
 use tracing_subscriber::{
     Layer, filter::FilterFn, layer::SubscriberExt, registry::LookupSpan, util::SubscriberInitExt,
 };
+
+const SCRIPT_TRACE_TARGET: &str = "isola_server::script";
 
 fn get_env_var(names: &[&'static str]) -> Option<String> {
     for name in names {
@@ -84,15 +82,10 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
         .with_default_directive(Level::INFO.into())
         .from_env()
         .expect("failed to read env filter")
-        .add_directive(format!("{TRACE_TARGET_SCRIPT}=off").parse().unwrap())
+        .add_directive(format!("{SCRIPT_TRACE_TARGET}=off").parse().unwrap())
         .add_directive("rmcp=warn".parse().unwrap());
 
     let registry = tracing_subscriber::Registry::default()
-        .with(
-            CollectLayer::default().with_filter(FilterFn::new(|metadata| {
-                metadata.target() == TRACE_TARGET_SCRIPT
-            })),
-        )
         .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter));
 
     match &provider {
@@ -111,14 +104,14 @@ where
     T: Tracer + 'static,
     T::Span: Send + Sync,
 {
+    const OTEL_TARGET: &str = "otel";
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer)
         .with_location(false)
         .with_tracked_inactivity(false)
         .with_threads(false)
         .with_filter(FilterFn::new(|metadata| {
             *metadata.level() <= LevelFilter::INFO
-                && (metadata.target() == TRACE_TARGET_SCRIPT
-                    || metadata.target() == TRACE_TARGET_OTEL)
+                && (metadata.target() == SCRIPT_TRACE_TARGET || metadata.target() == OTEL_TARGET)
         }))
 }
 

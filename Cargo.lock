@@ -1581,20 +1581,15 @@ dependencies = [
  "base64",
  "bytes",
  "component-init-transform",
- "dashmap",
- "fastant",
  "futures",
  "http",
  "http-body",
  "http-body-util",
  "hyper",
+ "isola-request",
  "minicbor",
  "minicbor-serde",
- "opentelemetry",
- "opentelemetry-semantic-conventions",
- "pin-project-lite",
- "rand 0.10.0",
- "reqwest 0.13.2",
+ "parking_lot",
  "serde",
  "serde-transcode",
  "serde_json",
@@ -1605,9 +1600,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
- "tracing-opentelemetry",
- "tracing-subscriber",
- "url",
  "wasmtime",
  "wasmtime-wasi",
  "wasmtime-wasi-http",
@@ -1620,12 +1612,10 @@ version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "bytes",
  "cbindgen",
- "futures",
  "http",
- "http-body-util",
  "isola",
+ "isola-request",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -1658,17 +1648,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "isola-request"
+version = "0.2.0"
+dependencies = [
+ "bytes",
+ "dashmap",
+ "fastant",
+ "futures",
+ "http",
+ "http-body",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
+ "pin-project-lite",
+ "reqwest 0.13.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-opentelemetry",
+ "url",
+]
+
+[[package]]
 name = "isola-server"
 version = "0.2.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "axum",
- "bytes",
  "futures",
  "http",
- "http-body-util",
  "isola",
+ "isola-request",
  "metrics-exporter-prometheus",
  "mimalloc",
  "opentelemetry",

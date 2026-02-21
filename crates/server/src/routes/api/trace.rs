@@ -1,8 +1,8 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use isola::trace::collect::{Collector, EventRecord, FieldFilter, SpanRecord};
 use serde::Serialize;
-use tokio::sync::mpsc;
+
+pub const SCRIPT_EXEC_SPAN_NAME: &str = "script.exec";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct HttpTrace {
@@ -21,26 +21,59 @@ pub enum TraceData {
     SpanEnd { parent_id: i64 },
 }
 
-pub struct HttpTraceCollector {
-    tx: mpsc::UnboundedSender<HttpTrace>,
+#[derive(Debug, Default)]
+pub struct HttpTraceBuilder {
     idgen: AtomicU64,
 }
 
-impl HttpTraceCollector {
-    pub fn new() -> (Self, mpsc::UnboundedReceiver<HttpTrace>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        (
-            Self {
-                tx,
-                idgen: AtomicU64::new(1),
+impl HttpTraceBuilder {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            idgen: AtomicU64::new(1),
+        }
+    }
+
+    pub fn span_begin(&self, name: &str) -> HttpTrace {
+        let id = to_i64(self.next_id());
+        HttpTrace {
+            id,
+            group: group_name(name),
+            timestamp: Self::format_timestamp(std::time::SystemTime::now()),
+            data: TraceData::SpanBegin {
+                name: name.to_string(),
             },
-            rx,
-        )
+        }
+    }
+
+    pub fn span_end(&self, name: &str, parent_id: i64) -> HttpTrace {
+        HttpTrace {
+            id: to_i64(self.next_id()),
+            group: group_name(name),
+            timestamp: Self::format_timestamp(std::time::SystemTime::now()),
+            data: TraceData::SpanEnd { parent_id },
+        }
+    }
+
+    pub fn log(&self, context: &str, message: impl Into<String>) -> HttpTrace {
+        let level = if context.is_empty() {
+            "INFO".to_string()
+        } else {
+            context.to_uppercase()
+        };
+        HttpTrace {
+            id: to_i64(self.next_id()),
+            group: group_name("log"),
+            timestamp: Self::format_timestamp(std::time::SystemTime::now()),
+            data: TraceData::Log {
+                level,
+                message: message.into(),
+            },
+        }
     }
 
     fn next_id(&self) -> u64 {
-        self.idgen
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        self.idgen.fetch_add(1, Ordering::Relaxed)
     }
 
     fn format_timestamp(time: std::time::SystemTime) -> String {
@@ -50,8 +83,8 @@ impl HttpTraceCollector {
         let secs = duration.as_secs();
         let nanos = duration.subsec_nanos();
 
-        let days_since_epoch = secs / 86400;
-        let time_of_day = secs % 86400;
+        let days_since_epoch = secs / 86_400;
+        let time_of_day = secs % 86_400;
 
         let mut year = 1970i32;
         let mut remaining_days = days_since_epoch;
@@ -100,98 +133,8 @@ fn to_i64(value: u64) -> i64 {
     i64::try_from(value).unwrap_or_default()
 }
 
-fn group_name(name: &'static str) -> String {
+fn group_name(name: &str) -> String {
     name.find('.')
         .map(|i| name[..i].to_string())
         .unwrap_or_default()
-}
-
-impl Collector for HttpTraceCollector {
-    fn on_span_start(&self, span: SpanRecord) {
-        let time = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_nanos(span.begin_time_unix_ns);
-        let span_id = to_i64(span.span_id);
-
-        let _ = self.tx.send(HttpTrace {
-            id: span_id,
-            group: group_name(span.name),
-            timestamp: Self::format_timestamp(time),
-            data: TraceData::SpanBegin {
-                name: span.name.to_string(),
-            },
-        });
-    }
-
-    fn on_span_end(&self, span: SpanRecord) {
-        let time = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_nanos(span.begin_time_unix_ns);
-        let end = time + std::time::Duration::from_nanos(span.duration_ns);
-        let span_id = to_i64(span.span_id);
-
-        let _ = self.tx.send(HttpTrace {
-            id: to_i64(self.next_id()),
-            group: group_name(span.name),
-            timestamp: Self::format_timestamp(end),
-            data: TraceData::SpanEnd { parent_id: span_id },
-        });
-    }
-
-    fn on_event(&self, event: EventRecord) {
-        let time = std::time::SystemTime::UNIX_EPOCH
-            + std::time::Duration::from_nanos(event.timestamp_unix_ns);
-        let id = to_i64(self.next_id());
-
-        if event.name == "log" {
-            let message = event
-                .properties
-                .iter()
-                .find_map(|(k, v)| {
-                    if *k == "log.output" {
-                        Some(v.clone())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-
-            let context = event
-                .properties
-                .iter()
-                .find_map(|(k, v)| {
-                    if *k == "log.context" {
-                        Some(v.clone())
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default();
-
-            let level = if context.is_empty() {
-                "INFO".to_string()
-            } else {
-                context.to_uppercase()
-            };
-
-            let _ = self.tx.send(HttpTrace {
-                id,
-                group: group_name(event.name),
-                timestamp: Self::format_timestamp(time),
-                data: TraceData::Log { level, message },
-            });
-        }
-    }
-
-    fn next_id(&self) -> u64 {
-        self.idgen
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn field_filter() -> Option<FieldFilter>
-    where
-        Self: Sized,
-    {
-        Some(FieldFilter {
-            ignore_prefix: &["otel."],
-        })
-    }
 }

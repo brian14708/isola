@@ -6,19 +6,20 @@ use std::{
     time::Duration,
 };
 
-use bytes::Bytes;
 use futures::Stream;
-use isola::{DirectoryMapping, Host, Module, ModuleBuilder, ModuleConfig, SandboxOptions};
+use isola::{
+    host::Host,
+    sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
+    value::Value,
+};
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::info;
-use tracing::level_filters::LevelFilter;
-
-use crate::utils::stream::join_with_infallible;
 
 use super::env::{MpscOutputSink, StreamItem};
+use crate::utils::stream::join_with_infallible;
 
 pub struct Source {
     pub prelude: String,
@@ -28,45 +29,42 @@ pub struct Source {
 #[derive(Clone, Copy)]
 pub struct ExecOptions {
     pub timeout: Duration,
-    pub log_level: LevelFilter,
 }
 
 pub enum Argument {
-    Cbor(Bytes),
-    CborStream(Pin<Box<dyn Stream<Item = Bytes> + Send>>),
+    Value(Value),
+    Stream(Pin<Box<dyn Stream<Item = Value> + Send>>),
 }
 
 impl Argument {
     #[must_use]
-    pub fn cbor(value: impl Into<Bytes>) -> Self {
-        Self::Cbor(value.into())
+    pub fn value(value: impl Into<Value>) -> Self {
+        Self::Value(value.into())
     }
 
     #[must_use]
-    pub fn cbor_stream(value: impl Stream<Item = Bytes> + Send + 'static) -> Self {
-        Self::CborStream(Box::pin(value))
+    pub fn stream(value: impl Stream<Item = Value> + Send + 'static) -> Self {
+        Self::Stream(Box::pin(value))
     }
 
-    fn into_isola(self, name: Option<String>) -> isola::Arg {
+    fn into_isola(self, name: Option<String>) -> Arg {
         match (name, self) {
-            (Some(name), Self::Cbor(data)) => isola::Arg::cbor(data).with_name(name),
-            (None, Self::Cbor(data)) => isola::Arg::cbor(data),
-            (Some(name), Self::CborStream(stream)) => {
-                isola::Arg::cbor_stream(stream).with_name(name)
-            }
-            (None, Self::CborStream(stream)) => isola::Arg::cbor_stream(stream),
+            (Some(name), Self::Value(data)) => Arg::Named(name, data),
+            (None, Self::Value(data)) => Arg::Positional(data),
+            (Some(name), Self::Stream(stream)) => Arg::NamedStream(name, stream),
+            (None, Self::Stream(stream)) => Arg::PositionalStream(stream),
         }
     }
 }
 
 struct CachedSandbox<E: Host + Clone> {
-    sandbox: isola::Sandbox<E>,
+    sandbox: Sandbox<E>,
 }
 
 type CacheMap<E> = Arc<Mutex<HashMap<[u8; 32], Vec<CachedSandbox<E>>>>>;
 
 pub struct SandboxManager<E: Host + Clone> {
-    module: Arc<Module<E>>,
+    module: Arc<SandboxTemplate<E>>,
     cache: CacheMap<E>,
 }
 
@@ -105,13 +103,11 @@ impl<E: Host + Clone> SandboxManager<E> {
         );
         lib_dir.push("lib");
 
-        let module = ModuleBuilder::new()
-            .config(ModuleConfig {
-                cache: Some(parent.join("cache")),
-                max_memory,
-                directory_mappings: vec![DirectoryMapping::new(lib_dir, "/lib")],
-                ..ModuleConfig::python()
-            })
+        let module = SandboxTemplate::<E>::builder()
+            .prelude(Some("import sandbox.asyncio".to_string()))
+            .cache(Some(parent.join("cache")))
+            .max_memory(max_memory)
+            .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
             .build(path)
             .await?;
 
@@ -138,7 +134,7 @@ impl<E: Host + Clone> SandboxManager<E> {
         hash: [u8; 32],
         script: Source,
         env: E,
-        log_level: LevelFilter,
+        sink: MpscOutputSink,
     ) -> anyhow::Result<CachedSandbox<E>> {
         if let Some(cached) = self.get_cached(hash) {
             return Ok(cached);
@@ -146,13 +142,15 @@ impl<E: Host + Clone> SandboxManager<E> {
 
         let mut sandbox = self
             .module
-            .instantiate(env, SandboxOptions::default().log_level(log_level))
+            .instantiate(env, SandboxOptions::default())
             .await?;
 
         if !script.prelude.is_empty() {
-            sandbox.eval_script(&script.prelude).await?;
+            sandbox
+                .eval_script(&script.prelude, Arc::new(sink.clone()))
+                .await?;
         }
-        sandbox.eval_script(&script.code).await?;
+        sandbox.eval_script(&script.code, Arc::new(sink)).await?;
 
         Ok(CachedSandbox { sandbox })
     }
@@ -166,13 +164,12 @@ impl<E: Host + Clone> SandboxManager<E> {
         env: E,
         options: ExecOptions,
     ) -> anyhow::Result<impl Stream<Item = StreamItem> + use<E>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let sink = MpscOutputSink::new(tx.clone());
         let hash = Self::compute_hash(id, &script);
         let mut cached = self
-            .prepare_sandbox(hash, script, env.clone(), options.log_level)
+            .prepare_sandbox(hash, script, env.clone(), sink.clone())
             .await?;
-
-        let (tx, rx) = mpsc::channel(4);
-        let sink = MpscOutputSink::new(tx.clone());
 
         let args: Vec<_> = args
             .into_iter()
@@ -182,10 +179,17 @@ impl<E: Host + Clone> SandboxManager<E> {
         let timeout = options.timeout;
         let cache = self.cache.clone();
         let task = Box::pin(async move {
-            let result = cached
-                .sandbox
-                .call_with_timeout(&func, args, sink, timeout)
-                .await;
+            let result = tokio::time::timeout(
+                timeout,
+                cached.sandbox.call_with_sink(&func, args, Arc::new(sink)),
+            )
+            .await
+            .unwrap_or_else(|_| {
+                Err(isola::sandbox::Error::Runtime(anyhow::anyhow!(
+                    "sandbox call timed out after {}ms",
+                    timeout.as_millis()
+                )))
+            });
             match result {
                 Ok(()) => {
                     let mut cache_lock = cache.lock();
@@ -201,11 +205,11 @@ impl<E: Host + Clone> SandboxManager<E> {
                     }
                 }
                 Err(err) => {
-                    let _ = tx.send(StreamItem::Error(err)).await;
+                    let _ = tx.send(StreamItem::Error(err));
                 }
             }
         });
 
-        Ok(join_with_infallible(ReceiverStream::new(rx), task))
+        Ok(join_with_infallible(UnboundedReceiverStream::new(rx), task))
     }
 }

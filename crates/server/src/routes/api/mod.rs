@@ -4,7 +4,10 @@ pub mod trace;
 pub mod types;
 mod websocket;
 
-use axum::{Router, routing::get, routing::post};
+use axum::{
+    Router,
+    routing::{get, post},
+};
 
 use super::AppState;
 

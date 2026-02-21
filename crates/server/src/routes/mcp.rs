@@ -1,13 +1,11 @@
-use std::sync::Arc;
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::StreamExt;
-use isola::{TRACE_TARGET_SCRIPT, cbor, trace::collect::CollectSpanExt};
-use rmcp::schemars;
 use rmcp::{
     ErrorData as McpError, ServerHandler,
     handler::server::{tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo},
+    schemars,
     schemars::JsonSchema,
     tool, tool_handler, tool_router,
     transport::{
@@ -16,12 +14,8 @@ use rmcp::{
     },
 };
 use serde::Deserialize;
-use serde_json::json;
-use serde_json::value::RawValue;
-use tracing::level_filters::LevelFilter;
-use tracing::{Span, info_span};
+use serde_json::{json, value::RawValue};
 
-use crate::routes::api::trace::{HttpTraceCollector, TraceData};
 use crate::routes::{AppState, ExecOptions, SandboxEnv, Source, StreamItem};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -70,23 +64,7 @@ impl Sandbox {
             .timeout_secs
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
 
-        let (collector, rx) = HttpTraceCollector::new();
-        let s = info_span!(
-            target: TRACE_TARGET_SCRIPT,
-            parent: Span::current(),
-            "script.exec"
-        );
-        let (span, mut trace_rx, log_level) = if s
-            .collect_into(TRACE_TARGET_SCRIPT, LevelFilter::DEBUG, collector)
-            .is_ok()
-        {
-            (s, Some(rx), LevelFilter::DEBUG)
-        } else {
-            (Span::none(), None, LevelFilter::OFF)
-        };
-
         let exec_future = async {
-            let _enter = span.enter();
             let mut stream = self
                 .state
                 .sandbox_manager
@@ -101,31 +79,33 @@ impl Sandbox {
                     SandboxEnv {
                         client: self.state.base_env.client.clone(),
                     },
-                    ExecOptions { timeout, log_level },
+                    ExecOptions { timeout },
                 )
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
             let mut results: Vec<serde_json::Value> = Vec::new();
             let mut final_result: Option<serde_json::Value> = None;
+            let mut output = String::new();
 
             while let Some(item) = stream.next().await {
                 match item {
                     StreamItem::Data(data) => {
-                        let json_str = cbor::cbor_to_json(&data)
-                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                        let value: serde_json::Value = serde_json::from_str(&json_str)
+                        let value = data
+                            .to_json_value()
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                         results.push(value);
                     }
                     StreamItem::End(Some(data)) => {
-                        let json_str = cbor::cbor_to_json(&data)
-                            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                        let value: serde_json::Value = serde_json::from_str(&json_str)
+                        let value = data
+                            .to_json_value()
                             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
                         final_result = Some(value);
                     }
                     StreamItem::End(None) => {}
+                    StreamItem::Log { message, .. } => {
+                        output.push_str(&message);
+                    }
                     StreamItem::Error(err) => {
                         return Err(McpError::internal_error(err.to_string(), None));
                     }
@@ -141,10 +121,10 @@ impl Sandbox {
                 serde_json::Value::Array(results)
             };
 
-            Ok::<serde_json::Value, McpError>(result)
+            Ok::<(serde_json::Value, String), McpError>((result, output))
         };
 
-        let result = match tokio::time::timeout(timeout, exec_future).await {
+        let (result, output) = match tokio::time::timeout(timeout, exec_future).await {
             Err(_) => {
                 return Ok(CallToolResult::structured(json!({
                     "status": "error",
@@ -154,15 +134,6 @@ impl Sandbox {
             Ok(Err(err)) => return Err(err),
             Ok(Ok(value)) => value,
         };
-
-        let mut output = String::new();
-        if let Some(ref mut trace_events) = trace_rx {
-            while let Ok(event) = trace_events.try_recv() {
-                if let TraceData::Log { message, .. } = event.data {
-                    output.push_str(&message);
-                }
-            }
-        }
 
         let result_json = serde_json::to_string(&result)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;

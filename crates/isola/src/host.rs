@@ -1,8 +1,9 @@
+use std::{pin::Pin, sync::Arc};
+
 use bytes::Bytes;
 use http_body::Frame;
-#[cfg(feature = "request")]
-use std::sync::OnceLock;
-use std::{pin::Pin, sync::Arc};
+
+use crate::value::Value;
 
 pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -12,10 +13,96 @@ pub type HttpBodyStream = BoxedStream<core::result::Result<Frame<Bytes>, BoxErro
 pub type HttpRequest = http::Request<Option<Bytes>>;
 pub type HttpResponse = http::Response<HttpBodyStream>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+    Critical,
+    Stdout,
+    Stderr,
+}
+
+impl LogLevel {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Trace => "trace",
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+            Self::Critical => "critical",
+            Self::Stdout => "stdout",
+            Self::Stderr => "stderr",
+        }
+    }
+}
+
+impl From<&str> for LogLevel {
+    fn from(context: &str) -> Self {
+        match context {
+            "trace" => Self::Trace,
+            "debug" => Self::Debug,
+            "warn" => Self::Warn,
+            "error" => Self::Error,
+            "critical" => Self::Critical,
+            "stdout" => Self::Stdout,
+            "stderr" => Self::Stderr,
+            _ => Self::Info,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogContext<'a> {
+    Stdout,
+    Stderr,
+    Other(&'a str),
+}
+
 #[async_trait::async_trait]
-pub trait OutputSink: Send + 'static {
-    async fn on_partial(&mut self, cbor: Bytes) -> core::result::Result<(), BoxError>;
-    async fn on_end(&mut self, cbor: Bytes) -> core::result::Result<(), BoxError>;
+pub trait OutputSink: Send + Sync + 'static {
+    async fn on_item(&self, value: Value) -> core::result::Result<(), BoxError>;
+    async fn on_complete(&self, value: Option<Value>) -> core::result::Result<(), BoxError>;
+
+    /// # Errors
+    /// Returns an error to fail the current guest execution when log delivery
+    /// fails.
+    async fn on_log(
+        &self,
+        _level: LogLevel,
+        _log_context: LogContext<'_>,
+        _message: &str,
+    ) -> core::result::Result<(), BoxError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopOutputSink;
+
+static SHARED_NOOP_OUTPUT_SINK: std::sync::LazyLock<Arc<NoopOutputSink>> =
+    std::sync::LazyLock::new(|| Arc::new(NoopOutputSink));
+
+impl NoopOutputSink {
+    #[must_use]
+    pub fn shared() -> Arc<dyn OutputSink> {
+        SHARED_NOOP_OUTPUT_SINK.clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl OutputSink for NoopOutputSink {
+    async fn on_item(&self, _value: Value) -> core::result::Result<(), BoxError> {
+        Ok(())
+    }
+
+    async fn on_complete(&self, _value: Option<Value>) -> core::result::Result<(), BoxError> {
+        Ok(())
+    }
 }
 
 #[async_trait::async_trait]
@@ -23,8 +110,8 @@ pub trait Host: Send + Sync + 'static {
     async fn hostcall(
         &self,
         call_type: &str,
-        payload: Bytes,
-    ) -> core::result::Result<Bytes, BoxError> {
+        payload: Value,
+    ) -> core::result::Result<Value, BoxError> {
         let _payload = payload;
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -38,38 +125,8 @@ pub trait Host: Send + Sync + 'static {
     /// Implementations own redirect behavior and header hygiene. In particular,
     /// remove any caller-supplied `Host` header before dispatching.
     async fn http_request(&self, req: HttpRequest) -> core::result::Result<HttpResponse, BoxError> {
-        #[cfg(feature = "request")]
-        {
-            use crate::request::{Client, RequestOptions};
-            use futures::StreamExt as _;
-
-            static DEFAULT_CLIENT: OnceLock<Client> = OnceLock::new();
-            let client = DEFAULT_CLIENT.get_or_init(Client::new);
-
-            let (parts, body) = req.into_parts();
-            let mut request = http::Request::new(body.unwrap_or_default());
-            *request.method_mut() = parts.method;
-            *request.uri_mut() = parts.uri;
-            *request.headers_mut() = parts.headers;
-
-            let response = client
-                .send_http(request, RequestOptions::default())
-                .await
-                .map_err(|e| -> BoxError { Box::new(e) })?;
-
-            Ok(response.map(|body| -> HttpBodyStream {
-                Box::pin(body.map(|frame| frame.map_err(|e| -> BoxError { Box::new(e) })))
-            }))
-        }
-
-        #[cfg(not(feature = "request"))]
-        {
-            let _req = req;
-            Err(
-                std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported http_request")
-                    .into(),
-            )
-        }
+        let _req = req;
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "unsupported http_request").into())
     }
 }
 
@@ -78,8 +135,8 @@ impl<T: Host + ?Sized> Host for Arc<T> {
     async fn hostcall(
         &self,
         call_type: &str,
-        payload: Bytes,
-    ) -> core::result::Result<Bytes, BoxError> {
+        payload: Value,
+    ) -> core::result::Result<Value, BoxError> {
         (**self).hostcall(call_type, payload).await
     }
 

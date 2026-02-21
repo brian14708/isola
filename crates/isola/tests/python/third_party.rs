@@ -1,9 +1,9 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use isola::cbor::from_cbor;
+use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
 
-use super::common::{TestHost, build_module, call_collect};
+use super::common::{TestHost, build_module};
 
 async fn run_case(method: &str, script: &str) -> Result<()> {
     let Some(module) = build_module().await? else {
@@ -11,37 +11,40 @@ async fn run_case(method: &str, script: &str) -> Result<()> {
     };
 
     let mut sandbox = module
-        .instantiate(TestHost::default(), Default::default())
+        .instantiate(TestHost::default(), SandboxOptions::default())
         .await
         .with_context(|| format!("failed to instantiate sandbox for `{method}`"))?;
 
     sandbox
-        .eval_script(script)
+        .eval_script(script, NoopOutputSink::shared())
         .await
         .with_context(|| format!("failed to evaluate third party script for `{method}`"))?;
 
-    let state = call_collect(&mut sandbox, method, vec![], Duration::from_secs(15))
-        .await
-        .with_context(|| format!("failed to call third party function `{method}`"))?;
+    let output = match tokio::time::timeout(Duration::from_secs(15), sandbox.call(method, [])).await
+    {
+        Ok(result) => {
+            result.with_context(|| format!("failed to call third party function `{method}`"))?
+        }
+        Err(_) => {
+            return Err(anyhow::anyhow!("sandbox call timed out after {}ms", 15_000));
+        }
+    };
 
     assert!(
-        state.partial.is_empty(),
+        output.items.is_empty(),
         "expected no partial outputs for `{method}`"
     );
-    assert_eq!(
-        state.end.len(),
-        1,
-        "expected exactly one end output for `{method}`"
-    );
 
-    if !state.end[0].is_empty() {
-        let value: Option<serde_json::Value> = from_cbor(state.end[0].as_ref())
-            .with_context(|| format!("failed to decode third party end output for `{method}`"))?;
-        assert!(
-            value.is_none(),
-            "expected null end output for `{method}`, got {value:?}"
-        );
-    }
+    let value: Option<serde_json::Value> = output
+        .result
+        .as_ref()
+        .context(format!("expected exactly one end output for `{method}`"))?
+        .to_serde()
+        .with_context(|| format!("failed to decode third party end output for `{method}`"))?;
+    assert!(
+        value.is_none(),
+        "expected null end output for `{method}`, got {value:?}"
+    );
 
     Ok(())
 }
@@ -94,11 +97,12 @@ def pillow() -> None:
 "#;
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_third_party_pillow() -> Result<()> {
     run_case("pillow", PILLOW_SCRIPT).await
 }
 
-const NUMPY_SCRIPT: &str = r#"
+const NUMPY_SCRIPT: &str = r"
 def numpy() -> None:
     import numpy as np
 
@@ -112,9 +116,10 @@ def numpy() -> None:
     assert mean < 100
     assert stddev >= 0
     assert len(filtered_values) > 0
-"#;
+";
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_third_party_numpy() -> Result<()> {
     run_case("numpy", NUMPY_SCRIPT).await
 }
@@ -133,6 +138,7 @@ def pydantic() -> None:
 "#;
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_third_party_pydantic() -> Result<()> {
     run_case("pydantic", PYDANTIC_SCRIPT).await
 }
@@ -148,6 +154,7 @@ def tzdata() -> None:
 "#;
 
 #[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_third_party_tzdata() -> Result<()> {
     run_case("tzdata", TZDATA_SCRIPT).await
 }

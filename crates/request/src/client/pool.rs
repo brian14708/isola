@@ -6,8 +6,7 @@ use std::sync::{
 use dashmap::DashMap;
 use fastant::{Atomic, Instant};
 
-use super::super::Error;
-use super::config::RequestConfig;
+use super::{super::Error, config::RequestConfig};
 
 pub struct ClientToken {
     pub client: reqwest::Client,

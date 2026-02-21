@@ -1,18 +1,22 @@
 use std::{
     ffi::{CStr, c_char, c_int, c_void},
     path::PathBuf,
+    sync::Arc,
     time::Duration,
 };
 
 use async_trait::async_trait;
-use bytes::Bytes;
 use isola::{
-    Arg, DirectoryMapping, Module, ModuleBuilder, ModuleConfig, OutputSink, Sandbox, SandboxOptions,
+    host::{BoxError, LogContext, LogLevel, OutputSink},
+    sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
+    value::Value,
 };
 use tokio::runtime::{Builder, Runtime};
 
-use crate::env::Env;
-use crate::error::{Error, ErrorCode, Result};
+use crate::{
+    env::Env,
+    error::{Error, ErrorCode, Result},
+};
 
 mod env;
 mod error;
@@ -32,7 +36,7 @@ macro_rules! c_try {
 
 pub struct ContextHandle {
     rt: Runtime,
-    module: Option<Module<Env>>,
+    module: Option<SandboxTemplate<Env>>,
 }
 
 impl ContextHandle {
@@ -90,13 +94,11 @@ impl ContextHandle {
         lib_dir.push("lib");
 
         self.rt.block_on(async {
-            let module = ModuleBuilder::new()
-                .config(ModuleConfig {
-                    cache: Some(parent.join("cache")),
-                    max_memory: 64 * 1024 * 1024,
-                    directory_mappings: vec![DirectoryMapping::new(lib_dir.clone(), "/lib")],
-                    ..ModuleConfig::python()
-                })
+            let module = SandboxTemplate::<Env>::builder()
+                .prelude(Some("import sandbox.asyncio".to_string()))
+                .cache(Some(parent.join("cache")))
+                .max_memory(64 * 1024 * 1024)
+                .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
                 .build(&path)
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to load runtime: {e}")))?;
@@ -166,7 +168,8 @@ pub unsafe extern "C" fn isola_context_initialize(
 ///
 /// # Safety
 ///
-/// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+/// The caller must ensure that both `key` and `value` are valid,
+/// null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_context_config_set(
     ctx: &mut ContextHandle,
@@ -193,8 +196,8 @@ unsafe impl Sync for Callback {}
 
 #[async_trait]
 impl OutputSink for Callback {
-    async fn on_partial(&mut self, item: Bytes) -> std::result::Result<(), isola::BoxError> {
-        let data = isola::cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+    async fn on_item(&self, item: Value) -> std::result::Result<(), BoxError> {
+        let data = item.to_json_str().map_err(|e| -> BoxError {
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
         (self.callback)(
@@ -206,11 +209,9 @@ impl OutputSink for Callback {
         Ok(())
     }
 
-    async fn on_end(&mut self, item: Bytes) -> std::result::Result<(), isola::BoxError> {
-        if item.is_empty() {
-            (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
-        } else {
-            let data = isola::cbor::cbor_to_json(&item).map_err(|e| -> isola::BoxError {
+    async fn on_complete(&self, item: Option<Value>) -> std::result::Result<(), BoxError> {
+        if let Some(item) = item {
+            let data = item.to_json_str().map_err(|e| -> BoxError {
                 Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
             (self.callback)(
@@ -219,7 +220,24 @@ impl OutputSink for Callback {
                 data.len(),
                 self.user_data,
             );
+        } else {
+            (self.callback)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
         }
+        Ok(())
+    }
+
+    async fn on_log(
+        &self,
+        level: LogLevel,
+        _log_context: LogContext<'_>,
+        message: &str,
+    ) -> std::result::Result<(), BoxError> {
+        let event = match level {
+            LogLevel::Stdout => CallbackEvent::Stdout,
+            LogLevel::Stderr => CallbackEvent::Stderr,
+            _ => CallbackEvent::Log,
+        };
+        (self.callback)(event, message.as_ptr(), message.len(), self.user_data);
         Ok(())
     }
 }
@@ -270,13 +288,13 @@ impl SandboxHandle<'_> {
 
     fn load_script(&mut self, input: &str, timeout_in_ms: u64) -> Result<()> {
         match &mut self.inner {
-            SandboxInner::Running { sandbox, .. } => {
+            SandboxInner::Running { sandbox, callback } => {
                 self.ctx
                     .rt
                     .block_on(async {
                         tokio::time::timeout(
                             Duration::from_millis(timeout_in_ms),
-                            sandbox.eval_script(input),
+                            sandbox.eval_script(input, Arc::new(callback.clone())),
                         )
                         .await
                     })
@@ -304,19 +322,19 @@ impl SandboxHandle<'_> {
                                 let json_str = std::str::from_utf8(&value).map_err(|_| {
                                     Error::InvalidArgument("Invalid UTF-8 in JSON argument")
                                 })?;
-                                let cbor = isola::cbor::json_to_cbor(json_str)
+                                let value = Value::from_json_str(json_str)
                                     .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
                                 Ok(match name {
-                                    Some(name) => Arg::cbor(cbor).with_name(name),
-                                    None => Arg::cbor(cbor),
+                                    Some(name) => Arg::Named(name, value),
+                                    None => Arg::Positional(value),
                                 })
                             }
                             RawArgument::JsonStream(name, receiver) => {
                                 let stream =
                                     Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
                                 Ok(match name {
-                                    Some(name) => Arg::cbor_stream(stream).with_name(name),
-                                    None => Arg::cbor_stream(stream),
+                                    Some(name) => Arg::NamedStream(name, stream),
+                                    None => Arg::PositionalStream(stream),
                                 })
                             }
                         }
@@ -326,15 +344,27 @@ impl SandboxHandle<'_> {
                 let func = func.to_string();
                 let timeout = Duration::from_millis(timeout_in_ms);
                 let result = self.ctx.rt.block_on(async {
-                    sandbox
-                        .call_with_timeout(&func, isola_args, callback.clone(), timeout)
-                        .await
+                    tokio::time::timeout(
+                        timeout,
+                        sandbox.call_with_sink(&func, isola_args, Arc::new(callback.clone())),
+                    )
+                    .await
                 });
 
                 // Restore the sandbox state.
                 self.inner = SandboxInner::Running { sandbox, callback };
 
-                result.map_err(|e| Error::Internal(format!("Sandbox execution failed: {e}")))?;
+                result.map_or_else(
+                    |_| {
+                        Err(Error::Internal(format!(
+                            "Sandbox execution timed out after {}ms",
+                            timeout.as_millis()
+                        )))
+                    },
+                    |inner| {
+                        inner.map_err(|e| Error::Internal(format!("Sandbox execution failed: {e}")))
+                    },
+                )?;
 
                 Ok(())
             }
@@ -366,7 +396,8 @@ pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle<'_>>) {}
 ///
 /// # Safety
 ///
-/// The caller must ensure that both `key` and `value` are valid, null-terminated C strings.
+/// The caller must ensure that both `key` and `value` are valid,
+/// null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_set_config(
     sandbox: &mut SandboxHandle<'_>,
@@ -386,6 +417,7 @@ pub enum CallbackEvent {
     Stdout = 1,
     Stderr = 2,
     Error = 3,
+    Log = 5,
 }
 
 #[repr(C)]
@@ -416,12 +448,12 @@ pub struct Argument {
 }
 
 pub struct StreamHandle {
-    sender: tokio::sync::mpsc::Sender<Bytes>,
-    receiver: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<Bytes>>>,
+    sender: tokio::sync::mpsc::Sender<Value>,
+    receiver: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<Value>>>,
 }
 
 impl StreamHandle {
-    fn take_receiver(&self) -> Result<tokio::sync::mpsc::Receiver<Bytes>> {
+    fn take_receiver(&self) -> Result<tokio::sync::mpsc::Receiver<Value>> {
         self.receiver
             .lock()
             .unwrap()
@@ -432,7 +464,7 @@ impl StreamHandle {
 
 enum RawArgument {
     Json(Option<String>, Vec<u8>),
-    JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Bytes>),
+    JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
 }
 
 #[unsafe(no_mangle)]
@@ -482,7 +514,8 @@ pub unsafe extern "C" fn isola_sandbox_load_script(
 ///
 /// The caller must ensure that:
 /// - `func` is a valid, null-terminated C string
-/// - `args` is a valid pointer to an array of `Argument` structs of length `args_len`
+/// - `args` is a valid pointer to an array of `Argument` structs of length
+///   `args_len`
 /// - Each `Argument` in the array has valid pointers and data
 ///
 /// # Panics
@@ -578,11 +611,20 @@ pub unsafe extern "C" fn isola_stream_push(
     blocking: c_int,
 ) -> ErrorCode {
     let data = unsafe { std::slice::from_raw_parts(data, len) };
-    let bytes = Bytes::copy_from_slice(data);
+    let Ok(json) = std::str::from_utf8(data) else {
+        let err = Error::InvalidArgument("Invalid UTF-8 in stream value");
+        crate::error::set_last_error(err);
+        return ErrorCode::InvalidArgument;
+    };
+    let Ok(value) = Value::from_json_str(json) else {
+        let err = Error::InvalidArgument("Invalid JSON in stream value");
+        crate::error::set_last_error(err);
+        return ErrorCode::InvalidArgument;
+    };
 
     if blocking != 0 {
         // Blocking send - waits until space is available
-        if stream.sender.blocking_send(bytes) == Ok(()) {
+        if stream.sender.blocking_send(value) == Ok(()) {
             ErrorCode::Ok
         } else {
             let err = Error::StreamClosed;
@@ -591,7 +633,7 @@ pub unsafe extern "C" fn isola_stream_push(
         }
     } else {
         // Non-blocking send - returns immediately if full
-        match stream.sender.try_send(bytes) {
+        match stream.sender.try_send(value) {
             Ok(()) => ErrorCode::Ok,
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 let err = Error::StreamFull;

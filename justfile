@@ -4,7 +4,7 @@ run: build
     cargo run --release -p isola-server
 
 integration: build-wasm
-    cargo test --release -p isola
+    cargo test --release -p isola integration_python
 
 build: build-wasm
     cargo build --release -p isola-server
