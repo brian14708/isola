@@ -98,8 +98,6 @@ jobs:
       - name: Package release artifacts
         run: |
           mkdir -p dist
-          test -f result/bin/isola_python.wasm
-          test -d result/lib
 
           tar -C result -czf dist/isola-python.tar.gz bin lib
       - name: Upload artifacts to target release
@@ -131,8 +129,6 @@ jobs:
         run: |
           mkdir -p dist
 
-          cargo build --profile release-lto -p isola-c-api-export
-
           os="$(uname -s)"
           arch="$(uname -m)"
 
@@ -156,6 +152,8 @@ jobs:
 
           triple="${arch_part}-${os_part}"
           mkdir -p dist/libisola/lib
+
+          cargo build --locked --profile release-lto -p isola-c-api-export
 
           cp "target/release-lto/libisola.${lib_ext}" dist/libisola/lib/
           cp -r crates/c-api/include dist/libisola/

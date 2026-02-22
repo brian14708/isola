@@ -20,19 +20,13 @@ jobs:
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-      - name: Setup Cachix
-        uses: cachix/cachix-action@v16
-        with:
-          name: isola
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
       - name: Run tests
-        run: nix --accept-flake-config develop --command cargo test
+        run: cargo test
       - name: Clippy
-        run: nix --accept-flake-config develop --command cargo clippy --all-features -- --deny warnings
+        run: cargo clippy --all-features -- --deny warnings
   integration:
     needs: build
     runs-on: ubuntu-latest
