@@ -26,11 +26,6 @@ lint: init-py
     uv run mypy
     uv run basedpyright
 
-integration-c:
-    cmake -B target/c -G Ninja crates/c-api/tests
-    cmake --build target/c
-    cmake --build target/c --target test
-
 [private]
 init-py:
     uv sync --all-packages

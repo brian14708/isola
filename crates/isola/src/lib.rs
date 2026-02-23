@@ -33,7 +33,12 @@
 //!     let template = SandboxTemplate::<MyHost>::builder()
 //!         .cache(Some("./isola-python/cache".into()))
 //!         .max_memory(64 * 1024 * 1024)
-//!         .mount("./isola-python/lib", "/lib", DirPerms::READ, FilePerms::READ)
+//!         .mount(
+//!             "./isola-python/lib",
+//!             "/lib",
+//!             DirPerms::READ,
+//!             FilePerms::READ,
+//!         )
 //!         .build::<MyHost>("./isola-python/bin/isola_python.wasm")
 //!         .await?;
 //!

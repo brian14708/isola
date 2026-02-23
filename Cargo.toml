@@ -1,7 +1,12 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/*",
+    "crates/isola",
+    "crates/py-binding",
+    "crates/python",
+    "crates/request",
+    "crates/server",
+    "crates/xtask",
 ]
 
 [workspace.package]
@@ -24,7 +29,6 @@ async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 bytes = "1.10"
-cbindgen = "0.29"
 component-init-transform = "0.1"
 dashmap = "6.1"
 eventsource = { version = "0.5", default-features = false }
@@ -37,7 +41,6 @@ http-body = "1.0"
 http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
-isola-c-api = { path = "crates/c-api" }
 isola-request = { path = "crates/request" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
@@ -68,14 +71,15 @@ tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
 url = "2.5"
-wiremock = "0.6"
 wasi-preview1-component-adapter-provider = "41.0"
 wasmtime = { version = "41.0", default-features = false }
 wasmtime-wasi = "41.0"
 wasmtime-wasi-http = { version = "41.0", default-features = false }
+wiremock = "0.6"
 wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
 xshell = "0.2"
+pyo3-build-config = "0.28"
 
 [profile.release-lto]
 inherits = "release"
