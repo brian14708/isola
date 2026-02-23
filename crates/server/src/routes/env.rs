@@ -8,9 +8,10 @@ use isola::{
     },
     value::Value,
 };
-use isola_request::{Client, RequestOptions, TraceRequest};
 use tokio::sync::mpsc;
 use tracing::field::Empty;
+
+use crate::request::{Client, RequestOptions, TraceRequest};
 
 const SCRIPT_TRACE_TARGET: &str = "isola_server::script";
 

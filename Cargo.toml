@@ -34,7 +34,6 @@ http-body = "1.0"
 http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
-isola-request = { path = "crates/request" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"

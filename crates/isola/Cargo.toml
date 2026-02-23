@@ -48,7 +48,7 @@ wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
-isola-request = { workspace = true }
+reqwest = { workspace = true, features = ["http2", "stream", "gzip", "rustls"] }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
 
