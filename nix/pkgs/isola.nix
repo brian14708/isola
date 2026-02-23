@@ -6,7 +6,7 @@
 }:
 stdenv.mkDerivation {
   pname = "isola";
-  version = "0.1.0";
+  version = "0.2.0";
 
   dontUnpack = true;
 
@@ -19,7 +19,7 @@ stdenv.mkDerivation {
     mkdir -p app
     cp -r ${python}/* app/
     mkdir -p app/target/wasm32-wasip1/wasi-deps
-    ln -s ../bin/isola_python.wasm app/target/isola_python.wasm
+    ln -s ../bin/python3.wasm app/target/python3.wasm
     ln -s ../../.. app/target/wasm32-wasip1/wasi-deps/usr
 
     runHook postBuild

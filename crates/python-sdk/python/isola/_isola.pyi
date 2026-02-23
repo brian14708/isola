@@ -1,5 +1,5 @@
+from asyncio import AbstractEventLoop
 from collections.abc import Awaitable, Callable
-from typing import Any
 
 class IsolaError(Exception): ...
 class InvalidArgumentError(IsolaError): ...
@@ -35,10 +35,10 @@ class _SandboxCore:
         self,
         callback: Callable[
             [str, str, dict[str, str], bytes | None],
-            Awaitable[tuple[int, dict[str, str], str, Any]],
+            Awaitable[tuple[int, dict[str, str], str, object]],
         ]
         | None,
-        event_loop: Any | None,
+        event_loop: AbstractEventLoop | None,
     ) -> None: ...
     def start(self) -> None: ...
     def load_script(self, code: str, timeout_ms: int | None = None) -> None: ...

@@ -1,0 +1,58 @@
+[project]
+name = "isola-python-runtime"
+version = "0.2.0"
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.11.1",
+    "pyyaml>=6.0.2",
+    "cbor2>=5.6.0",
+    "duron>=0.0.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+only-include = ["python/sandbox"]
+sources = ["python"]
+
+[tool.ruff]
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812", "S101", "CPY",
+    "D10", "D203", "D213",
+    "PLR09", "PLR2004", "PLC2701", "C901",
+]
+extend-safe-fixes = ["TC"]
+preview = true
+future-annotations = true
+
+[tool.ruff.lint.per-file-ignores]
+"python/tests/**/*.py" = ["BLE001", "PLC0415", "DOC", "INP001", "ANN001"]
+
+[tool.ruff.format]
+preview = true
+
+[tool.mypy]
+files = ["crates/python-runtime/python"]
+strict = true
+python_version = "3.14"
+mypy_path = "crates/python-runtime/python/typings"
+disable_error_code = [
+    "decorated-any",
+    "explicit-any",
+    "any",
+]
+
+[tool.pyright]
+venv = ".venv"
+venvPath = "../.."
+include = ["./python"]
+stubPath = "./python/typings"
+typeCheckingMode = "strict"
+enableExperimentalFeatures = true
+reportMissingModuleSource = false

@@ -222,7 +222,9 @@ class Sandbox:
         self._core = core
         self._callback: Callable[[Event], Awaitable[None] | None] | None = None
         self._dispatch: Callable[[str, str | None], None] | None = None
-        self._http_handler: Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None = None
+        self._http_handler: (
+            Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None
+        ) = None
         self._http_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -290,8 +292,7 @@ class Sandbox:
         self._core.set_callback(_dispatch)
 
     def set_http_handler(
-        self,
-        handler: Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None,
+        self, handler: Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None
     ) -> None:
         self._http_handler = handler
         if handler is None:
@@ -302,18 +303,16 @@ class Sandbox:
         loop = asyncio.get_running_loop()
 
         async def _dispatch(
-            method: str,
-            url: str,
-            headers: dict[str, str],
-            body: bytes | None,
+            method: str, url: str, headers: dict[str, str], body: bytes | None
         ) -> tuple[int, dict[str, str], str, object]:
             request = HttpRequestData(
                 method=method, url=url, headers=dict(headers), body=body
             )
-            response = await handler(request)
-            if not isinstance(response, HttpResponseData):
+            response_obj = cast("object", await handler(request))
+            if not isinstance(response_obj, HttpResponseData):
                 msg = "http handler must return HttpResponseData"
                 raise TypeError(msg)
+            response = response_obj
             body_mode, body_payload = _normalize_http_response_body(response.body)
             return (response.status, dict(response.headers), body_mode, body_payload)
 
@@ -371,7 +370,7 @@ class RuntimeManager:
 
 def _ensure_latest_runtime_sync(cache_subdir: str, *, force: bool) -> str:
     runtime_root = _data_root() / cache_subdir
-    wasm_path = runtime_root / "bin" / "isola_python.wasm"
+    wasm_path = runtime_root / "bin" / "python3.wasm"
 
     if wasm_path.exists() and not force:
         return str(runtime_root)
@@ -418,7 +417,7 @@ def _safe_extract(tar: tarfile.TarFile, target_dir: Path) -> None:
 
 
 def _normalize_runtime_layout(runtime_root: Path) -> None:
-    wasm_path = runtime_root / "bin" / "isola_python.wasm"
+    wasm_path = runtime_root / "bin" / "python3.wasm"
     if wasm_path.exists():
         return
 
@@ -427,7 +426,7 @@ def _normalize_runtime_layout(runtime_root: Path) -> None:
         return
 
     nested_root = candidates[0]
-    nested_wasm = nested_root / "bin" / "isola_python.wasm"
+    nested_wasm = nested_root / "bin" / "python3.wasm"
     if not nested_wasm.exists():
         return
 

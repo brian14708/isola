@@ -48,7 +48,7 @@ jobs:
               -f sha="$GITHUB_SHA" >/dev/null
           fi
   oci:
-    needs: [targets, python]
+    needs: [targets, python-runtime]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,7 +78,7 @@ jobs:
           docker tag isola:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.release_tag }}
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.release_tag }}
 
-  python:
+  python-runtime:
     needs: targets
     runs-on: ubuntu-latest
     permissions:
