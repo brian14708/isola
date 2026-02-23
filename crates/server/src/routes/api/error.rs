@@ -67,7 +67,7 @@ impl IntoResponse for HttpApiError {
 impl From<IsolaError> for HttpApiError {
     fn from(err: IsolaError) -> Self {
         match err {
-            IsolaError::Guest { message } => Self::script_error(message),
+            IsolaError::UserCode { message } => Self::script_error(message),
             IsolaError::Runtime(err) => {
                 let message = err.to_string();
                 if message.contains("interrupt") {

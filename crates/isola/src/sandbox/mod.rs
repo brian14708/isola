@@ -55,7 +55,7 @@ pub type Result<T, E = Error> = core::result::Result<T, E>;
 pub enum Error {
     /// Guest/user-code failure.
     #[error("{message}")]
-    Guest { message: String },
+    UserCode { message: String },
 
     /// Internal runtime failure (wasm engine, host callback, filesystem, etc).
     #[error("runtime error: {0}")]
@@ -66,7 +66,7 @@ impl From<exports::Error> for Error {
     fn from(value: exports::Error) -> Self {
         let exports::Error { code, message } = value;
         match code {
-            exports::ErrorCode::Aborted => Self::Guest { message },
+            exports::ErrorCode::Aborted => Self::UserCode { message },
             exports::ErrorCode::Unknown | exports::ErrorCode::Internal => {
                 Self::Runtime(anyhow::anyhow!("[{code:?}] {message}"))
             }
@@ -404,7 +404,7 @@ impl<H: Host> Sandbox<H> {
         store.set_sink(Arc::clone(&sink));
         let result = self
             .bindings
-            .isola_script_guest()
+            .isola_script_runtime()
             .call_eval_script(&mut store, &code)
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);
@@ -422,7 +422,7 @@ impl<H: Host> Sandbox<H> {
         store.set_sink(Arc::clone(&sink));
         let result = self
             .bindings
-            .isola_script_guest()
+            .isola_script_runtime()
             .call_eval_file(&mut store, guest_path)
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);
@@ -515,7 +515,7 @@ impl<H: Host> Sandbox<H> {
         store.set_sink(sink);
         let result = self
             .bindings
-            .isola_script_guest()
+            .isola_script_runtime()
             .call_call_func(&mut store, function, &internal_args)
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);

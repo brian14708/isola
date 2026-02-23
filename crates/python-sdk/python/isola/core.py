@@ -1,39 +1,31 @@
+# pyright: reportPrivateUsage=false
+
 from __future__ import annotations
 
-# pyright: reportPrivateUsage=false
 import asyncio
 import inspect
 import json
-import os
-import shutil
-import sys
-import tarfile
-import tempfile
-import urllib.request
+import math
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
-from functools import partial
-from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeVar, cast
+from os import PathLike, fspath
+from typing import TYPE_CHECKING, Literal, cast
+from typing_extensions import Self, TypedDict, Unpack
 
-from isola._isola import IsolaError, _ContextCore, _StreamCore
+from isola._isola import _ContextCore, _StreamCore
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Iterable
-    from contextlib import AbstractAsyncContextManager
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 
-    from isola._isola import _RunResultCore, _SandboxCore
+    from isola._isola import _SandboxCore
 
 JsonScalar = bool | int | float | str | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
-EventKind = Literal["result_json", "end_json", "stdout", "stderr", "error", "log"]
-HttpBodyOut = bytes | AsyncIterable[bytes] | None
-T = TypeVar("T")
-
-_UNSET = object()
-_RUNTIME_BUNDLE_URL = (
-    "https://github.com/brian14708/isola/releases/download/latest/isola-python.tar.gz"
-)
+EventKind = Literal["result", "end", "stdout", "stderr", "error", "log"]
+BytesLike = bytes | bytearray | memoryview
+Pathish = str | PathLike[str]
+HttpBodyOut = BytesLike | AsyncIterable[BytesLike] | None
+_EVENT_KIND_MAP = {"result_json": "result", "end_json": "end"}
 
 
 @dataclass(slots=True)
@@ -53,7 +45,7 @@ class RunResult:
 
 
 @dataclass(slots=True)
-class HttpRequestData:
+class HttpRequest:
     method: str
     url: str
     headers: dict[str, str]
@@ -61,7 +53,7 @@ class HttpRequestData:
 
 
 @dataclass(slots=True)
-class HttpResponseData:
+class HttpResponse:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
     body: HttpBodyOut = None
@@ -69,14 +61,14 @@ class HttpResponseData:
 
 @dataclass(slots=True)
 class MountConfig:
-    host: str
+    host: Pathish
     guest: str
     dir_perms: Literal["read", "write", "read-write"] = "read"
     file_perms: Literal["read", "write", "read-write"] = "read"
 
     def to_dict(self) -> dict[str, str]:
         return {
-            "host": self.host,
+            "host": _normalize_path(self.host, key="host"),
             "guest": self.guest,
             "dir_perms": self.dir_perms,
             "file_perms": self.file_perms,
@@ -86,26 +78,26 @@ class MountConfig:
 @dataclass(slots=True)
 class SandboxConfig:
     max_memory: int | None = None
-    timeout_ms: int | None = 30_000
+    timeout: float | None = None
     mounts: list[MountConfig] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
-    def to_patch(self) -> dict[str, object]:
+    def to_patch(self) -> _SandboxConfigureInput:
         return {
             "max_memory": self.max_memory,
-            "timeout_ms": self.timeout_ms,
-            "mounts": [mount.to_dict() for mount in self.mounts],
+            "timeout": self.timeout,
+            "mounts": self.mounts,
             "env": self.env,
         }
 
 
 @dataclass(slots=True)
-class JsonArg:
+class Arg:
     value: object
     name: str | None = None
 
 
-class JsonStreamArg:
+class StreamArg:
     def __init__(
         self,
         core: _StreamCore,
@@ -132,17 +124,16 @@ class JsonStreamArg:
         *,
         name: str | None = None,
         capacity: int = 1024,
-    ) -> JsonStreamArg:
+    ) -> StreamArg:
         core = _StreamCore(capacity)
 
         async def _produce() -> None:
             try:
                 async for item in values:
                     payload = _to_json(item)
-                    operation = partial(core.push_json, payload, blocking=True)
-                    await asyncio.to_thread(operation)
+                    await core.push_json_async(payload)
             finally:
-                await asyncio.to_thread(core.end)
+                core.end()
 
         producer_task = asyncio.create_task(_produce())
         return cls(core, name=name, producer_task=producer_task)
@@ -150,12 +141,111 @@ class JsonStreamArg:
     @classmethod
     def from_iterable(
         cls, values: Iterable[object], *, name: str | None = None, capacity: int = 1024
-    ) -> JsonStreamArg:
-        core = _StreamCore(capacity)
-        for item in values:
-            core.push_json(_to_json(item), blocking=True)
-        core.end()
-        return cls(core, name=name)
+    ) -> StreamArg:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            buffered = list(values)
+            core = _StreamCore(max(capacity, len(buffered), 1))
+            for item in buffered:
+                core.push_json(_to_json(item))
+            core.end()
+            return cls(core, name=name)
+
+        async def _iterate() -> AsyncIterable[object]:
+            for item in values:
+                await asyncio.sleep(0)
+                yield item
+
+        return cls.from_async_iterable(_iterate(), name=name, capacity=capacity)
+
+
+RunArg = Arg | StreamArg | JsonValue
+
+
+class _ContextConfigurePatch(TypedDict, total=False):
+    cache_dir: Pathish | None
+    max_memory: int | None
+    prelude: str | None
+    runtime_lib_dir: Pathish | None
+    mounts: list[MountConfig] | None
+    env: dict[str, str]
+
+
+class _SandboxConfigureInput(TypedDict, total=False):
+    max_memory: int | None
+    timeout: float | None
+    mounts: list[MountConfig] | None
+    env: dict[str, str]
+
+
+def _normalize_mounts(
+    mounts: object, *, key: str = "mounts"
+) -> list[dict[str, str]] | None:
+    if mounts is None:
+        return None
+    if not isinstance(mounts, list):
+        msg = f"{key} must be a list[MountConfig] or None"
+        raise TypeError(msg)
+
+    mount_items = cast("list[object]", mounts)
+    encoded: list[dict[str, str]] = []
+    for mount_obj in mount_items:
+        if not isinstance(mount_obj, MountConfig):
+            msg = f"{key} entries must be MountConfig"
+            raise TypeError(msg)
+        encoded.append(mount_obj.to_dict())
+    return encoded
+
+
+def _normalize_path(value: object, *, key: str) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bytes):
+        msg = f"{key} must be str | os.PathLike[str], not bytes"
+        raise TypeError(msg)
+    if isinstance(value, PathLike):
+        path_like_value = cast("PathLike[str] | PathLike[bytes]", value)
+        raw_path = fspath(path_like_value)
+        if isinstance(raw_path, bytes):
+            msg = f"{key} must be str | os.PathLike[str], not bytes"
+            raise TypeError(msg)
+        return raw_path
+    msg = f"{key} must be str | os.PathLike[str]"
+    raise TypeError(msg)
+
+
+def _normalize_optional_path(value: object, *, key: str) -> str | None:
+    if value is None:
+        return None
+    return _normalize_path(value, key=key)
+
+
+def _timeout_seconds_to_ms(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        msg = "timeout must be float | None"
+        raise TypeError(msg)
+    timeout = float(value)
+    if not math.isfinite(timeout):
+        msg = "timeout must be finite"
+        raise ValueError(msg)
+    if timeout <= 0:
+        msg = "timeout must be greater than 0"
+        raise ValueError(msg)
+    timeout_ms = math.ceil(timeout * 1000)
+    if timeout_ms <= 0:
+        msg = "timeout must be at least 0.001 seconds"
+        raise ValueError(msg)
+    return timeout_ms
+
+
+def _configure_core(
+    core: _ContextCore | _SandboxCore, patch: dict[str, object]
+) -> None:
+    if patch:
+        core.configure_json(json.dumps(patch, separators=(",", ":")))
 
 
 class Context:
@@ -163,69 +253,56 @@ class Context:
         self._core = core
 
     @classmethod
-    async def create(cls, threads: int = 0) -> Context:
-        core = await asyncio.to_thread(_ContextCore, threads)
+    def create(cls) -> Context:
+        core = _ContextCore()
         return cls(core)
 
-    async def configure(
-        self,
-        *,
-        cache_dir: str | object | None = _UNSET,
-        max_memory: int | object = _UNSET,
-        prelude: str | object | None = _UNSET,
-        runtime_lib_dir: str | object | None = _UNSET,
-        mounts: list[MountConfig] | object | None = _UNSET,
-        env: dict[str, str] | object = _UNSET,
-    ) -> None:
-        patch: dict[str, object] = {}
+    def configure(self, **kwargs: Unpack[_ContextConfigurePatch]) -> None:
+        patch = dict(kwargs)
+        if "cache_dir" in patch:
+            patch["cache_dir"] = _normalize_optional_path(
+                patch["cache_dir"], key="cache_dir"
+            )
+        if "runtime_lib_dir" in patch:
+            patch["runtime_lib_dir"] = _normalize_optional_path(
+                patch["runtime_lib_dir"], key="runtime_lib_dir"
+            )
+        if "mounts" in patch:
+            patch["mounts"] = _normalize_mounts(patch["mounts"])
+        _configure_core(self._core, patch)
 
-        if cache_dir is not _UNSET:
-            patch["cache_dir"] = cache_dir
-        if max_memory is not _UNSET:
-            patch["max_memory"] = max_memory
-        if prelude is not _UNSET:
-            patch["prelude"] = prelude
-        if runtime_lib_dir is not _UNSET:
-            patch["runtime_lib_dir"] = runtime_lib_dir
-        if mounts is not _UNSET:
-            if mounts is None:
-                patch["mounts"] = None
-            elif isinstance(mounts, list):
-                mounts_list = cast("list[MountConfig]", mounts)
-                patch["mounts"] = [mount.to_dict() for mount in mounts_list]
-            else:
-                msg = "mounts must be a list[MountConfig] or None"
-                raise TypeError(msg)
-        if env is not _UNSET:
-            patch["env"] = env
-
-        if patch:
-            payload = json.dumps(patch)
-            await asyncio.to_thread(self._core.configure_json, payload)
-
-    async def initialize_template(self, runtime_path: str) -> None:
-        await asyncio.to_thread(self._core.initialize_template, runtime_path)
+    async def initialize_template(self, runtime_path: Pathish) -> None:
+        normalized_runtime_path = _normalize_path(runtime_path, key="runtime_path")
+        await self._core.initialize_template(normalized_runtime_path)
 
     async def instantiate(self, *, config: SandboxConfig | None = None) -> Sandbox:
-        core = await asyncio.to_thread(self._core.instantiate)
+        core = await self._core.instantiate()
         sandbox = Sandbox(core)
         if config is not None:
-            await sandbox.configure(**config.to_patch())
+            sandbox.configure(**config.to_patch())
         return sandbox
 
-    async def close(self) -> None:
-        await asyncio.to_thread(self._core.close)
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        self.close()
+
+    def close(self) -> None:
+        self._core.close()
 
 
 class Sandbox:
     def __init__(self, core: _SandboxCore) -> None:
         self._core = core
-        self._callback: Callable[[Event], Awaitable[None] | None] | None = None
-        self._dispatch: Callable[[str, str | None], None] | None = None
-        self._http_handler: (
-            Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None
-        ) = None
-        self._http_dispatch: (
+        self._event_dispatch: Callable[[str, str | None], None] | None = None
+        self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
                 Awaitable[tuple[int, dict[str, str], str, object]],
@@ -234,69 +311,72 @@ class Sandbox:
         ) = None
         self._pending_callback_tasks: set[asyncio.Task[None]] = set()
 
-    async def configure(
-        self,
-        *,
-        max_memory: int | object | None = _UNSET,
-        timeout_ms: int | object | None = _UNSET,
-        mounts: list[MountConfig] | object | None = _UNSET,
-        env: dict[str, str] | object = _UNSET,
-    ) -> None:
-        patch: dict[str, object] = {}
-
-        if max_memory is not _UNSET:
-            patch["max_memory"] = max_memory
-        if timeout_ms is not _UNSET:
+    def configure(self, **kwargs: Unpack[_SandboxConfigureInput]) -> None:
+        patch = dict(kwargs)
+        if "timeout" in patch:
+            timeout_value = patch.pop("timeout")
+            timeout_ms = _timeout_seconds_to_ms(timeout_value)
             patch["timeout_ms"] = timeout_ms
-        if mounts is not _UNSET:
-            if mounts is None:
-                patch["mounts"] = None
-            elif isinstance(mounts, list):
-                mounts_list = cast("list[MountConfig]", mounts)
-                patch["mounts"] = [mount.to_dict() for mount in mounts_list]
-            else:
-                msg = "mounts must be a list[MountConfig] or None"
-                raise TypeError(msg)
-        if env is not _UNSET:
-            patch["env"] = env
-
-        if patch:
-            payload = json.dumps(patch)
-            await asyncio.to_thread(self._core.configure_json, payload)
+            self._http_handler_timeout_seconds = (
+                None if timeout_ms is None else timeout_ms / 1000
+            )
+        if "mounts" in patch:
+            patch["mounts"] = _normalize_mounts(patch["mounts"])
+        _configure_core(self._core, patch)
 
     def set_callback(
         self, callback: Callable[[Event], Awaitable[None] | None] | None
     ) -> None:
-        self._callback = callback
-
         if callback is None:
-            self._dispatch = None
+            self._event_dispatch = None
             self._core.set_callback(None)
             return
 
         loop = asyncio.get_running_loop()
 
         def _dispatch(kind: str, data: str | None) -> None:
-            event = Event(kind=cast("EventKind", kind), data=data)
+            mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
+            event = Event(kind=cast("EventKind", mapped_kind), data=data)
 
             def _invoke() -> None:
-                outcome = callback(event)
+                try:
+                    outcome = callback(event)
+                except Exception as exc:  # noqa: BLE001  # pragma: no cover - loop handler path
+                    context: dict[str, object] = {
+                        "message": "isola callback raised synchronously",
+                        "exception": exc,
+                    }
+                    loop.call_exception_handler(context)
+                    return
                 if inspect.isawaitable(outcome):
                     future = asyncio.ensure_future(outcome)
                     self._pending_callback_tasks.add(future)
-                    future.add_done_callback(self._pending_callback_tasks.discard)
+
+                    def _on_done(task: asyncio.Task[None]) -> None:
+                        self._pending_callback_tasks.discard(task)
+                        if task.cancelled():
+                            return
+                        exc = task.exception()
+                        if exc is not None:  # pragma: no cover - loop handler path
+                            context: dict[str, object] = {
+                                "message": "isola callback task failed",
+                                "exception": exc,
+                                "task": task,
+                            }
+                            loop.call_exception_handler(context)
+
+                    future.add_done_callback(_on_done)
 
             loop.call_soon_threadsafe(_invoke)
 
-        self._dispatch = _dispatch
+        self._event_dispatch = _dispatch
         self._core.set_callback(_dispatch)
 
     def set_http_handler(
-        self, handler: Callable[[HttpRequestData], Awaitable[HttpResponseData]] | None
+        self, handler: Callable[[HttpRequest], Awaitable[object]] | None
     ) -> None:
-        self._http_handler = handler
         if handler is None:
-            self._http_dispatch = None
+            self._http_handler_dispatch = None
             self._core.set_http_handler(None, None)
             return
 
@@ -305,39 +385,85 @@ class Sandbox:
         async def _dispatch(
             method: str, url: str, headers: dict[str, str], body: bytes | None
         ) -> tuple[int, dict[str, str], str, object]:
-            request = HttpRequestData(
+            request = HttpRequest(
                 method=method, url=url, headers=dict(headers), body=body
             )
-            response_obj = cast("object", await handler(request))
-            if not isinstance(response_obj, HttpResponseData):
-                msg = "http handler must return HttpResponseData"
+            timeout = self._http_handler_timeout_seconds
+            if timeout is None:
+                response: object = await handler(request)
+            else:
+                response = await asyncio.wait_for(handler(request), timeout=timeout)
+            if not isinstance(response, HttpResponse):
+                msg = "http handler must return HttpResponse"
                 raise TypeError(msg)
-            response = response_obj
             body_mode, body_payload = _normalize_http_response_body(response.body)
             return (response.status, dict(response.headers), body_mode, body_payload)
 
-        self._http_dispatch = _dispatch
+        self._http_handler_dispatch = _dispatch
         self._core.set_http_handler(_dispatch, loop)
 
     async def start(self) -> None:
-        await asyncio.to_thread(self._core.start)
+        await self._core.start()
 
-    async def load_script(self, code: str, timeout_s: float | None = None) -> None:
-        operation = asyncio.to_thread(self._core.load_script, code, None)
-        await _await_with_timeout(operation, timeout_s)
+    async def load_script(self, code: str) -> None:
+        await self._core.load_script(code)
 
-    async def run(
-        self,
-        func: str,
-        args: list[JsonArg | JsonStreamArg | object] | None = None,
-        timeout_s: float | None = None,
-    ) -> RunResult:
+    async def run(self, name: str, args: list[RunArg] | None = None) -> RunResult:
+        results: list[JsonValue] = []
+        final: JsonValue | None = None
+        stdout: list[str] = []
+        stderr: list[str] = []
+        logs: list[str] = []
+        errors: list[str] = []
+
+        async for event in self.run_stream(name, args):
+            if event.kind == "result":
+                if event.data is not None:
+                    results.append(cast("JsonValue", json.loads(event.data)))
+                continue
+
+            if event.kind == "end":
+                final = (
+                    None
+                    if event.data is None
+                    else cast("JsonValue", json.loads(event.data))
+                )
+                continue
+
+            if event.kind == "stdout":
+                if event.data is not None:
+                    stdout.append(event.data)
+                continue
+
+            if event.kind == "stderr":
+                if event.data is not None:
+                    stderr.append(event.data)
+                continue
+
+            if event.kind == "log":
+                if event.data is not None:
+                    logs.append(event.data)
+                continue
+
+            if event.data is not None:
+                errors.append(event.data)
+
+        return RunResult(
+            results=results,
+            final=final,
+            stdout=stdout,
+            stderr=stderr,
+            logs=logs,
+            errors=errors,
+        )
+
+    async def _run_operation(self, name: str, args: list[RunArg] | None = None) -> None:
         encoded_args, producers = _encode_args(args)
-        operation = asyncio.to_thread(self._core.run, func, encoded_args, None)
+        operation = self._core.run(name, encoded_args)
 
         try:
-            core_result = await _await_with_timeout(operation, timeout_s)
-        except Exception:
+            await operation
+        except BaseException:
             for producer in producers:
                 producer.cancel()
             if producers:
@@ -347,116 +473,83 @@ class Sandbox:
         if producers:
             await asyncio.gather(*producers)
 
-        return _convert_result(core_result)
+    async def run_stream(
+        self, name: str, args: list[RunArg] | None = None
+    ) -> AsyncIterator[Event]:
+        queue: asyncio.Queue[Event] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        previous_dispatch = self._event_dispatch
 
-    async def close(self) -> None:
-        self._http_handler = None
-        self._http_dispatch = None
-        await asyncio.to_thread(self._core.close)
+        def _dispatch(kind: str, data: str | None) -> None:
+            mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
+            event = Event(kind=cast("EventKind", mapped_kind), data=data)
+            loop.call_soon_threadsafe(queue.put_nowait, event)
+            if previous_dispatch is not None:
+                previous_dispatch(kind, data)
 
-
-class RuntimeDownloadError(IsolaError):
-    pass
-
-
-class RuntimeManager:
-    @staticmethod
-    async def ensure_latest(
-        *, cache_subdir: str = "isola/runtime", force: bool = False
-    ) -> str:
-        operation = partial(_ensure_latest_runtime_sync, cache_subdir, force=force)
-        return await asyncio.to_thread(operation)
-
-
-def _ensure_latest_runtime_sync(cache_subdir: str, *, force: bool) -> str:
-    runtime_root = _data_root() / cache_subdir
-    wasm_path = runtime_root / "bin" / "python3.wasm"
-
-    if wasm_path.exists() and not force:
-        return str(runtime_root)
-
-    runtime_root.mkdir(parents=True, exist_ok=True)
-    _clear_directory(runtime_root)
-
-    with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=True) as archive:
-        try:
-            with urllib.request.urlopen(_RUNTIME_BUNDLE_URL, timeout=120) as response:
-                archive.write(response.read())
-                archive.flush()
-        except Exception as exc:
-            message = f"failed to download runtime bundle: {exc}"
-            raise RuntimeDownloadError(message) from exc
+        self._event_dispatch = _dispatch
+        self._core.set_callback(_dispatch)
+        run_task = asyncio.create_task(self._run_operation(name, args))
 
         try:
-            with tarfile.open(archive.name, mode="r:gz") as tar:
-                _safe_extract(tar, runtime_root)
-        except Exception as exc:
-            message = f"failed to extract runtime bundle: {exc}"
-            raise RuntimeDownloadError(message) from exc
+            while True:
+                get_event_task: asyncio.Task[Event] = asyncio.create_task(queue.get())
+                done, _ = await asyncio.wait(
+                    {run_task, get_event_task}, return_when=asyncio.FIRST_COMPLETED
+                )
 
-    _normalize_runtime_layout(runtime_root)
+                if get_event_task in done:
+                    yield get_event_task.result()
+                    continue
 
-    if not wasm_path.exists():
-        message = f"runtime bundle is missing '{wasm_path}' after extraction"
-        raise RuntimeDownloadError(message)
+                get_event_task.cancel()
+                await asyncio.gather(get_event_task, return_exceptions=True)
 
-    return str(runtime_root)
+                while not queue.empty():
+                    yield queue.get_nowait()
 
+                await run_task
+                break
+        finally:
+            if self._event_dispatch is _dispatch:
+                self._event_dispatch = previous_dispatch
+                self._core.set_callback(previous_dispatch)
+            if not run_task.done():
+                run_task.cancel()
+                await asyncio.gather(run_task, return_exceptions=True)
 
-def _safe_extract(tar: tarfile.TarFile, target_dir: Path) -> None:
-    target_dir = target_dir.resolve()
+    def __enter__(self) -> Self:
+        return self
 
-    for member in tar.getmembers():
-        destination = (target_dir / member.name).resolve()
-        if destination != target_dir and target_dir not in destination.parents:
-            message = "runtime archive contains unsafe paths"
-            raise RuntimeDownloadError(message)
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
-    for member in tar.getmembers():
-        tar.extract(member, target_dir)
+    async def __aenter__(self) -> Self:
+        return self
 
+    async def __aexit__(self, *_: object) -> None:
+        await self.aclose()
 
-def _normalize_runtime_layout(runtime_root: Path) -> None:
-    wasm_path = runtime_root / "bin" / "python3.wasm"
-    if wasm_path.exists():
-        return
+    def close(self) -> None:
+        self._cancel_pending_callback_tasks()
+        self._event_dispatch = None
+        self._http_handler_dispatch = None
+        self._core.close()
 
-    candidates = [entry for entry in runtime_root.iterdir() if entry.is_dir()]
-    if len(candidates) != 1:
-        return
+    async def aclose(self) -> None:
+        pending = self._cancel_pending_callback_tasks()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        self._event_dispatch = None
+        self._http_handler_dispatch = None
+        self._core.close()
 
-    nested_root = candidates[0]
-    nested_wasm = nested_root / "bin" / "python3.wasm"
-    if not nested_wasm.exists():
-        return
-
-    for item in nested_root.iterdir():
-        shutil.move(str(item), runtime_root / item.name)
-    nested_root.rmdir()
-
-
-def _clear_directory(directory: Path) -> None:
-    for item in directory.iterdir():
-        if item.is_dir():
-            shutil.rmtree(item)
-        else:
-            item.unlink()
-
-
-def _data_root() -> Path:
-    if os.name == "nt":
-        appdata = os.environ.get("APPDATA")
-        if appdata:
-            return Path(appdata)
-        return Path.home() / "AppData" / "Roaming"
-
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support"
-
-    xdg = os.environ.get("XDG_DATA_HOME")
-    if xdg:
-        return Path(xdg)
-    return Path.home() / ".local" / "share"
+    def _cancel_pending_callback_tasks(self) -> tuple[asyncio.Task[None], ...]:
+        pending = tuple(self._pending_callback_tasks)
+        for task in pending:
+            task.cancel()
+        self._pending_callback_tasks.clear()
+        return pending
 
 
 def _to_json(value: object) -> str:
@@ -464,7 +557,7 @@ def _to_json(value: object) -> str:
 
 
 def _encode_args(
-    args: list[JsonArg | JsonStreamArg | object] | None,
+    args: list[RunArg] | None,
 ) -> tuple[list[tuple[str, str | None, object]], list[asyncio.Task[None]]]:
     if args is None:
         return [], []
@@ -473,11 +566,11 @@ def _encode_args(
     producers: list[asyncio.Task[None]] = []
 
     for arg in args:
-        if isinstance(arg, JsonArg):
+        if isinstance(arg, Arg):
             encoded.append(("json", arg.name, _to_json(arg.value)))
             continue
 
-        if isinstance(arg, JsonStreamArg):
+        if isinstance(arg, StreamArg):
             encoded.append(("stream", arg.name, arg.stream_core))
             if arg.producer_task is not None:
                 producers.append(arg.producer_task)
@@ -488,51 +581,34 @@ def _encode_args(
     return encoded, producers
 
 
-def _convert_result(core_result: _RunResultCore) -> RunResult:
-    results = [cast("JsonValue", json.loads(item)) for item in core_result.result_json]
-    if core_result.final_json is None:
-        final = None
-    else:
-        final = cast("JsonValue", json.loads(core_result.final_json))
-
-    return RunResult(
-        results=results,
-        final=final,
-        stdout=list(core_result.stdout),
-        stderr=list(core_result.stderr),
-        logs=list(core_result.logs),
-        errors=list(core_result.errors),
-    )
-
-
-def _normalize_http_response_body(body: HttpBodyOut) -> tuple[str, object]:
+def _normalize_http_response_body(body: object) -> tuple[str, object]:
     if body is None:
         return ("none", None)
 
-    if isinstance(body, (bytes, bytearray, memoryview)):
+    if isinstance(body, bytes):
+        return ("bytes", body)
+    if isinstance(body, bytearray):
         return ("bytes", bytes(body))
+    if isinstance(body, memoryview):
+        return ("bytes", body.tobytes())
 
-    if not hasattr(body, "__aiter__"):
+    if not isinstance(body, AsyncIterable):
         msg = "http response body must be bytes, AsyncIterable[bytes], or None"
         raise TypeError(msg)
 
-    async def _stream_body(source: AsyncIterable[bytes]) -> AsyncIterable[bytes]:
+    async def _stream_body(source: AsyncIterable[object]) -> AsyncIterable[bytes]:
         async for chunk in source:
-            yield bytes(chunk)
+            if isinstance(chunk, bytes):
+                yield chunk
+                continue
+            if isinstance(chunk, bytearray):
+                yield bytes(chunk)
+                continue
+            if isinstance(chunk, memoryview):
+                yield chunk.tobytes()
+                continue
+            msg = "http response stream chunks must be bytes-like"
+            raise TypeError(msg)
 
-    return ("stream", _stream_body(body))
-
-
-async def _await_with_timeout(awaitable: Awaitable[T], timeout_s: float | None) -> T:
-    if timeout_s is None:
-        return await awaitable
-
-    timeout_ctx = getattr(asyncio, "timeout", None)
-    if timeout_ctx is not None:
-        timeout_factory = cast(
-            "Callable[[float], AbstractAsyncContextManager[None]]", timeout_ctx
-        )
-        async with timeout_factory(timeout_s):
-            return await awaitable
-
-    return await asyncio.wait_for(awaitable, timeout_s)
+    source = cast("AsyncIterable[object]", body)
+    return ("stream", _stream_body(source))

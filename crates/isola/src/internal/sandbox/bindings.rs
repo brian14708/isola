@@ -24,7 +24,7 @@ wasmtime::component::bindgen!({
 use std::{future::Future, sync::Arc};
 
 use bytes::Bytes;
-pub use exports::isola::script::guest;
+pub use exports::isola::script::runtime;
 use wasmtime::component::{HasData, Linker};
 use wasmtime_wasi::ResourceTable;
 

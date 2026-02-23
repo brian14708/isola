@@ -10,7 +10,7 @@ use std::cell::RefCell;
 
 use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
 
-use self::{exports::isola::script::guest, isola::script::host, wasi::io::streams::StreamError};
+use self::{exports::isola::script::runtime, isola::script::host, wasi::io::streams::StreamError};
 use crate::{
     error::Error,
     script::{InputValue, Scope},
@@ -135,7 +135,7 @@ export!(Global);
 
 pub struct Global;
 
-impl guest::Guest for Global {
+impl runtime::Guest for Global {
     fn initialize(preinit: bool, prelude: Option<String>) {
         GLOBAL_SCOPE.with(|scope| {
             let mut scope = scope.borrow_mut();
@@ -181,14 +181,14 @@ impl guest::Guest for Global {
         }
     }
 
-    fn eval_script(script: String) -> Result<(), guest::Error> {
+    fn eval_script(script: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
                 |sandbox| {
                     let result = sandbox
                         .load_script(&script)
-                        .map_err(Into::<guest::Error>::into);
+                        .map_err(Into::<runtime::Error>::into);
                     sandbox.flush();
                     result
                 },
@@ -196,14 +196,14 @@ impl guest::Guest for Global {
         })
     }
 
-    fn eval_file(path: String) -> Result<(), guest::Error> {
+    fn eval_file(path: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             if let Some(sandbox) = sandbox.as_ref() {
                 let script = std::fs::read_to_string(std::path::Path::new(&path))
                     .map_err(|_e| Error::UnexpectedError("fail to read script"))?;
                 let result = sandbox
                     .load_script(&script)
-                    .map_err(Into::<guest::Error>::into);
+                    .map_err(Into::<runtime::Error>::into);
                 sandbox.flush();
                 result
             } else {
@@ -212,7 +212,7 @@ impl guest::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<guest::Argument>) -> Result<(), guest::Error> {
+    fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
@@ -220,7 +220,7 @@ impl guest::Guest for Global {
                     let mut positional = vec![];
                     let mut named = vec![];
                     for arg in args {
-                        let guest::Argument { name, value } = arg;
+                        let runtime::Argument { name, value } = arg;
                         let value = match value {
                             host::Value::Cbor(s) => InputValue::Cbor(s.into()),
                             host::Value::CborIterator(e) => InputValue::Iter(ArgIter { iter: e }),
@@ -235,7 +235,7 @@ impl guest::Guest for Global {
                         .run(&func, positional, named, |emit_type, data| {
                             host::blocking_emit(emit_type, data);
                         })
-                        .map_err(Into::<guest::Error>::into);
+                        .map_err(Into::<runtime::Error>::into);
                     sandbox.flush();
                     ret
                 },

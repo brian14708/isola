@@ -1,8 +1,7 @@
 use std::{
     collections::BTreeMap,
-    future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::Duration,
 };
 
@@ -17,6 +16,7 @@ use isola::{
     sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
     value::Value,
 };
+use parking_lot::Mutex;
 use pyo3::{
     create_exception,
     exceptions::PyException,
@@ -24,13 +24,9 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyModule},
 };
 use serde::Deserialize;
-use tokio::runtime::{Builder, Runtime};
 
-const DEFAULT_TIMEOUT_MS: u64 = 30_000;
-const DEFAULT_MAX_MEMORY_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_STREAM_CAPACITY: usize = 1024;
 const DEFAULT_HTTP_STREAM_CAPACITY: usize = 8;
-const DEFAULT_PRELUDE: &str = "import sandbox.asyncio";
 
 create_exception!(_isola, IsolaError, PyException);
 create_exception!(_isola, InvalidArgumentError, IsolaError);
@@ -86,7 +82,7 @@ enum CacheDirConfig {
 #[derive(Clone, Debug)]
 struct ContextConfig {
     cache_dir: CacheDirConfig,
-    max_memory: usize,
+    max_memory: Option<usize>,
     prelude: Option<String>,
     runtime_lib_dir: Option<PathBuf>,
     mounts: Vec<ConfiguredMount>,
@@ -97,8 +93,8 @@ impl Default for ContextConfig {
     fn default() -> Self {
         Self {
             cache_dir: CacheDirConfig::Auto,
-            max_memory: DEFAULT_MAX_MEMORY_BYTES,
-            prelude: Some(DEFAULT_PRELUDE.to_string()),
+            max_memory: None,
+            prelude: None,
             runtime_lib_dir: None,
             mounts: Vec::new(),
             env: Vec::new(),
@@ -106,23 +102,12 @@ impl Default for ContextConfig {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct PendingSandboxConfig {
     max_memory: Option<usize>,
     mounts: Vec<ConfiguredMount>,
     env: Vec<(String, String)>,
     timeout_ms: Option<u64>,
-}
-
-impl Default for PendingSandboxConfig {
-    fn default() -> Self {
-        Self {
-            max_memory: None,
-            mounts: Vec::new(),
-            env: Vec::new(),
-            timeout_ms: Some(DEFAULT_TIMEOUT_MS),
-        }
-    }
 }
 
 impl PendingSandboxConfig {
@@ -160,10 +145,14 @@ impl PendingSandboxConfig {
         }
 
         if let Some(timeout_ms) = patch.timeout_ms {
-            if timeout_ms == 0 {
-                return Err(invalid_argument("timeout_ms must be greater than 0"));
-            }
-            self.timeout_ms = Some(timeout_ms);
+            self.timeout_ms = timeout_ms
+                .map(|value| {
+                    if value == 0 {
+                        return Err(invalid_argument("timeout_ms must be greater than 0"));
+                    }
+                    Ok(value)
+                })
+                .transpose()?;
         }
 
         if let Some(mounts) = patch.mounts {
@@ -184,77 +173,24 @@ struct ContextState {
 }
 
 struct ContextInner {
-    rt: Runtime,
-    runtime_lock: Option<Mutex<()>>,
     state: Mutex<ContextState>,
 }
 
 impl ContextInner {
-    fn new(nr_thread: i32) -> Result<Self> {
-        let (rt, runtime_lock) = match nr_thread {
-            0 => (
-                Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
-                Some(Mutex::new(())),
-            ),
-            n if n > 0 => (
-                Builder::new_multi_thread()
-                    .worker_threads(
-                        n.try_into()
-                            .map_err(|_| invalid_argument("invalid thread count"))?,
-                    )
-                    .thread_name("isola-runner")
-                    .enable_all()
-                    .build()
-                    .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
-                None,
-            ),
-            _ => (
-                Builder::new_multi_thread()
-                    .thread_name("isola-runner")
-                    .enable_all()
-                    .build()
-                    .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
-                None,
-            ),
-        };
-
-        Ok(Self {
-            rt,
-            runtime_lock,
+    fn new() -> Self {
+        Self {
             state: Mutex::new(ContextState {
                 config: ContextConfig::default(),
                 template: None,
             }),
-        })
-    }
-
-    fn block_on<F, T>(&self, fut: F) -> Result<T>
-    where
-        F: Future<Output = T>,
-    {
-        let _guard = if let Some(lock) = &self.runtime_lock {
-            Some(
-                lock.lock()
-                    .map_err(|_| Error::Internal("Runtime lock poisoned".to_string()))?,
-            )
-        } else {
-            None
-        };
-
-        Ok(self.rt.block_on(fut))
+        }
     }
 
     fn set_context_config_json(&self, json: &[u8]) -> Result<()> {
         let patch: ContextConfigPatch = serde_json::from_slice(json)
             .map_err(|_| invalid_argument("invalid context config JSON"))?;
 
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| Error::Internal("Context state lock poisoned".to_string()))?;
+        let mut state = self.state.lock();
 
         if state.template.is_some() {
             return Err(invalid_argument("context template already initialized"));
@@ -263,8 +199,8 @@ impl ContextInner {
         state.config.apply_patch(patch)
     }
 
-    fn initialize_template(&self, runtime_path: &Path) -> Result<()> {
-        let mut wasm_path = runtime_path.to_owned();
+    async fn initialize_template(&self, runtime_path: PathBuf) -> Result<()> {
+        let mut wasm_path = runtime_path;
         wasm_path.push("python3.wasm");
 
         let parent = wasm_path
@@ -273,10 +209,7 @@ impl ContextInner {
             .to_owned();
 
         let config = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| Error::Internal("Context state lock poisoned".to_string()))?;
+            let state = self.state.lock();
 
             if state.template.is_some() {
                 return Err(invalid_argument("context template already initialized"));
@@ -287,7 +220,9 @@ impl ContextInner {
 
         let mut builder = SandboxTemplate::<Env>::builder();
         builder = builder.prelude(config.prelude.clone());
-        builder = builder.max_memory(config.max_memory);
+        if let Some(max_memory) = config.max_memory {
+            builder = builder.max_memory(max_memory);
+        }
 
         builder = match config.cache_dir {
             CacheDirConfig::Auto => builder.cache(Some(parent.join("cache"))),
@@ -317,14 +252,12 @@ impl ContextInner {
             let _ = builder.env(k, v);
         }
 
-        let template = self
-            .block_on(async { builder.build::<Env>(&wasm_path).await })?
+        let template = builder
+            .build::<Env>(&wasm_path)
+            .await
             .map_err(|e| Error::Internal(format!("Failed to load runtime template: {e}")))?;
 
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|_| Error::Internal("Context state lock poisoned".to_string()))?;
+        let mut state = self.state.lock();
 
         if state.template.is_some() {
             return Err(invalid_argument("context template already initialized"));
@@ -335,28 +268,24 @@ impl ContextInner {
         Ok(())
     }
 
-    fn instantiate_sandbox(&self, options: SandboxOptions, env: Env) -> Result<Sandbox<Env>> {
+    async fn instantiate_sandbox(&self, options: SandboxOptions, env: Env) -> Result<Sandbox<Env>> {
         let template = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| Error::Internal("Context state lock poisoned".to_string()))?;
+            let state = self.state.lock();
             state
                 .template
                 .clone()
                 .ok_or_else(|| invalid_argument("runtime template not initialized"))?
         };
 
-        self.block_on(async { template.instantiate(env, options).await })?
+        template
+            .instantiate(env, options)
+            .await
             .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))
     }
 
-    fn has_template(&self) -> Result<bool> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|_| Error::Internal("Context state lock poisoned".to_string()))?;
-        Ok(state.template.is_some())
+    fn has_template(&self) -> bool {
+        let state = self.state.lock();
+        state.template.is_some()
     }
 }
 
@@ -367,7 +296,7 @@ struct ContextConfigPatch {
     #[serde(default)]
     cache_dir: Option<Option<String>>,
     #[serde(default)]
-    max_memory: Option<u64>,
+    max_memory: Option<Option<u64>>,
     #[serde(default)]
     prelude: Option<Option<String>>,
     #[serde(default)]
@@ -388,8 +317,12 @@ impl ContextConfig {
 
         if let Some(max_memory) = patch.max_memory {
             self.max_memory = max_memory
-                .try_into()
-                .map_err(|_| invalid_argument("max_memory exceeds usize"))?;
+                .map(|value| {
+                    value
+                        .try_into()
+                        .map_err(|_| invalid_argument("max_memory exceeds usize"))
+                })
+                .transpose()?;
         }
 
         if let Some(prelude) = patch.prelude {
@@ -440,7 +373,7 @@ struct SandboxConfigPatch {
     #[serde(default)]
     max_memory: Option<Option<u64>>,
     #[serde(default)]
-    timeout_ms: Option<u64>,
+    timeout_ms: Option<Option<u64>>,
     #[serde(default)]
     mounts: Option<Vec<MountConfigInput>>,
     #[serde(default)]
@@ -518,9 +451,8 @@ fn resolve_runtime_lib_dir(template_parent: &Path, runtime_lib_dir: Option<PathB
     )
 }
 
-#[derive(Clone)]
 struct PyCallback {
-    callback: Arc<Py<PyAny>>,
+    callback: Py<PyAny>,
 }
 
 // SAFETY: callback invocation always reacquires the GIL before touching Python
@@ -535,16 +467,15 @@ impl PyCallback {
         Python::attach(|py| {
             let callback = self.callback.bind(py);
             if let Err(err) = callback.call1((event.as_str(), data)) {
-                eprintln!("isola callback error: {err}");
+                err.write_unraisable(py, Some(callback));
             }
         });
     }
 }
 
-#[derive(Clone)]
 struct PyHttpHandler {
-    callback: Arc<Py<PyAny>>,
-    event_loop: Arc<Py<PyAny>>,
+    callback: Py<PyAny>,
+    event_loop: Py<PyAny>,
 }
 
 // SAFETY: Python objects are only touched while holding the GIL.
@@ -571,25 +502,24 @@ fn py_bytes_to_rust_bytes(value: &Bound<'_, PyAny>) -> std::result::Result<Bytes
         return Ok(Bytes::copy_from_slice(py_bytes.as_bytes()));
     }
 
-    Python::attach(|py| {
-        let builtins = py
-            .import("builtins")
-            .map_err(|e| py_error_to_box_error("builtins", &e))?;
-        let coerced = builtins
-            .call_method1("bytes", (value,))
-            .map_err(|e| py_error_to_box_error("body chunk must be bytes-like", &e))?;
-        let py_bytes = coerced
-            .cast::<PyBytes>()
-            .map_err(|e| io_error(format!("body coercion failed: {e}")))?;
-        Ok(Bytes::copy_from_slice(py_bytes.as_bytes()))
-    })
+    let py = value.py();
+    let builtins = py
+        .import("builtins")
+        .map_err(|e| py_error_to_box_error("builtins", &e))?;
+    let coerced = builtins
+        .call_method1("bytes", (value,))
+        .map_err(|e| py_error_to_box_error("body chunk must be bytes-like", &e))?;
+    let py_bytes = coerced
+        .cast::<PyBytes>()
+        .map_err(|e| io_error(format!("body coercion failed: {e}")))?;
+    Ok(Bytes::copy_from_slice(py_bytes.as_bytes()))
 }
 
 impl PyHttpHandler {
-    fn new(callback: Py<PyAny>, event_loop: Py<PyAny>) -> Self {
+    const fn new(callback: Py<PyAny>, event_loop: Py<PyAny>) -> Self {
         Self {
-            callback: Arc::new(callback),
-            event_loop: Arc::new(event_loop),
+            callback,
+            event_loop,
         }
     }
 
@@ -597,7 +527,7 @@ impl PyHttpHandler {
         &self,
         create_coro: impl for<'py> FnOnce(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
     ) -> std::result::Result<Py<PyAny>, BoxError> {
-        let event_loop = Arc::clone(&self.event_loop);
+        let event_loop = Python::attach(|py| self.event_loop.clone_ref(py));
         tokio::task::spawn_blocking(move || {
             Python::attach(|py| {
                 let asyncio = py
@@ -634,7 +564,7 @@ impl PyHttpHandler {
             })
             .collect::<Vec<_>>();
         let body = incoming.body().clone();
-        let callback = Arc::clone(&self.callback);
+        let callback = Python::attach(|py| self.callback.clone_ref(py));
 
         let result = self
             .await_coroutine_blocking(move |py| {
@@ -693,11 +623,12 @@ impl PyHttpHandler {
         iterator: Py<PyAny>,
     ) -> tokio::sync::mpsc::Receiver<std::result::Result<Frame<Bytes>, BoxError>> {
         let (tx, rx) = tokio::sync::mpsc::channel(DEFAULT_HTTP_STREAM_CAPACITY);
-        let event_loop = Arc::clone(&self.event_loop);
+        let event_loop = Python::attach(|py| self.event_loop.clone_ref(py));
+        let iterator = Arc::new(iterator);
         tokio::spawn(async move {
             loop {
-                let iterator_ref = Python::attach(|py| iterator.clone_ref(py));
-                let event_loop = Arc::clone(&event_loop);
+                let iterator = Arc::clone(&iterator);
+                let event_loop = Python::attach(|py| event_loop.clone_ref(py));
                 let next = tokio::task::spawn_blocking(move || {
                     Python::attach(|py| {
                         let builtins = py
@@ -706,7 +637,7 @@ impl PyHttpHandler {
                         let anext = builtins
                             .getattr("anext")
                             .map_err(|e| py_error_to_box_error("failed to access anext", &e))?;
-                        let coro = anext.call1((iterator_ref.bind(py),)).map_err(|e| {
+                        let coro = anext.call1((iterator.bind(py),)).map_err(|e| {
                             py_error_to_box_error("failed to create anext coroutine", &e)
                         })?;
                         let asyncio = py
@@ -814,9 +745,8 @@ impl OutputCollector {
     where
         F: FnOnce(&mut OutputData),
     {
-        if let Ok(mut data) = self.data.lock() {
-            f(&mut data);
-        }
+        let mut data = self.data.lock();
+        f(&mut data);
     }
 
     fn emit(&self, event: CallbackEvent, payload: Option<&str>) {
@@ -831,11 +761,7 @@ impl OutputCollector {
     }
 
     fn into_result(self) -> PyRunResult {
-        let data = self
-            .data
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default();
+        let data = self.data.lock().clone();
         PyRunResult {
             result_json: data.result_json,
             final_json: data.final_json,
@@ -905,10 +831,45 @@ enum SandboxInner {
         http_handler: Option<Arc<PyHttpHandler>>,
     },
     Running {
-        sandbox: Sandbox<Env>,
+        sandbox: Option<Sandbox<Env>>,
         callback: Option<Arc<PyCallback>>,
         timeout_ms: Option<u64>,
     },
+}
+
+struct RunningSandboxLease {
+    inner: Arc<Mutex<SandboxInner>>,
+    sandbox: Option<Sandbox<Env>>,
+}
+
+impl RunningSandboxLease {
+    const fn new(inner: Arc<Mutex<SandboxInner>>, sandbox: Sandbox<Env>) -> Self {
+        Self {
+            inner,
+            sandbox: Some(sandbox),
+        }
+    }
+
+    const fn sandbox_mut(&mut self) -> &mut Sandbox<Env> {
+        self.sandbox
+            .as_mut()
+            .expect("running sandbox lease must contain sandbox")
+    }
+}
+
+impl Drop for RunningSandboxLease {
+    fn drop(&mut self) {
+        let Some(sandbox) = self.sandbox.take() else {
+            return;
+        };
+
+        let mut guard = self.inner.lock();
+        if let SandboxInner::Running { sandbox: slot, .. } = &mut *guard
+            && slot.is_none()
+        {
+            *slot = Some(sandbox);
+        }
+    }
 }
 
 #[pyclass(name = "_ContextCore")]
@@ -927,46 +888,58 @@ impl PyContext {
 #[pymethods]
 impl PyContext {
     #[new]
-    #[pyo3(signature = (threads = 0))]
-    fn new(py: Python<'_>, threads: i32) -> PyResult<Self> {
-        let inner = py
-            .detach(|| ContextInner::new(threads))
-            .map_err(to_py_err)?;
-        Ok(Self {
+    fn new() -> Self {
+        let inner = ContextInner::new();
+        Self {
             inner: Some(Arc::new(inner)),
+        }
+    }
+
+    fn configure_json(&self, config_json: &str) -> PyResult<()> {
+        let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
+        let bytes = config_json.as_bytes().to_vec();
+        inner.set_context_config_json(&bytes).map_err(to_py_err)
+    }
+
+    fn initialize_template<'py>(
+        &self,
+        py: Python<'py>,
+        runtime_path: &str,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
+        let runtime_path = PathBuf::from(runtime_path);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            inner
+                .initialize_template(runtime_path)
+                .await
+                .map_err(to_py_err)?;
+            Ok(())
         })
     }
 
-    fn configure_json(&self, py: Python<'_>, config_json: &str) -> PyResult<()> {
+    fn instantiate<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
-        let bytes = config_json.as_bytes().to_vec();
-        py.detach(move || inner.set_context_config_json(&bytes))
-            .map_err(to_py_err)
-    }
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let has_template = inner.has_template();
+            if !has_template {
+                return Err(to_py_err(invalid_argument(
+                    "runtime template not initialized",
+                )));
+            }
 
-    fn initialize_template(&self, py: Python<'_>, runtime_path: &str) -> PyResult<()> {
-        let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
-        let runtime_path = runtime_path.to_string();
-        py.detach(move || inner.initialize_template(Path::new(&runtime_path)))
-            .map_err(to_py_err)
-    }
-
-    fn instantiate(&self) -> PyResult<PySandbox> {
-        let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
-        let has_template = inner.has_template().map_err(to_py_err)?;
-        if !has_template {
-            return Err(to_py_err(invalid_argument(
-                "runtime template not initialized",
-            )));
-        }
-
-        Ok(PySandbox {
-            ctx: inner,
-            inner: Arc::new(Mutex::new(SandboxInner::Pending {
-                config: PendingSandboxConfig::default(),
-                callback: None,
-                http_handler: None,
-            })),
+            Python::attach(|py| {
+                Py::new(
+                    py,
+                    PySandbox {
+                        ctx: inner,
+                        inner: Arc::new(Mutex::new(SandboxInner::Pending {
+                            config: PendingSandboxConfig::default(),
+                            callback: None,
+                            http_handler: None,
+                        })),
+                    },
+                )
+            })
         })
     }
 
@@ -1015,25 +988,6 @@ fn parse_run_args(py: Python<'_>, args: Vec<WireArgument>) -> Result<Vec<RawArgu
     Ok(parsed)
 }
 
-fn block_on_with_optional_timeout<F, T>(
-    ctx: &ContextInner,
-    timeout_ms: Option<u64>,
-    timeout_label: &'static str,
-    fut: F,
-) -> Result<T>
-where
-    F: Future<Output = T>,
-{
-    ctx.block_on(async move {
-        match timeout_ms {
-            Some(timeout_ms) => tokio::time::timeout(Duration::from_millis(timeout_ms), fut)
-                .await
-                .map_err(|_| Error::Internal(format!("{timeout_label} after {timeout_ms}ms"))),
-            None => Ok(fut.await),
-        }
-    })?
-}
-
 #[pyclass(name = "_SandboxCore")]
 struct PySandbox {
     ctx: Arc<ContextInner>,
@@ -1045,12 +999,8 @@ impl PySandbox {
     fn configure_json(&self, config_json: &str) -> PyResult<()> {
         let patch: SandboxConfigPatch = serde_json::from_str(config_json)
             .map_err(|_| to_py_err(invalid_argument("invalid sandbox config JSON")))?;
-
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| to_py_err(Error::Internal("Sandbox lock poisoned".to_string())))?;
-        match &mut *inner {
+        let mut guard = self.inner.lock();
+        match &mut *guard {
             SandboxInner::Pending { config, .. } => config.apply_patch(patch).map_err(to_py_err),
             SandboxInner::Running { .. } => {
                 Err(to_py_err(invalid_argument("sandbox is already running")))
@@ -1062,16 +1012,9 @@ impl PySandbox {
     }
 
     fn set_callback(&self, callback: Option<Py<PyAny>>) -> PyResult<()> {
-        let callback = callback.map(|callback| {
-            Arc::new(PyCallback {
-                callback: Arc::new(callback),
-            })
-        });
+        let callback = callback.map(|callback| Arc::new(PyCallback { callback }));
 
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| to_py_err(Error::Internal("Sandbox lock poisoned".to_string())))?;
+        let mut inner = self.inner.lock();
         match &mut *inner {
             SandboxInner::Pending { callback: slot, .. }
             | SandboxInner::Running { callback: slot, .. } => {
@@ -1101,10 +1044,7 @@ impl PySandbox {
             }
         };
 
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| to_py_err(Error::Internal("Sandbox lock poisoned".to_string())))?;
+        let mut inner = self.inner.lock();
         match &mut *inner {
             SandboxInner::Pending {
                 http_handler: slot, ..
@@ -1121,170 +1061,207 @@ impl PySandbox {
         }
     }
 
-    fn start(&self, py: Python<'_>) -> PyResult<()> {
+    fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = Arc::clone(&self.inner);
         let ctx = Arc::clone(&self.ctx);
-        py.detach(move || {
-            let mut guard = inner
-                .lock()
-                .map_err(|_| Error::Internal("Sandbox lock poisoned".to_string()))?;
-            let current = std::mem::replace(&mut *guard, SandboxInner::Uninitialized);
-
-            match current {
-                SandboxInner::Pending {
-                    config,
-                    callback,
-                    http_handler,
-                } => {
-                    let options = config.to_options();
-                    let timeout_ms = config.timeout_ms;
-                    let env = Env::new(http_handler.clone());
-
-                    match ctx.instantiate_sandbox(options, env) {
-                        Ok(sandbox) => {
-                            *guard = SandboxInner::Running {
-                                sandbox,
-                                callback,
-                                timeout_ms,
-                            };
-                            drop(guard);
-                            Ok(())
-                        }
-                        Err(err) => {
-                            *guard = SandboxInner::Pending {
-                                config,
-                                callback,
-                                http_handler,
-                            };
-                            drop(guard);
-                            Err(err)
-                        }
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (config, callback, http_handler) = {
+                let mut guard = inner.lock();
+                let current = std::mem::replace(&mut *guard, SandboxInner::Uninitialized);
+                match current {
+                    SandboxInner::Pending {
+                        config,
+                        callback,
+                        http_handler,
+                    } => (config, callback, http_handler),
+                    other => {
+                        *guard = other;
+                        drop(guard);
+                        return Err(to_py_err(invalid_argument(
+                            "sandbox is not in pending state",
+                        )));
                     }
                 }
-                other => {
-                    *guard = other;
-                    drop(guard);
-                    Err(invalid_argument("sandbox is not in pending state"))
-                }
-            }
-        })
-        .map_err(to_py_err)
-    }
+            };
 
-    #[pyo3(signature = (code, timeout_ms = None))]
-    fn load_script(&self, py: Python<'_>, code: &str, timeout_ms: Option<u64>) -> PyResult<()> {
-        let script = code.to_string();
-        let inner = Arc::clone(&self.inner);
-        let ctx = Arc::clone(&self.ctx);
+            let options = config.to_options();
+            let timeout_ms = config.timeout_ms;
+            let env = Env::new(http_handler.clone());
 
-        py.detach(move || {
-            let mut guard = inner
-                .lock()
-                .map_err(|_| Error::Internal("Sandbox lock poisoned".to_string()))?;
-            match &mut *guard {
-                SandboxInner::Running {
-                    sandbox,
-                    callback,
-                    timeout_ms: _default_timeout,
-                    ..
-                } => {
-                    let collector = OutputCollector::new(callback.clone());
-                    let sink = Arc::new(collector.clone());
-                    let outcome = block_on_with_optional_timeout(
-                        &ctx,
+            match ctx.instantiate_sandbox(options, env).await {
+                Ok(sandbox) => {
+                    let mut guard = inner.lock();
+                    *guard = SandboxInner::Running {
+                        sandbox: Some(sandbox),
+                        callback,
                         timeout_ms,
-                        "Script execution timed out",
-                        sandbox.eval_script(&script, sink),
-                    )?;
-
-                    if let Err(err) = outcome {
-                        let message = format!("Script loading failed: {err}");
-                        collector.emit_error_message(&message);
-                        return Err(Error::Internal(message));
-                    }
-
+                    };
+                    drop(guard);
                     Ok(())
                 }
-                _ => Err(invalid_argument("sandbox is not running")),
-            }
-        })
-        .map_err(to_py_err)
-    }
-
-    #[pyo3(signature = (func, args = Vec::new(), timeout_ms = None))]
-    fn run(
-        &self,
-        py: Python<'_>,
-        func: &str,
-        args: Vec<WireArgument>,
-        timeout_ms: Option<u64>,
-    ) -> PyResult<PyRunResult> {
-        let func = func.to_string();
-        let parsed_args = parse_run_args(py, args).map_err(to_py_err)?;
-        let inner = Arc::clone(&self.inner);
-        let ctx = Arc::clone(&self.ctx);
-
-        py.detach(move || {
-            let mut guard = inner
-                .lock()
-                .map_err(|_| Error::Internal("Sandbox lock poisoned".to_string()))?;
-            match &mut *guard {
-                SandboxInner::Running {
-                    sandbox,
-                    callback,
-                    timeout_ms: _default_timeout,
-                    ..
-                } => {
-                    let collector = OutputCollector::new(callback.clone());
-                    let sink = Arc::new(collector.clone());
-
-                    let isola_args = parsed_args
-                        .into_iter()
-                        .map(|arg| match arg {
-                            RawArgument::Json(name, value) => Ok(match name {
-                                Some(name) => Arg::Named(name, value),
-                                None => Arg::Positional(value),
-                            }),
-                            RawArgument::JsonStream(name, receiver) => {
-                                let stream =
-                                    Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-                                Ok(match name {
-                                    Some(name) => Arg::NamedStream(name, stream),
-                                    None => Arg::PositionalStream(stream),
-                                })
-                            }
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-
-                    let outcome = block_on_with_optional_timeout(
-                        &ctx,
-                        timeout_ms,
-                        "Sandbox execution timed out",
-                        sandbox.call_with_sink(&func, isola_args, sink),
-                    )?;
-
-                    if let Err(err) = outcome {
-                        let message = format!("Sandbox execution failed: {err}");
-                        collector.emit_error_message(&message);
-                        return Err(Error::Internal(message));
-                    }
-
-                    Ok(collector.into_result())
+                Err(err) => {
+                    let mut guard = inner.lock();
+                    *guard = SandboxInner::Pending {
+                        config,
+                        callback,
+                        http_handler,
+                    };
+                    drop(guard);
+                    Err(to_py_err(err))
                 }
-                _ => Err(invalid_argument("sandbox is not running")),
             }
         })
-        .map_err(to_py_err)
     }
 
-    fn close(&self) -> PyResult<()> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|_| to_py_err(Error::Internal("Sandbox lock poisoned".to_string())))?;
-        *inner = SandboxInner::Uninitialized;
-        drop(inner);
-        Ok(())
+    #[pyo3(signature = (code))]
+    fn load_script<'py>(&self, py: Python<'py>, code: &str) -> PyResult<Bound<'py, PyAny>> {
+        let script = code.to_string();
+        let inner = Arc::clone(&self.inner);
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (mut lease, callback, timeout_ms) = {
+                let mut guard = inner.lock();
+                match &mut *guard {
+                    SandboxInner::Running {
+                        sandbox,
+                        callback,
+                        timeout_ms,
+                    } => {
+                        let sandbox = sandbox
+                            .take()
+                            .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
+                        (
+                            RunningSandboxLease::new(Arc::clone(&inner), sandbox),
+                            callback.clone(),
+                            *timeout_ms,
+                        )
+                    }
+                    _ => return Err(to_py_err(invalid_argument("sandbox is not running"))),
+                }
+            };
+
+            let collector = OutputCollector::new(callback);
+            let sink = Arc::new(collector.clone());
+            let outcome_result = match timeout_ms {
+                Some(timeout_ms) => tokio::time::timeout(
+                    Duration::from_millis(timeout_ms),
+                    lease.sandbox_mut().eval_script(&script, sink),
+                )
+                .await
+                .map_or_else(
+                    |_| {
+                        Err(to_py_err(Error::Internal(format!(
+                            "Script execution timed out after {timeout_ms}ms"
+                        ))))
+                    },
+                    Ok,
+                ),
+                None => Ok(lease.sandbox_mut().eval_script(&script, sink).await),
+            };
+
+            let outcome = outcome_result?;
+            if let Err(err) = outcome {
+                let message = format!("Script loading failed: {err}");
+                collector.emit_error_message(&message);
+                return Err(to_py_err(Error::Internal(message)));
+            }
+
+            Ok(())
+        })
+    }
+
+    #[pyo3(signature = (func, args = Vec::new()))]
+    fn run<'py>(
+        &self,
+        py: Python<'py>,
+        func: String,
+        args: Vec<WireArgument>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let inner = Arc::clone(&self.inner);
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            let (mut lease, callback, timeout_ms) = {
+                let mut guard = inner.lock();
+                match &mut *guard {
+                    SandboxInner::Running {
+                        sandbox,
+                        callback,
+                        timeout_ms,
+                    } => {
+                        let sandbox = sandbox
+                            .take()
+                            .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
+                        (
+                            RunningSandboxLease::new(Arc::clone(&inner), sandbox),
+                            callback.clone(),
+                            *timeout_ms,
+                        )
+                    }
+                    _ => return Err(to_py_err(invalid_argument("sandbox is not running"))),
+                }
+            };
+
+            let parsed_args = match Python::attach(|py| parse_run_args(py, args)) {
+                Ok(parsed_args) => parsed_args,
+                Err(err) => return Err(to_py_err(err)),
+            };
+
+            let collector = OutputCollector::new(callback);
+            let sink = Arc::new(collector.clone());
+            let isola_args = parsed_args
+                .into_iter()
+                .map(|arg| match arg {
+                    RawArgument::Json(name, value) => Ok(match name {
+                        Some(name) => Arg::Named(name, value),
+                        None => Arg::Positional(value),
+                    }),
+                    RawArgument::JsonStream(name, receiver) => {
+                        let stream =
+                            Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
+                        Ok(match name {
+                            Some(name) => Arg::NamedStream(name, stream),
+                            None => Arg::PositionalStream(stream),
+                        })
+                    }
+                })
+                .collect::<Result<Vec<_>>>()
+                .map_err(to_py_err)?;
+
+            let outcome_result = match timeout_ms {
+                Some(timeout_ms) => tokio::time::timeout(
+                    Duration::from_millis(timeout_ms),
+                    lease.sandbox_mut().call_with_sink(&func, isola_args, sink),
+                )
+                .await
+                .map_or_else(
+                    |_| {
+                        Err(to_py_err(Error::Internal(format!(
+                            "Sandbox execution timed out after {timeout_ms}ms"
+                        ))))
+                    },
+                    Ok,
+                ),
+                None => Ok(lease
+                    .sandbox_mut()
+                    .call_with_sink(&func, isola_args, sink)
+                    .await),
+            };
+
+            let outcome = outcome_result?;
+            if let Err(err) = outcome {
+                let message = format!("Sandbox execution failed: {err}");
+                collector.emit_error_message(&message);
+                return Err(to_py_err(Error::Internal(message)));
+            }
+
+            Ok(collector.into_result())
+        })
+    }
+
+    fn close(&self) {
+        let mut guard = self.inner.lock();
+        *guard = SandboxInner::Uninitialized;
+        drop(guard);
     }
 }
 
@@ -1314,7 +1291,6 @@ impl StreamHandle {
     fn sender(&self) -> Result<tokio::sync::mpsc::Sender<Value>> {
         self.sender
             .lock()
-            .map_err(|_| Error::Internal("Stream sender lock poisoned".to_string()))?
             .as_ref()
             .cloned()
             .ok_or(Error::StreamClosed)
@@ -1323,17 +1299,12 @@ impl StreamHandle {
     fn take_receiver(&self) -> Result<tokio::sync::mpsc::Receiver<Value>> {
         self.receiver
             .lock()
-            .map_err(|_| Error::Internal("Stream receiver lock poisoned".to_string()))?
             .take()
             .ok_or_else(|| invalid_argument("stream receiver already taken"))
     }
 
-    fn close_sender(&self) -> Result<()> {
-        self.sender
-            .lock()
-            .map_err(|_| Error::Internal("Stream sender lock poisoned".to_string()))?
-            .take();
-        Ok(())
+    fn close_sender(&self) {
+        self.sender.lock().take();
     }
 }
 
@@ -1381,8 +1352,22 @@ impl StreamHandle {
         }
     }
 
-    fn end(&self) -> PyResult<()> {
-        self.close_sender().map_err(to_py_err)
+    fn push_json_async<'py>(&self, py: Python<'py>, json: &str) -> PyResult<Bound<'py, PyAny>> {
+        let value = Value::from_json_str(json)
+            .map_err(|_| to_py_err(invalid_argument("invalid JSON in stream value")))?;
+        let sender = self.sender().map_err(to_py_err)?;
+
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            sender
+                .send(value)
+                .await
+                .map_err(|_| to_py_err(Error::StreamClosed))?;
+            Ok(())
+        })
+    }
+
+    fn end(&self) {
+        self.close_sender();
     }
 }
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections import deque
 from typing import TYPE_CHECKING, Unpack, cast, overload, override
 
@@ -24,6 +25,8 @@ __all__ = [
     "run",
     "subscribe",
 ]
+
+logger = logging.getLogger(__name__)
 
 with contextlib.suppress(ImportError):
     import _isola_sys
@@ -146,7 +149,18 @@ class PollLoop(asyncio.AbstractEventLoop):
 
     @override
     def call_exception_handler(self, context: dict[str, object]) -> None:
-        pass
+        message = cast(
+            "str",
+            context.get("message", "Unhandled exception in sandbox PollLoop"),
+        )
+        exception = context.get("exception")
+        if isinstance(exception, BaseException):
+            logger.error(
+                message,
+                exc_info=(type(exception), exception, exception.__traceback__),
+            )
+        else:
+            logger.error(message)
 
     @override
     def call_soon[*Ts](

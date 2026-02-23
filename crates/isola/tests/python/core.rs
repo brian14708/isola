@@ -367,7 +367,7 @@ async fn integration_python_guest_exception_surface() -> Result<()> {
     let err = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
         .await
         .expect_err("expected exception from guest function");
-    let IsolaError::Guest { message } = err else {
+    let IsolaError::UserCode { message } = err else {
         panic!("expected guest error, got {err:?}");
     };
     assert!(
@@ -490,7 +490,7 @@ async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
     let memory_after = sandbox.memory_usage();
 
     let message = match err {
-        IsolaError::Guest { message } => message.to_ascii_lowercase(),
+        IsolaError::UserCode { message } => message.to_ascii_lowercase(),
         IsolaError::Runtime(cause) => cause.to_string().to_ascii_lowercase(),
     };
     assert!(
