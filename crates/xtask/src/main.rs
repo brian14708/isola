@@ -53,15 +53,17 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-python"
+        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-python-runtime"
     )
     .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
     .env("RUSTFLAGS", "-C relocation-model=pic")
     .run()?;
 
     run_if_changed(
-        vec![format!("target/{TARGET}/release-lto/isola_python.wasm")],
-        "target/isola_python.wasm".to_string(),
+        vec![format!(
+            "target/{TARGET}/release-lto/isola_python_runtime.wasm"
+        )],
+        "target/python3.wasm".to_string(),
         |inp, out| -> Result<()> {
             fn lib(
                 name: impl Into<String>,

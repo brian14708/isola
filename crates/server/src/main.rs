@@ -27,12 +27,12 @@ async fn async_main() -> anyhow::Result<()> {
     let task = args().nth(1);
     match task.as_deref() {
         Some("build") => {
-            _ = SandboxManager::<SandboxEnv>::new("target/isola_python.wasm").await?;
+            _ = SandboxManager::<SandboxEnv>::new("target/python3.wasm").await?;
             Ok(())
         }
         None | Some("serve") => {
             let _provider = init_tracing()?;
-            let state = routes::AppState::new("target/isola_python.wasm").await?;
+            let state = routes::AppState::new("target/python3.wasm").await?;
             let app = routes::router(&state);
 
             server::serve(

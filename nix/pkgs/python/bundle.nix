@@ -42,7 +42,7 @@ let
       tzdata
     ]);
 
-  isolaPy = ../../../crates/python/bundled;
+  isolaPy = ../../../crates/python-runtime/python;
 in
 stdenv.mkDerivation {
   pname = "wasi-python-bundle";

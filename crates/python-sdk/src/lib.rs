@@ -265,7 +265,7 @@ impl ContextInner {
 
     fn initialize_template(&self, runtime_path: &Path) -> Result<()> {
         let mut wasm_path = runtime_path.to_owned();
-        wasm_path.push("isola_python.wasm");
+        wasm_path.push("python3.wasm");
 
         let parent = wasm_path
             .parent()
@@ -603,8 +603,8 @@ impl PyHttpHandler {
                 let asyncio = py
                     .import("asyncio")
                     .map_err(|e| py_error_to_box_error("failed to import asyncio", &e))?;
-                let coro = create_coro(py)
-                    .map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
+                let coro =
+                    create_coro(py).map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
                 let future = asyncio
                     .call_method1("run_coroutine_threadsafe", (coro, event_loop.bind(py)))
                     .map_err(|e| py_error_to_box_error("failed to schedule coroutine", &e))?;
@@ -665,9 +665,7 @@ impl PyHttpHandler {
                     .map_err(|e| py_error_to_box_error("response header name must be str", &e))?;
                 let value = v
                     .extract::<String>()
-                    .map_err(|e| {
-                        py_error_to_box_error("response header value must be str", &e)
-                    })?;
+                    .map_err(|e| py_error_to_box_error("response header value must be str", &e))?;
                 builder = builder.header(name, value);
             }
             let response = builder

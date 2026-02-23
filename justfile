@@ -26,15 +26,15 @@ lint-rust:
     cargo clippy --all-features -- --deny warnings
 
 lint-python: init-py
-    uv run ruff check --config crates/python/pyproject.toml crates/python/bundled
-    uv run ruff check --config crates/py-binding/pyproject.toml crates/py-binding/python crates/py-binding/tests
-    uv run mypy --config-file crates/python/pyproject.toml
-    uv run mypy --config-file crates/py-binding/pyproject.toml
-    uv run basedpyright --project crates/python/pyproject.toml
-    uv run basedpyright --project crates/py-binding/pyproject.toml
+    uv run ruff check --config crates/python-runtime/pyproject.toml crates/python-runtime/python
+    uv run ruff check --config crates/python-sdk/pyproject.toml crates/python-sdk
+    uv run mypy --config-file crates/python-runtime/pyproject.toml
+    uv run mypy --config-file crates/python-sdk/pyproject.toml
+    uv run basedpyright --project crates/python-runtime/pyproject.toml
+    uv run basedpyright --project crates/python-sdk/pyproject.toml
 
 pytest: init-py
-    uv run pytest ./crates/py-binding/tests/
+    uv run pytest ./crates/python-sdk/tests/
 
 [private]
 init-py:

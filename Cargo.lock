@@ -1499,25 +1499,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "isola-py-binding"
-version = "0.2.0"
-dependencies = [
- "async-trait",
- "bytes",
- "futures",
- "http",
- "http-body",
- "isola",
- "pyo3",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
-]
-
-[[package]]
-name = "isola-python"
+name = "isola-python-runtime"
 version = "0.2.0"
 dependencies = [
  "base64",
@@ -1534,6 +1516,24 @@ dependencies = [
  "thiserror 2.0.18",
  "url",
  "wit-bindgen 0.53.1",
+]
+
+[[package]]
+name = "isola-python-sdk"
+version = "0.2.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "isola",
+ "pyo3",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

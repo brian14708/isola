@@ -1,13 +1,6 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/isola",
-    "crates/py-binding",
-    "crates/python",
-    "crates/request",
-    "crates/server",
-    "crates/xtask",
-]
+members = ["crates/*"]
 
 [workspace.package]
 version = "0.2.0"
@@ -53,6 +46,7 @@ opentelemetry_sdk = "0.31"
 parking_lot = "0.12"
 pin-project-lite = "0.2"
 pyo3 = "0.28"
+pyo3-build-config = "0.28"
 rand = "0.10"
 reqwest = { version = "0.13", default-features = false }
 rlimit = "0.11"
@@ -79,7 +73,6 @@ wiremock = "0.6"
 wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
 xshell = "0.2"
-pyo3-build-config = "0.28"
 
 [profile.release-lto]
 inherits = "release"

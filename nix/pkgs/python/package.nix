@@ -19,7 +19,7 @@ let
       ../../../Cargo.toml
       ../../../crates/isola/wit
       (craneLib.fileset.commonCargoSources ../../../crates/xtask)
-      (craneLib.fileset.commonCargoSources ../../../crates/python)
+      (craneLib.fileset.commonCargoSources ../../../crates/python-runtime)
     ];
   };
 in
@@ -76,7 +76,7 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    install -Dm644 target/isola_python.wasm $out/bin/isola_python.wasm
+    install -Dm644 target/python3.wasm $out/bin/python3.wasm
     cp --no-preserve=mode -rL ${bundle}/. $out/
     find $out/ -type f -print -exec nuke-refs '{}' +
 

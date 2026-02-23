@@ -1,6 +1,6 @@
 [project]
 name = "isola-workspace"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.12"
 dependencies = []
 
@@ -10,8 +10,8 @@ isola-py = { workspace = true }
 
 [tool.uv.workspace]
 members = [
-    "crates/py-binding",
-    "crates/python/bundled",
+    "crates/python-sdk",
+    "crates/python-runtime",
 ]
 
 [dependency-groups]
@@ -19,5 +19,4 @@ dev = [
     "basedmypy>=2.10.0",
     "basedpyright>=1.31.1",
     "ruff>=0.11.2",
-    "types-pyyaml>=6.0.12.20250516",
 ]

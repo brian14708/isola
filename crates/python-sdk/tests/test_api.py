@@ -2,39 +2,69 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Awaitable, Callable
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn, cast
 
 import pytest
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from isola import HttpRequestData, HttpResponseData
+
 isola = pytest.importorskip("isola")
+
+_HttpHandlerDispatch = Callable[
+    [str, str, dict[str, str], bytes | None],
+    Awaitable[tuple[int, dict[str, str], str, object]],
+]
 
 
 class _FakeSandboxCore:
     def __init__(self) -> None:
-        self.http_handler = None
-        self.http_loop = None
+        self.config_json: str | None = None
+        self.callback: Callable[[str, str | None], None] | None = None
+        self.http_handler: _HttpHandlerDispatch | None = None
+        self.http_loop: asyncio.AbstractEventLoop | None = None
+        self.started = False
+        self.loaded_script: tuple[str, int | None] | None = None
+        self.last_run: (
+            tuple[str, list[tuple[str, str | None, object]] | None, int | None] | None
+        ) = None
+        self.closed = False
 
     def configure_json(self, config_json: str) -> None:
-        return None
+        self.config_json = config_json
 
-    def set_callback(self, callback) -> None:
-        return None
+    def set_callback(self, callback: Callable[[str, str | None], None] | None) -> None:
+        self.callback = callback
 
-    def set_http_handler(self, callback, event_loop) -> None:
+    def set_http_handler(
+        self,
+        callback: _HttpHandlerDispatch | None,
+        event_loop: asyncio.AbstractEventLoop | None,
+    ) -> None:
         self.http_handler = callback
         self.http_loop = event_loop
 
     def start(self) -> None:
-        return None
+        self.started = True
 
     def load_script(self, code: str, timeout_ms: int | None = None) -> None:
-        return None
+        self.loaded_script = (code, timeout_ms)
 
-    def run(self, func: str, args=None, timeout_ms: int | None = None):
-        raise AssertionError("not used by this test")
+    def run(
+        self,
+        func: str,
+        args: list[tuple[str, str | None, object]] | None = None,
+        timeout_ms: int | None = None,
+    ) -> NoReturn:
+        self.last_run = (func, args, timeout_ms)
+        raise AssertionError
 
     def close(self) -> None:
-        return None
+        self.closed = True
 
 
 def test_json_stream_from_iterable_roundtrip() -> None:
@@ -45,7 +75,7 @@ def test_json_stream_from_iterable_roundtrip() -> None:
 def _resolve_runtime_paths() -> tuple[Path, Path]:
     workspace_root = Path(__file__).resolve().parents[3]
     runtime_dir = workspace_root / "target"
-    wasm_path = runtime_dir / "isola_python.wasm"
+    wasm_path = runtime_dir / "python3.wasm"
     if not wasm_path.is_file():
         message = (
             f"missing runtime wasm at '{wasm_path}', build with `cargo xtask build-all`"
@@ -122,18 +152,23 @@ async def test_can_start_sandbox_and_execute_code() -> None:
 @pytest.mark.asyncio
 async def test_sandbox_http_handler_bytes_response_shape() -> None:
     core = _FakeSandboxCore()
-    sandbox = isola.Sandbox(core)  # type: ignore[arg-type]
+    sandbox = isola.Sandbox(core)
 
-    async def handler(_: isola.HttpRequestData) -> isola.HttpResponseData:
-        return isola.HttpResponseData(
-            status=201, headers={"content-type": "text/plain"}, body=b"ok"
+    async def handler(_: HttpRequestData) -> HttpResponseData:
+        await asyncio.sleep(0)
+        return cast(
+            "HttpResponseData",
+            isola.HttpResponseData(
+                status=201, headers={"content-type": "text/plain"}, body=b"ok"
+            ),
         )
 
     sandbox.set_http_handler(handler)
-    assert core.http_handler is not None
+    http_handler = core.http_handler
+    assert http_handler is not None
     assert core.http_loop is not None
 
-    status, headers, mode, payload = await core.http_handler(
+    status, headers, mode, payload = await http_handler(
         "GET", "https://example.com", {"x-test": "1"}, None
     )
     assert status == 201
@@ -145,23 +180,25 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
 @pytest.mark.asyncio
 async def test_sandbox_http_handler_stream_response_shape() -> None:
     core = _FakeSandboxCore()
-    sandbox = isola.Sandbox(core)  # type: ignore[arg-type]
+    sandbox = isola.Sandbox(core)
 
-    async def body():
+    async def body() -> AsyncIterator[bytes]:
+        await asyncio.sleep(0)
         yield b"a"
-        yield bytearray(b"b")
+        await asyncio.sleep(0)
+        yield b"b"
 
-    async def handler(_: isola.HttpRequestData) -> isola.HttpResponseData:
-        return isola.HttpResponseData(status=200, body=body())
+    async def handler(_: HttpRequestData) -> HttpResponseData:
+        await asyncio.sleep(0)
+        return cast("HttpResponseData", isola.HttpResponseData(status=200, body=body()))
 
     sandbox.set_http_handler(handler)
-    _, _, mode, payload = await core.http_handler(
-        "GET", "https://example.com", {}, None
-    )
+    http_handler = core.http_handler
+    assert http_handler is not None
+    _, _, mode, payload = await http_handler("GET", "https://example.com", {}, None)
     assert mode == "stream"
-    chunks = []
-    async for item in payload:
-        chunks.append(item)
+    stream = cast("AsyncIterator[bytes]", payload)
+    chunks = [item async for item in stream]
     assert chunks == [b"a", b"b"]
 
 
@@ -180,17 +217,23 @@ async def test_real_sandbox_http_fetch_uses_python_handler_stream() -> None:
         )
         try:
 
-            async def response_chunks():
+            async def response_chunks() -> AsyncIterator[bytes]:
+                await asyncio.sleep(0)
                 yield b"hello "
-                yield bytearray(b"world")
+                await asyncio.sleep(0)
+                yield b"world"
 
-            async def http_handler(req: isola.HttpRequestData) -> isola.HttpResponseData:
+            async def http_handler(req: HttpRequestData) -> HttpResponseData:
                 assert req.method == "GET"
                 assert req.url == "https://example.test/stream"
-                return isola.HttpResponseData(
-                    status=200,
-                    headers={"content-type": "text/plain", "x-test": "stream"},
-                    body=response_chunks(),
+                await asyncio.sleep(0)
+                return cast(
+                    "HttpResponseData",
+                    isola.HttpResponseData(
+                        status=200,
+                        headers={"content-type": "text/plain", "x-test": "stream"},
+                        body=response_chunks(),
+                    ),
                 )
 
             sandbox.set_http_handler(http_handler)

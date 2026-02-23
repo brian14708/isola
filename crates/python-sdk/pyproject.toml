@@ -69,7 +69,7 @@ docstring-code-format = true
 skip-magic-trailing-comma = true
 
 [tool.mypy]
-files = ["crates/py-binding/python", "crates/py-binding/tests"]
+files = ["crates/python-sdk/python", "crates/python-sdk/tests"]
 strict = true
 python_version = "3.10"
 disable_error_code = [
