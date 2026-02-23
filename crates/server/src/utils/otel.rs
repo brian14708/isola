@@ -1,7 +1,7 @@
 use opentelemetry::{
     KeyValue, global,
     propagation::TextMapCompositePropagator,
-    trace::{Tracer, TracerProvider, noop::NoopTracer},
+    trace::{Tracer, TracerProvider},
 };
 use opentelemetry_otlp::{
     OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_EXPORTER_OTLP_PROTOCOL, OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
@@ -31,15 +31,24 @@ fn get_env_var(names: &[&'static str]) -> Option<String> {
 }
 
 pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
-    let provider = if let Some(_endpoint) = get_env_var(&[
+    global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
+        Box::new(TraceContextPropagator::new()),
+        Box::new(BaggagePropagator::new()),
+    ]));
+
+    let mut provider_builder = opentelemetry_sdk::trace::SdkTracerProvider::builder()
+        .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
+        .with_id_generator(RandomIdGenerator::default())
+        .with_resource(
+            Resource::builder()
+                .with_attribute(KeyValue::new(resource::SERVICE_NAME, "isola-server"))
+                .build(),
+        );
+
+    if let Some(_endpoint) = get_env_var(&[
         OTEL_EXPORTER_OTLP_TRACES_ENDPOINT,
         OTEL_EXPORTER_OTLP_ENDPOINT,
     ]) {
-        global::set_text_map_propagator(TextMapCompositePropagator::new(vec![
-            Box::new(TraceContextPropagator::new()),
-            Box::new(BaggagePropagator::new()),
-        ]));
-
         let protocol = get_env_var(&[
             "OTEL_EXPORTER_OTLP_TRACES_PROTOCOL",
             OTEL_EXPORTER_OTLP_PROTOCOL,
@@ -61,22 +70,12 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
                 .build(),
         }?;
 
-        let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
-            .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build())
-            .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOff)))
-            .with_id_generator(RandomIdGenerator::default())
-            .with_resource(
-                Resource::builder()
-                    .with_attribute(KeyValue::new(resource::SERVICE_NAME, "isola-server"))
-                    .build(),
-            )
-            .build();
+        provider_builder = provider_builder
+            .with_span_processor(BatchSpanProcessor::builder(exporter, runtime::Tokio).build());
+    }
 
-        global::set_tracer_provider(provider.clone());
-        Some(provider)
-    } else {
-        None
-    };
+    let provider = provider_builder.build();
+    global::set_tracer_provider(provider.clone());
 
     let envfilter = tracing_subscriber::EnvFilter::builder()
         .with_default_directive(Level::INFO.into())
@@ -88,14 +87,11 @@ pub fn init_tracing() -> anyhow::Result<ProviderGuard> {
     let registry = tracing_subscriber::Registry::default()
         .with(tracing_subscriber::fmt::Layer::default().with_filter(envfilter));
 
-    match &provider {
-        Some(provider) => registry
-            .with(otel_layer(provider.tracer("isola-server")))
-            .init(),
-        None => registry.with(otel_layer(NoopTracer::new())).init(),
-    }
+    registry
+        .with(otel_layer(provider.tracer("isola-server")))
+        .init();
 
-    Ok(ProviderGuard(provider))
+    Ok(ProviderGuard(Some(provider)))
 }
 
 fn otel_layer<S, T>(tracer: T) -> impl Layer<S>

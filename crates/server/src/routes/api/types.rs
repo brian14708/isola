@@ -6,17 +6,11 @@ const fn default_timeout() -> u64 {
     30000
 }
 
-fn default_function() -> String {
-    "main".to_string()
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ExecuteRequest {
-    pub runtime: String,
     pub script: String,
     #[serde(default)]
     pub prelude: String,
-    #[serde(default = "default_function")]
     pub function: String,
     #[serde(default)]
     pub args: Vec<serde_json::Value>,
@@ -50,7 +44,6 @@ pub struct HttpError {
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ErrorCode {
     InvalidRequest,
-    UnknownRuntime,
     ScriptError,
     Timeout,
     Cancelled,
