@@ -44,3 +44,5 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Run integration test
         run: nix --accept-flake-config develop --command just integration
+      - name: Run Python pytest suite
+        run: nix --accept-flake-config develop --command just pytest

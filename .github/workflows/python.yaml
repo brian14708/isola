@@ -26,8 +26,14 @@ jobs:
       - name: Sync Python dependencies
         run: uv sync --all-packages
       - name: Ruff check
-        run: uv run ruff check
+        run: |
+          uv run ruff check --config crates/python/pyproject.toml crates/python/bundled
+          uv run ruff check --config crates/py-binding/pyproject.toml crates/py-binding/python crates/py-binding/tests
       - name: Mypy check
-        run: uv run mypy
+        run: |
+          uv run mypy --config-file crates/python/pyproject.toml
+          uv run mypy --config-file crates/py-binding/pyproject.toml
       - name: Basedpyright check
-        run: uv run basedpyright
+        run: |
+          uv run basedpyright --project crates/python/pyproject.toml
+          uv run basedpyright --project crates/py-binding/pyproject.toml

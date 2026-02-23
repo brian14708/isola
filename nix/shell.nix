@@ -21,10 +21,10 @@ in
       just
       mdbook
       (python.withPackages (p: with p; [ uv ]))
+      maturin
     ];
 
     env = {
-      UV_PYTHON = python.interpreter;
       WASI_PYTHON_DEV = "${bundle.dev}";
       WASI_PYTHON_RUNTIME = "${bundle}";
     };

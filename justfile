@@ -20,11 +20,21 @@ build-wasm:
 test:
     cargo test --all-features
 
-lint: init-py
+lint: init-py lint-rust lint-python
+
+lint-rust:
     cargo clippy --all-features -- --deny warnings
-    uv run ruff check
-    uv run mypy
-    uv run basedpyright
+
+lint-python: init-py
+    uv run ruff check --config crates/python/pyproject.toml crates/python/bundled
+    uv run ruff check --config crates/py-binding/pyproject.toml crates/py-binding/python crates/py-binding/tests
+    uv run mypy --config-file crates/python/pyproject.toml
+    uv run mypy --config-file crates/py-binding/pyproject.toml
+    uv run basedpyright --project crates/python/pyproject.toml
+    uv run basedpyright --project crates/py-binding/pyproject.toml
+
+pytest: init-py
+    uv run pytest ./crates/py-binding/tests/
 
 [private]
 init-py:

@@ -1,14 +1,16 @@
 [project]
-name = "isola"
+name = "isola-workspace"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = []
 
 [tool.uv.sources]
+isola = { workspace = true }
 isola-py = { workspace = true }
 
 [tool.uv.workspace]
 members = [
+    "crates/py-binding",
     "crates/python/bundled",
 ]
 
@@ -19,41 +21,3 @@ dev = [
     "ruff>=0.11.2",
     "types-pyyaml>=6.0.12.20250516",
 ]
-
-[tool.ruff]
-
-[tool.ruff.lint]
-select = ["ALL"]
-ignore = [
-    "COM812", "S101", "CPY",
-    "D10", "D203", "D213",
-    "PLR09", "PLR2004", "PLC2701", "C901",
-]
-extend-safe-fixes = ["TC"]
-preview = true
-future-annotations = true
-
-[tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["BLE001", "PLC0415", "DOC", "INP001", "ANN001"]
-
-[tool.ruff.format]
-preview = true
-
-[tool.mypy]
-files = ["crates/python/bundled"]
-strict = true
-python_version = "3.12"
-disable_error_code = [
-    "decorated-any",
-    "explicit-any",
-    "any",
-]
-
-[tool.pyright]
-venv = "."
-venvPath = ".venv"
-include = ["crates/python/bundled"]
-stubPath = "crates/python/bundled/typings"
-typeCheckingMode = "strict"
-enableExperimentalFeatures = true
-reportMissingModuleSource = false
