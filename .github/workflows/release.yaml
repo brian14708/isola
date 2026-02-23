@@ -16,6 +16,7 @@ env:
 
 jobs:
   targets:
+    name: Tag
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -48,6 +49,7 @@ jobs:
               -f sha="$GITHUB_SHA" >/dev/null
           fi
   oci:
+    name: OCI
     needs: [targets, python-runtime]
     runs-on: ubuntu-latest
     permissions:
@@ -79,6 +81,7 @@ jobs:
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.release_tag }}
 
   python-runtime:
+    name: Python Runtime
     needs: targets
     runs-on: ubuntu-latest
     permissions:
@@ -98,19 +101,44 @@ jobs:
       - name: Package release artifacts
         run: |
           mkdir -p dist
-
-          tar -C result -czf dist/isola-python.tar.gz bin lib
+          tar -C result -czf dist/isola-python-runtime.tar.gz bin lib
       - name: Upload artifacts to target release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
-            dist/isola-python.tar.gz \
+            dist/isola-python-runtime.tar.gz \
             --clobber
 
-  cargo_publish:
+  python-sdk:
+    name: Python SDK (${{ matrix.os }})
     needs: targets
-    if: needs.targets.outputs.release_tag != 'latest'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Build Python SDK artifacts
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+      - name: Publish
+        if: needs.targets.outputs.release_tag != 'latest'
+        run: |
+          uv publish dist/*
+
+  cargo_publish:
+    name: Cargo
+    needs: targets
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -118,7 +146,12 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Dry run crates publish to crates.io
+        if: needs.targets.outputs.release_tag == 'latest'
+        run: |
+          cargo publish --locked --dry-run
       - name: Publish crates to crates.io
+        if: needs.targets.outputs.release_tag != 'latest'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |

@@ -22,9 +22,9 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install uv
-        run: python -m pip install --upgrade uv
+        uses: astral-sh/setup-uv@v7
       - name: Sync Python dependencies
-        run: uv sync --all-packages
+        run: uv sync --all-packages --no-install-package isola
       - name: Ruff check
         run: |
           uv run ruff check --config crates/python-runtime/pyproject.toml crates/python-runtime/python

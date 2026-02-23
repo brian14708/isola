@@ -85,6 +85,10 @@ include = ["python", "tests"]
 typeCheckingMode = "strict"
 enableExperimentalFeatures = true
 reportMissingModuleSource = false
+executionEnvironments = [
+  { root = "python" },
+  { root = "tests", extraPaths = ["python"] },
+]
 
 [dependency-groups]
 dev = [
