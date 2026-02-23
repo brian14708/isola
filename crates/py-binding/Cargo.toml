@@ -1,0 +1,30 @@
+[package]
+name = "isola-py-binding"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+name = "_isola"
+crate-type = ["cdylib"]
+
+[dependencies]
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+isola = { workspace = true, features = ["serde"] }
+pyo3 = { workspace = true, features = ["extension-module", "abi3", "abi3-py310"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
+tokio-stream = { workspace = true }
+
+[lints]
+workspace = true

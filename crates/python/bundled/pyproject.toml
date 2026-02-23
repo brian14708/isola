@@ -20,11 +20,3 @@ include = ["sandbox/py.typed"]
 [tool.hatch.build.targets.wheel.sources]
 sandbox = "sandbox"
 typings = "."
-
-[tool.mypy]
-mypy_path = "typings"
-
-[tool.pyright]
-venv = ".venv"
-venvPath = "../../../.."
-reportMissingModuleSource = "none"
