@@ -131,6 +131,9 @@ fn inject_headers<B>(span: &Span, mut request: http::Request<B>) -> http::Reques
         struct RequestCarrier<'a, T>(&'a mut http::Request<T>);
         impl<T> opentelemetry::propagation::Injector for RequestCarrier<'_, T> {
             fn set(&mut self, key: &str, value: String) {
+                if value.is_empty() {
+                    return;
+                }
                 if let (Ok(header_name), Ok(header_value)) =
                     (HeaderName::from_str(key), HeaderValue::try_from(value))
                 {

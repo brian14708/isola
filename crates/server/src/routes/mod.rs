@@ -13,24 +13,43 @@ pub use sandbox_manager::{Argument, ExecOptions, SandboxManager, Source};
 pub use state::AppState;
 
 pub fn router(state: &AppState) -> axum::Router {
-    let prometheus = PrometheusBuilder::new().install_recorder().unwrap();
-    tokio::spawn(prometheus_upkeep(
-        prometheus.clone(),
-        Duration::from_secs(5),
-    ));
+    let prometheus = match PrometheusBuilder::new().install_recorder() {
+        Ok(handle) => {
+            tracing::info!("Prometheus metrics recorder installed");
+            Some(handle)
+        }
+        Err(err) => {
+            tracing::warn!("Failed to install metrics recorder: {err}");
+            None
+        }
+    };
 
-    axum::Router::new()
+    if let Some(handle) = prometheus.clone() {
+        tokio::spawn(prometheus_upkeep(handle, Duration::from_secs(5)));
+    }
+
+    let router = axum::Router::new()
         .route("/debug/healthz", get(|| async { StatusCode::NO_CONTENT }))
-        .route(
+        .route("/openapi.json", get(api::openapi::openapi_json))
+        .with_state(state.clone())
+        .nest_service("/mcp", mcp::server(state.clone()))
+        .nest("/v1", api::router(state));
+
+    if let Some(handle) = prometheus {
+        router.route(
             "/debug/metrics",
             get(move || {
-                let rendered = prometheus.render();
+                let rendered = handle.render();
                 async move { rendered }
             }),
         )
-        .with_state(state.clone())
-        .nest_service("/mcp", mcp::server(state.clone()))
-        .nest("/api/v1", api::router(state))
+    } else {
+        tracing::info!("Prometheus metrics endpoint running in degraded mode");
+        router.route(
+            "/debug/metrics",
+            get(|| async { (StatusCode::SERVICE_UNAVAILABLE, "metrics unavailable") }),
+        )
+    }
 }
 
 async fn prometheus_upkeep(handle: PrometheusHandle, duration: Duration) {

@@ -3,13 +3,13 @@ use std::time::Duration;
 use axum::{
     Json,
     extract::State,
-    http::header,
-    response::{IntoResponse, Response, Sse, sse::Event},
+    response::{Sse, sse::Event},
 };
 use futures::{Stream, StreamExt};
 use isola::value::Value;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::Instrument;
 
 use super::{
     error::HttpApiError,
@@ -56,13 +56,6 @@ fn map_start_error(err: anyhow::Error) -> HttpApiError {
     }
 }
 
-fn make_json_event<T: serde::Serialize>(event: &str, payload: T) -> Event {
-    Event::default()
-        .event(event)
-        .json_data(payload)
-        .unwrap_or_else(|_| Event::default())
-}
-
 fn emit_event(
     tx: &mpsc::UnboundedSender<Result<Event, std::convert::Infallible>>,
     event: Event,
@@ -70,31 +63,56 @@ fn emit_event(
     tx.send(Ok(event)).is_ok()
 }
 
-pub async fn execute(
-    State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    Json(req): Json<ExecuteRequest>,
-) -> Response {
-    let accept = headers
-        .get(header::ACCEPT)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/json");
-
-    if accept.contains("text/event-stream") {
-        execute_sse(state, req).await.into_response()
-    } else {
-        execute_json(state, req).await.into_response()
+fn emit_json_event<T: serde::Serialize>(
+    tx: &mpsc::UnboundedSender<Result<Event, std::convert::Infallible>>,
+    event: &str,
+    payload: &T,
+) -> bool {
+    match serde_json::to_string(payload) {
+        Ok(data) => emit_event(tx, Event::default().event(event).data(data)),
+        Err(err) => {
+            tracing::error!(?err, %event, "failed to serialize SSE event payload");
+            let fallback = serde_json::json!({
+                "code": ErrorCode::Internal,
+                "message": "Failed to serialize server event",
+            });
+            let _ = emit_event(
+                tx,
+                Event::default().event("error").data(fallback.to_string()),
+            );
+            false
+        }
     }
 }
 
-async fn execute_json(
-    state: AppState,
-    req: ExecuteRequest,
+#[utoipa::path(
+    post,
+    path = "/v1/execute",
+    request_body = crate::routes::api::openapi::OpenApiExecuteRequest,
+    responses(
+        (status = 200, description = "Execution completed", body = crate::routes::api::openapi::OpenApiExecuteResponse),
+        (status = 400, description = "Invalid request", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 408, description = "Execution timed out", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 422, description = "Script error", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 499, description = "Execution cancelled", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 500, description = "Internal error", body = crate::routes::api::openapi::OpenApiErrorResponse),
+    ),
+    params(
+        ("traceparent" = Option<String>, Header, description = "W3C trace context"),
+        ("tracestate" = Option<String>, Header, description = "W3C trace state"),
+    ),
+    operation_id = "executeSyncV1",
+    tag = "Execute"
+)]
+#[tracing::instrument(
+    target = "isola_server::script",
+    skip(state, req),
+    fields(transport = "sync")
+)]
+pub async fn execute_sync(
+    State(state): State<AppState>,
+    Json(req): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, HttpApiError> {
-    if req.runtime != "python3" {
-        return Err(HttpApiError::unknown_runtime(&req.runtime));
-    }
-
     let args = convert_args(&req.args, &req.kwargs)?;
     let source = Source {
         prelude: req.prelude,
@@ -183,60 +201,85 @@ async fn execute_json(
     Ok(Json(ExecuteResponse { result, traces }))
 }
 
-#[allow(clippy::unused_async)]
-async fn execute_sse(
-    state: AppState,
-    req: ExecuteRequest,
-) -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
-    Sse::new(execute_sse_inner(state, req))
+#[utoipa::path(
+    post,
+    path = "/v1/execute/stream",
+    request_body = crate::routes::api::openapi::OpenApiExecuteRequest,
+    responses(
+        (
+            status = 200,
+            description = "SSE stream with event types: data, log, trace, error, done",
+            body = String,
+            content_type = "text/event-stream"
+        ),
+        (status = 400, description = "Invalid request", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 408, description = "Execution timed out", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 422, description = "Script error", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 499, description = "Execution cancelled", body = crate::routes::api::openapi::OpenApiErrorResponse),
+        (status = 500, description = "Internal error", body = crate::routes::api::openapi::OpenApiErrorResponse),
+    ),
+    params(
+        ("traceparent" = Option<String>, Header, description = "W3C trace context"),
+        ("tracestate" = Option<String>, Header, description = "W3C trace state"),
+    ),
+    operation_id = "executeStreamV1",
+    tag = "Execute"
+)]
+#[tracing::instrument(
+    target = "isola_server::script",
+    skip(state, req),
+    fields(transport = "sse")
+)]
+pub async fn execute_stream(
+    State(state): State<AppState>,
+    Json(req): Json<ExecuteRequest>,
+) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, HttpApiError> {
+    let ExecuteRequest {
+        script,
+        prelude,
+        function,
+        args,
+        kwargs,
+        timeout_ms,
+        trace,
+    } = req;
+
+    let args = convert_args(&args, &kwargs)?;
+    let source = Source {
+        prelude,
+        code: script,
+    };
+    let timeout = Duration::from_millis(timeout_ms);
+
+    Ok(Sse::new(execute_sse_inner(
+        state, source, function, args, timeout, timeout_ms, trace,
+    )))
 }
 
 #[allow(clippy::too_many_lines)]
 fn execute_sse_inner(
     state: AppState,
-    req: ExecuteRequest,
+    source: Source,
+    function: String,
+    args: Vec<(Option<String>, Argument)>,
+    timeout: Duration,
+    timeout_ms: u64,
+    trace: bool,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
     let (tx, rx) = mpsc::unbounded_channel::<Result<Event, std::convert::Infallible>>();
 
     tokio::spawn(async move {
-        if req.runtime != "python3" {
-            let err = SseErrorEvent {
-                code: ErrorCode::UnknownRuntime,
-                message: format!("Unknown runtime: {}", req.runtime),
-            };
-            let _ = emit_event(&tx, make_json_event("error", err));
-            return;
-        }
-
-        let args = match convert_args(&req.args, &req.kwargs) {
-            Ok(a) => a,
-            Err(e) => {
-                let err = SseErrorEvent {
-                    code: e.code,
-                    message: e.message,
-                };
-                let _ = emit_event(&tx, make_json_event("error", err));
-                return;
-            }
-        };
-
-        let source = Source {
-            prelude: req.prelude.clone(),
-            code: req.script.clone(),
-        };
-        let timeout = Duration::from_millis(req.timeout_ms);
-
         let env = SandboxEnv {
             client: state.base_env.client.clone(),
         };
 
-        let cache_key = if req.trace { "trace" } else { "default" };
+        let cache_key = if trace { "trace" } else { "default" };
         let stream_result = state
             .sandbox_manager
             .exec(
                 cache_key,
                 source,
-                req.function.clone(),
+                function,
                 args,
                 env,
                 ExecOptions { timeout },
@@ -251,20 +294,20 @@ fn execute_sse_inner(
                     code: mapped.code,
                     message: mapped.message,
                 };
-                let _ = emit_event(&tx, make_json_event("error", err));
+                let _ = emit_json_event(&tx, "error", &err);
                 return;
             }
         };
 
-        let trace_builder = req.trace.then(HttpTraceBuilder::new);
+        let trace_builder = trace.then(HttpTraceBuilder::new);
         let mut pending_traces = Vec::new();
         let span_parent_id = if let Some(builder) = trace_builder.as_ref() {
-            let trace = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
-            if !emit_event(&tx, make_json_event("trace", trace.clone())) {
+            let trace_event = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
+            if !emit_json_event(&tx, "trace", &trace_event) {
                 return;
             }
-            let parent_id = trace.id;
-            pending_traces.push(trace);
+            let parent_id = trace_event.id;
+            pending_traces.push(trace_event);
             Some(parent_id)
         } else {
             None
@@ -278,17 +321,17 @@ fn execute_sse_inner(
 
                 () = tokio::time::sleep_until(deadline) => {
                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                        pending_traces.push(trace.clone());
-                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                        pending_traces.push(trace_event.clone());
+                        if !emit_json_event(&tx, "trace", &trace_event) {
                             break;
                         }
                     }
                     let err = SseErrorEvent {
                         code: ErrorCode::Timeout,
-                        message: format!("Execution timed out after {}ms", req.timeout_ms),
+                        message: format!("Execution timed out after {timeout_ms}ms"),
                     };
-                    let _ = emit_event(&tx, make_json_event("error", err));
+                    let _ = emit_json_event(&tx, "error", &err);
                     break;
                 }
 
@@ -298,15 +341,15 @@ fn execute_sse_inner(
                             match value_to_json(&data) {
                                 Ok(value) => {
                                     let event = SseDataEvent { value };
-                                    if !emit_event(&tx, make_json_event("data", event)) {
+                                    if !emit_json_event(&tx, "data", &event) {
                                         break;
                                     }
                                 }
                                 Err(e) => {
                                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                        pending_traces.push(trace.clone());
-                                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace_event.clone());
+                                        if !emit_json_event(&tx, "trace", &trace_event) {
                                             break;
                                         }
                                     }
@@ -314,7 +357,7 @@ fn execute_sse_inner(
                                         code: ErrorCode::Internal,
                                         message: e.message,
                                     };
-                                    let _ = emit_event(&tx, make_json_event("error", err));
+                                    let _ = emit_json_event(&tx, "error", &err);
                                     break;
                                 }
                             }
@@ -323,15 +366,15 @@ fn execute_sse_inner(
                             match value_to_json(&data) {
                                 Ok(value) => {
                                     let event = SseDataEvent { value };
-                                    if !emit_event(&tx, make_json_event("data", event)) {
+                                    if !emit_json_event(&tx, "data", &event) {
                                         break;
                                     }
                                 }
                                 Err(e) => {
                                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                                        let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                        pending_traces.push(trace.clone());
-                                        if !emit_event(&tx, make_json_event("trace", trace)) {
+                                        let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                        pending_traces.push(trace_event.clone());
+                                        if !emit_json_event(&tx, "trace", &trace_event) {
                                             break;
                                         }
                                     }
@@ -339,28 +382,28 @@ fn execute_sse_inner(
                                         code: ErrorCode::Internal,
                                         message: e.message,
                                     };
-                                    let _ = emit_event(&tx, make_json_event("error", err));
+                                    let _ = emit_json_event(&tx, "error", &err);
                                     break;
                                 }
                             }
 
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace.clone());
-                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
 
                             let done = SseDoneEvent { traces: pending_traces };
-                            let _ = emit_event(&tx, make_json_event("done", done));
+                            let _ = emit_json_event(&tx, "done", &done);
                             break;
                         }
                         Some(StreamItem::Error(err)) => {
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace.clone());
-                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
@@ -369,7 +412,7 @@ fn execute_sse_inner(
                                 code: api_err.code,
                                 message: api_err.message,
                             };
-                            let _ = emit_event(&tx, make_json_event("error", err));
+                            let _ = emit_json_event(&tx, "error", &err);
                             break;
                         }
                         Some(StreamItem::Log {
@@ -379,37 +422,38 @@ fn execute_sse_inner(
                         }) => {
                             let event = SseLogEvent {
                                 level: level.clone(),
-                                context: context.clone(),
+                                context,
                                 message: message.clone(),
                             };
-                            if !emit_event(&tx, make_json_event("log", event)) {
+                            if !emit_json_event(&tx, "log", &event) {
                                 break;
                             }
                             if let Some(builder) = trace_builder.as_ref() {
-                                let trace = builder.log(&level, message);
-                                pending_traces.push(trace.clone());
-                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                let trace_event = builder.log(&level, message);
+                                pending_traces.push(trace_event.clone());
+                                if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
                         }
                         Some(StreamItem::End(None)) | None => {
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
-                                let trace = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace.clone());
-                                if !emit_event(&tx, make_json_event("trace", trace)) {
+                                let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
+                                pending_traces.push(trace_event.clone());
+                                if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
                             let done = SseDoneEvent { traces: pending_traces };
-                            let _ = emit_event(&tx, make_json_event("done", done));
+                            let _ = emit_json_event(&tx, "done", &done);
                             break;
                         }
                     }
                 }
             }
         }
-    });
+    }
+    .instrument(tracing::Span::current()));
 
     UnboundedReceiverStream::new(rx)
 }

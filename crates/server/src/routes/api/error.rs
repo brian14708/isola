@@ -25,13 +25,6 @@ impl HttpApiError {
         Self::new(ErrorCode::InvalidRequest, message)
     }
 
-    pub fn unknown_runtime(runtime: &str) -> Self {
-        Self::new(
-            ErrorCode::UnknownRuntime,
-            format!("Unknown runtime: {runtime}"),
-        )
-    }
-
     pub fn script_error(message: impl Into<String>) -> Self {
         Self::new(ErrorCode::ScriptError, message)
     }
@@ -51,7 +44,7 @@ impl HttpApiError {
 impl IntoResponse for HttpApiError {
     fn into_response(self) -> Response {
         let status = match self.code {
-            ErrorCode::InvalidRequest | ErrorCode::UnknownRuntime => StatusCode::BAD_REQUEST,
+            ErrorCode::InvalidRequest => StatusCode::BAD_REQUEST,
             ErrorCode::ScriptError => StatusCode::UNPROCESSABLE_ENTITY,
             ErrorCode::Timeout => StatusCode::REQUEST_TIMEOUT,
             ErrorCode::Cancelled => {
