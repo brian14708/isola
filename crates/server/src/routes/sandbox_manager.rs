@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use futures::Stream;
@@ -23,6 +23,8 @@ use crate::utils::stream::join_with_infallible;
 
 const DEFAULT_TEMPLATE_PRELUDE: &str = "import sandbox.asyncio";
 const DEFAULT_TEMPLATE_MAX_MEMORY: usize = 64 * 1024 * 1024;
+const DEFAULT_CACHE_MAX_INSTANCES: usize = 64;
+const DEFAULT_CACHE_TTL_MS: u64 = 60_000;
 
 pub struct Source {
     pub prelude: String,
@@ -62,13 +64,37 @@ impl Argument {
 
 struct CachedSandbox<E: Host + Clone> {
     sandbox: Sandbox<E>,
+    last_used: Instant,
 }
 
 type CacheMap<E> = Arc<Mutex<HashMap<[u8; 32], Vec<CachedSandbox<E>>>>>;
 
+#[derive(Clone, Copy)]
+struct CacheConfig {
+    max_instances: usize,
+    ttl: Option<Duration>,
+}
+
+struct ResolvedManagerConfig {
+    max_memory: usize,
+    max_memory_source: &'static str,
+    template_prelude: Option<String>,
+    template_prelude_source: &'static str,
+    template_cache_dir: Option<PathBuf>,
+    template_cache_dir_source: &'static str,
+    template_cache_dir_display: String,
+    cache_max_instances: usize,
+    cache_max_instances_source: &'static str,
+    cache_ttl: Option<Duration>,
+    cache_ttl_source: &'static str,
+    lib_dir: PathBuf,
+    runtime_lib_dir_source: &'static str,
+}
+
 pub struct SandboxManager<E: Host + Clone> {
     module: Arc<SandboxTemplate<E>>,
     cache: CacheMap<E>,
+    cache_config: CacheConfig,
 }
 
 impl<E: Host + Clone> Clone for SandboxManager<E> {
@@ -76,18 +102,13 @@ impl<E: Host + Clone> Clone for SandboxManager<E> {
         Self {
             module: self.module.clone(),
             cache: self.cache.clone(),
+            cache_config: self.cache_config,
         }
     }
 }
 
 impl<E: Host + Clone> SandboxManager<E> {
-    pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
-        info!("Creating SandboxManager...");
-        let path = wasm_path.as_ref();
-        let parent = path
-            .parent()
-            .ok_or_else(|| anyhow::anyhow!("Wasm path has no parent directory"))?;
-
+    fn resolve_manager_config(parent: &Path) -> ResolvedManagerConfig {
         let (max_memory, max_memory_source) = std::env::var("SANDBOX_MAX_MEMORY").map_or(
             (DEFAULT_TEMPLATE_MAX_MEMORY, "default"),
             |raw| match raw.parse::<usize>() {
@@ -121,6 +142,41 @@ impl<E: Host + Clone> SandboxManager<E> {
             |path| path.display().to_string(),
         );
 
+        let (cache_max_instances, cache_max_instances_source) =
+            std::env::var("SANDBOX_CACHE_MAX_INSTANCES").map_or(
+                (DEFAULT_CACHE_MAX_INSTANCES, "default"),
+                |raw| match raw.parse::<usize>() {
+                    Ok(parsed) => (parsed, "env"),
+                    Err(err) => {
+                        tracing::warn!(
+                            %raw,
+                            ?err,
+                            "Invalid SANDBOX_CACHE_MAX_INSTANCES; falling back to default"
+                        );
+                        (DEFAULT_CACHE_MAX_INSTANCES, "default_invalid_env")
+                    }
+                },
+            );
+
+        let (cache_ttl, cache_ttl_source) = std::env::var("SANDBOX_CACHE_TTL_MS").map_or(
+            (Some(Duration::from_millis(DEFAULT_CACHE_TTL_MS)), "default"),
+            |raw| match raw.parse::<u64>() {
+                Ok(0) => (None, "env_disabled"),
+                Ok(ms) => (Some(Duration::from_millis(ms)), "env"),
+                Err(err) => {
+                    tracing::warn!(
+                        %raw,
+                        ?err,
+                        "Invalid SANDBOX_CACHE_TTL_MS; falling back to default"
+                    );
+                    (
+                        Some(Duration::from_millis(DEFAULT_CACHE_TTL_MS)),
+                        "default_invalid_env",
+                    )
+                }
+            },
+        );
+
         let (mut lib_dir, runtime_lib_dir_source) = std::env::var("WASI_PYTHON_RUNTIME")
             .map_or_else(
                 |_| {
@@ -135,30 +191,63 @@ impl<E: Host + Clone> SandboxManager<E> {
             );
         lib_dir.push("lib");
 
+        ResolvedManagerConfig {
+            max_memory,
+            max_memory_source,
+            template_prelude,
+            template_prelude_source,
+            template_cache_dir,
+            template_cache_dir_source,
+            template_cache_dir_display,
+            cache_max_instances,
+            cache_max_instances_source,
+            cache_ttl,
+            cache_ttl_source,
+            lib_dir,
+            runtime_lib_dir_source,
+        }
+    }
+
+    pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+        info!("Creating SandboxManager...");
+        let path = wasm_path.as_ref();
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Wasm path has no parent directory"))?;
+        let config = Self::resolve_manager_config(parent);
+
         info!(
             wasm_path = %path.display(),
-            template_max_memory_bytes = max_memory,
-            template_max_memory_source = max_memory_source,
-            template_prelude_enabled = template_prelude.is_some(),
-            template_prelude_source,
-            template_cache_dir_source,
-            runtime_lib_dir_source,
-            runtime_lib_dir = %lib_dir.display(),
-            template_cache_dir = %template_cache_dir_display,
+            template_max_memory_bytes = config.max_memory,
+            template_max_memory_source = config.max_memory_source,
+            template_prelude_enabled = config.template_prelude.is_some(),
+            template_prelude_source = config.template_prelude_source,
+            template_cache_dir_source = config.template_cache_dir_source,
+            runtime_lib_dir_source = config.runtime_lib_dir_source,
+            runtime_lib_dir = %config.lib_dir.display(),
+            template_cache_dir = %config.template_cache_dir_display,
+            cache_max_instances = config.cache_max_instances,
+            cache_max_instances_source = config.cache_max_instances_source,
+            cache_ttl_ms = config.cache_ttl.map_or(0, |ttl| ttl.as_millis()),
+            cache_ttl_source = config.cache_ttl_source,
             "Resolved sandbox template configuration"
         );
 
         let module = SandboxTemplate::<E>::builder()
-            .prelude(template_prelude)
-            .cache(template_cache_dir)
-            .max_memory(max_memory)
-            .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
+            .prelude(config.template_prelude)
+            .cache(config.template_cache_dir)
+            .max_memory(config.max_memory)
+            .mount(&config.lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
             .build(path)
             .await?;
 
         Ok(Self {
             module: Arc::new(module),
             cache: Arc::new(Mutex::new(HashMap::new())),
+            cache_config: CacheConfig {
+                max_instances: config.cache_max_instances,
+                ttl: config.cache_ttl,
+            },
         })
     }
 
@@ -170,8 +259,60 @@ impl<E: Host + Clone> SandboxManager<E> {
         hasher.finalize().into()
     }
 
+    fn prune_expired_cache(
+        cache: &mut HashMap<[u8; 32], Vec<CachedSandbox<E>>>,
+        ttl: Option<Duration>,
+    ) {
+        let Some(ttl) = ttl else {
+            return;
+        };
+
+        cache.retain(|_, instances| {
+            instances.retain(|cached| cached.last_used.elapsed() <= ttl);
+            !instances.is_empty()
+        });
+    }
+
+    fn evict_lru_until_limit(
+        cache: &mut HashMap<[u8; 32], Vec<CachedSandbox<E>>>,
+        max_instances: usize,
+    ) {
+        if max_instances == 0 {
+            cache.clear();
+            return;
+        }
+
+        while cache.values().map(Vec::len).sum::<usize>() > max_instances {
+            let mut victim: Option<([u8; 32], usize, Instant)> = None;
+            for (key, instances) in cache.iter() {
+                for (idx, cached) in instances.iter().enumerate() {
+                    if victim.is_none_or(|(_, _, ts)| cached.last_used < ts) {
+                        victim = Some((*key, idx, cached.last_used));
+                    }
+                }
+            }
+
+            let Some((victim_key, victim_idx, _)) = victim else {
+                break;
+            };
+
+            if let Some(instances) = cache.get_mut(&victim_key) {
+                instances.swap_remove(victim_idx);
+                if instances.is_empty() {
+                    cache.remove(&victim_key);
+                }
+            }
+        }
+    }
+
     fn get_cached(&self, hash: [u8; 32]) -> Option<CachedSandbox<E>> {
-        self.cache.lock().get_mut(&hash)?.pop()
+        let mut cache = self.cache.lock();
+        Self::prune_expired_cache(&mut cache, self.cache_config.ttl);
+        let cached = cache.get_mut(&hash)?.pop();
+        if cache.get(&hash).is_some_and(Vec::is_empty) {
+            cache.remove(&hash);
+        }
+        cached
     }
 
     async fn prepare_sandbox(
@@ -197,7 +338,10 @@ impl<E: Host + Clone> SandboxManager<E> {
         }
         sandbox.eval_script(&script.code, Arc::new(sink)).await?;
 
-        Ok(CachedSandbox { sandbox })
+        Ok(CachedSandbox {
+            sandbox,
+            last_used: Instant::now(),
+        })
     }
 
     pub async fn exec(
@@ -223,6 +367,7 @@ impl<E: Host + Clone> SandboxManager<E> {
 
         let timeout = options.timeout;
         let cache = self.cache.clone();
+        let cache_config = self.cache_config;
         let task = Box::pin(async move {
             let result = tokio::time::timeout(
                 timeout,
@@ -237,17 +382,12 @@ impl<E: Host + Clone> SandboxManager<E> {
             });
             match result {
                 Ok(()) => {
+                    cached.last_used = Instant::now();
                     let mut cache_lock = cache.lock();
                     cache_lock.entry(hash).or_default().push(cached);
-
-                    let total: usize = cache_lock.values().map(Vec::len).sum();
-                    if total > 64
-                        && let Some(key) = cache_lock.keys().next().copied()
-                        && let Some(instances) = cache_lock.get_mut(&key)
-                        && !instances.is_empty()
-                    {
-                        instances.remove(0);
-                    }
+                    Self::prune_expired_cache(&mut cache_lock, cache_config.ttl);
+                    Self::evict_lru_until_limit(&mut cache_lock, cache_config.max_instances);
+                    drop(cache_lock);
                 }
                 Err(err) => {
                     let _ = tx.send(StreamItem::Error(err));

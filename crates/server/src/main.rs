@@ -39,7 +39,6 @@ async fn async_main() -> anyhow::Result<()> {
             Ok(())
         }
         None | Some("serve") => {
-            let _provider = init_tracing()?;
             let port = std::env::var("PORT")
                 .ok()
                 .and_then(|p| p.parse::<u16>().ok())
