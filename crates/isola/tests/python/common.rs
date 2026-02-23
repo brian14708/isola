@@ -7,12 +7,13 @@ use std::{
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use futures::TryStreamExt;
+use http::header::HOST;
 use isola::{
     host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
     sandbox::{DirPerms, FilePerms, SandboxTemplate},
     value::Value,
 };
-use isola_request::{Client, RequestOptions};
+use reqwest::Client;
 
 #[derive(Clone)]
 pub struct TestHost {
@@ -41,20 +42,33 @@ impl Host for TestHost {
     }
 
     async fn http_request(&self, req: HttpRequest) -> std::result::Result<HttpResponse, BoxError> {
-        let mut request = http::Request::new(req.body().clone().unwrap_or_default());
-        *request.method_mut() = req.method().clone();
-        *request.uri_mut() = req.uri().clone();
-        *request.headers_mut() = req.headers().clone();
+        let mut headers = req.headers().clone();
+        headers.remove(HOST);
 
         let response = self
             .client
-            .send_http(request, RequestOptions::default())
+            .request(req.method().clone(), req.uri().to_string())
+            .headers(headers)
+            .body(req.body().clone().unwrap_or_default())
+            .send()
             .await
             .map_err(|e| -> BoxError { Box::new(e) })?;
 
-        Ok(response.map(|body| -> HttpBodyStream {
-            Box::pin(body.map_err(|e| -> BoxError { Box::new(e) }))
-        }))
+        let mut builder = http::Response::builder()
+            .status(response.status())
+            .version(response.version());
+        if let Some(headers) = builder.headers_mut() {
+            *headers = response.headers().clone();
+        }
+
+        let body = response
+            .bytes_stream()
+            .map_ok(http_body::Frame::data)
+            .map_err(|e| -> BoxError { Box::new(e) });
+
+        builder
+            .body(Box::pin(body) as HttpBodyStream)
+            .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)
     }
 }
 

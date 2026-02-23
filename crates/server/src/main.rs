@@ -5,6 +5,7 @@ use utils::otel::init_tracing;
 
 use crate::routes::{SandboxEnv, SandboxManager};
 
+mod request;
 mod routes;
 mod server;
 mod utils;

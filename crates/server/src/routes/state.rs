@@ -1,9 +1,9 @@
 use std::{path::Path, sync::Arc};
 
 use axum::extract::FromRef;
-use isola_request::Client;
 
 use super::{SandboxEnv, SandboxManager};
+use crate::request::Client;
 
 #[derive(Clone)]
 pub struct AppState {
