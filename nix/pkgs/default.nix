@@ -11,6 +11,5 @@ in
 {
   inherit (packages) python;
   default = packages.isola;
-  lib = packages.library;
   oci = packages.container;
 }

@@ -27,5 +27,8 @@ thiserror = { workspace = true }
 url = { workspace = true }
 wit-bindgen = { workspace = true, features = ["macros"] }
 
+[build-dependencies]
+pyo3-build-config = { workspace = true, features = ["resolve-config"] }
+
 [lints]
 workspace = true
