@@ -4,7 +4,9 @@ Async-first Python bindings for the Isola runtime, built with `maturin` and PyO3
 
 ## Python HTTP Host Handler
 
-Outbound guest HTTP can be handled in Python per sandbox:
+Outbound guest HTTP is handled by `httpx` by default.
+
+You can override it per sandbox with a custom Python handler:
 
 ```python
 import isola
@@ -26,4 +28,4 @@ async def handle_http(req: isola.HttpRequest) -> isola.HttpResponse:
 sandbox.set_http_handler(handle_http)
 ```
 
-If no handler is configured, guest `http_request` calls fail with `unsupported http_request`.
+Call `sandbox.set_http_handler(None)` to disable outbound HTTP handling.

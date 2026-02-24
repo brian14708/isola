@@ -9,7 +9,7 @@ description = "Async Python bindings for the Isola runtime"
 license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = ["httpx>=0.28.1"]
 classifiers = [
   "Programming Language :: Rust",
   "Programming Language :: Python :: 3",
@@ -100,4 +100,8 @@ test = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "-m 'not network'"
 testpaths = ["tests"]
+markers = [
+  "network: tests that require outbound network access",
+]

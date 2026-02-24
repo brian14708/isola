@@ -12,6 +12,8 @@ from os import PathLike, fspath
 from typing import TYPE_CHECKING, Literal, cast
 from typing_extensions import Self, TypedDict, Unpack
 
+import httpx
+
 from isola._isola import _ContextCore, _StreamCore
 
 if TYPE_CHECKING:
@@ -57,6 +59,30 @@ class HttpResponse:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
     body: HttpBodyOut = None
+
+
+async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
+    client = httpx.AsyncClient()
+    try:
+        outbound_request = client.build_request(
+            request.method, request.url, headers=request.headers, content=request.body
+        )
+        response = await client.send(outbound_request, stream=True)
+    except Exception:
+        await client.aclose()
+        raise
+
+    async def _stream_body() -> AsyncIterable[bytes]:
+        try:
+            async for chunk in response.aiter_bytes():
+                yield chunk
+        finally:
+            await response.aclose()
+            await client.aclose()
+
+    return HttpResponse(
+        status=response.status_code, headers=dict(response.headers), body=_stream_body()
+    )
 
 
 @dataclass(slots=True)
@@ -310,6 +336,7 @@ class Sandbox:
             | None
         ) = None
         self._pending_callback_tasks: set[asyncio.Task[None]] = set()
+        self.set_http_handler(_default_httpx_handler)
 
     def configure(self, **kwargs: Unpack[_SandboxConfigureInput]) -> None:
         patch = dict(kwargs)
