@@ -76,7 +76,7 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    install -Dm644 target/python3.wasm $out/bin/python3.wasm
+    install -Dm644 target/python.wasm $out/bin/python.wasm
     cp --no-preserve=mode -rL ${bundle}/. $out/
     find $out/ -type f -print -exec nuke-refs '{}' +
 

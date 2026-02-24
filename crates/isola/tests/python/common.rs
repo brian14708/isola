@@ -81,7 +81,7 @@ fn workspace_root() -> Result<PathBuf> {
 }
 
 fn bundle_path(root: &Path) -> PathBuf {
-    root.join("target").join("python3.wasm")
+    root.join("target").join("python.wasm")
 }
 
 fn resolve_lib_dir(root: &Path) -> PathBuf {

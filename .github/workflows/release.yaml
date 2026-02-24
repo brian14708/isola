@@ -101,7 +101,9 @@ jobs:
       - name: Package release artifacts
         run: |
           mkdir -p dist
-          tar -C result -czf dist/isola-python-runtime.tar.gz bin lib
+          tar -C result -czf dist/isola-python-runtime.tar.gz \
+            --transform='s,^,isola-python-runtime/,' \
+            bin lib
       - name: Upload artifacts to target release
         env:
           GH_TOKEN: ${{ github.token }}

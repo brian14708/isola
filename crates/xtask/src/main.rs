@@ -69,7 +69,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         vec![format!(
             "target/{TARGET}/release-lto/isola_python_runtime.wasm"
         )],
-        "target/python3.wasm".to_string(),
+        "target/python.wasm".to_string(),
         |inp, out| -> Result<()> {
             fn lib(
                 name: impl Into<String>,

@@ -20,7 +20,7 @@ stdenv.mkDerivation {
     mkdir -p app
     cp --no-preserve=mode -rL ${python}/. app/
     mkdir -p app/target/wasm32-wasip1/wasi-deps
-    ln -s ../bin/python3.wasm app/target/python3.wasm
+    ln -s ../bin/python.wasm app/target/python.wasm
     ln -s ../../.. app/target/wasm32-wasip1/wasi-deps/usr
 
     # Install the JS runtime WASM.

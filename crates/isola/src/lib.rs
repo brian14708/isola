@@ -9,12 +9,12 @@
 //!
 //! Download and extract the Python runtime bundle first:
 //! ```bash
-//! curl -L -o isola-python.tar.gz https://github.com/brian14708/isola/releases/download/latest/isola-python.tar.gz
-//! tar xzf isola-python.tar.gz
-//! mkdir -p isola-python/cache
+//! curl -L -o isola-python-runtime.tar.gz https://github.com/brian14708/isola/releases/download/latest/isola-python-runtime.tar.gz
+//! tar xzf isola-python-runtime.tar.gz
+//! mkdir -p isola-python-runtime/cache
 //! ```
-//! The archive contains `bin/python3.wasm` and `lib/` (runtime deps).
-//! Point `.build(...)` and `.mount(...)` at those extracted paths.
+//! The archive extracts into `isola-python-runtime/` with `bin/python.wasm` and
+//! `lib/`. Point `.build(...)` and `.mount(...)` at those extracted paths.
 //!
 //! ```no_run
 //! use isola::{
@@ -31,15 +31,15 @@
 //! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let template = SandboxTemplate::<MyHost>::builder()
-//!         .cache(Some("./isola-python/cache".into()))
+//!         .cache(Some("./isola-python-runtime/cache".into()))
 //!         .max_memory(64 * 1024 * 1024)
 //!         .mount(
-//!             "./isola-python/lib",
+//!             "./isola-python-runtime/lib",
 //!             "/lib",
 //!             DirPerms::READ,
 //!             FilePerms::READ,
 //!         )
-//!         .build::<MyHost>("./isola-python/bin/python3.wasm")
+//!         .build::<MyHost>("./isola-python-runtime/bin/python.wasm")
 //!         .await?;
 //!
 //!     let mut sandbox = template

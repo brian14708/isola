@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import math
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from os import PathLike, fspath
 from typing import TYPE_CHECKING, Literal, cast
@@ -17,7 +16,7 @@ import httpx
 from isola._isola import _ContextCore, _StreamCore
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncIterator, Iterable
 
     from isola._isola import _SandboxCore
 
@@ -102,20 +101,21 @@ class MountConfig:
         }
 
 
-@dataclass(slots=True)
-class SandboxConfig:
-    max_memory: int | None = None
-    timeout: float | None = None
-    mounts: list[MountConfig] = field(default_factory=list)
-    env: dict[str, str] = field(default_factory=dict)
+class TemplateConfig(TypedDict, total=False):
+    runtime_path: Pathish | None
+    cache_dir: Pathish | None
+    max_memory: int | None
+    prelude: str | None
+    runtime_lib_dir: Pathish | None
+    mounts: list[MountConfig] | None
+    env: dict[str, str]
 
-    def to_patch(self) -> _SandboxConfigureInput:
-        return {
-            "max_memory": self.max_memory,
-            "timeout": self.timeout,
-            "mounts": self.mounts,
-            "env": self.env,
-        }
+
+class SandboxConfig(TypedDict, total=False):
+    max_memory: int | None
+    mounts: list[MountConfig] | None
+    env: dict[str, str]
+    http_handler: Callable[[HttpRequest], Awaitable[object]] | None
 
 
 @dataclass(slots=True)
@@ -130,10 +130,12 @@ class StreamArg:
         core: _StreamCore,
         *,
         name: str | None = None,
+        source: AsyncIterable[object] | None = None,
         producer_task: asyncio.Task[None] | None = None,
     ) -> None:
         self._core = core
         self.name = name
+        self._source = source
         self._producer_task = producer_task
 
     @property
@@ -142,6 +144,24 @@ class StreamArg:
 
     @property
     def producer_task(self) -> asyncio.Task[None] | None:
+        return self._producer_task
+
+    def start_producer(self) -> asyncio.Task[None] | None:
+        if self._producer_task is not None or self._source is None:
+            return self._producer_task
+
+        source = self._source
+        self._source = None
+
+        async def _produce() -> None:
+            try:
+                async for item in source:
+                    payload = _to_json(item)
+                    await self._core.push_json_async(payload)
+            finally:
+                self._core.end()
+
+        self._producer_task = asyncio.create_task(_produce())
         return self._producer_task
 
     @classmethod
@@ -153,17 +173,7 @@ class StreamArg:
         capacity: int = 1024,
     ) -> StreamArg:
         core = _StreamCore(capacity)
-
-        async def _produce() -> None:
-            try:
-                async for item in values:
-                    payload = _to_json(item)
-                    await core.push_json_async(payload)
-            finally:
-                core.end()
-
-        producer_task = asyncio.create_task(_produce())
-        return cls(core, name=name, producer_task=producer_task)
+        return cls(core, name=name, source=values)
 
     @classmethod
     def from_iterable(
@@ -188,22 +198,6 @@ class StreamArg:
 
 
 RunArg = Arg | StreamArg | JsonValue
-
-
-class _ContextConfigurePatch(TypedDict, total=False):
-    cache_dir: Pathish | None
-    max_memory: int | None
-    prelude: str | None
-    runtime_lib_dir: Pathish | None
-    mounts: list[MountConfig] | None
-    env: dict[str, str]
-
-
-class _SandboxConfigureInput(TypedDict, total=False):
-    max_memory: int | None
-    timeout: float | None
-    mounts: list[MountConfig] | None
-    env: dict[str, str]
 
 
 def _normalize_mounts(
@@ -248,26 +242,6 @@ def _normalize_optional_path(value: object, *, key: str) -> str | None:
     return _normalize_path(value, key=key)
 
 
-def _timeout_seconds_to_ms(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        msg = "timeout must be float | None"
-        raise TypeError(msg)
-    timeout = float(value)
-    if not math.isfinite(timeout):
-        msg = "timeout must be finite"
-        raise ValueError(msg)
-    if timeout <= 0:
-        msg = "timeout must be greater than 0"
-        raise ValueError(msg)
-    timeout_ms = math.ceil(timeout * 1000)
-    if timeout_ms <= 0:
-        msg = "timeout must be at least 0.001 seconds"
-        raise ValueError(msg)
-    return timeout_ms
-
-
 def _configure_core(
     core: _ContextCore | _SandboxCore, patch: dict[str, object]
 ) -> None:
@@ -275,17 +249,38 @@ def _configure_core(
         core.configure_json(json.dumps(patch, separators=(",", ":")))
 
 
-class Context:
-    def __init__(self, core: _ContextCore) -> None:
-        self._core = core
+class SandboxManager:
+    def __init__(self) -> None:
+        self._core = _ContextCore()
 
-    @classmethod
-    def create(cls) -> Context:
-        core = _ContextCore()
-        return cls(core)
+    async def compile_template(
+        self,
+        runtime: RuntimeName,
+        *,
+        version: str | None = None,
+        **kwargs: Unpack[TemplateConfig],
+    ) -> SandboxTemplate:
+        runtime_path = kwargs.pop("runtime_path", None)
 
-    def configure(self, **kwargs: Unpack[_ContextConfigurePatch]) -> None:
-        patch = dict(kwargs)
+        if runtime_path is None:
+            from isola._runtime import resolve_runtime  # noqa: PLC0415
+
+            defaults = await resolve_runtime(runtime, version=version)
+            resolved: dict[str, object] = {**defaults, **kwargs}
+        else:
+            resolved = dict(kwargs)
+            resolved["runtime_path"] = runtime_path
+
+        actual_runtime_path = resolved.pop("runtime_path", None)
+        if actual_runtime_path is None:
+            msg = "runtime_path must be provided or resolvable via auto-download"
+            raise ValueError(msg)
+
+        patch: dict[str, object] = dict(resolved)
+        if "cache_dir" not in patch or patch["cache_dir"] is None:
+            from isola._runtime import _cache_base  # noqa: PLC0415
+
+            patch["cache_dir"] = str(_cache_base() / "isola" / "cache")
         if "cache_dir" in patch:
             patch["cache_dir"] = _normalize_optional_path(
                 patch["cache_dir"], key="cache_dir"
@@ -297,19 +292,11 @@ class Context:
         if "mounts" in patch:
             patch["mounts"] = _normalize_mounts(patch["mounts"])
         _configure_core(self._core, patch)
-
-    async def initialize_template(
-        self, runtime_path: Pathish, *, runtime: RuntimeName = "python"
-    ) -> None:
-        normalized_runtime_path = _normalize_path(runtime_path, key="runtime_path")
+        normalized_runtime_path = _normalize_path(
+            actual_runtime_path, key="runtime_path"
+        )
         await self._core.initialize_template(normalized_runtime_path, runtime)
-
-    async def instantiate(self, *, config: SandboxConfig | None = None) -> Sandbox:
-        core = await self._core.instantiate()
-        sandbox = Sandbox(core)
-        if config is not None:
-            sandbox.configure(**config.to_patch())
-        return sandbox
+        return SandboxTemplate(self._core)
 
     def __enter__(self) -> Self:
         return self
@@ -327,10 +314,34 @@ class Context:
         self._core.close()
 
 
+class SandboxTemplate:
+    def __init__(self, core: _ContextCore) -> None:
+        self._core = core
+
+    async def create(self, **kwargs: Unpack[SandboxConfig]) -> Sandbox:
+        core = await self._core.instantiate()
+        sandbox = Sandbox(core)
+
+        patch: dict[str, object] = {}
+        if "max_memory" in kwargs:
+            patch["max_memory"] = kwargs["max_memory"]
+        if "mounts" in kwargs:
+            patch["mounts"] = _normalize_mounts(kwargs["mounts"])
+        if "env" in kwargs:
+            patch["env"] = kwargs["env"]
+        _configure_core(sandbox._core, patch)  # noqa: SLF001
+
+        http_handler = kwargs.get("http_handler", _default_httpx_handler)
+        sandbox.set_http_handler(http_handler)
+        return sandbox
+
+
 class Sandbox:
     def __init__(self, core: _SandboxCore) -> None:
         self._core = core
         self._event_dispatch: Callable[[str, str | None], None] | None = None
+        self._stream_dispatches: dict[int, Callable[[str, str | None], None]] = {}
+        self._next_stream_dispatch_id = 0
         self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -339,27 +350,13 @@ class Sandbox:
             | None
         ) = None
         self._pending_callback_tasks: set[asyncio.Task[None]] = set()
-        self.set_http_handler(_default_httpx_handler)
-
-    def configure(self, **kwargs: Unpack[_SandboxConfigureInput]) -> None:
-        patch = dict(kwargs)
-        if "timeout" in patch:
-            timeout_value = patch.pop("timeout")
-            timeout_ms = _timeout_seconds_to_ms(timeout_value)
-            patch["timeout_ms"] = timeout_ms
-            self._http_handler_timeout_seconds = (
-                None if timeout_ms is None else timeout_ms / 1000
-            )
-        if "mounts" in patch:
-            patch["mounts"] = _normalize_mounts(patch["mounts"])
-        _configure_core(self._core, patch)
 
     def set_callback(
         self, callback: Callable[[Event], Awaitable[None] | None] | None
     ) -> None:
         if callback is None:
             self._event_dispatch = None
-            self._core.set_callback(None)
+            self._refresh_core_callback()
             return
 
         loop = asyncio.get_running_loop()
@@ -400,6 +397,23 @@ class Sandbox:
             loop.call_soon_threadsafe(_invoke)
 
         self._event_dispatch = _dispatch
+        self._refresh_core_callback()
+
+    def _refresh_core_callback(self) -> None:
+        if self._event_dispatch is None and not self._stream_dispatches:
+            self._core.set_callback(None)
+            return
+
+        def _dispatch(kind: str, data: str | None) -> None:
+            # Stream listeners can change while events are emitted.
+            stream_dispatches = tuple(self._stream_dispatches.values())
+            for stream_dispatch in stream_dispatches:
+                stream_dispatch(kind, data)
+
+            event_dispatch = self._event_dispatch
+            if event_dispatch is not None:
+                event_dispatch(kind, data)
+
         self._core.set_callback(_dispatch)
 
     def set_http_handler(
@@ -418,11 +432,7 @@ class Sandbox:
             request = HttpRequest(
                 method=method, url=url, headers=dict(headers), body=body
             )
-            timeout = self._http_handler_timeout_seconds
-            if timeout is None:
-                response: object = await handler(request)
-            else:
-                response = await asyncio.wait_for(handler(request), timeout=timeout)
+            response: object = await handler(request)
             if not isinstance(response, HttpResponse):
                 msg = "http handler must return HttpResponse"
                 raise TypeError(msg)
@@ -431,9 +441,6 @@ class Sandbox:
 
         self._http_handler_dispatch = _dispatch
         self._core.set_http_handler(_dispatch, loop)
-
-    async def start(self) -> None:
-        await self._core.start()
 
     async def load_script(self, code: str) -> None:
         await self._core.load_script(code)
@@ -508,17 +515,32 @@ class Sandbox:
     ) -> AsyncIterator[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue()
         loop = asyncio.get_running_loop()
-        previous_dispatch = self._event_dispatch
+        pending_dispatches = 0
+        operation_finished = False
+        dispatches_drained: asyncio.Future[None] = loop.create_future()
+
+        def _enqueue(event: Event) -> None:
+            nonlocal pending_dispatches
+            queue.put_nowait(event)
+            pending_dispatches -= 1
+            if (
+                operation_finished
+                and pending_dispatches == 0
+                and not dispatches_drained.done()
+            ):
+                dispatches_drained.set_result(None)
 
         def _dispatch(kind: str, data: str | None) -> None:
+            nonlocal pending_dispatches
             mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
             event = Event(kind=cast("EventKind", mapped_kind), data=data)
-            loop.call_soon_threadsafe(queue.put_nowait, event)
-            if previous_dispatch is not None:
-                previous_dispatch(kind, data)
+            pending_dispatches += 1
+            loop.call_soon_threadsafe(_enqueue, event)
 
-        self._event_dispatch = _dispatch
-        self._core.set_callback(_dispatch)
+        stream_dispatch_id = self._next_stream_dispatch_id
+        self._next_stream_dispatch_id += 1
+        self._stream_dispatches[stream_dispatch_id] = _dispatch
+        self._refresh_core_callback()
         run_task = asyncio.create_task(self._run_operation(name, args))
 
         try:
@@ -535,15 +557,18 @@ class Sandbox:
                 get_event_task.cancel()
                 await asyncio.gather(get_event_task, return_exceptions=True)
 
+                operation_finished = True
+                if pending_dispatches > 0:
+                    await asyncio.shield(dispatches_drained)
+
                 while not queue.empty():
                     yield queue.get_nowait()
 
                 await run_task
                 break
         finally:
-            if self._event_dispatch is _dispatch:
-                self._event_dispatch = previous_dispatch
-                self._core.set_callback(previous_dispatch)
+            self._stream_dispatches.pop(stream_dispatch_id, None)
+            self._refresh_core_callback()
             if not run_task.done():
                 run_task.cancel()
                 await asyncio.gather(run_task, return_exceptions=True)
@@ -555,6 +580,7 @@ class Sandbox:
         self.close()
 
     async def __aenter__(self) -> Self:
+        await self._core.start()
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -563,6 +589,7 @@ class Sandbox:
     def close(self) -> None:
         self._cancel_pending_callback_tasks()
         self._event_dispatch = None
+        self._stream_dispatches.clear()
         self._http_handler_dispatch = None
         self._core.close()
 
@@ -571,6 +598,7 @@ class Sandbox:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._event_dispatch = None
+        self._stream_dispatches.clear()
         self._http_handler_dispatch = None
         self._core.close()
 
@@ -594,6 +622,7 @@ def _encode_args(
 
     encoded: list[tuple[str, str | None, object]] = []
     producers: list[asyncio.Task[None]] = []
+    stream_args: list[StreamArg] = []
 
     for arg in args:
         if isinstance(arg, Arg):
@@ -602,11 +631,15 @@ def _encode_args(
 
         if isinstance(arg, StreamArg):
             encoded.append(("stream", arg.name, arg.stream_core))
-            if arg.producer_task is not None:
-                producers.append(arg.producer_task)
+            stream_args.append(arg)
             continue
 
         encoded.append(("json", None, _to_json(arg)))
+
+    for stream_arg in stream_args:
+        producer = stream_arg.start_producer()
+        if producer is not None:
+            producers.append(producer)
 
     return encoded, producers
 
