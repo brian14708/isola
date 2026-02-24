@@ -78,7 +78,7 @@ def test_context_creation_smoke() -> None:
 def test_sandbox_config_defaults_are_unlimited() -> None:
     patch = isola.SandboxConfig().to_patch()
     assert patch["max_memory"] is None
-    assert patch["timeout"] is None
+    assert "timeout" not in patch
 
 
 @pytest.mark.asyncio
@@ -88,10 +88,7 @@ async def test_async_context_managers_smoke() -> None:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
 
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
-        ) as sandbox:
-            await sandbox.start()
+        async with context.instantiate(config=isola.SandboxConfig()) as sandbox:
             await sandbox.load_script("def ping():\n\treturn 'ok'")
             result = await sandbox.run("ping")
             assert result.results == []
@@ -104,10 +101,7 @@ async def test_async_context_managers_js_runtime_smoke() -> None:
     async with isola.Context.create() as context:
         await context.initialize_template(runtime_dir, runtime="js")
 
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
-        ) as sandbox:
-            await sandbox.start()
+        async with context.instantiate(config=isola.SandboxConfig()) as sandbox:
             await sandbox.load_script("function ping() { return 'ok'; }")
             result = await sandbox.run("ping")
             assert result.results == []
@@ -127,10 +121,7 @@ async def test_asyncio_timeout_wrapper() -> None:
     async with isola.Context.create() as context:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=30.0)
-        ) as sandbox:
-            await sandbox.start()
+        async with context.instantiate(config=isola.SandboxConfig()) as sandbox:
             await sandbox.load_script(
                 "import time\n\ndef slow():\n\ttime.sleep(0.2)\n\treturn 1\n"
             )
@@ -145,10 +136,7 @@ async def test_can_start_sandbox_and_execute_code() -> None:
     async with isola.Context.create() as context:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
-        ) as sandbox:
-            await sandbox.start()
+        async with context.instantiate(config=isola.SandboxConfig()) as sandbox:
             await sandbox.load_script(
                 "def add(a, b):\n"
                 "\treturn a + b\n"
@@ -173,10 +161,7 @@ async def test_run_stream_yields_events() -> None:
     async with isola.Context.create() as context:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
-        ) as sandbox:
-            await sandbox.start()
+        async with context.instantiate(config=isola.SandboxConfig()) as sandbox:
             await sandbox.load_script("def emit():\n\tprint('hello')\n\treturn 7\n")
 
             events = [event async for event in sandbox.run_stream("emit")]
@@ -267,12 +252,8 @@ async def test_two_sandboxes_can_run_concurrently() -> None:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
         async with (
-            await context.instantiate(
-                config=isola.SandboxConfig(timeout=2.0)
-            ) as sandbox_a,
-            await context.instantiate(
-                config=isola.SandboxConfig(timeout=2.0)
-            ) as sandbox_b,
+            context.instantiate(config=isola.SandboxConfig()) as sandbox_a,
+            context.instantiate(config=isola.SandboxConfig()) as sandbox_b,
         ):
             script = (
                 "import time\n"
@@ -283,7 +264,6 @@ async def test_two_sandboxes_can_run_concurrently() -> None:
             )
 
             async def _run_one(sandbox: IsolaSandbox, name: str) -> str | None:
-                await sandbox.start()
                 await sandbox.load_script(script)
                 result = await sandbox.run("identify", [name, 0.05])
                 return cast("str | None", result.final)
@@ -301,23 +281,21 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
     async with isola.Context.create() as context:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
+
+        async def http_handler(_: HttpRequest) -> HttpResponse:
+            await asyncio.sleep(0)
+            return cast(
+                "HttpResponse",
+                isola.HttpResponse(
+                    status=201,
+                    headers={"content-type": "text/plain", "x-test": "bytes"},
+                    body=b"ok",
+                ),
+            )
+
+        async with context.instantiate(
+            config=isola.SandboxConfig(), http_handler=http_handler
         ) as sandbox:
-
-            async def http_handler(_: HttpRequest) -> HttpResponse:
-                await asyncio.sleep(0)
-                return cast(
-                    "HttpResponse",
-                    isola.HttpResponse(
-                        status=201,
-                        headers={"content-type": "text/plain", "x-test": "bytes"},
-                        body=b"ok",
-                    ),
-                )
-
-            sandbox.set_http_handler(http_handler)
-            await sandbox.start()
             await sandbox.load_script(_FETCH_SCRIPT)
 
             result = await sandbox.run("main", ["https://example.test/bytes"])
@@ -332,34 +310,80 @@ async def test_sandbox_http_handler_stream_response_shape() -> None:
     async with isola.Context.create() as context:
         context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
         await context.initialize_template(runtime_dir)
-        async with await context.instantiate(
-            config=isola.SandboxConfig(timeout=1.0)
+
+        async def response_chunks() -> AsyncIterator[bytes]:
+            await asyncio.sleep(0)
+            yield b"a"
+            await asyncio.sleep(0)
+            yield b"b"
+
+        async def http_handler(req: HttpRequest) -> HttpResponse:
+            assert req.method == "GET"
+            assert req.url == "https://example.test/stream"
+            await asyncio.sleep(0)
+            return cast(
+                "HttpResponse",
+                isola.HttpResponse(
+                    status=200,
+                    headers={"content-type": "text/plain", "x-test": "stream"},
+                    body=response_chunks(),
+                ),
+            )
+
+        async with context.instantiate(
+            config=isola.SandboxConfig(), http_handler=http_handler
         ) as sandbox:
-
-            async def response_chunks() -> AsyncIterator[bytes]:
-                await asyncio.sleep(0)
-                yield b"a"
-                await asyncio.sleep(0)
-                yield b"b"
-
-            async def http_handler(req: HttpRequest) -> HttpResponse:
-                assert req.method == "GET"
-                assert req.url == "https://example.test/stream"
-                await asyncio.sleep(0)
-                return cast(
-                    "HttpResponse",
-                    isola.HttpResponse(
-                        status=200,
-                        headers={"content-type": "text/plain", "x-test": "stream"},
-                        body=response_chunks(),
-                    ),
-                )
-
-            sandbox.set_http_handler(http_handler)
-            await sandbox.start()
             await sandbox.load_script(_FETCH_SCRIPT)
 
             result = await sandbox.run("main", ["https://example.test/stream"])
             assert result.results == []
             assert result.final == [200, "stream", "ab"]
             assert result.errors == []
+
+
+@pytest.mark.asyncio
+async def test_sandbox_caller_timeout_does_not_break_following_requests() -> None:
+    runtime_dir, lib_dir = _resolve_runtime_paths()
+    async with isola.Context.create() as context:
+        context.configure(max_memory=64 * 1024 * 1024, runtime_lib_dir=lib_dir)
+        await context.initialize_template(runtime_dir)
+
+        async def warmup_handler(_: HttpRequest) -> HttpResponse:
+            await asyncio.sleep(0)
+            return cast("HttpResponse", isola.HttpResponse(status=200, body=b"ok"))
+
+        async with context.instantiate(
+            config=isola.SandboxConfig(), http_handler=warmup_handler
+        ) as warmup:
+            await warmup.load_script(_FETCH_SCRIPT)
+            result = await warmup.run("main", ["https://example.test/warmup"])
+            assert result.final == [200, None, "ok"]
+
+        for _ in range(4):
+
+            async def hanging_handler(_: HttpRequest) -> HttpResponse:
+                await asyncio.Event().wait()
+                message = "unreachable"
+                raise AssertionError(message)
+
+            async with context.instantiate(
+                config=isola.SandboxConfig(), http_handler=hanging_handler
+            ) as sandbox:
+                await sandbox.load_script(_FETCH_SCRIPT)
+                with pytest.raises(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        sandbox.run("main", ["https://example.test/hang"]), timeout=0.05
+                    )
+
+            await asyncio.sleep(0.05)
+
+        async def recovery_handler(_: HttpRequest) -> HttpResponse:
+            await asyncio.sleep(0)
+            return cast("HttpResponse", isola.HttpResponse(status=200, body=b"ok"))
+
+        async with context.instantiate(
+            config=isola.SandboxConfig(), http_handler=recovery_handler
+        ) as sandbox:
+            await sandbox.load_script(_FETCH_SCRIPT)
+            result = await sandbox.run("main", ["https://example.test/recovery"])
+            assert result.final == [200, None, "ok"]

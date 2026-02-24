@@ -2,7 +2,6 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -23,6 +22,7 @@ use pyo3::{
     prelude::*,
     types::{PyAnyMethods, PyBytes, PyDict, PyModule},
 };
+use pyo3_async_runtimes::TaskLocals;
 use serde::Deserialize;
 
 const DEFAULT_STREAM_CAPACITY: usize = 1024;
@@ -136,7 +136,6 @@ struct PendingSandboxConfig {
     max_memory: Option<usize>,
     mounts: Vec<ConfiguredMount>,
     env: Vec<(String, String)>,
-    timeout_ms: Option<u64>,
 }
 
 impl PendingSandboxConfig {
@@ -169,17 +168,6 @@ impl PendingSandboxConfig {
                     value
                         .try_into()
                         .map_err(|_| invalid_argument("max_memory exceeds usize"))
-                })
-                .transpose()?;
-        }
-
-        if let Some(timeout_ms) = patch.timeout_ms {
-            self.timeout_ms = timeout_ms
-                .map(|value| {
-                    if value == 0 {
-                        return Err(invalid_argument("timeout_ms must be greater than 0"));
-                    }
-                    Ok(value)
                 })
                 .transpose()?;
         }
@@ -411,8 +399,6 @@ struct SandboxConfigPatch {
     #[serde(default)]
     max_memory: Option<Option<u64>>,
     #[serde(default)]
-    timeout_ms: Option<Option<u64>>,
-    #[serde(default)]
     mounts: Option<Vec<MountConfigInput>>,
     #[serde(default)]
     env: Option<BTreeMap<String, String>>,
@@ -561,29 +547,22 @@ impl PyHttpHandler {
         }
     }
 
-    async fn await_coroutine_blocking(
+    async fn await_coroutine(
         &self,
         create_coro: impl for<'py> FnOnce(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
     ) -> std::result::Result<Py<PyAny>, BoxError> {
         let event_loop = Python::attach(|py| self.event_loop.clone_ref(py));
-        tokio::task::spawn_blocking(move || {
-            Python::attach(|py| {
-                let asyncio = py
-                    .import("asyncio")
-                    .map_err(|e| py_error_to_box_error("failed to import asyncio", &e))?;
-                let coro =
-                    create_coro(py).map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
-                let future = asyncio
-                    .call_method1("run_coroutine_threadsafe", (coro, event_loop.bind(py)))
-                    .map_err(|e| py_error_to_box_error("failed to schedule coroutine", &e))?;
-                let result = future
-                    .call_method0("result")
-                    .map_err(|e| py_error_to_box_error("python coroutine failed", &e))?;
-                Ok(result.unbind())
-            })
-        })
-        .await
-        .map_err(|e| io_error(format!("python callback join error: {e}")))?
+        let py_future = Python::attach(|py| {
+            let coro =
+                create_coro(py).map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
+            let locals = TaskLocals::new(event_loop.bind(py).clone());
+            pyo3_async_runtimes::into_future_with_locals(&locals, coro)
+                .map_err(|e| py_error_to_box_error("failed to schedule coroutine", &e))
+        })?;
+
+        py_future
+            .await
+            .map_err(|e| py_error_to_box_error("python coroutine failed", &e))
     }
 
     async fn invoke_http_handler(
@@ -605,7 +584,7 @@ impl PyHttpHandler {
         let callback = Python::attach(|py| self.callback.clone_ref(py));
 
         let result = self
-            .await_coroutine_blocking(move |py| {
+            .await_coroutine(move |py| {
                 let headers_dict = PyDict::new(py);
                 for (k, v) in headers {
                     headers_dict.set_item(k, v)?;
@@ -665,47 +644,34 @@ impl PyHttpHandler {
         let iterator = Arc::new(iterator);
         tokio::spawn(async move {
             loop {
-                let iterator = Arc::clone(&iterator);
-                let event_loop = Python::attach(|py| event_loop.clone_ref(py));
-                let next = tokio::task::spawn_blocking(move || {
-                    Python::attach(|py| {
-                        let builtins = py
-                            .import("builtins")
-                            .map_err(|e| py_error_to_box_error("failed to import builtins", &e))?;
-                        let anext = builtins
-                            .getattr("anext")
-                            .map_err(|e| py_error_to_box_error("failed to access anext", &e))?;
-                        let coro = anext.call1((iterator.bind(py),)).map_err(|e| {
-                            py_error_to_box_error("failed to create anext coroutine", &e)
-                        })?;
-                        let asyncio = py
-                            .import("asyncio")
-                            .map_err(|e| py_error_to_box_error("failed to import asyncio", &e))?;
-                        let future = asyncio
-                            .call_method1("run_coroutine_threadsafe", (coro, event_loop.bind(py)))
-                            .map_err(|e| py_error_to_box_error("failed to schedule anext", &e))?;
-                        match future.call_method0("result") {
-                            Ok(obj) => Ok(Some(obj.unbind())),
-                            Err(err) => {
-                                if err.is_instance_of::<pyo3::exceptions::PyStopAsyncIteration>(py)
-                                {
-                                    Ok(None)
-                                } else {
-                                    Err(py_error_to_box_error("stream iterator failed", &err))
-                                }
-                            }
-                        }
-                    })
-                })
-                .await;
+                if tx.is_closed() {
+                    break;
+                }
 
-                let outcome = match next {
-                    Ok(value) => value,
-                    Err(err) => Err(io_error(format!("stream join error: {err}"))),
+                let iterator = Arc::clone(&iterator);
+                let next_item = match Python::attach(|py| {
+                    let builtins = py
+                        .import("builtins")
+                        .map_err(|e| py_error_to_box_error("failed to import builtins", &e))?;
+                    let anext = builtins
+                        .getattr("anext")
+                        .map_err(|e| py_error_to_box_error("failed to access anext", &e))?;
+                    let coro = anext.call1((iterator.bind(py),)).map_err(|e| {
+                        py_error_to_box_error("failed to create anext coroutine", &e)
+                    })?;
+                    let locals = TaskLocals::new(event_loop.bind(py).clone());
+                    pyo3_async_runtimes::into_future_with_locals(&locals, coro)
+                        .map_err(|e| py_error_to_box_error("failed to schedule anext", &e))
+                }) {
+                    Ok(future) => future.await,
+                    Err(err) => {
+                        let _ = tx.send(Err(err)).await;
+                        break;
+                    }
                 };
 
-                match outcome {
-                    Ok(Some(value)) => {
+                match next_item {
+                    Ok(value) => {
                         let bytes = Python::attach(|py| py_bytes_to_rust_bytes(value.bind(py)));
                         match bytes {
                             Ok(bytes) => {
@@ -719,9 +685,15 @@ impl PyHttpHandler {
                             }
                         }
                     }
-                    Ok(None) => break,
                     Err(err) => {
-                        let _ = tx.send(Err(err)).await;
+                        let is_end_of_stream = Python::attach(|py| {
+                            err.is_instance_of::<pyo3::exceptions::PyStopAsyncIteration>(py)
+                        });
+                        if is_end_of_stream {
+                            break;
+                        }
+                        let stream_error = py_error_to_box_error("stream iterator failed", &err);
+                        let _ = tx.send(Err(stream_error)).await;
                         break;
                     }
                 }
@@ -871,7 +843,6 @@ enum SandboxInner {
     Running {
         sandbox: Option<Sandbox<Env>>,
         callback: Option<Arc<PyCallback>>,
-        timeout_ms: Option<u64>,
     },
 }
 
@@ -1126,7 +1097,6 @@ impl PySandbox {
             };
 
             let options = config.to_options();
-            let timeout_ms = config.timeout_ms;
             let env = Env::new(http_handler.clone());
 
             match ctx.instantiate_sandbox(options, env).await {
@@ -1135,7 +1105,6 @@ impl PySandbox {
                     *guard = SandboxInner::Running {
                         sandbox: Some(sandbox),
                         callback,
-                        timeout_ms,
                     };
                     drop(guard);
                     Ok(())
@@ -1160,21 +1129,16 @@ impl PySandbox {
         let inner = Arc::clone(&self.inner);
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (mut lease, callback, timeout_ms) = {
+            let (mut lease, callback) = {
                 let mut guard = inner.lock();
                 match &mut *guard {
-                    SandboxInner::Running {
-                        sandbox,
-                        callback,
-                        timeout_ms,
-                    } => {
+                    SandboxInner::Running { sandbox, callback } => {
                         let sandbox = sandbox
                             .take()
                             .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
                         (
                             RunningSandboxLease::new(Arc::clone(&inner), sandbox),
                             callback.clone(),
-                            *timeout_ms,
                         )
                     }
                     _ => return Err(to_py_err(invalid_argument("sandbox is not running"))),
@@ -1183,24 +1147,7 @@ impl PySandbox {
 
             let collector = OutputCollector::new(callback);
             let sink = Arc::new(collector.clone());
-            let outcome_result = match timeout_ms {
-                Some(timeout_ms) => tokio::time::timeout(
-                    Duration::from_millis(timeout_ms),
-                    lease.sandbox_mut().eval_script(&script, sink),
-                )
-                .await
-                .map_or_else(
-                    |_| {
-                        Err(to_py_err(Error::Internal(format!(
-                            "Script execution timed out after {timeout_ms}ms"
-                        ))))
-                    },
-                    Ok,
-                ),
-                None => Ok(lease.sandbox_mut().eval_script(&script, sink).await),
-            };
-
-            let outcome = outcome_result?;
+            let outcome = lease.sandbox_mut().eval_script(&script, sink).await;
             if let Err(err) = outcome {
                 let message = format!("Script loading failed: {err}");
                 collector.emit_error_message(&message);
@@ -1221,21 +1168,16 @@ impl PySandbox {
         let inner = Arc::clone(&self.inner);
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (mut lease, callback, timeout_ms) = {
+            let (mut lease, callback) = {
                 let mut guard = inner.lock();
                 match &mut *guard {
-                    SandboxInner::Running {
-                        sandbox,
-                        callback,
-                        timeout_ms,
-                    } => {
+                    SandboxInner::Running { sandbox, callback } => {
                         let sandbox = sandbox
                             .take()
                             .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
                         (
                             RunningSandboxLease::new(Arc::clone(&inner), sandbox),
                             callback.clone(),
-                            *timeout_ms,
                         )
                     }
                     _ => return Err(to_py_err(invalid_argument("sandbox is not running"))),
@@ -1268,27 +1210,10 @@ impl PySandbox {
                 .collect::<Result<Vec<_>>>()
                 .map_err(to_py_err)?;
 
-            let outcome_result = match timeout_ms {
-                Some(timeout_ms) => tokio::time::timeout(
-                    Duration::from_millis(timeout_ms),
-                    lease.sandbox_mut().call_with_sink(&func, isola_args, sink),
-                )
-                .await
-                .map_or_else(
-                    |_| {
-                        Err(to_py_err(Error::Internal(format!(
-                            "Sandbox execution timed out after {timeout_ms}ms"
-                        ))))
-                    },
-                    Ok,
-                ),
-                None => Ok(lease
-                    .sandbox_mut()
-                    .call_with_sink(&func, isola_args, sink)
-                    .await),
-            };
-
-            let outcome = outcome_result?;
+            let outcome = lease
+                .sandbox_mut()
+                .call_with_sink(&func, isola_args, sink)
+                .await;
             if let Err(err) = outcome {
                 let message = format!("Sandbox execution failed: {err}");
                 collector.emit_error_message(&message);

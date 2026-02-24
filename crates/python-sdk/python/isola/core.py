@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-import math
 from collections.abc import AsyncIterable
 from dataclasses import dataclass, field
 from os import PathLike, fspath
@@ -17,7 +16,7 @@ import httpx
 from isola._isola import _ContextCore, _StreamCore
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+    from collections.abc import AsyncIterator, Awaitable, Callable, Generator, Iterable
 
     from isola._isola import _SandboxCore
 
@@ -105,17 +104,11 @@ class MountConfig:
 @dataclass(slots=True)
 class SandboxConfig:
     max_memory: int | None = None
-    timeout: float | None = None
     mounts: list[MountConfig] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
 
     def to_patch(self) -> _SandboxConfigureInput:
-        return {
-            "max_memory": self.max_memory,
-            "timeout": self.timeout,
-            "mounts": self.mounts,
-            "env": self.env,
-        }
+        return {"max_memory": self.max_memory, "mounts": self.mounts, "env": self.env}
 
 
 @dataclass(slots=True)
@@ -201,7 +194,6 @@ class _ContextConfigurePatch(TypedDict, total=False):
 
 class _SandboxConfigureInput(TypedDict, total=False):
     max_memory: int | None
-    timeout: float | None
     mounts: list[MountConfig] | None
     env: dict[str, str]
 
@@ -248,31 +240,57 @@ def _normalize_optional_path(value: object, *, key: str) -> str | None:
     return _normalize_path(value, key=key)
 
 
-def _timeout_seconds_to_ms(value: object) -> int | None:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        msg = "timeout must be float | None"
-        raise TypeError(msg)
-    timeout = float(value)
-    if not math.isfinite(timeout):
-        msg = "timeout must be finite"
-        raise ValueError(msg)
-    if timeout <= 0:
-        msg = "timeout must be greater than 0"
-        raise ValueError(msg)
-    timeout_ms = math.ceil(timeout * 1000)
-    if timeout_ms <= 0:
-        msg = "timeout must be at least 0.001 seconds"
-        raise ValueError(msg)
-    return timeout_ms
-
-
 def _configure_core(
     core: _ContextCore | _SandboxCore, patch: dict[str, object]
 ) -> None:
     if patch:
         core.configure_json(json.dumps(patch, separators=(",", ":")))
+
+
+class _SandboxInstantiation:
+    def __init__(
+        self,
+        core: _ContextCore,
+        config: SandboxConfig | None = None,
+        http_handler: Callable[[HttpRequest], Awaitable[object]]
+        | None = _default_httpx_handler,
+    ) -> None:
+        self._core = core
+        self._config = config
+        self._http_handler = http_handler
+        self._sandbox: Sandbox | None = None
+        self._lock = asyncio.Lock()
+
+    async def _resolve(self) -> Sandbox:
+        sandbox = self._sandbox
+        if sandbox is not None:
+            return sandbox
+
+        async with self._lock:
+            sandbox = self._sandbox
+            if sandbox is not None:
+                return sandbox
+
+            core = await self._core.instantiate()
+            sandbox = Sandbox(core)
+            if self._config is not None:
+                sandbox.configure(**self._config.to_patch())
+            sandbox.set_http_handler(self._http_handler)
+            self._sandbox = sandbox
+            return sandbox
+
+    def __await__(self) -> Generator[object, None, Sandbox]:
+        return self._resolve().__await__()
+
+    async def __aenter__(self) -> Sandbox:
+        sandbox = await self._resolve()
+        return await sandbox.__aenter__()
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        sandbox = self._sandbox
+        if sandbox is None:
+            return
+        await sandbox.__aexit__(exc_type, exc, traceback)
 
 
 class Context:
@@ -304,12 +322,14 @@ class Context:
         normalized_runtime_path = _normalize_path(runtime_path, key="runtime_path")
         await self._core.initialize_template(normalized_runtime_path, runtime)
 
-    async def instantiate(self, *, config: SandboxConfig | None = None) -> Sandbox:
-        core = await self._core.instantiate()
-        sandbox = Sandbox(core)
-        if config is not None:
-            sandbox.configure(**config.to_patch())
-        return sandbox
+    def instantiate(
+        self,
+        *,
+        config: SandboxConfig | None = None,
+        http_handler: Callable[[HttpRequest], Awaitable[object]]
+        | None = _default_httpx_handler,
+    ) -> _SandboxInstantiation:
+        return _SandboxInstantiation(self._core, config, http_handler)
 
     def __enter__(self) -> Self:
         return self
@@ -331,6 +351,8 @@ class Sandbox:
     def __init__(self, core: _SandboxCore) -> None:
         self._core = core
         self._event_dispatch: Callable[[str, str | None], None] | None = None
+        self._stream_dispatches: dict[int, Callable[[str, str | None], None]] = {}
+        self._next_stream_dispatch_id = 0
         self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -343,13 +365,6 @@ class Sandbox:
 
     def configure(self, **kwargs: Unpack[_SandboxConfigureInput]) -> None:
         patch = dict(kwargs)
-        if "timeout" in patch:
-            timeout_value = patch.pop("timeout")
-            timeout_ms = _timeout_seconds_to_ms(timeout_value)
-            patch["timeout_ms"] = timeout_ms
-            self._http_handler_timeout_seconds = (
-                None if timeout_ms is None else timeout_ms / 1000
-            )
         if "mounts" in patch:
             patch["mounts"] = _normalize_mounts(patch["mounts"])
         _configure_core(self._core, patch)
@@ -359,7 +374,7 @@ class Sandbox:
     ) -> None:
         if callback is None:
             self._event_dispatch = None
-            self._core.set_callback(None)
+            self._refresh_core_callback()
             return
 
         loop = asyncio.get_running_loop()
@@ -400,6 +415,23 @@ class Sandbox:
             loop.call_soon_threadsafe(_invoke)
 
         self._event_dispatch = _dispatch
+        self._refresh_core_callback()
+
+    def _refresh_core_callback(self) -> None:
+        if self._event_dispatch is None and not self._stream_dispatches:
+            self._core.set_callback(None)
+            return
+
+        def _dispatch(kind: str, data: str | None) -> None:
+            # Stream listeners can change while events are emitted.
+            stream_dispatches = tuple(self._stream_dispatches.values())
+            for stream_dispatch in stream_dispatches:
+                stream_dispatch(kind, data)
+
+            event_dispatch = self._event_dispatch
+            if event_dispatch is not None:
+                event_dispatch(kind, data)
+
         self._core.set_callback(_dispatch)
 
     def set_http_handler(
@@ -418,11 +450,7 @@ class Sandbox:
             request = HttpRequest(
                 method=method, url=url, headers=dict(headers), body=body
             )
-            timeout = self._http_handler_timeout_seconds
-            if timeout is None:
-                response: object = await handler(request)
-            else:
-                response = await asyncio.wait_for(handler(request), timeout=timeout)
+            response: object = await handler(request)
             if not isinstance(response, HttpResponse):
                 msg = "http handler must return HttpResponse"
                 raise TypeError(msg)
@@ -431,9 +459,6 @@ class Sandbox:
 
         self._http_handler_dispatch = _dispatch
         self._core.set_http_handler(_dispatch, loop)
-
-    async def start(self) -> None:
-        await self._core.start()
 
     async def load_script(self, code: str) -> None:
         await self._core.load_script(code)
@@ -508,17 +533,16 @@ class Sandbox:
     ) -> AsyncIterator[Event]:
         queue: asyncio.Queue[Event] = asyncio.Queue()
         loop = asyncio.get_running_loop()
-        previous_dispatch = self._event_dispatch
 
         def _dispatch(kind: str, data: str | None) -> None:
             mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
             event = Event(kind=cast("EventKind", mapped_kind), data=data)
             loop.call_soon_threadsafe(queue.put_nowait, event)
-            if previous_dispatch is not None:
-                previous_dispatch(kind, data)
 
-        self._event_dispatch = _dispatch
-        self._core.set_callback(_dispatch)
+        stream_dispatch_id = self._next_stream_dispatch_id
+        self._next_stream_dispatch_id += 1
+        self._stream_dispatches[stream_dispatch_id] = _dispatch
+        self._refresh_core_callback()
         run_task = asyncio.create_task(self._run_operation(name, args))
 
         try:
@@ -541,9 +565,8 @@ class Sandbox:
                 await run_task
                 break
         finally:
-            if self._event_dispatch is _dispatch:
-                self._event_dispatch = previous_dispatch
-                self._core.set_callback(previous_dispatch)
+            self._stream_dispatches.pop(stream_dispatch_id, None)
+            self._refresh_core_callback()
             if not run_task.done():
                 run_task.cancel()
                 await asyncio.gather(run_task, return_exceptions=True)
@@ -555,6 +578,7 @@ class Sandbox:
         self.close()
 
     async def __aenter__(self) -> Self:
+        await self._core.start()
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -563,6 +587,7 @@ class Sandbox:
     def close(self) -> None:
         self._cancel_pending_callback_tasks()
         self._event_dispatch = None
+        self._stream_dispatches.clear()
         self._http_handler_dispatch = None
         self._core.close()
 
@@ -571,6 +596,7 @@ class Sandbox:
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         self._event_dispatch = None
+        self._stream_dispatches.clear()
         self._http_handler_dispatch = None
         self._core.close()
 
