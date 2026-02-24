@@ -564,7 +564,7 @@ async fn integration_js_stream_input_arg_is_iterable() -> Result<()> {
         .await
         .context("failed to instantiate sandbox")?;
 
-    let script = r#"
+    let script = r"
 function main(values) {
     var out = [];
     for (const value of values) {
@@ -572,7 +572,7 @@ function main(values) {
     }
     return out;
 }
-"#;
+";
 
     sandbox
         .eval_script(script, NoopOutputSink::shared())

@@ -48,6 +48,7 @@ wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 
 [dev-dependencies]
+criterion = { workspace = true }
 reqwest = { workspace = true, features = ["http2", "stream", "gzip", "rustls"] }
 tempfile = { workspace = true }
 wiremock = { workspace = true }
@@ -56,11 +57,12 @@ wiremock = { workspace = true }
 workspace = true
 
 [[test]]
-name = "integration_python"
-path = "tests/python/mod.rs"
+name = "integration"
+path = "tests/integration.rs"
 required-features = ["serde"]
 
-[[test]]
-name = "integration_js"
-path = "tests/js/mod.rs"
+[[bench]]
+name = "isola-integration-bench"
+path = "benches/integration.rs"
+harness = false
 required-features = ["serde"]

@@ -124,7 +124,7 @@ impl runtime::Guest for Global {
                         let value = match value {
                             isola::script::host::Value::Cbor(s) => InputValue::Cbor(s.into()),
                             isola::script::host::Value::CborIterator(e) => {
-                                InputValue::Iter(collect_stream_arg(e)?)
+                                InputValue::Iter(collect_stream_arg(&e)?)
                             }
                         };
                         if let Some(name) = name {
@@ -144,7 +144,7 @@ impl runtime::Guest for Global {
     }
 }
 
-fn collect_stream_arg(iter: host::ValueIterator) -> Result<Vec<Vec<u8>>, runtime::Error> {
+fn collect_stream_arg(iter: &host::ValueIterator) -> Result<Vec<Vec<u8>>, runtime::Error> {
     let mut items = Vec::new();
     loop {
         match iter.blocking_read() {

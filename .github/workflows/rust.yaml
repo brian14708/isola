@@ -29,7 +29,6 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-features -- --deny warnings
   integration:
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout your repository using git
