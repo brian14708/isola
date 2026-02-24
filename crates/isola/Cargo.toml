@@ -59,3 +59,8 @@ workspace = true
 name = "integration_python"
 path = "tests/python/mod.rs"
 required-features = ["serde"]
+
+[[test]]
+name = "integration_js"
+path = "tests/js/mod.rs"
+required-features = ["serde"]

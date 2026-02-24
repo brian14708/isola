@@ -32,7 +32,11 @@ fn main() -> Result<()> {
 }
 
 type Task = fn(&Shell) -> Result<()>;
-const TASKS: &[(&str, Task)] = &[("build-all", build_all), ("build-python", build_python)];
+const TASKS: &[(&str, Task)] = &[
+    ("build-all", build_all),
+    ("build-python", build_python),
+    ("build-js", build_js),
+];
 
 fn print_help(_sh: &Shell) -> Result<()> {
     println!("Tasks:");
@@ -43,7 +47,9 @@ fn print_help(_sh: &Shell) -> Result<()> {
 }
 
 fn build_all(sh: &Shell) -> Result<()> {
-    build_python(sh)
+    build_python(sh)?;
+    build_js(sh)?;
+    Ok(())
 }
 
 fn build_python(sh: &Shell) -> Result<()> {
@@ -113,6 +119,76 @@ fn build_python(sh: &Shell) -> Result<()> {
             let mut wasm = wit_component::Linker::default()
                 .validate(true)
                 .stack_size(8_388_608)
+                .use_built_in_libdl(true);
+            for lib in libs {
+                let lib_path = lib.1.to_str().unwrap().to_string();
+                let data = &std::fs::read(lib_path)?;
+                wasm = wasm.library(&lib.0, data, lib.2)?;
+            }
+            let wasm = wasm
+                .adapter(
+                    wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
+                    wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
+                )?
+                .encode()?;
+
+            std::fs::write(out, wasm)?;
+
+            Ok(())
+        },
+    )?;
+
+    Ok(())
+}
+
+fn build_js(sh: &Shell) -> Result<()> {
+    const TARGET: &str = "wasm32-wasip1";
+
+    cmd!(
+        sh,
+        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-js-runtime"
+    )
+    .env("RUSTFLAGS", "-C relocation-model=pic")
+    .run()?;
+
+    run_if_changed(
+        vec![format!("target/{TARGET}/release-lto/isola_js_runtime.wasm")],
+        "target/js.wasm".to_string(),
+        |inp, out| -> Result<()> {
+            fn lib(
+                name: impl Into<String>,
+                path: impl AsRef<Path>,
+                dlopen: bool,
+            ) -> (String, PathBuf, bool) {
+                (name.into(), path.as_ref().to_path_buf(), dlopen)
+            }
+
+            // JS runtime needs libc and the WASI emulated libs (same as Python)
+            let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
+
+            let libs = vec![
+                lib("libisola_js.so", &inp[0], false),
+                lib("libc.so", format!("{wasi_deps_dir}/lib/libc.so"), false),
+                lib(
+                    "libwasi-emulated-signal.so",
+                    format!("{wasi_deps_dir}/lib/libwasi-emulated-signal.so"),
+                    false,
+                ),
+                lib(
+                    "libwasi-emulated-getpid.so",
+                    format!("{wasi_deps_dir}/lib/libwasi-emulated-getpid.so"),
+                    false,
+                ),
+                lib(
+                    "libwasi-emulated-process-clocks.so",
+                    format!("{wasi_deps_dir}/lib/libwasi-emulated-process-clocks.so"),
+                    false,
+                ),
+            ];
+
+            let mut wasm = wit_component::Linker::default()
+                .validate(true)
+                .stack_size(2_097_152) // 2MB stack (lighter than Python's 8MB)
                 .use_built_in_libdl(true);
             for lib in libs {
                 let lib_path = lib.1.to_str().unwrap().to_string();

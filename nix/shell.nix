@@ -10,22 +10,17 @@ let
   );
   python = pkgs.wasipkgs.python.host;
 in
-(craneLib.devShell.override {
-  mkShell = pkgs.mkShell.override {
-    stdenv =
-      if pkgs.stdenv.isDarwin then pkgs.stdenv else pkgs.stdenvAdapters.useMoldLinker pkgs.stdenv;
-  };
-})
-  {
-    buildInputs = with pkgs; [
-      just
-      mdbook
-      (python.withPackages (p: with p; [ uv ]))
-      maturin
-    ];
+craneLib.devShell {
+  buildInputs = with pkgs; [
+    just
+    mdbook
+    (python.withPackages (p: with p; [ uv ]))
+    maturin
+  ];
 
-    env = {
-      WASI_PYTHON_DEV = "${bundle.dev}";
-      WASI_PYTHON_RUNTIME = "${bundle}";
-    };
-  }
+  env = {
+    WASI_SDK = pkgs.wasipkgs.sdk;
+    WASI_PYTHON_DEV = "${bundle.dev}";
+    WASI_PYTHON_RUNTIME = "${bundle}";
+  };
+}

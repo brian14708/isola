@@ -1,0 +1,27 @@
+[package]
+name = "isola-js-runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+heapless = { workspace = true }
+minicbor = { workspace = true }
+minicbor-serde = { workspace = true, features = ["alloc"] }
+rquickjs = { workspace = true, features = ["classes", "properties"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+wit-bindgen = { workspace = true, features = ["macros"] }
+
+[lints]
+workspace = true

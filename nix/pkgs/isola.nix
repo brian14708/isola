@@ -3,6 +3,7 @@
   makeBinaryWrapper,
   server,
   python,
+  js,
 }:
 stdenv.mkDerivation {
   pname = "isola";
@@ -21,6 +22,10 @@ stdenv.mkDerivation {
     mkdir -p app/target/wasm32-wasip1/wasi-deps
     ln -s ../bin/python3.wasm app/target/python3.wasm
     ln -s ../../.. app/target/wasm32-wasip1/wasi-deps/usr
+
+    # Install the JS runtime WASM.
+    cp ${js}/bin/js.wasm app/bin/js.wasm
+    ln -s ../bin/js.wasm app/target/js.wasm
 
     runHook postBuild
   '';

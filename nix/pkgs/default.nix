@@ -9,7 +9,7 @@ let
   };
 in
 {
-  inherit (packages) python;
+  inherit (packages) python js;
   default = packages.isola;
   oci = packages.container;
 }

@@ -5,6 +5,13 @@ run: build
 
 integration: build-wasm
     cargo test --release -p isola integration_python
+    cargo test --release -p isola integration_js
+
+integration-python: build-wasm
+    cargo test --release -p isola integration_python
+
+integration-js: build-js-wasm
+    cargo test --release -p isola integration_js
 
 build: build-wasm
     cargo build --release -p isola-server
@@ -16,6 +23,10 @@ docs:
 [private]
 build-wasm:
     cargo xtask build-all
+
+[private]
+build-js-wasm:
+    cargo xtask build-js
 
 test:
     cargo test --all-features

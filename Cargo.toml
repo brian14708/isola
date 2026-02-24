@@ -72,6 +72,7 @@ wasmtime = { version = "41.0", default-features = false }
 wasmtime-wasi = "41.0"
 wasmtime-wasi-http = { version = "41.0", default-features = false }
 wiremock = "0.6"
+rquickjs = "0.11"
 wit-bindgen = { version = "0.53", default-features = false }
 wit-component = "0.245"
 xshell = "0.2"
