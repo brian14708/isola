@@ -1,6 +1,7 @@
 mod api;
 mod env;
 mod mcp;
+mod runtime_factory;
 mod sandbox_manager;
 mod state;
 
@@ -9,6 +10,7 @@ use std::time::Duration;
 use axum::{http::StatusCode, routing::get};
 pub use env::{SandboxEnv, StreamItem};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+pub use runtime_factory::{Runtime, RuntimeFactory};
 pub use sandbox_manager::{Argument, ExecOptions, SandboxManager, Source};
 pub use state::AppState;
 

@@ -21,10 +21,56 @@ use tracing::info;
 use super::env::{MpscOutputSink, StreamItem};
 use crate::utils::stream::join_with_infallible;
 
-const DEFAULT_TEMPLATE_PRELUDE: &str = "import sandbox.asyncio";
+const DEFAULT_PYTHON_TEMPLATE_PRELUDE: &str = "import sandbox.asyncio";
 const DEFAULT_TEMPLATE_MAX_MEMORY: usize = 64 * 1024 * 1024;
 const DEFAULT_CACHE_MAX_INSTANCES: usize = 64;
 const DEFAULT_CACHE_TTL_MS: u64 = 60_000;
+
+#[derive(Clone, Copy)]
+enum RuntimeKind {
+    Python,
+    Js,
+    Unknown,
+}
+
+impl RuntimeKind {
+    fn from_wasm_path(path: &Path) -> Self {
+        let file = path
+            .file_name()
+            .and_then(std::ffi::OsStr::to_str)
+            .unwrap_or_default();
+
+        if file.eq_ignore_ascii_case("js.wasm") || file.contains("js") {
+            Self::Js
+        } else if file.eq_ignore_ascii_case("python3.wasm") || file.contains("python") {
+            Self::Python
+        } else {
+            Self::Unknown
+        }
+    }
+
+    const fn default_template_prelude(self) -> Option<&'static str> {
+        match self {
+            Self::Js => None,
+            Self::Python | Self::Unknown => Some(DEFAULT_PYTHON_TEMPLATE_PRELUDE),
+        }
+    }
+
+    const fn requires_runtime_lib_dir(self) -> bool {
+        match self {
+            Self::Js => false,
+            Self::Python | Self::Unknown => true,
+        }
+    }
+
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Python => "python",
+            Self::Js => "js",
+            Self::Unknown => "unknown",
+        }
+    }
+}
 
 pub struct Source {
     pub prelude: String,
@@ -76,6 +122,7 @@ struct CacheConfig {
 }
 
 struct ResolvedManagerConfig {
+    runtime_kind: RuntimeKind,
     max_memory: usize,
     max_memory_source: &'static str,
     template_prelude: Option<String>,
@@ -87,8 +134,9 @@ struct ResolvedManagerConfig {
     cache_max_instances_source: &'static str,
     cache_ttl: Option<Duration>,
     cache_ttl_source: &'static str,
-    lib_dir: PathBuf,
+    lib_dir: Option<PathBuf>,
     runtime_lib_dir_source: &'static str,
+    runtime_lib_dir_display: String,
 }
 
 pub struct SandboxManager<E: Host + Clone> {
@@ -108,7 +156,8 @@ impl<E: Host + Clone> Clone for SandboxManager<E> {
 }
 
 impl<E: Host + Clone> SandboxManager<E> {
-    fn resolve_manager_config(parent: &Path) -> ResolvedManagerConfig {
+    #[allow(clippy::too_many_lines)]
+    fn resolve_manager_config(parent: &Path, runtime_kind: RuntimeKind) -> ResolvedManagerConfig {
         let (max_memory, max_memory_source) = std::env::var("SANDBOX_MAX_MEMORY").map_or(
             (DEFAULT_TEMPLATE_MAX_MEMORY, "default"),
             |raw| match raw.parse::<usize>() {
@@ -128,7 +177,16 @@ impl<E: Host + Clone> SandboxManager<E> {
             match std::env::var("SANDBOX_TEMPLATE_PRELUDE") {
                 Ok(value) if value.is_empty() => (None, "env_empty"),
                 Ok(value) => (Some(value), "env"),
-                Err(_) => (Some(DEFAULT_TEMPLATE_PRELUDE.to_string()), "default"),
+                Err(_) => (
+                    runtime_kind
+                        .default_template_prelude()
+                        .map(ToString::to_string),
+                    if runtime_kind.default_template_prelude().is_some() {
+                        "default"
+                    } else {
+                        "default_runtime_none"
+                    },
+                ),
             };
 
         let (template_cache_dir, template_cache_dir_source) =
@@ -177,21 +235,31 @@ impl<E: Host + Clone> SandboxManager<E> {
             },
         );
 
-        let (mut lib_dir, runtime_lib_dir_source) = std::env::var("WASI_PYTHON_RUNTIME")
-            .map_or_else(
-                |_| {
-                    let mut lib_dir = parent.to_owned();
-                    lib_dir.push("wasm32-wasip1");
-                    lib_dir.push("wasi-deps");
-                    lib_dir.push("usr");
-                    lib_dir.push("local");
-                    (lib_dir, "derived")
-                },
-                |path| (PathBuf::from(path), "env"),
-            );
-        lib_dir.push("lib");
+        let (lib_dir, runtime_lib_dir_source) = if runtime_kind.requires_runtime_lib_dir() {
+            let (mut lib_dir, runtime_lib_dir_source) = std::env::var("WASI_PYTHON_RUNTIME")
+                .map_or_else(
+                    |_| {
+                        let mut lib_dir = parent.to_owned();
+                        lib_dir.push("wasm32-wasip1");
+                        lib_dir.push("wasi-deps");
+                        lib_dir.push("usr");
+                        lib_dir.push("local");
+                        (lib_dir, "derived")
+                    },
+                    |path| (PathBuf::from(path), "env"),
+                );
+            lib_dir.push("lib");
+            (Some(lib_dir), runtime_lib_dir_source)
+        } else {
+            (None, "not_required")
+        };
+        let runtime_lib_dir_display = lib_dir.as_ref().map_or_else(
+            || "<disabled>".to_string(),
+            |path| path.display().to_string(),
+        );
 
         ResolvedManagerConfig {
+            runtime_kind,
             max_memory,
             max_memory_source,
             template_prelude,
@@ -205,26 +273,29 @@ impl<E: Host + Clone> SandboxManager<E> {
             cache_ttl_source,
             lib_dir,
             runtime_lib_dir_source,
+            runtime_lib_dir_display,
         }
     }
 
     pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
         info!("Creating SandboxManager...");
         let path = wasm_path.as_ref();
+        let runtime_kind = RuntimeKind::from_wasm_path(path);
         let parent = path
             .parent()
             .ok_or_else(|| anyhow::anyhow!("Wasm path has no parent directory"))?;
-        let config = Self::resolve_manager_config(parent);
+        let config = Self::resolve_manager_config(parent, runtime_kind);
 
         info!(
             wasm_path = %path.display(),
+            runtime_kind = config.runtime_kind.as_str(),
             template_max_memory_bytes = config.max_memory,
             template_max_memory_source = config.max_memory_source,
             template_prelude_enabled = config.template_prelude.is_some(),
             template_prelude_source = config.template_prelude_source,
             template_cache_dir_source = config.template_cache_dir_source,
             runtime_lib_dir_source = config.runtime_lib_dir_source,
-            runtime_lib_dir = %config.lib_dir.display(),
+            runtime_lib_dir = %config.runtime_lib_dir_display,
             template_cache_dir = %config.template_cache_dir_display,
             cache_max_instances = config.cache_max_instances,
             cache_max_instances_source = config.cache_max_instances_source,
@@ -233,13 +304,16 @@ impl<E: Host + Clone> SandboxManager<E> {
             "Resolved sandbox template configuration"
         );
 
-        let module = SandboxTemplate::<E>::builder()
+        let mut module = SandboxTemplate::<E>::builder()
             .prelude(config.template_prelude)
             .cache(config.template_cache_dir)
-            .max_memory(config.max_memory)
-            .mount(&config.lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
-            .build(path)
-            .await?;
+            .max_memory(config.max_memory);
+
+        if let Some(lib_dir) = &config.lib_dir {
+            module = module.mount(lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
+        }
+
+        let module = module.build(path).await?;
 
         Ok(Self {
             module: Arc::new(module),
@@ -396,5 +470,31 @@ impl<E: Host + Clone> SandboxManager<E> {
         });
 
         Ok(join_with_infallible(UnboundedReceiverStream::new(rx), task))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::RuntimeKind;
+
+    #[test]
+    fn detects_js_runtime_from_default_bundle_name() {
+        let runtime = RuntimeKind::from_wasm_path(Path::new("target/js.wasm"));
+        assert!(matches!(runtime, RuntimeKind::Js));
+    }
+
+    #[test]
+    fn detects_python_runtime_from_default_bundle_name() {
+        let runtime = RuntimeKind::from_wasm_path(Path::new("target/python3.wasm"));
+        assert!(matches!(runtime, RuntimeKind::Python));
+    }
+
+    #[test]
+    fn js_runtime_disables_python_template_prelude() {
+        let runtime = RuntimeKind::from_wasm_path(Path::new("target/js.wasm"));
+        assert_eq!(runtime.default_template_prelude(), None);
+        assert!(!runtime.requires_runtime_lib_dir());
     }
 }

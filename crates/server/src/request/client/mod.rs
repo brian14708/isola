@@ -32,7 +32,10 @@ impl Client {
     /// Create a new request client.
     #[must_use]
     pub fn new() -> Self {
-        Self::builder().build()
+        Self::builder()
+            .max_inflight_per_client(builder::DEFAULT_MAX_INFLIGHT_PER_CLIENT)
+            .client_idle_timeout(builder::DEFAULT_CLIENT_IDLE_TIMEOUT)
+            .build()
     }
 
     /// Create a new client builder.

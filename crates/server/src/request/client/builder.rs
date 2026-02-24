@@ -1,5 +1,8 @@
 use super::Client;
 
+pub const DEFAULT_MAX_INFLIGHT_PER_CLIENT: u32 = 96;
+pub const DEFAULT_CLIENT_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_mins(1);
+
 #[must_use]
 pub struct ClientBuilder {
     pub(crate) max_inflight_per_client: u32,
@@ -9,8 +12,8 @@ pub struct ClientBuilder {
 impl Default for ClientBuilder {
     fn default() -> Self {
         Self {
-            max_inflight_per_client: 96,
-            client_idle_timeout: std::time::Duration::from_mins(1),
+            max_inflight_per_client: DEFAULT_MAX_INFLIGHT_PER_CLIENT,
+            client_idle_timeout: DEFAULT_CLIENT_IDLE_TIMEOUT,
         }
     }
 }

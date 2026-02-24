@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::trace::HttpTrace;
+use crate::routes::Runtime;
 
 const fn default_timeout() -> u64 {
     30000
@@ -8,6 +9,7 @@ const fn default_timeout() -> u64 {
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteRequest {
+    pub runtime: Runtime,
     pub script: String,
     #[serde(default)]
     pub prelude: String,

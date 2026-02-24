@@ -1,30 +1,26 @@
-use std::{path::Path, sync::Arc};
+use std::sync::Arc;
 
-use axum::extract::FromRef;
-
-use super::{SandboxEnv, SandboxManager};
+use super::{RuntimeFactory, SandboxEnv};
 use crate::request::Client;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub sandbox_manager: Arc<SandboxManager<SandboxEnv>>,
+    pub runtime_factory: Arc<RuntimeFactory<SandboxEnv>>,
     pub base_env: SandboxEnv,
 }
 
 impl AppState {
-    pub async fn new(wasm_path: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub async fn new() -> anyhow::Result<Self> {
+        let request_proxy = std::env::var("SANDBOX_HTTP_PROXY")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
         let base_env = SandboxEnv {
             client: Arc::new(Client::new()),
+            request_proxy,
         };
         Ok(Self {
-            sandbox_manager: Arc::new(SandboxManager::new(wasm_path.as_ref()).await?),
+            runtime_factory: Arc::new(RuntimeFactory::new().await?),
             base_env,
         })
-    }
-}
-
-impl FromRef<AppState> for Arc<SandboxManager<SandboxEnv>> {
-    fn from_ref(state: &AppState) -> Self {
-        state.sandbox_manager.clone()
     }
 }

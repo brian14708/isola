@@ -44,6 +44,7 @@ fn make_request_span(request: &TraceRequest<'_>) -> tracing::Span {
 #[derive(Clone)]
 pub struct SandboxEnv {
     pub client: Arc<Client>,
+    pub request_proxy: Option<String>,
 }
 
 pub enum StreamItem {
@@ -122,12 +123,14 @@ impl Host for SandboxEnv {
         *request.uri_mut() = incoming.uri().clone();
         *request.headers_mut() = incoming.headers().clone();
 
+        let mut options = RequestOptions::new().with_make_span(make_request_span);
+        if let Some(proxy) = self.request_proxy.as_ref() {
+            options = options.with_proxy(proxy.clone());
+        }
+
         let response = self
             .client
-            .send_http(
-                request,
-                RequestOptions::new().with_make_span(make_request_span),
-            )
+            .send_http(request, options)
             .await
             .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)?;
 

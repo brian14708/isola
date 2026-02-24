@@ -72,6 +72,35 @@ struct ConfiguredMount {
     file_perms: FilePerms,
 }
 
+#[derive(Clone, Copy, Debug)]
+enum RuntimeFlavor {
+    Python,
+    Js,
+}
+
+impl RuntimeFlavor {
+    fn parse(name: &str) -> Result<Self> {
+        match name {
+            "python" => Ok(Self::Python),
+            "js" => Ok(Self::Js),
+            _ => Err(invalid_argument(format!(
+                "unsupported runtime '{name}', expected 'python' or 'js'"
+            ))),
+        }
+    }
+
+    const fn bundle_file(self) -> &'static str {
+        match self {
+            Self::Python => "python3.wasm",
+            Self::Js => "js.wasm",
+        }
+    }
+
+    const fn uses_runtime_lib_mount(self) -> bool {
+        matches!(self, Self::Python)
+    }
+}
+
 #[derive(Clone, Debug)]
 enum CacheDirConfig {
     Auto,
@@ -199,9 +228,13 @@ impl ContextInner {
         state.config.apply_patch(patch)
     }
 
-    async fn initialize_template(&self, runtime_path: PathBuf) -> Result<()> {
+    async fn initialize_template(
+        &self,
+        runtime_path: PathBuf,
+        runtime: RuntimeFlavor,
+    ) -> Result<()> {
         let mut wasm_path = runtime_path;
-        wasm_path.push("python3.wasm");
+        wasm_path.push(runtime.bundle_file());
 
         let parent = wasm_path
             .parent()
@@ -230,13 +263,18 @@ impl ContextInner {
             CacheDirConfig::Custom(path) => builder.cache(Some(path)),
         };
 
-        let mut mounts = vec![ConfiguredMount {
-            host: resolve_runtime_lib_dir(&parent, config.runtime_lib_dir),
-            guest: "/lib".to_string(),
-            dir_perms: DirPerms::READ,
-            file_perms: FilePerms::READ,
-        }];
-        mounts.extend(config.mounts);
+        let mut mounts = config.mounts;
+        if runtime.uses_runtime_lib_mount() {
+            mounts.insert(
+                0,
+                ConfiguredMount {
+                    host: resolve_runtime_lib_dir(&parent, config.runtime_lib_dir),
+                    guest: "/lib".to_string(),
+                    dir_perms: DirPerms::READ,
+                    file_perms: FilePerms::READ,
+                },
+            );
+        }
         mounts = dedupe_mounts_by_guest(mounts);
 
         for mapping in &mounts {
@@ -901,16 +939,19 @@ impl PyContext {
         inner.set_context_config_json(&bytes).map_err(to_py_err)
     }
 
+    #[pyo3(signature = (runtime_path, runtime_name = "python"))]
     fn initialize_template<'py>(
         &self,
         py: Python<'py>,
         runtime_path: &str,
+        runtime_name: &str,
     ) -> PyResult<Bound<'py, PyAny>> {
         let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
         let runtime_path = PathBuf::from(runtime_path);
+        let runtime = RuntimeFlavor::parse(runtime_name).map_err(to_py_err)?;
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
             inner
-                .initialize_template(runtime_path)
+                .initialize_template(runtime_path, runtime)
                 .await
                 .map_err(to_py_err)?;
             Ok(())

@@ -57,6 +57,19 @@ def _resolve_runtime_paths() -> tuple[Path, Path]:
     return runtime_dir, lib_dir
 
 
+def _resolve_js_runtime_dir() -> Path:
+    workspace_root = Path(__file__).resolve().parents[3]
+    runtime_dir = workspace_root / "target"
+    wasm_path = runtime_dir / "js.wasm"
+    if not wasm_path.is_file():
+        message = (
+            f"missing JS runtime wasm at '{wasm_path}', "
+            "build with `cargo xtask build-js`"
+        )
+        pytest.skip(message)
+    return runtime_dir
+
+
 def test_context_creation_smoke() -> None:
     with isola.Context.create():
         pass
@@ -83,6 +96,29 @@ async def test_async_context_managers_smoke() -> None:
             result = await sandbox.run("ping")
             assert result.results == []
             assert result.final == "ok"
+
+
+@pytest.mark.asyncio
+async def test_async_context_managers_js_runtime_smoke() -> None:
+    runtime_dir = _resolve_js_runtime_dir()
+    async with isola.Context.create() as context:
+        await context.initialize_template(runtime_dir, runtime="js")
+
+        async with await context.instantiate(
+            config=isola.SandboxConfig(timeout=1.0)
+        ) as sandbox:
+            await sandbox.start()
+            await sandbox.load_script("function ping() { return 'ok'; }")
+            result = await sandbox.run("ping")
+            assert result.results == []
+            assert result.final == "ok"
+
+
+@pytest.mark.asyncio
+async def test_initialize_template_rejects_unknown_runtime() -> None:
+    async with isola.Context.create() as context:
+        with pytest.raises(isola.InvalidArgumentError, match="unsupported runtime"):
+            await context.initialize_template(".", runtime=cast("str", "ruby"))
 
 
 @pytest.mark.asyncio

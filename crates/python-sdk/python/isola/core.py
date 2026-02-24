@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 JsonScalar = bool | int | float | str | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 EventKind = Literal["result", "end", "stdout", "stderr", "error", "log"]
+RuntimeName = Literal["python", "js"]
 BytesLike = bytes | bytearray | memoryview
 Pathish = str | PathLike[str]
 HttpBodyOut = BytesLike | AsyncIterable[BytesLike] | None
@@ -297,9 +298,11 @@ class Context:
             patch["mounts"] = _normalize_mounts(patch["mounts"])
         _configure_core(self._core, patch)
 
-    async def initialize_template(self, runtime_path: Pathish) -> None:
+    async def initialize_template(
+        self, runtime_path: Pathish, *, runtime: RuntimeName = "python"
+    ) -> None:
         normalized_runtime_path = _normalize_path(runtime_path, key="runtime_path")
-        await self._core.initialize_template(normalized_runtime_path)
+        await self._core.initialize_template(normalized_runtime_path, runtime)
 
     async def instantiate(self, *, config: SandboxConfig | None = None) -> Sandbox:
         core = await self._core.instantiate()

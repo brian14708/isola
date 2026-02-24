@@ -16,7 +16,7 @@ use rmcp::{
 use serde::Deserialize;
 use serde_json::{json, value::RawValue};
 
-use crate::routes::{AppState, ExecOptions, SandboxEnv, Source, StreamItem};
+use crate::routes::{AppState, ExecOptions, Runtime, SandboxEnv, Source, StreamItem};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -65,9 +65,12 @@ impl Sandbox {
             .map_or(DEFAULT_TIMEOUT, Duration::from_secs);
 
         let exec_future = async {
-            let mut stream = self
+            let runtime_manager = self
                 .state
-                .sandbox_manager
+                .runtime_factory
+                .manager_for(Runtime::Python)
+                .map_err(|err| McpError::invalid_request(err.to_string(), None))?;
+            let mut stream = runtime_manager
                 .exec(
                     "mcp-trace",
                     Source {
@@ -78,6 +81,7 @@ impl Sandbox {
                     vec![],
                     SandboxEnv {
                         client: self.state.base_env.client.clone(),
+                        request_proxy: self.state.base_env.request_proxy.clone(),
                     },
                     ExecOptions { timeout },
                 )

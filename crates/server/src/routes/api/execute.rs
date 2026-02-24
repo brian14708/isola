@@ -19,7 +19,7 @@ use super::{
         SseLogEvent,
     },
 };
-use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
+use crate::routes::{AppState, Argument, ExecOptions, Runtime, SandboxEnv, Source, StreamItem};
 
 fn convert_args(
     args: &[serde_json::Value],
@@ -54,6 +54,16 @@ fn map_start_error(err: anyhow::Error) -> HttpApiError {
         Ok(err) => HttpApiError::from(err),
         Err(err) => HttpApiError::invalid_request(format!("Failed to start script: {err}")),
     }
+}
+
+fn resolve_runtime_manager(
+    state: &AppState,
+    runtime: Runtime,
+) -> Result<std::sync::Arc<crate::routes::SandboxManager<SandboxEnv>>, HttpApiError> {
+    state
+        .runtime_factory
+        .manager_for(runtime)
+        .map_err(|err| HttpApiError::invalid_request(err.to_string()))
 }
 
 fn emit_event(
@@ -113,6 +123,7 @@ pub async fn execute_sync(
     State(state): State<AppState>,
     Json(req): Json<ExecuteRequest>,
 ) -> Result<Json<ExecuteResponse>, HttpApiError> {
+    let runtime_manager = resolve_runtime_manager(&state, req.runtime)?;
     let args = convert_args(&req.args, &req.kwargs)?;
     let source = Source {
         prelude: req.prelude,
@@ -122,12 +133,12 @@ pub async fn execute_sync(
 
     let env = SandboxEnv {
         client: state.base_env.client.clone(),
+        request_proxy: state.base_env.request_proxy.clone(),
     };
 
     let result = async {
         let cache_key = if req.trace { "trace" } else { "default" };
-        let mut stream = state
-            .sandbox_manager
+        let mut stream = runtime_manager
             .exec(
                 cache_key,
                 source,
@@ -237,6 +248,7 @@ pub async fn execute_stream(
     let ExecuteRequest {
         script,
         prelude,
+        runtime,
         function,
         args,
         kwargs,
@@ -252,30 +264,65 @@ pub async fn execute_stream(
     let timeout = Duration::from_millis(timeout_ms);
 
     Ok(Sse::new(execute_sse_inner(
-        state, source, function, args, timeout, timeout_ms, trace,
+        state,
+        ExecuteSseInput {
+            runtime,
+            source,
+            function,
+            args,
+            timeout,
+            timeout_ms,
+            trace,
+        },
     )))
 }
 
-#[allow(clippy::too_many_lines)]
-fn execute_sse_inner(
-    state: AppState,
+struct ExecuteSseInput {
+    runtime: Runtime,
     source: Source,
     function: String,
     args: Vec<(Option<String>, Argument)>,
     timeout: Duration,
     timeout_ms: u64,
     trace: bool,
+}
+
+#[allow(clippy::too_many_lines)]
+fn execute_sse_inner(
+    state: AppState,
+    input: ExecuteSseInput,
 ) -> impl Stream<Item = Result<Event, std::convert::Infallible>> {
+    let ExecuteSseInput {
+        runtime,
+        source,
+        function,
+        args,
+        timeout,
+        timeout_ms,
+        trace,
+    } = input;
+
     let (tx, rx) = mpsc::unbounded_channel::<Result<Event, std::convert::Infallible>>();
 
     tokio::spawn(async move {
         let env = SandboxEnv {
             client: state.base_env.client.clone(),
+            request_proxy: state.base_env.request_proxy.clone(),
+        };
+        let runtime_manager = match resolve_runtime_manager(&state, runtime) {
+            Ok(manager) => manager,
+            Err(err) => {
+                let payload = SseErrorEvent {
+                    code: err.code,
+                    message: err.message,
+                };
+                let _ = emit_json_event(&tx, "error", &payload);
+                return;
+            }
         };
 
         let cache_key = if trace { "trace" } else { "default" };
-        let stream_result = state
-            .sandbox_manager
+        let stream_result = runtime_manager
             .exec(
                 cache_key,
                 source,

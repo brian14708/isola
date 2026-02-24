@@ -9,12 +9,15 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use utoipa::{OpenApi, ToSchema};
 
+use crate::routes::Runtime;
+
 const fn default_timeout() -> u64 {
     30000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OpenApiExecuteRequest {
+    pub runtime: Runtime,
     pub script: String,
     #[serde(default)]
     pub prelude: String,
@@ -71,6 +74,7 @@ pub enum OpenApiErrorCode {
     ),
     components(
         schemas(
+            Runtime,
             OpenApiExecuteRequest,
             OpenApiExecuteResponse,
             OpenApiErrorResponse,
@@ -79,7 +83,7 @@ pub enum OpenApiErrorCode {
         )
     ),
     tags(
-        (name = "Execute", description = "Python sandbox execution endpoints"),
+        (name = "Execute", description = "Sandbox execution endpoints"),
         (name = "Meta", description = "Server metadata endpoints")
     )
 )]
@@ -121,6 +125,7 @@ mod tests {
             .pointer("/components/schemas/OpenApiExecuteRequest/required")
             .and_then(serde_json::Value::as_array)
             .expect("OpenApiExecuteRequest.required must exist");
+        assert!(required.iter().any(|field| field == "runtime"));
         assert!(required.iter().any(|field| field == "function"));
     }
 }

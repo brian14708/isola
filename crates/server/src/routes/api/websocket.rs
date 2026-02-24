@@ -23,12 +23,13 @@ use super::{
     trace::{HttpTrace, HttpTraceBuilder, SCRIPT_EXEC_SPAN_NAME},
     types::ErrorCode,
 };
-use crate::routes::{AppState, Argument, ExecOptions, SandboxEnv, Source, StreamItem};
+use crate::routes::{AppState, Argument, ExecOptions, Runtime, SandboxEnv, Source, StreamItem};
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum ClientMessage {
     Init {
+        runtime: Runtime,
         script: String,
         #[serde(default)]
         prelude: String,
@@ -56,6 +57,7 @@ enum ClientMessage {
 
 #[derive(Debug)]
 struct InitPayload {
+    runtime: Runtime,
     script: String,
     prelude: String,
     function: String,
@@ -97,6 +99,16 @@ fn map_start_error(err: anyhow::Error) -> HttpApiError {
         Ok(err) => HttpApiError::from(err),
         Err(err) => HttpApiError::invalid_request(format!("Failed to start script: {err}")),
     }
+}
+
+fn resolve_runtime_manager(
+    state: &AppState,
+    runtime: Runtime,
+) -> Result<std::sync::Arc<crate::routes::SandboxManager<SandboxEnv>>, HttpApiError> {
+    state
+        .runtime_factory
+        .manager_for(runtime)
+        .map_err(|err| HttpApiError::invalid_request(err.to_string()))
 }
 
 fn convert_ws_args(
@@ -202,6 +214,7 @@ async fn run_init_execution(
     init: InitPayload,
 ) -> SocketAction {
     tracing::info!(
+        runtime = init.runtime.as_str(),
         function = %init.function,
         timeout_ms = init.timeout_ms,
         trace = init.trace,
@@ -262,11 +275,25 @@ async fn run_init_execution(
 
         let env = SandboxEnv {
             client: state.base_env.client.clone(),
+            request_proxy: state.base_env.request_proxy.clone(),
+        };
+        let runtime_manager = match resolve_runtime_manager(state, init.runtime) {
+            Ok(manager) => manager,
+            Err(err) => {
+                let msg = ServerMessage::Error {
+                    code: err.code,
+                    message: err.message,
+                };
+                return if send_server_message(sender, &msg).await {
+                    SocketAction::Continue
+                } else {
+                    SocketAction::Close
+                };
+            }
         };
 
         let cache_key = if init.trace { "trace" } else { "default" };
-        let stream_result = state
-            .sandbox_manager
+        let stream_result = runtime_manager
             .exec(
                 cache_key,
                 source,
@@ -525,6 +552,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 Some(Ok(Message::Text(text))) => match serde_json::from_str::<ClientMessage>(&text)
                 {
                     Ok(ClientMessage::Init {
+                        runtime,
                         script,
                         prelude,
                         function,
@@ -535,6 +563,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         trace,
                     }) => {
                         break Some(InitPayload {
+                            runtime,
                             script,
                             prelude,
                             function,
