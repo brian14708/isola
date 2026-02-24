@@ -23,11 +23,8 @@ where
         .await
         .unwrap_or_else(|_| {
             Err(IsolaError::Other(
-                anyhow::anyhow!(
-                "sandbox call timed out after {}ms",
-                timeout.as_millis()
-            )
-                .into()))
+                anyhow::anyhow!("sandbox call timed out after {}ms", timeout.as_millis()).into(),
+            ))
         })
 }
 

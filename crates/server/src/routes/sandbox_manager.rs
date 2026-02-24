@@ -42,7 +42,7 @@ impl RuntimeKind {
 
         if file.eq_ignore_ascii_case("js.wasm") || file.contains("js") {
             Self::Js
-        } else if file.eq_ignore_ascii_case("python3.wasm") || file.contains("python") {
+        } else if file.eq_ignore_ascii_case("python.wasm") || file.contains("python") {
             Self::Python
         } else {
             Self::Unknown
@@ -450,11 +450,9 @@ impl<E: Host + Clone> SandboxManager<E> {
             .await
             .unwrap_or_else(|_| {
                 Err(isola::sandbox::Error::Other(
-                    anyhow::anyhow!(
-                    "sandbox call timed out after {}ms",
-                    timeout.as_millis()
-                )
-                    .into()))
+                    anyhow::anyhow!("sandbox call timed out after {}ms", timeout.as_millis())
+                        .into(),
+                ))
             });
             match result {
                 Ok(()) => {
@@ -489,7 +487,7 @@ mod tests {
 
     #[test]
     fn detects_python_runtime_from_default_bundle_name() {
-        let runtime = RuntimeKind::from_wasm_path(Path::new("target/python3.wasm"));
+        let runtime = RuntimeKind::from_wasm_path(Path::new("target/python.wasm"));
         assert!(matches!(runtime, RuntimeKind::Python));
     }
 

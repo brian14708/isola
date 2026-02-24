@@ -1,13 +1,5 @@
-from isola._isola import (
-    InternalError,
-    InvalidArgumentError,
-    IsolaError,
-    StreamClosedError,
-    StreamFullError,
-)
-from isola.core import (
+from isola._core import (
     Arg,
-    Context,
     Event,
     HttpRequest,
     HttpResponse,
@@ -15,12 +7,22 @@ from isola.core import (
     RunResult,
     Sandbox,
     SandboxConfig,
+    SandboxManager,
+    SandboxTemplate,
     StreamArg,
+    TemplateConfig,
 )
+from isola._isola import (
+    InternalError,
+    InvalidArgumentError,
+    IsolaError,
+    StreamClosedError,
+    StreamFullError,
+)
+from isola._runtime import resolve_runtime
 
 __all__ = [
     "Arg",
-    "Context",
     "Event",
     "HttpRequest",
     "HttpResponse",
@@ -31,7 +33,11 @@ __all__ = [
     "RunResult",
     "Sandbox",
     "SandboxConfig",
+    "SandboxManager",
+    "SandboxTemplate",
     "StreamArg",
     "StreamClosedError",
     "StreamFullError",
+    "TemplateConfig",
+    "resolve_runtime",
 ]

@@ -13,7 +13,7 @@
 //! tar xzf isola-python.tar.gz
 //! mkdir -p isola-python/cache
 //! ```
-//! The archive contains `bin/python3.wasm` and `lib/` (runtime deps).
+//! The archive contains `bin/python.wasm` and `lib/` (runtime deps).
 //! Point `.build(...)` and `.mount(...)` at those extracted paths.
 //!
 //! ```no_run
@@ -39,7 +39,7 @@
 //!             DirPerms::READ,
 //!             FilePerms::READ,
 //!         )
-//!         .build::<MyHost>("./isola-python/bin/python3.wasm")
+//!         .build::<MyHost>("./isola-python/bin/python.wasm")
 //!         .await?;
 //!
 //!     let mut sandbox = template

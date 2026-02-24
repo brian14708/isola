@@ -8,7 +8,7 @@ use utoipa::ToSchema;
 
 use super::SandboxManager;
 
-const PYTHON_WASM_PATH: &str = "target/python3.wasm";
+const PYTHON_WASM_PATH: &str = "target/python.wasm";
 const JS_WASM_PATH: &str = "target/js.wasm";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
@@ -68,7 +68,7 @@ impl<E: Host + Clone> RuntimeFactory<E> {
         if python.is_none() && js.is_none() {
             return Err(anyhow!(
                 "No runtime bundles found. Build at least one runtime bundle: \
-                 `cargo xtask build-python` (target/python3.wasm) or \
+                 `cargo xtask build-python` (target/python.wasm) or \
                  `cargo xtask build-js` (target/js.wasm)."
             ));
         }
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn runtime_uses_expected_default_bundle_paths() {
-        assert_eq!(Runtime::Python.default_wasm_path(), "target/python3.wasm");
+        assert_eq!(Runtime::Python.default_wasm_path(), "target/python.wasm");
         assert_eq!(Runtime::Js.default_wasm_path(), "target/js.wasm");
     }
 }

@@ -32,7 +32,7 @@ void callback(isola_callback_event event, const uint8_t *data, size_t len,
 static std::string runtime_wasm_path() {
   const char *dir = std::getenv("ISOLA_RUNTIME_PATH");
   REQUIRE(dir != nullptr);
-  return std::string(dir) + "/python3.wasm";
+  return std::string(dir) + "/python.wasm";
 }
 
 TEST_CASE("Context") {
