@@ -165,6 +165,66 @@ jobs:
         run: |
           uv publish dist/*
 
+  library:
+    needs: targets
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+          - os: macos-latest
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Package library artifact
+        id: package_lib
+        run: |
+          mkdir -p dist
+
+          os="$(uname -s)"
+          arch="$(uname -m)"
+
+          case "$os" in
+            Linux)
+              os_part="unknown-linux-gnu"
+              lib_ext="so"
+              ;;
+            Darwin)
+              os_part="apple-darwin"
+              lib_ext="dylib"
+              ;;
+            *) echo "Unsupported OS: $os" >&2; exit 1 ;;
+          esac
+
+          case "$arch" in
+            x86_64|amd64) arch_part="x86_64" ;;
+            arm64|aarch64) arch_part="aarch64" ;;
+            *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
+          esac
+
+          triple="${arch_part}-${os_part}"
+          mkdir -p dist/libisola/lib
+
+          cargo build --locked --profile release-lto -p isola-c-api-export
+
+          cp "target/release-lto/libisola.${lib_ext}" dist/libisola/lib/
+          cp -r crates/c-api/include dist/libisola/
+
+          echo "triple=${triple}" >> "$GITHUB_OUTPUT"
+          tar -C dist/libisola -czf "dist/libisola-${triple}.tar.gz" lib include
+      - name: Upload library artifact to target release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
+            dist/libisola-${{ steps.package_lib.outputs.triple }}.tar.gz \
+            --clobber
+
   cargo_publish:
     name: Cargo
     needs: targets

@@ -15,6 +15,8 @@ craneLib.devShell {
     just
     (python.withPackages (p: with p; [ uv ]))
     maturin
+    cmake
+    ninja
   ];
 
   env = {

@@ -22,6 +22,7 @@ async-trait = "0.1"
 axum = "0.8"
 base64 = "0.22"
 bytes = "1.10"
+cbindgen = "0.29"
 component-init-transform = "0.1"
 criterion = "0.8"
 dashmap = "6.1"
@@ -35,6 +36,7 @@ http-body = "1.0"
 http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
+isola-c-api = { path = "crates/c-api" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 minicbor = "2.0"

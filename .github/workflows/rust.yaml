@@ -46,3 +46,5 @@ jobs:
         run: nix --accept-flake-config develop --command just integration
       - name: Run Python pytest suite
         run: nix --accept-flake-config develop --command just pytest
+      - name: Run C integration tests
+        run: nix --accept-flake-config develop --command just integration-c
