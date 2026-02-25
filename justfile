@@ -36,6 +36,11 @@ lint-python: init-py
 pytest: init-py
     uv run pytest ./crates/python-sdk/tests/
 
+integration-c:
+    cmake -B target/c -G Ninja crates/c-api/tests
+    cmake --build target/c
+    cmake --build target/c --target test
+
 [private]
 init-py:
     uv sync --all-packages

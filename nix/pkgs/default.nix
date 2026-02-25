@@ -11,5 +11,6 @@ in
 {
   inherit (packages) python js;
   default = packages.isola;
+  lib = packages.library;
   oci = packages.container;
 }

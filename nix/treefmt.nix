@@ -12,4 +12,11 @@
     actionlint.enable = true;
     prettier.enable = true;
   };
+  settings.formatter = {
+    clang-format = {
+      excludes = [
+        "crates/c-api/include/isola.h"
+      ];
+    };
+  };
 }

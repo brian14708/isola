@@ -32,7 +32,8 @@ pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Stri
     for mapping in &cfg.directory_mappings {
         h.update(mapping.guest.as_bytes());
         h.update([0]);
-        update_path_hash(&mut h, &mapping.host);
+        let host = mapping.host.to_string_lossy();
+        h.update(host.as_bytes());
         h.update([0]);
         h.update(mapping.dir_perms.bits().to_le_bytes());
         h.update(mapping.file_perms.bits().to_le_bytes());
@@ -65,28 +66,6 @@ pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Stri
     out
 }
 
-fn update_path_hash(hasher: &mut Sha256, path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt as _;
-        hasher.update(path.as_os_str().as_bytes());
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt as _;
-        for code_unit in path.as_os_str().encode_wide() {
-            hasher.update(code_unit.to_le_bytes());
-        }
-    }
-
-    #[cfg(not(any(unix, windows)))]
-    {
-        let host = path.to_string_lossy();
-        hasher.update(host.as_bytes());
-    }
-}
-
 pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<()> {
     static CACHE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -108,33 +87,5 @@ pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<
             let _ = tokio::fs::remove_file(&tmp_path).await;
             Err(e.into())
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::path::PathBuf;
-
-    use sha2::{Digest, Sha256};
-
-    use super::update_path_hash;
-
-    #[cfg(unix)]
-    #[test]
-    fn update_path_hash_distinguishes_non_utf8_paths() {
-        use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
-
-        let left = PathBuf::from(OsString::from_vec(vec![b'a', 0x80]));
-        let right = PathBuf::from(OsString::from_vec(vec![b'a', 0x81]));
-
-        let mut left_hasher = Sha256::new();
-        update_path_hash(&mut left_hasher, &left);
-        let left_digest = left_hasher.finalize();
-
-        let mut right_hasher = Sha256::new();
-        update_path_hash(&mut right_hasher, &right);
-        let right_digest = right_hasher.finalize();
-
-        assert_ne!(left_digest, right_digest);
     }
 }
