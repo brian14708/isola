@@ -35,7 +35,7 @@ impl ResourceLimiter for MemoryLimiter {
         _current: usize,
         desired: usize,
         _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    ) -> wasmtime::Result<bool> {
         if desired > self.max_memory_hard {
             return Ok(false);
         }
@@ -48,7 +48,7 @@ impl ResourceLimiter for MemoryLimiter {
         _current: usize,
         desired: usize,
         _maximum: Option<usize>,
-    ) -> anyhow::Result<bool> {
+    ) -> wasmtime::Result<bool> {
         if desired > self.max_table_elements_hard {
             return Ok(false);
         }

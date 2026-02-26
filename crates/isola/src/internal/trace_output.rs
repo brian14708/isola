@@ -66,8 +66,8 @@ pub struct TraceOutputStream {
     context: LogContext<'static>,
     sink_store: LogSinkStore,
     buffer: SmallVec<[u8; MAX_BUFFER + MAX_UTF8_BYTES]>,
-    in_flight: Option<wasmtime_wasi::runtime::AbortOnDropJoinHandle<anyhow::Result<()>>>,
-    last_error: Option<anyhow::Error>,
+    in_flight: Option<wasmtime_wasi::runtime::AbortOnDropJoinHandle<wasmtime::Result<()>>>,
+    last_error: Option<wasmtime::Error>,
 }
 
 const MIN_BUFFER: usize = 64;
@@ -77,8 +77,8 @@ const MAX_UTF8_BYTES: usize = 4;
 impl TraceOutputStream {
     fn record(&mut self, s: &str) -> StreamResult<()> {
         if self.in_flight.is_some() {
-            return Err(StreamError::Trap(anyhow::anyhow!(
-                "write not permitted while emit pending"
+            return Err(StreamError::Trap(wasmtime::Error::msg(
+                "write not permitted while emit pending",
             )));
         }
 
@@ -96,7 +96,7 @@ impl TraceOutputStream {
         let mut future = Box::pin(async move {
             sink.on_log(level, context, &message)
                 .await
-                .map_err(anyhow::Error::from_boxed)
+                .map_err(wasmtime::Error::from_boxed)
         });
         let waker = noop_waker_ref();
         let mut cx = Context::from_waker(waker);
@@ -154,8 +154,8 @@ impl OutputStream for TraceOutputStream {
         }
 
         if self.in_flight.is_some() {
-            return Err(StreamError::Trap(anyhow::anyhow!(
-                "write not permitted while emit pending"
+            return Err(StreamError::Trap(wasmtime::Error::msg(
+                "write not permitted while emit pending",
             )));
         }
 

@@ -96,7 +96,7 @@ pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<
 
     tokio::fs::write(&tmp_path, bytes)
         .await
-        .map_err(|e| Error::Runtime(e.into()))?;
+        .map_err(Error::from)?;
     match tokio::fs::rename(&tmp_path, cache_path).await {
         Ok(()) => Ok(()),
         // Windows doesn't atomically replace by default; treat a concurrent winner as success.
@@ -106,7 +106,7 @@ pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<
         }
         Err(e) => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
-            Err(Error::Runtime(e.into()))
+            Err(e.into())
         }
     }
 }

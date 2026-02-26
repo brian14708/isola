@@ -66,16 +66,19 @@ impl IntoResponse for HttpApiError {
 
 impl From<IsolaError> for HttpApiError {
     fn from(err: IsolaError) -> Self {
+        fn map_runtime_message(message: String) -> HttpApiError {
+            if message.contains("interrupt") || message.contains("timed out") {
+                HttpApiError::new(ErrorCode::Timeout, "Execution timed out")
+            } else {
+                HttpApiError::internal(message)
+            }
+        }
+
         match err {
             IsolaError::UserCode { message } => Self::script_error(message),
-            IsolaError::Runtime(err) => {
-                let message = err.to_string();
-                if message.contains("interrupt") {
-                    Self::new(ErrorCode::Timeout, "Execution timed out")
-                } else {
-                    Self::internal(message)
-                }
-            }
+            IsolaError::Wasm(err) => map_runtime_message(err.to_string()),
+            IsolaError::Io(err) => Self::internal(err.to_string()),
+            IsolaError::Other(err) => map_runtime_message(err.to_string()),
         }
     }
 }

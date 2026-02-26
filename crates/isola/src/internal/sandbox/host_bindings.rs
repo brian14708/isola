@@ -96,7 +96,7 @@ impl<T: HostView> Host for HostImpl<T> {
                 host.hostcall(&call_type, payload)
                     .await
                     .map(|v| v.into_cbor().to_vec())
-                    .map_err(anyhow::Error::from_boxed)
+                    .map_err(wasmtime::Error::from_boxed)
             }
             .in_current_span(),
         );

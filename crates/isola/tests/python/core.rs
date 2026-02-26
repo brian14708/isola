@@ -64,10 +64,12 @@ where
     tokio::time::timeout(timeout, sandbox.call(function, args))
         .await
         .unwrap_or_else(|_| {
-            Err(IsolaError::Runtime(anyhow::anyhow!(
+            Err(IsolaError::Other(
+                anyhow::anyhow!(
                 "sandbox call timed out after {}ms",
                 timeout.as_millis()
-            )))
+            )
+                .into()))
         })
 }
 
@@ -448,7 +450,7 @@ async fn integration_python_call_timeout() -> Result<()> {
     let err = call_with_timeout(&mut sandbox, "main", [], Duration::from_millis(1))
         .await
         .expect_err("expected timeout while executing guest function");
-    let IsolaError::Runtime(cause) = err else {
+    let IsolaError::Other(cause) = err else {
         panic!("expected runtime timeout error, got {err:?}");
     };
     let message = cause.to_string().to_ascii_lowercase();
@@ -491,7 +493,9 @@ async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
 
     let message = match err {
         IsolaError::UserCode { message } => message.to_ascii_lowercase(),
-        IsolaError::Runtime(cause) => cause.to_string().to_ascii_lowercase(),
+        IsolaError::Wasm(cause) => cause.to_string().to_ascii_lowercase(),
+        IsolaError::Io(cause) => cause.to_string().to_ascii_lowercase(),
+        IsolaError::Other(cause) => cause.to_string().to_ascii_lowercase(),
     };
     assert!(
         message.contains("memory")

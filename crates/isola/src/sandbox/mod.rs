@@ -31,7 +31,7 @@ pub use wasmtime_wasi::{DirPerms, FilePerms};
 #[cfg(feature = "serde")]
 pub use crate::args;
 use crate::{
-    host::{Host, OutputSink},
+    host::{BoxError, Host, OutputSink},
     internal::{
         module::{
             ModuleConfig as InternalModuleConfig,
@@ -57,9 +57,17 @@ pub enum Error {
     #[error("{message}")]
     UserCode { message: String },
 
-    /// Internal runtime failure (wasm engine, host callback, filesystem, etc).
+    /// Failure from Wasmtime APIs.
+    #[error("wasm error: {0}")]
+    Wasm(#[from] wasmtime::Error),
+
+    /// Filesystem or OS-level runtime failure.
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+
+    /// Other host/runtime failures.
     #[error("runtime error: {0}")]
-    Runtime(#[source] anyhow::Error),
+    Other(#[from] BoxError),
 }
 
 impl From<exports::Error> for Error {
@@ -68,7 +76,7 @@ impl From<exports::Error> for Error {
         match code {
             exports::ErrorCode::Aborted => Self::UserCode { message },
             exports::ErrorCode::Unknown | exports::ErrorCode::Internal => {
-                Self::Runtime(anyhow::anyhow!("[{code:?}] {message}"))
+                Self::Other(std::io::Error::other(format!("[{code:?}] {message}")).into())
             }
         }
     }
@@ -314,8 +322,7 @@ impl SandboxTemplateBuilder {
     /// # Errors
     /// Returns an error if the template cannot be built or compiled.
     pub async fn build<H: Host>(self, wasm: impl AsRef<Path>) -> Result<SandboxTemplate<H>> {
-        let wasm_path =
-            std::fs::canonicalize(wasm.as_ref()).map_err(|e| Error::Runtime(e.into()))?;
+        let wasm_path = std::fs::canonicalize(wasm.as_ref()).map_err(Error::from)?;
         let base_options = self.base_options;
         let cfg = InternalModuleConfig {
             cache: self.cache.clone(),
@@ -327,21 +334,21 @@ impl SandboxTemplateBuilder {
 
         let mut engine_cfg = wasmtime::Config::default();
         configure_engine(&mut engine_cfg);
-        let engine = Engine::new(&engine_cfg).map_err(Error::Runtime)?;
+        let engine = Engine::new(&engine_cfg).map_err(Error::Wasm)?;
 
         let component =
             load_or_compile_component(&engine, &wasm_path, &cfg.directory_mappings, &cfg).await?;
 
-        let linker = InstanceState::<H>::new_linker(&engine).map_err(Error::Runtime)?;
-        let pre = linker.instantiate_pre(&component).map_err(Error::Runtime)?;
+        let linker = InstanceState::<H>::new_linker(&engine).map_err(Error::Wasm)?;
+        let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
         Engine::tls_eager_initialize();
         let ticker = global_epoch_ticker()
-            .map_err(|e| Error::Runtime(e.into()))?
+            .map_err(Error::from)?
             .register(engine.clone());
 
         Ok(SandboxTemplate {
             base_options,
-            pre: SandboxPre::new(pre).map_err(Error::Runtime)?,
+            pre: SandboxPre::new(pre).map_err(Error::Wasm)?,
             ticker,
             engine,
         })
@@ -374,14 +381,14 @@ impl<H: Host> SandboxTemplate<H> {
             merged.max_memory.unwrap_or(usize::MAX),
             host,
         )
-        .map_err(Error::Runtime)?;
+        .map_err(Error::Wasm)?;
         store.epoch_deadline_async_yield_and_update(1);
 
         let bindings = self
             .pre
             .instantiate_async(&mut store)
             .await
-            .map_err(Error::Runtime)?;
+            .map_err(Error::Wasm)?;
 
         Ok(Sandbox {
             store,
@@ -407,8 +414,8 @@ impl<H: Host> Sandbox<H> {
             .isola_script_runtime()
             .call_eval_script(&mut store, &code)
             .await;
-        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);
-        result.map_err(Error::Runtime)??;
+        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
+        result.map_err(Error::Wasm)??;
         flush_result?;
         Ok(())
     }
@@ -425,8 +432,8 @@ impl<H: Host> Sandbox<H> {
             .isola_script_runtime()
             .call_eval_file(&mut store, guest_path)
             .await;
-        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);
-        result.map_err(Error::Runtime)??;
+        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
+        result.map_err(Error::Wasm)??;
         flush_result?;
         Ok(())
     }
@@ -491,7 +498,7 @@ impl<H: Host> Sandbox<H> {
                         .data_mut()
                         .table()
                         .push(ValueIterator::new(stream))
-                        .map_err(|e| Error::Runtime(e.into()))?;
+                        .map_err(|e| Error::Other(e.into()))?;
                     Ok(RawArgument {
                         name: None,
                         value: WasmValue::CborIterator(iter),
@@ -503,7 +510,7 @@ impl<H: Host> Sandbox<H> {
                         .data_mut()
                         .table()
                         .push(ValueIterator::new(stream))
-                        .map_err(|e| Error::Runtime(e.into()))?;
+                        .map_err(|e| Error::Other(e.into()))?;
                     Ok(RawArgument {
                         name: Some(name.as_str()),
                         value: WasmValue::CborIterator(iter),
@@ -518,8 +525,8 @@ impl<H: Host> Sandbox<H> {
             .isola_script_runtime()
             .call_call_func(&mut store, function, &internal_args)
             .await;
-        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Runtime);
-        result.map_err(Error::Runtime)??;
+        let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
+        result.map_err(Error::Wasm)??;
         flush_result?;
         Ok(())
     }

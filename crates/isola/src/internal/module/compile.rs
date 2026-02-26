@@ -26,23 +26,20 @@ pub async fn load_or_compile_component(
     directory_mappings: &[DirectoryMapping],
     cfg: &ModuleConfig,
 ) -> Result<Component> {
-    let wasm_bytes = tokio::fs::read(wasm_path)
-        .await
-        .map_err(|e| Error::Runtime(e.into()))?;
+    let wasm_bytes = tokio::fs::read(wasm_path).await.map_err(Error::from)?;
 
     let Some(cache_dir) = &cfg.cache else {
         let bytes =
             compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
         // SAFETY: bytes are produced by wasmtime for the same version/config; if
         // incompatible, deserialization will fail and surface as an error.
-        let component =
-            unsafe { Component::deserialize(engine, &bytes) }.map_err(Error::Runtime)?;
+        let component = unsafe { Component::deserialize(engine, &bytes) }.map_err(Error::Wasm)?;
         return Ok(component);
     };
 
     tokio::fs::create_dir_all(cache_dir)
         .await
-        .map_err(|e| Error::Runtime(e.into()))?;
+        .map_err(Error::from)?;
     let key = cache_key(engine, cfg, &wasm_bytes);
     let cache_path = cache_dir.join(format!("{key}.cwasm"));
 
@@ -54,7 +51,7 @@ pub async fn load_or_compile_component(
     write_cache_file_atomic(&cache_path, &bytes).await?;
 
     let component =
-        unsafe { Component::deserialize_file(engine, &cache_path) }.map_err(Error::Runtime)?;
+        unsafe { Component::deserialize_file(engine, &cache_path) }.map_err(Error::Wasm)?;
     Ok(component)
 }
 
@@ -76,11 +73,10 @@ async fn compile_serialized_component(
             let data = component_init_transform::initialize(&wasm_bytes, |instrumented| {
                 let engine = engine.clone();
                 async move {
-                    let component =
-                        Component::new(&engine, &instrumented).map_err(Error::Runtime)?;
+                    let component = Component::new(&engine, &instrumented).map_err(Error::Wasm)?;
 
-                    let linker = InstanceState::<CompileHost>::new_linker(&engine)
-                        .map_err(Error::Runtime)?;
+                    let linker =
+                        InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
                     let mut store = InstanceState::new(
                         &engine,
                         &directory_mappings,
@@ -88,23 +84,23 @@ async fn compile_serialized_component(
                         cfg.max_memory,
                         CompileHost,
                     )
-                    .map_err(Error::Runtime)?;
+                    .map_err(Error::Wasm)?;
                     store.epoch_deadline_async_yield_and_update(1);
 
-                    let pre = linker.instantiate_pre(&component).map_err(Error::Runtime)?;
+                    let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
                     let binding = pre
                         .instantiate_async(&mut store)
                         .await
-                        .map_err(Error::Runtime)?;
+                        .map_err(Error::Wasm)?;
                     let guest = GuestIndices::new(&pre)
-                        .map_err(Error::Runtime)?
+                        .map_err(Error::Wasm)?
                         .load(&mut store, &binding)
-                        .map_err(Error::Runtime)?;
+                        .map_err(Error::Wasm)?;
 
                     guest
                         .call_initialize(&mut store, true, cfg.prelude.as_deref())
                         .await
-                        .map_err(Error::Runtime)?;
+                        .map_err(Error::Wasm)?;
 
                     Ok(Box::new(MyInvoker {
                         store,
@@ -114,14 +110,14 @@ async fn compile_serialized_component(
                 .boxed()
             })
             .await
-            .map_err(Error::Runtime)?;
+            .map_err(|e| Error::Other(e.into()))?;
 
-            let component = Component::new(&engine, &data).map_err(Error::Runtime)?;
-            component.serialize().map_err(Error::Runtime)
+            let component = Component::new(&engine, &data).map_err(Error::Wasm)?;
+            component.serialize().map_err(Error::Wasm)
         })
     })
     .await
-    .map_err(|e| Error::Runtime(e.into()))?
+    .map_err(|e| Error::Other(e.into()))?
 }
 
 // Helper structs for compilation pre-init.
@@ -136,45 +132,65 @@ impl<S: Host> Invoker for MyInvoker<S> {
     async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
         let func = self
             .instance
-            .get_typed_func::<(), (i32,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
+            .get_typed_func::<(), (i32,)>(&mut self.store, function)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
+        let result = func
+            .call_async(&mut self.store, ())
+            .await
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .0;
         Ok(result)
     }
 
     async fn call_s64(&mut self, function: &str) -> anyhow::Result<i64> {
         let func = self
             .instance
-            .get_typed_func::<(), (i64,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
+            .get_typed_func::<(), (i64,)>(&mut self.store, function)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
+        let result = func
+            .call_async(&mut self.store, ())
+            .await
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .0;
         Ok(result)
     }
 
     async fn call_f32(&mut self, function: &str) -> anyhow::Result<f32> {
         let func = self
             .instance
-            .get_typed_func::<(), (f32,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
+            .get_typed_func::<(), (f32,)>(&mut self.store, function)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
+        let result = func
+            .call_async(&mut self.store, ())
+            .await
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .0;
         Ok(result)
     }
 
     async fn call_f64(&mut self, function: &str) -> anyhow::Result<f64> {
         let func = self
             .instance
-            .get_typed_func::<(), (f64,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
+            .get_typed_func::<(), (f64,)>(&mut self.store, function)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
+        let result = func
+            .call_async(&mut self.store, ())
+            .await
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .0;
         Ok(result)
     }
 
     async fn call_list_u8(&mut self, function: &str) -> anyhow::Result<Vec<u8>> {
         let func = self
             .instance
-            .get_typed_func::<(), (Vec<u8>,)>(&mut self.store, function)?;
-        let result = func.call_async(&mut self.store, ()).await?.0;
-        func.post_return_async(&mut self.store).await?;
+            .get_typed_func::<(), (Vec<u8>,)>(&mut self.store, function)
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
+        let result = func
+            .call_async(&mut self.store, ())
+            .await
+            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
+            .0;
         Ok(result)
     }
 }

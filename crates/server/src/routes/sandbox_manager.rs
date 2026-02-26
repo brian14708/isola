@@ -449,10 +449,12 @@ impl<E: Host + Clone> SandboxManager<E> {
             )
             .await
             .unwrap_or_else(|_| {
-                Err(isola::sandbox::Error::Runtime(anyhow::anyhow!(
+                Err(isola::sandbox::Error::Other(
+                    anyhow::anyhow!(
                     "sandbox call timed out after {}ms",
                     timeout.as_millis()
-                )))
+                )
+                    .into()))
             });
             match result {
                 Ok(()) => {

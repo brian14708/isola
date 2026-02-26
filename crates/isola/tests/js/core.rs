@@ -22,10 +22,12 @@ where
     tokio::time::timeout(timeout, sandbox.call(function, args))
         .await
         .unwrap_or_else(|_| {
-            Err(IsolaError::Runtime(anyhow::anyhow!(
+            Err(IsolaError::Other(
+                anyhow::anyhow!(
                 "sandbox call timed out after {}ms",
                 timeout.as_millis()
-            )))
+            )
+                .into()))
         })
 }
 

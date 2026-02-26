@@ -62,11 +62,10 @@ impl<T: ?Sized + HostView> HostView for &mut T {
 
 pub struct HostImpl<T>(pub T);
 
-pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> anyhow::Result<()> {
+pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> wasmtime::Result<()> {
     struct Host<T>(T);
     impl<T: 'static> HasData for Host<T> {
         type Data<'a> = HostImpl<&'a mut T>;
     }
-    self::isola::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))?;
-    Ok(())
+    self::isola::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))
 }

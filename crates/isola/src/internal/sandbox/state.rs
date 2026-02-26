@@ -80,7 +80,7 @@ impl<H: Host> InstanceState<H> {
     /// # Errors
     ///
     /// Returns an error if any of the WASI components fail to link.
-    pub fn new_linker(engine: &Engine) -> anyhow::Result<Linker<Self>> {
+    pub fn new_linker(engine: &Engine) -> wasmtime::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
         wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
@@ -101,7 +101,7 @@ impl<H: Host> InstanceState<H> {
         env: &[(String, String)],
         max_memory: usize,
         host: H,
-    ) -> anyhow::Result<Store<Self>> {
+    ) -> wasmtime::Result<Store<Self>> {
         let log_sink_store = new_log_sink_store();
         let mut builder = WasiCtxBuilder::new();
 
@@ -114,11 +114,11 @@ impl<H: Host> InstanceState<H> {
                     mapping.file_perms,
                 )
                 .map_err(|e| {
-                    anyhow::anyhow!(
+                    wasmtime::Error::msg(format!(
                         "Failed to add directory mapping '{}' -> '{}': {e}",
                         mapping.host.display(),
                         mapping.guest
-                    )
+                    ))
                 })?;
         }
         for (k, v) in env {
@@ -166,7 +166,7 @@ impl<H: Host> InstanceState<H> {
     }
 
     #[allow(clippy::needless_pass_by_ref_mut, clippy::unused_async)]
-    pub async fn flush_logs(&mut self) -> anyhow::Result<()> {
+    pub async fn flush_logs(&mut self) -> wasmtime::Result<()> {
         Ok(())
     }
 }
@@ -263,7 +263,7 @@ impl<H: Host> HostView for InstanceState<H> {
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
         let Some(sink) = self.sink.as_ref() else {
-            return Err(anyhow::anyhow!("output sink missing"));
+            return Err(wasmtime::Error::msg("output sink missing"));
         };
 
         match data {
@@ -281,14 +281,14 @@ impl<H: Host> HostView for InstanceState<H> {
                 };
                 sink.on_complete(output)
                     .await
-                    .map_err(anyhow::Error::from_boxed)
+                    .map_err(wasmtime::Error::from_boxed)
             }
             EmitValue::PartialResult(new_data) => {
                 self.output_buffer.append(new_data.as_ref())?;
                 let output = self.output_buffer.take();
                 sink.on_item(Value::from(output))
                     .await
-                    .map_err(anyhow::Error::from_boxed)
+                    .map_err(wasmtime::Error::from_boxed)
             }
         }
     }
@@ -322,7 +322,7 @@ impl<H: Host> wasm::logging::HostView for InstanceState<H> {
         if let Some(sink) = self.sink.clone() {
             sink.on_log(sink_level, sink_context, message)
                 .await
-                .map_err(anyhow::Error::from_boxed)?;
+                .map_err(wasmtime::Error::from_boxed)?;
         }
         Ok(())
     }
@@ -341,12 +341,14 @@ impl OutputBuffer {
     }
 
     #[inline]
-    fn append(&mut self, data: &[u8]) -> anyhow::Result<()> {
+    fn append(&mut self, data: &[u8]) -> wasmtime::Result<()> {
         let new_len = self.0.len().saturating_add(data.len());
         if new_len > MAX_BUFFERED_OUTPUT_BYTES {
             // Drop any already-buffered data to avoid retaining attacker-controlled memory.
             self.reset();
-            anyhow::bail!("output buffer exceeded hard limit ({MAX_BUFFERED_OUTPUT_BYTES} bytes)");
+            return Err(wasmtime::Error::msg(format!(
+                "output buffer exceeded hard limit ({MAX_BUFFERED_OUTPUT_BYTES} bytes)"
+            )));
         }
         self.0.extend_from_slice(data);
         Ok(())
