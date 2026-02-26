@@ -1,4 +1,6 @@
-use criterion::{Criterion, black_box};
+use std::hint::black_box;
+
+use criterion::Criterion;
 use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
 use tokio::runtime::Runtime;
 

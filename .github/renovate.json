@@ -1,7 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended", ":semanticCommitTypeAll(chore)"],
-  "ignorePaths": ["crates/python/requirements.txt"],
+  "ignorePaths": ["crates/python-runtime/pyproject.toml"],
   "packageRules": [
     {
       "groupName": "opentelemetry",

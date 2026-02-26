@@ -23,7 +23,7 @@ axum = "0.8"
 base64 = "0.22"
 bytes = "1.10"
 component-init-transform = "0.1"
-criterion = "0.5"
+criterion = "0.8"
 dashmap = "6.1"
 eventsource = { version = "0.5", default-features = false }
 fastant = "0.1"
