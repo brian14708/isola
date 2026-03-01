@@ -1,0 +1,38 @@
+site_name: Isola
+site_url: "https://brian14708.github.io/isola/"
+repo_url: "https://github.com/brian14708/isola"
+repo_name: "brian14708/isola"
+nav:
+  - index.md
+  - getting-started.md
+
+theme:
+  name: material
+  language: en
+  logo: images/icon.svg
+  favicon: images/icon.svg
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: lucide/sun-moon
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: lucide/sun
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: lucide/moon
+        name: Switch to system preference
+  features:
+    - navigation.tabs
+
+plugins:
+  - search
+
+markdown_extensions:
+  - pymdownx.snippets:
+      base_path: ["."]
+      check_paths: true

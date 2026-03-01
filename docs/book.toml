@@ -1,7 +1,0 @@
-[book]
-title = "Isola Documentation"
-language = "en"
-src = "src"
-
-[build]
-build-dir = "book"

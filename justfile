@@ -11,7 +11,10 @@ build: build-wasm
     cargo run --release -p isola-server build
 
 docs:
-    mdbook build docs
+    uv run --group docs zensical build
+
+docs-serve:
+    uv run --group docs zensical serve
 
 [private]
 build-wasm:

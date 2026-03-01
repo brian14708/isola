@@ -2,7 +2,8 @@
 
 ## Documentation
 
-Documentation is authored with mdBook in `docs/`.
+Documentation is authored with Zensical (MkDocs-compatible) in `docs/` and
+configured by `mkdocs.yaml`.
 
 - Build locally: `just docs`
 - Serve locally: `just docs-serve`

@@ -13,7 +13,6 @@ in
 craneLib.devShell {
   buildInputs = with pkgs; [
     just
-    mdbook
     (python.withPackages (p: with p; [ uv ]))
     maturin
   ];
