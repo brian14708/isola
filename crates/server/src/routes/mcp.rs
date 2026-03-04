@@ -159,12 +159,12 @@ impl Sandbox {
 #[tool_handler]
 impl ServerHandler for Sandbox {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::LATEST,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation::from_build_env(),
-            instructions: Some(
-                r#"
+        let mut info = ServerInfo::default();
+        info.protocol_version = ProtocolVersion::LATEST;
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info.server_info = Implementation::from_build_env();
+        info.instructions = Some(
+            r#"
 Sandboxed Python execution environment.
 
 ## Code Requirements
@@ -195,8 +195,8 @@ async def main():
 - `async for line in resp.aiter_lines()`, `async for chunk in resp.aiter_bytes()`
 - `async for event in resp.aiter_sse()` (SSE: `.id`, `.event`, `.data`)
                 "#
-                .to_string(),
-            ),
-        }
+            .to_string(),
+        );
+        info
     }
 }
