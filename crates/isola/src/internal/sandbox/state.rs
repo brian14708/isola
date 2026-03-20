@@ -10,10 +10,13 @@ use wasmtime::{
 };
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
-    HttpResult, WasiHttpCtx, WasiHttpView,
-    bindings::http::outgoing_handler::ErrorCode,
-    body::{HyperIncomingBody, HyperOutgoingBody},
-    types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
+    WasiHttpCtx,
+    p2::{
+        HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
+        bindings::http::types::ErrorCode,
+        body::{HyperIncomingBody, HyperOutgoingBody},
+        types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
+    },
 };
 
 use super::bindings::{EmitValue, HostView, add_to_linker};
@@ -34,10 +37,15 @@ pub struct InstanceState<H: Host> {
     http: WasiHttpCtx,
     table: ResourceTable,
     host: Arc<H>,
+    http_hooks: InstanceHttpHooks<H>,
 
     sink: Option<Arc<dyn OutputSink>>,
     log_sink_store: LogSinkStore,
     output_buffer: OutputBuffer,
+}
+
+struct InstanceHttpHooks<H: Host> {
+    host: Arc<H>,
 }
 
 const MAX_OUTGOING_HTTP_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -83,7 +91,7 @@ impl<H: Host> InstanceState<H> {
     pub fn new_linker(engine: &Engine) -> wasmtime::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-        wasmtime_wasi_http::add_only_http_to_linker_async(&mut linker)?;
+        wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
         wasm::logging::add_to_linker(&mut linker)?;
         add_to_linker(&mut linker)?;
         Ok(linker)
@@ -139,6 +147,7 @@ impl<H: Host> InstanceState<H> {
             ))
             .build();
         let limiter = MemoryLimiter::new(max_memory);
+        let host = Arc::new(host);
 
         let mut s = Store::new(
             engine,
@@ -147,7 +156,8 @@ impl<H: Host> InstanceState<H> {
                 wasi,
                 http: WasiHttpCtx::new(),
                 table: ResourceTable::new(),
-                host: Arc::new(host),
+                host: Arc::clone(&host),
+                http_hooks: InstanceHttpHooks { host },
                 sink: None,
                 log_sink_store,
                 output_buffer: OutputBuffer::new(),
@@ -169,6 +179,15 @@ impl<H: Host> InstanceState<H> {
     pub async fn flush_logs(&mut self) -> wasmtime::Result<()> {
         Ok(())
     }
+
+    #[cfg(test)]
+    fn send_request(
+        &mut self,
+        request: hyper::Request<HyperOutgoingBody>,
+        config: OutgoingRequestConfig,
+    ) -> HttpResult<HostFutureIncomingResponse> {
+        self.http_hooks.send_request(request, config)
+    }
 }
 
 impl<H: Host> WasiView for InstanceState<H> {
@@ -181,14 +200,16 @@ impl<H: Host> WasiView for InstanceState<H> {
 }
 
 impl<H: Host> WasiHttpView for InstanceState<H> {
-    fn ctx(&mut self) -> &mut WasiHttpCtx {
-        &mut self.http
+    fn http(&mut self) -> WasiHttpCtxView<'_> {
+        WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: &mut self.http_hooks,
+        }
     }
+}
 
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
+impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
     fn send_request(
         &mut self,
         request: hyper::Request<HyperOutgoingBody>,
@@ -368,7 +389,7 @@ mod tests {
     use http_body_util::BodyExt as _;
     use parking_lot::Mutex;
     use wasmtime_wasi::p2::Pollable as _;
-    use wasmtime_wasi_http::bindings::http::types::ErrorCode as TypesErrorCode;
+    use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode as TypesErrorCode;
 
     use super::*;
     use crate::host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse};
@@ -426,13 +447,17 @@ mod tests {
     #[tokio::test]
     async fn send_request_body_timeout_is_enforced() {
         let host = ScriptedHost::default();
+        let host = Arc::new(host.clone());
 
         let mut state = InstanceState {
             limiter: MemoryLimiter::new(1024),
             wasi: WasiCtxBuilder::new().build(),
             http: WasiHttpCtx::new(),
             table: ResourceTable::new(),
-            host: Arc::new(host.clone()),
+            host: Arc::clone(&host),
+            http_hooks: InstanceHttpHooks {
+                host: Arc::clone(&host),
+            },
             sink: None,
             log_sink_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
@@ -488,13 +513,17 @@ mod tests {
     #[tokio::test]
     async fn send_request_delegates_redirect_and_host_handling_to_host() {
         let host = ScriptedHost::default();
+        let host = Arc::new(host.clone());
 
         let mut state = InstanceState {
             limiter: MemoryLimiter::new(1024),
             wasi: WasiCtxBuilder::new().build(),
             http: WasiHttpCtx::new(),
             table: ResourceTable::new(),
-            host: Arc::new(host.clone()),
+            host: Arc::clone(&host),
+            http_hooks: InstanceHttpHooks {
+                host: Arc::clone(&host),
+            },
             sink: None,
             log_sink_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
