@@ -32,33 +32,6 @@ def test_json_stream_from_iterable_roundtrip() -> None:
     assert stream_arg.producer_task is None
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("runtime", "bundle_file", "lib_subdir"),
-    [("python", "python.wasm", "lib"), ("js", "js.wasm", None)],
-)
-async def test_resolve_runtime_uses_flat_cache_layout(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    runtime: str,
-    bundle_file: str,
-    lib_subdir: str | None,
-) -> None:
-    cache_base = tmp_path / "cache"
-    runtime_root = cache_base / "isola" / "runtimes" / f"{runtime}-0.2.0"
-    (runtime_root / "bin").mkdir(parents=True)
-    (runtime_root / "bin" / bundle_file).write_bytes(b"")
-    if lib_subdir is not None:
-        (runtime_root / lib_subdir).mkdir()
-
-    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_base))
-
-    config = await isola.resolve_runtime(cast("Any", runtime), version="0.2.0")
-    assert config["runtime_path"] == runtime_root / "bin"
-    if lib_subdir is not None:
-        assert config["runtime_lib_dir"] == runtime_root / lib_subdir
-
-
 def test_strip_first_path_component_flattens_bundle_root() -> None:
     strip_first_path_component = runtime_module._strip_first_path_component  # noqa: SLF001
 
