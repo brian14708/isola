@@ -39,10 +39,12 @@ event: data
 data: {"value":2}
 
 event: done
-data: {"traces":[]}
+data: {}
 ```
 
 The same server also exposes an OpenAPI document at `http://127.0.0.1:3000/openapi.json`.
+
+If you set `"trace": true` in the request body, trace records are emitted as separate `event: trace` entries before the final `event: done`.
 
 ## Python SDK
 

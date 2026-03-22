@@ -65,13 +65,21 @@ pub struct SseLogEvent {
 }
 
 #[derive(Debug, Serialize)]
-pub struct SseDoneEvent {
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub traces: Vec<HttpTrace>,
-}
+pub struct SseDoneEvent {}
 
 #[derive(Debug, Serialize)]
 pub struct SseErrorEvent {
     pub code: ErrorCode,
     pub message: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SseDoneEvent;
+
+    #[test]
+    fn sse_done_event_serializes_to_empty_object() {
+        let value = serde_json::to_value(SseDoneEvent {}).expect("must serialize");
+        assert_eq!(value, serde_json::json!({}));
+    }
 }

@@ -347,15 +347,12 @@ fn execute_sse_inner(
         };
 
         let trace_builder = trace.then(HttpTraceBuilder::new);
-        let mut pending_traces = Vec::new();
         let span_parent_id = if let Some(builder) = trace_builder.as_ref() {
             let trace_event = builder.span_begin(SCRIPT_EXEC_SPAN_NAME);
             if !emit_json_event(&tx, "trace", &trace_event) {
                 return;
             }
-            let parent_id = trace_event.id;
-            pending_traces.push(trace_event);
-            Some(parent_id)
+            Some(trace_event.id)
         } else {
             None
         };
@@ -369,7 +366,6 @@ fn execute_sse_inner(
                 () = tokio::time::sleep_until(deadline) => {
                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                         let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                        pending_traces.push(trace_event.clone());
                         if !emit_json_event(&tx, "trace", &trace_event) {
                             break;
                         }
@@ -395,7 +391,6 @@ fn execute_sse_inner(
                                 Err(e) => {
                                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                                         let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                        pending_traces.push(trace_event.clone());
                                         if !emit_json_event(&tx, "trace", &trace_event) {
                                             break;
                                         }
@@ -420,7 +415,6 @@ fn execute_sse_inner(
                                 Err(e) => {
                                     if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                                         let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                        pending_traces.push(trace_event.clone());
                                         if !emit_json_event(&tx, "trace", &trace_event) {
                                             break;
                                         }
@@ -436,20 +430,18 @@ fn execute_sse_inner(
 
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                                 let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace_event.clone());
                                 if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
 
-                            let done = SseDoneEvent { traces: pending_traces };
+                            let done = SseDoneEvent {};
                             let _ = emit_json_event(&tx, "done", &done);
                             break;
                         }
                         Some(StreamItem::Error(err)) => {
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                                 let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace_event.clone());
                                 if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
@@ -477,7 +469,6 @@ fn execute_sse_inner(
                             }
                             if let Some(builder) = trace_builder.as_ref() {
                                 let trace_event = builder.log(&level, message);
-                                pending_traces.push(trace_event.clone());
                                 if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
@@ -486,12 +477,11 @@ fn execute_sse_inner(
                         Some(StreamItem::End(None)) | None => {
                             if let (Some(builder), Some(parent_id)) = (trace_builder.as_ref(), span_parent_id) {
                                 let trace_event = builder.span_end(SCRIPT_EXEC_SPAN_NAME, parent_id);
-                                pending_traces.push(trace_event.clone());
                                 if !emit_json_event(&tx, "trace", &trace_event) {
                                     break;
                                 }
                             }
-                            let done = SseDoneEvent { traces: pending_traces };
+                            let done = SseDoneEvent {};
                             let _ = emit_json_event(&tx, "done", &done);
                             break;
                         }
