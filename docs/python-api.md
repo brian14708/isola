@@ -49,7 +49,7 @@ async def main() -> None:
         async with sandbox:
             await sandbox.load_script("def hello(name):\n    return f'hello {name}'")
             result = await sandbox.run("hello", ["world"])
-            print(result.final)
+            print(result)
 
 
 asyncio.run(main())
@@ -110,7 +110,7 @@ async with sandbox:
 Public methods:
 
 - `await load_script(code)`
-- `await run(name, args=None) -> RunResult`
+- `await run(name, args=None) -> JsonValue | None`
 - `run_stream(name, args=None) -> AsyncIterator[Event]`
 - `close()`
 - `await aclose()`
@@ -176,30 +176,33 @@ Each hostcall handler receives the decoded JSON payload for its registered call 
 
 ## Events and Results
 
-`run_stream(...)` yields `Event` objects:
+`run(...)` returns the final value directly:
 
 ```python
-async for event in sandbox.run_stream("emit"):
-    print(event.kind, event.data)
+result = await sandbox.run("add", [1, 2])
+assert result == 3
 ```
 
-`Event.kind` is one of:
+`run_stream(...)` yields typed `Event` objects for fine-grained control:
 
-- `"result"`
-- `"end"`
-- `"stdout"`
-- `"stderr"`
-- `"error"`
-- `"log"`
+```python
+async for event in sandbox.run_stream("compute"):
+    match event:
+        case ResultEvent(data=value):
+            print("intermediate:", value)
+        case EndEvent(data=value):
+            print("final:", value)
+        case StdoutEvent(data=line):
+            print("stdout:", line)
+        case StderrEvent(data=line):
+            print("stderr:", line)
+        case ErrorEvent(data=msg):
+            print("error:", msg)
+        case LogEvent(data=msg):
+            print("log:", msg)
+```
 
-`run(...)` collects those events into `RunResult`:
-
-- `results`: streamed JSON values
-- `final`: final JSON return value
-- `stdout`: captured stdout lines
-- `stderr`: captured stderr lines
-- `logs`: runtime log messages
-- `errors`: execution errors emitted by the runtime
+`Event` is a union of: `ResultEvent`, `EndEvent`, `StdoutEvent`, `StderrEvent`, `ErrorEvent`, `LogEvent`. Each carries a typed `data` field (`JsonValue` for result/end, `str` for the rest).
 
 ## Filesystem and Environment
 

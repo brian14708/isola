@@ -76,7 +76,7 @@ async def main() -> None:
                 "    return a + b\n"
             )
             result = await sandbox.run("add", [1, 2])
-            print(result.final)
+            print(result)
 
 
 asyncio.run(main())
@@ -116,7 +116,7 @@ async def main() -> None:
                 "    return await hostcall('lookup_user', {'user_id': user_id})\n"
             )
             result = await sandbox.run("lookup_user", [7])
-            print(result.final)
+            print(result)
 
 
 asyncio.run(main())

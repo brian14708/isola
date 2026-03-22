@@ -134,8 +134,7 @@ async def test_async_context_managers_smoke() -> None:
     async with sandbox:
         await sandbox.load_script("def ping():\n\treturn 'ok'")
         result = await sandbox.run("ping")
-        assert result.results == []
-        assert result.final == "ok"
+        assert result == "ok"
     mgr.close()
 
 
@@ -149,8 +148,7 @@ async def test_async_context_managers_js_runtime_smoke() -> None:
     async with sandbox:
         await sandbox.load_script("function ping() { return 'ok'; }")
         result = await sandbox.run("ping")
-        assert result.results == []
-        assert result.final == "ok"
+        assert result == "ok"
     mgr.close()
 
 
@@ -207,12 +205,10 @@ async def test_can_start_sandbox_and_execute_code() -> None:
         )
 
         add_result = await sandbox.run("add", [1, 2])
-        assert add_result.results == []
-        assert add_result.final == 3
+        assert add_result == 3
 
         stream_result = await sandbox.run("stream_values", [3])
-        assert stream_result.results == [0, 1, 2]
-        assert stream_result.final is None
+        assert stream_result is None
     mgr.close()
 
 
@@ -233,10 +229,10 @@ async def test_run_stream_yields_events() -> None:
 
         events = [event async for event in sandbox.run_stream("emit")]
         assert events
-        assert any(event.kind == "stdout" for event in events)
-        end_events = [event for event in events if event.kind == "end"]
+        assert any(isinstance(event, isola.StdoutEvent) for event in events)
+        end_events = [event for event in events if isinstance(event, isola.EndEvent)]
         assert len(end_events) == 1
-        assert end_events[0].data == "7"
+        assert end_events[0].data == 7
     mgr.close()
 
 
@@ -245,9 +241,7 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
     class _FakeCore:
         def __init__(self) -> None:
             self.callback: Callable[[str, str | None], None] | None = None
-            self.hostcall_handler: (
-                Callable[[str, str], Awaitable[str]] | None
-            ) = None
+            self.hostcall_handler: Callable[[str, str], Awaitable[str]] | None = None
             self.hostcall_loop: asyncio.AbstractEventLoop | None = None
             self.http_handler: (
                 Callable[
@@ -365,10 +359,11 @@ async def test_run_stream_flushes_trailing_scheduled_events() -> None:
     sandbox = isola.Sandbox(cast("Any", core))
 
     events = [event async for event in sandbox.run_stream("emit")]
-    assert [(event.kind, event.data) for event in events] == [
-        ("stdout", "hello"),
-        ("end", "7"),
-    ]
+    assert len(events) == 2
+    assert isinstance(events[0], isola.StdoutEvent)
+    assert events[0].data == "hello"
+    assert isinstance(events[1], isola.EndEvent)
+    assert events[1].data == 7
 
 
 @pytest.mark.asyncio
@@ -457,7 +452,7 @@ async def test_two_sandboxes_can_run_concurrently() -> None:
         async def _run_one(sandbox: IsolaSandbox, name: str) -> str | None:
             await sandbox.load_script(script)
             result = await sandbox.run("identify", [name, 0.05])
-            return cast("str | None", result.final)
+            return cast("str | None", result)
 
         result_a, result_b = await asyncio.gather(
             _run_one(sandbox_a, "sandbox-a"), _run_one(sandbox_b, "sandbox-b")
@@ -494,9 +489,7 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
         await sandbox.load_script(_FETCH_SCRIPT)
 
         result = await sandbox.run("main", ["https://example.test/bytes"])
-        assert result.results == []
-        assert result.final == [201, "bytes", "ok"]
-        assert result.errors == []
+        assert result == [201, "bytes", "ok"]
     mgr.close()
 
 
@@ -526,9 +519,7 @@ async def test_sandbox_hostcalls_roundtrip() -> None:
         )
 
         result = await sandbox.run("main", [7])
-        assert result.results == []
-        assert result.final == {"user_id": 7, "name": "user-7"}
-        assert result.errors == []
+        assert result == {"user_id": 7, "name": "user-7"}
     mgr.close()
 
 
@@ -567,9 +558,7 @@ async def test_sandbox_http_handler_stream_response_shape() -> None:
         await sandbox.load_script(_FETCH_SCRIPT)
 
         result = await sandbox.run("main", ["https://example.test/stream"])
-        assert result.results == []
-        assert result.final == [200, "stream", "ab"]
-        assert result.errors == []
+        assert result == [200, "stream", "ab"]
     mgr.close()
 
 
@@ -592,7 +581,7 @@ async def test_sandbox_caller_timeout_does_not_break_following_requests() -> Non
     async with warmup:
         await warmup.load_script(_FETCH_SCRIPT)
         result = await warmup.run("main", ["https://example.test/warmup"])
-        assert result.final == [200, None, "ok"]
+        assert result == [200, None, "ok"]
 
     for _ in range(4):
 
@@ -619,5 +608,5 @@ async def test_sandbox_caller_timeout_does_not_break_following_requests() -> Non
     async with sandbox:
         await sandbox.load_script(_FETCH_SCRIPT)
         result = await sandbox.run("main", ["https://example.test/recovery"])
-        assert result.final == [200, None, "ok"]
+        assert result == [200, None, "ok"]
     mgr.close()

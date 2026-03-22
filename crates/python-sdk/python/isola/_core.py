@@ -21,30 +21,45 @@ if TYPE_CHECKING:
 
 JsonScalar = bool | int | float | str | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
-EventKind = Literal["result", "end", "stdout", "stderr", "error", "log"]
 RuntimeName = Literal["python", "js"]
 BytesLike = bytes | bytearray | memoryview
 Pathish = str | PathLike[str]
 HttpBodyOut = BytesLike | AsyncIterable[BytesLike] | None
 HostcallHandler = Callable[[JsonValue], Awaitable[object]]
 Hostcalls = dict[str, HostcallHandler]
-_EVENT_KIND_MAP = {"result_json": "result", "end_json": "end"}
 
 
 @dataclass(slots=True)
-class Event:
-    kind: EventKind
-    data: str | None
+class ResultEvent:
+    data: JsonValue
 
 
 @dataclass(slots=True)
-class RunResult:
-    results: list[JsonValue]
-    final: JsonValue | None
-    stdout: list[str]
-    stderr: list[str]
-    logs: list[str]
-    errors: list[str]
+class EndEvent:
+    data: JsonValue | None
+
+
+@dataclass(slots=True)
+class StdoutEvent:
+    data: str
+
+
+@dataclass(slots=True)
+class StderrEvent:
+    data: str
+
+
+@dataclass(slots=True)
+class ErrorEvent:
+    data: str
+
+
+@dataclass(slots=True)
+class LogEvent:
+    data: str
+
+
+Event = ResultEvent | EndEvent | StdoutEvent | StderrEvent | ErrorEvent | LogEvent
 
 
 @dataclass(slots=True)
@@ -345,9 +360,9 @@ class Sandbox:
         self._core = core
         self._stream_dispatches: dict[int, Callable[[str, str | None], None]] = {}
         self._next_stream_dispatch_id = 0
-        self._hostcall_handler_dispatch: (
-            Callable[[str, str], Awaitable[str]] | None
-        ) = None
+        self._hostcall_handler_dispatch: Callable[[str, str], Awaitable[str]] | None = (
+            None
+        )
         self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -419,54 +434,14 @@ class Sandbox:
     async def load_script(self, code: str) -> None:
         await self._core.load_script(code)
 
-    async def run(self, name: str, args: list[RunArg] | None = None) -> RunResult:
-        results: list[JsonValue] = []
+    async def run(
+        self, name: str, args: list[RunArg] | None = None
+    ) -> JsonValue | None:
         final: JsonValue | None = None
-        stdout: list[str] = []
-        stderr: list[str] = []
-        logs: list[str] = []
-        errors: list[str] = []
-
         async for event in self.run_stream(name, args):
-            if event.kind == "result":
-                if event.data is not None:
-                    results.append(cast("JsonValue", json.loads(event.data)))
-                continue
-
-            if event.kind == "end":
-                final = (
-                    None
-                    if event.data is None
-                    else cast("JsonValue", json.loads(event.data))
-                )
-                continue
-
-            if event.kind == "stdout":
-                if event.data is not None:
-                    stdout.append(event.data)
-                continue
-
-            if event.kind == "stderr":
-                if event.data is not None:
-                    stderr.append(event.data)
-                continue
-
-            if event.kind == "log":
-                if event.data is not None:
-                    logs.append(event.data)
-                continue
-
-            if event.data is not None:
-                errors.append(event.data)
-
-        return RunResult(
-            results=results,
-            final=final,
-            stdout=stdout,
-            stderr=stderr,
-            logs=logs,
-            errors=errors,
-        )
+            if isinstance(event, EndEvent):
+                final = event.data
+        return final
 
     async def _run_operation(self, name: str, args: list[RunArg] | None = None) -> None:
         encoded_args, producers = _encode_args(args)
@@ -506,8 +481,33 @@ class Sandbox:
 
         def _dispatch(kind: str, data: str | None) -> None:
             nonlocal pending_dispatches
-            mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
-            event = Event(kind=cast("EventKind", mapped_kind), data=data)
+            event: Event
+            if kind == "result_json":
+                if data is None:
+                    return
+                event = ResultEvent(data=cast("JsonValue", json.loads(data)))
+            elif kind == "end_json":
+                event = EndEvent(
+                    data=None if data is None else cast("JsonValue", json.loads(data))
+                )
+            elif kind == "stdout":
+                if data is None:
+                    return
+                event = StdoutEvent(data=data)
+            elif kind == "stderr":
+                if data is None:
+                    return
+                event = StderrEvent(data=data)
+            elif kind == "error":
+                if data is None:
+                    return
+                event = ErrorEvent(data=data)
+            elif kind == "log":
+                if data is None:
+                    return
+                event = LogEvent(data=data)
+            else:
+                return
             pending_dispatches += 1
             loop.call_soon_threadsafe(_enqueue, event)
 
