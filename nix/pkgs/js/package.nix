@@ -41,9 +41,6 @@ craneLib.buildPackage {
 
     [lib]
     path = "src/lib.rs"
-
-    [lints]
-    workspace = true
     EOF
           cat > crates/isola/src/lib.rs <<'EOF'
     // Stub workspace member used by the JS Nix build source filter.
