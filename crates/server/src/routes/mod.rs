@@ -1,6 +1,5 @@
 mod api;
 mod env;
-mod mcp;
 mod runtime_factory;
 mod sandbox_manager;
 mod state;
@@ -34,7 +33,6 @@ pub fn router(state: &AppState) -> axum::Router {
         .route("/debug/healthz", get(|| async { StatusCode::NO_CONTENT }))
         .route("/openapi.json", get(api::openapi::openapi_json))
         .with_state(state.clone())
-        .nest_service("/mcp", mcp::server(state.clone()))
         .nest("/v1", api::router(state));
 
     if let Some(handle) = prometheus {
