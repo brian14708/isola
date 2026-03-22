@@ -178,3 +178,82 @@ TEST_CASE("HTTP mock handler") {
   isola_sandbox_destroy(sandbox);
   isola_context_destroy(ctx);
 }
+
+// ---------------------------------------------------------------------------
+// Hostcall mock handler test
+// ---------------------------------------------------------------------------
+
+struct hostcall_test_context {
+  callback_outputs outputs;
+  std::string captured_type;
+  std::string captured_payload;
+};
+
+static isola_error_code mock_hostcall_handler(const char *type,
+                                              const uint8_t *payload,
+                                              size_t payload_len,
+                                              isola_hostcall_response *response,
+                                              void *user_data) {
+  auto *tc = reinterpret_cast<hostcall_test_context *>(user_data);
+
+  // Capture the request details for later assertions.
+  tc->captured_type = type;
+  tc->captured_payload = std::string((const char *)payload, payload_len);
+
+  // Deliver the response from a separate thread (non-blocking).
+  std::string result_payload = tc->captured_payload;
+  std::thread([response, result_payload]() {
+    isola_hostcall_response_resolve(
+        response, reinterpret_cast<const uint8_t *>(result_payload.data()),
+        result_payload.size());
+  }).detach();
+
+  return ISOLA_ERROR_CODE_OK;
+}
+
+static void hostcall_on_event(isola_callback_event event, const uint8_t *data,
+                              size_t len, void *user_data) {
+  auto *tc = reinterpret_cast<hostcall_test_context *>(user_data);
+  callback(event, data, len, &tc->outputs);
+}
+
+TEST_CASE("Hostcall mock handler") {
+  isola_context_handle *ctx;
+  REQUIRE(isola_context_create(0, &ctx) == 0);
+  auto path = runtime_wasm_path();
+  REQUIRE(isola_context_initialize(ctx, path.c_str()) == 0);
+
+  isola_sandbox_handle *sandbox;
+  REQUIRE(isola_sandbox_create(ctx, &sandbox) == 0);
+
+  hostcall_test_context tc;
+  isola_sandbox_handler_vtable vtable = {};
+  vtable.on_event = hostcall_on_event;
+  vtable.hostcall = mock_hostcall_handler;
+  REQUIRE(isola_sandbox_set_handler(sandbox, &vtable, &tc) == 0);
+  REQUIRE(isola_sandbox_start(sandbox) == 0);
+
+  REQUIRE(isola_sandbox_load_script(
+              sandbox,
+              "from sandbox.asyncio import hostcall\n"
+              "async def main():\n"
+              "    return await hostcall('test_type', {'key': 'value'})\n",
+              5000) == 0);
+
+  REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 5000) == 0);
+
+  // The mock handler should have been called with the right type.
+  REQUIRE(tc.captured_type == "test_type");
+  // The captured payload should contain the JSON for {"key": "value"}.
+  REQUIRE(tc.captured_payload.find("key") != std::string::npos);
+  REQUIRE(tc.captured_payload.find("value") != std::string::npos);
+
+  // The sandbox should have received the echoed result.
+  REQUIRE(!tc.outputs.results.empty());
+  auto &result = tc.outputs.results.back();
+  REQUIRE(result.find("key") != std::string::npos);
+  REQUIRE(result.find("value") != std::string::npos);
+
+  isola_sandbox_destroy(sandbox);
+  isola_context_destroy(ctx);
+}

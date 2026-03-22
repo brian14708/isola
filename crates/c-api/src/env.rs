@@ -73,6 +73,39 @@ impl HttpResponseBody {
     }
 }
 
+/// Opaque handle for an in-flight hostcall response.
+///
+/// The C side delivers the result by calling exactly one of:
+/// - `isola_hostcall_response_resolve` — on success
+/// - `isola_hostcall_response_reject` — on failure
+///
+/// Either call consumes and frees the handle.
+pub struct HostcallResponse {
+    sender: Mutex<Option<tokio::sync::oneshot::Sender<Result<Value, BoxError>>>>,
+}
+
+impl HostcallResponse {
+    /// Resolve the hostcall with a successful value.
+    pub fn resolve(self, value: Value) -> Result<(), ()> {
+        self.sender
+            .into_inner()
+            .unwrap()
+            .ok_or(())?
+            .send(Ok(value))
+            .map_err(|_| ())
+    }
+
+    /// Reject the hostcall with an error message.
+    pub fn reject(self, error: String) -> Result<(), ()> {
+        self.sender
+            .into_inner()
+            .unwrap()
+            .ok_or(())?
+            .send(Err(Box::new(std::io::Error::other(error))))
+            .map_err(|_| ())
+    }
+}
+
 #[derive(Clone)]
 pub struct Env {
     handler: Arc<OnceLock<Arc<crate::SandboxHandler>>>,
@@ -87,13 +120,61 @@ impl Env {
 #[async_trait]
 impl Host for Env {
     async fn hostcall(&self, call_type: &str, payload: Value) -> Result<Value, BoxError> {
-        match call_type {
-            "echo" => Ok(payload),
-            _ => Err(
-                std::io::Error::new(std::io::ErrorKind::Unsupported, "unknown hostcall type")
-                    .into(),
-            ),
+        let handler = self
+            .handler
+            .get()
+            .ok_or_else(|| -> BoxError {
+                Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Unsupported,
+                    "handler not set",
+                ))
+            })?
+            .clone();
+
+        let hostcall_fn = handler.vtable.hostcall.ok_or_else(|| -> BoxError {
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "no hostcall handler registered",
+            ))
+        })?;
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+
+        // Block scope: raw pointers do not cross the .await
+        {
+            let call_type_c = CString::new(call_type)
+                .map_err(|e| -> BoxError { Box::new(std::io::Error::other(e)) })?;
+
+            let payload_json = payload.to_json_str().map_err(|e| -> BoxError {
+                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+            })?;
+
+            let response = Box::into_raw(Box::new(HostcallResponse {
+                sender: Mutex::new(Some(tx)),
+            }));
+
+            let code = hostcall_fn(
+                call_type_c.as_ptr(),
+                payload_json.as_ptr(),
+                payload_json.len(),
+                response,
+                handler.user_data,
+            );
+
+            if code != ErrorCode::Ok {
+                drop(unsafe { Box::from_raw(response) });
+                return Err(Box::new(std::io::Error::other(
+                    "hostcall handler callback failed",
+                )));
+            }
         }
+
+        // Await response from C side
+        rx.await.map_err(|_| -> BoxError {
+            Box::new(std::io::Error::other(
+                "hostcall response handle dropped without resolve/reject",
+            ))
+        })?
     }
 
     async fn http_request(&self, incoming: HttpRequest) -> Result<HttpResponse, BoxError> {

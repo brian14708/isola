@@ -34,6 +34,17 @@ typedef enum isola_argument_type {
 typedef struct isola_context_handle isola_context_handle;
 
 /**
+ * Opaque handle for an in-flight hostcall response.
+ *
+ * The C side delivers the result by calling exactly one of:
+ * - `isola_hostcall_response_resolve` — on success
+ * - `isola_hostcall_response_reject` — on failure
+ *
+ * Either call consumes and frees the handle.
+ */
+typedef struct isola_hostcall_response isola_hostcall_response;
+
+/**
  * Opaque handle for an in-flight HTTP response.
  *
  * The C side drives the response through three phases:
@@ -96,6 +107,22 @@ typedef struct isola_sandbox_handler_vtable {
   enum isola_error_code (*http_request)(const struct isola_http_request *request,
                                         struct isola_http_response_body *response_body,
                                         void *user_data);
+  /**
+   * Called to handle a hostcall from guest code.
+   *
+   * The callback should return immediately. The `response` handle
+   * is Rust-owned; the C side delivers the result asynchronously:
+   *
+   * - `isola_hostcall_response_resolve(response, data, len)` — on success
+   * - `isola_hostcall_response_reject(response, error_message)` — on failure
+   *
+   * Exactly one of resolve/reject must be called. The call frees the handle.
+   */
+  enum isola_error_code (*hostcall)(const char *call_type,
+                                    const uint8_t *payload,
+                                    size_t payload_len,
+                                    struct isola_hostcall_response *response,
+                                    void *user_data);
 } isola_sandbox_handler_vtable;
 
 typedef struct isola_blob {
@@ -160,7 +187,7 @@ void isola_context_destroy(struct isola_context_handle *_ctx);
  * The caller must ensure that `out_sandbox` is a valid pointer to an
  * uninitialized `Box<SandboxHandle>`.
  */
-enum isola_error_code isola_sandbox_create(struct isola_context_handle *ctx,
+enum isola_error_code isola_sandbox_create(const struct isola_context_handle *ctx,
                                            struct isola_sandbox_handle **out_sandbox);
 
 void isola_sandbox_destroy(struct isola_sandbox_handle *_sandbox);
@@ -214,10 +241,6 @@ enum isola_error_code isola_sandbox_load_script(struct isola_sandbox_handle *san
  * - `args` is a valid pointer to an array of `Argument` structs of length
  *   `args_len`
  * - Each `Argument` in the array has valid pointers and data
- *
- * # Panics
- *
- * This function may panic if argument names contain invalid UTF-8 sequences.
  */
 enum isola_error_code isola_sandbox_run(struct isola_sandbox_handle *sandbox,
                                         const char *func,
@@ -246,6 +269,10 @@ enum isola_error_code isola_stream_create(struct isola_stream_handle **out_strea
  *
  * * `blocking` - If non-zero, blocks until space is available in the channel.
  *   If zero, returns immediately with an error if the channel is full.
+ *
+ * # Panics
+ *
+ * Panics if the internal stream mutex is poisoned.
  */
 enum isola_error_code isola_stream_push(const struct isola_stream_handle *stream,
                                         const uint8_t *data,
@@ -253,13 +280,12 @@ enum isola_error_code isola_stream_push(const struct isola_stream_handle *stream
                                         int blocking);
 
 /**
- * Signals the end of a stream.
+ * Signals the end of a stream and frees the handle.
  *
- * After calling this function, no more data can be pushed to the stream.
+ * After calling this function, no more data can be pushed to the stream
+ * and the handle is invalid.
  */
 enum isola_error_code isola_stream_end(struct isola_stream_handle *_stream);
-
-void isola_stream_destroy(struct isola_stream_handle *_stream);
 
 /**
  * Delivers the HTTP status code and response headers.
@@ -306,6 +332,39 @@ enum isola_error_code isola_http_response_body_push(const struct isola_http_resp
  * After this call the pointer is invalid.
  */
 void isola_http_response_body_close(struct isola_http_response_body *body);
+
+/**
+ * Resolves a hostcall with a JSON result value, consuming the handle.
+ *
+ * Must be called exactly once per handle. After this call the pointer is
+ * invalid. Use `isola_hostcall_response_reject` to deliver an error instead.
+ *
+ * If the data is not valid JSON, the handle is **not** consumed and the
+ * caller may retry with corrected data or call
+ * `isola_hostcall_response_reject`.
+ *
+ * # Safety
+ *
+ * - `response` must be a live handle obtained from a `hostcall` callback.
+ * - `data` must point to a valid JSON buffer of `len` bytes.
+ */
+enum isola_error_code isola_hostcall_response_resolve(struct isola_hostcall_response *response,
+                                                      const uint8_t *data,
+                                                      size_t len);
+
+/**
+ * Rejects a hostcall with an error message, consuming the handle.
+ *
+ * Must be called exactly once per handle. After this call the pointer is
+ * invalid. Use `isola_hostcall_response_resolve` to deliver a result instead.
+ *
+ * # Safety
+ *
+ * - `response` must be a live handle obtained from a `hostcall` callback.
+ * - `error_message` must be a valid, null-terminated C string.
+ */
+enum isola_error_code isola_hostcall_response_reject(struct isola_hostcall_response *response,
+                                                     const char *error_message);
 
 const char *isola_last_error(void);
 

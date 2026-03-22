@@ -20,6 +20,7 @@ StreamHandle = "stream_handle"
 HttpHeader = "http_header"
 HttpRequestInfo = "http_request"
 HttpResponseBody = "http_response_body"
+HostcallResponse = "hostcall_response"
 SandboxHandlerVtable = "sandbox_handler_vtable"
 
 [enum]

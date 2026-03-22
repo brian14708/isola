@@ -65,6 +65,25 @@ pub struct SandboxHandlerVtable {
             user_data: *mut c_void,
         ) -> ErrorCode,
     >,
+
+    /// Called to handle a hostcall from guest code.
+    ///
+    /// The callback should return immediately. The `response` handle
+    /// is Rust-owned; the C side delivers the result asynchronously:
+    ///
+    /// - `isola_hostcall_response_resolve(response, data, len)` — on success
+    /// - `isola_hostcall_response_reject(response, error_message)` — on failure
+    ///
+    /// Exactly one of resolve/reject must be called. The call frees the handle.
+    pub hostcall: Option<
+        extern "C" fn(
+            call_type: *const c_char,
+            payload: *const u8,
+            payload_len: usize,
+            response: *mut crate::env::HostcallResponse,
+            user_data: *mut c_void,
+        ) -> ErrorCode,
+    >,
 }
 
 /// Resolved handler: vtable + `user_data`, stored internally.
@@ -346,45 +365,45 @@ impl SandboxHandle<'_> {
     }
 
     fn run(&mut self, func: &str, args: Vec<RawArgument>, timeout_in_ms: u64) -> Result<()> {
+        // Convert arguments before taking the sandbox out, so a parse error
+        // does not leave `self.inner` as `Uninitialized`.
+        let isola_args: Vec<_> = args
+            .into_iter()
+            .map(|arg| -> Result<Arg> {
+                match arg {
+                    RawArgument::Json(name, value) => {
+                        let json_str = std::str::from_utf8(&value).map_err(|_| {
+                            Error::InvalidArgument("Invalid UTF-8 in JSON argument")
+                        })?;
+                        let value = Value::from_json_str(json_str)
+                            .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
+                        Ok(match name {
+                            Some(name) => Arg::Named(name, value),
+                            None => Arg::Positional(value),
+                        })
+                    }
+                    RawArgument::JsonStream(name, receiver) => {
+                        let stream =
+                            Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
+                        Ok(match name {
+                            Some(name) => Arg::NamedStream(name, stream),
+                            None => Arg::PositionalStream(stream),
+                        })
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>>>()?;
+
         match std::mem::replace(&mut self.inner, SandboxInner::Uninitialized) {
             SandboxInner::Running {
                 mut sandbox,
                 handler,
             } => {
-                // Convert arguments to isola format.
-                let isola_args: Vec<_> = args
-                    .into_iter()
-                    .map(|arg| -> Result<Arg> {
-                        match arg {
-                            RawArgument::Json(name, value) => {
-                                let json_str = std::str::from_utf8(&value).map_err(|_| {
-                                    Error::InvalidArgument("Invalid UTF-8 in JSON argument")
-                                })?;
-                                let value = Value::from_json_str(json_str)
-                                    .map_err(|_| Error::InvalidArgument("Invalid JSON format"))?;
-                                Ok(match name {
-                                    Some(name) => Arg::Named(name, value),
-                                    None => Arg::Positional(value),
-                                })
-                            }
-                            RawArgument::JsonStream(name, receiver) => {
-                                let stream =
-                                    Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-                                Ok(match name {
-                                    Some(name) => Arg::NamedStream(name, stream),
-                                    None => Arg::PositionalStream(stream),
-                                })
-                            }
-                        }
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-
-                let func = func.to_string();
                 let timeout = Duration::from_millis(timeout_in_ms);
                 let result = self.ctx.rt.block_on(async {
                     tokio::time::timeout(
                         timeout,
-                        sandbox.call_with_sink(&func, isola_args, handler.clone()),
+                        sandbox.call_with_sink(func, isola_args, handler.clone()),
                     )
                     .await
                 });
@@ -419,7 +438,7 @@ impl SandboxHandle<'_> {
 /// uninitialized `Box<SandboxHandle>`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_create<'a>(
-    ctx: &'a mut ContextHandle,
+    ctx: &'a ContextHandle,
     out_sandbox: *mut Box<SandboxHandle<'a>>,
 ) -> ErrorCode {
     let sandbox = c_try!(ctx.new_sandbox());
@@ -514,10 +533,6 @@ pub unsafe extern "C" fn isola_sandbox_load_script(
 /// - `args` is a valid pointer to an array of `Argument` structs of length
 ///   `args_len`
 /// - Each `Argument` in the array has valid pointers and data
-///
-/// # Panics
-///
-/// This function may panic if argument names contain invalid UTF-8 sequences.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_run(
     sandbox: &mut SandboxHandle<'_>,
@@ -609,7 +624,7 @@ pub struct Argument {
 // ---------------------------------------------------------------------------
 
 pub struct StreamHandle {
-    sender: tokio::sync::mpsc::Sender<Value>,
+    sender: std::sync::Mutex<Option<tokio::sync::mpsc::Sender<Value>>>,
     receiver: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<Value>>>,
 }
 
@@ -638,7 +653,7 @@ enum RawArgument {
 pub unsafe extern "C" fn isola_stream_create(out_stream: *mut Box<StreamHandle>) -> ErrorCode {
     let (sender, receiver) = tokio::sync::mpsc::channel(1024);
     let stream = Box::new(StreamHandle {
-        sender,
+        sender: std::sync::Mutex::new(Some(sender)),
         receiver: std::sync::Mutex::new(Some(receiver)),
     });
     unsafe { out_stream.write(stream) };
@@ -655,6 +670,10 @@ pub unsafe extern "C" fn isola_stream_create(out_stream: *mut Box<StreamHandle>)
 ///
 /// * `blocking` - If non-zero, blocks until space is available in the channel.
 ///   If zero, returns immediately with an error if the channel is full.
+///
+/// # Panics
+///
+/// Panics if the internal stream mutex is poisoned.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_stream_push(
     stream: &StreamHandle,
@@ -674,9 +693,17 @@ pub unsafe extern "C" fn isola_stream_push(
         return ErrorCode::InvalidArgument;
     };
 
+    // Clone the sender so we don't hold the lock during blocking_send.
+    let sender = stream.sender.lock().unwrap().as_ref().cloned();
+    let Some(sender) = sender else {
+        let err = Error::StreamClosed;
+        crate::error::set_last_error(err);
+        return ErrorCode::StreamClosed;
+    };
+
     if blocking != 0 {
         // Blocking send - waits until space is available
-        if stream.sender.blocking_send(value) == Ok(()) {
+        if sender.blocking_send(value).is_ok() {
             ErrorCode::Ok
         } else {
             let err = Error::StreamClosed;
@@ -685,7 +712,7 @@ pub unsafe extern "C" fn isola_stream_push(
         }
     } else {
         // Non-blocking send - returns immediately if full
-        match stream.sender.try_send(value) {
+        match sender.try_send(value) {
             Ok(()) => ErrorCode::Ok,
             Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
                 let err = Error::StreamFull;
@@ -701,17 +728,15 @@ pub unsafe extern "C" fn isola_stream_push(
     }
 }
 
-/// Signals the end of a stream.
+/// Signals the end of a stream and frees the handle.
 ///
-/// After calling this function, no more data can be pushed to the stream.
+/// After calling this function, no more data can be pushed to the stream
+/// and the handle is invalid.
 #[unsafe(no_mangle)]
 pub extern "C" fn isola_stream_end(_stream: Box<StreamHandle>) -> ErrorCode {
-    // Dropping the sender will close the channel
+    // Dropping the StreamHandle closes the sender and frees the handle.
     ErrorCode::Ok
 }
-
-#[unsafe(no_mangle)]
-pub extern "C" fn isola_stream_destroy(_stream: Box<StreamHandle>) {}
 
 // ---------------------------------------------------------------------------
 // HTTP response body (push-based)
@@ -777,8 +802,8 @@ pub unsafe extern "C" fn isola_http_response_body_push(
     data: *const u8,
     len: usize,
 ) -> ErrorCode {
-    let chunk = unsafe { std::slice::from_raw_parts(data, len) }.to_vec();
-    if body.send(bytes::Bytes::from(chunk)).is_err() {
+    let chunk = bytes::Bytes::copy_from_slice(unsafe { std::slice::from_raw_parts(data, len) });
+    if body.send(chunk).is_err() {
         let err = Error::StreamClosed;
         crate::error::set_last_error(err);
         return ErrorCode::StreamClosed;
@@ -798,4 +823,76 @@ pub unsafe extern "C" fn isola_http_response_body_push(
 pub unsafe extern "C" fn isola_http_response_body_close(body: *mut crate::env::HttpResponseBody) {
     // Dropping the sender signals EOF to the receiver stream.
     drop(unsafe { Box::from_raw(body) });
+}
+
+// ---------------------------------------------------------------------------
+// Hostcall response (non-blocking)
+// ---------------------------------------------------------------------------
+
+/// Resolves a hostcall with a JSON result value, consuming the handle.
+///
+/// Must be called exactly once per handle. After this call the pointer is
+/// invalid. Use `isola_hostcall_response_reject` to deliver an error instead.
+///
+/// If the data is not valid JSON, the handle is **not** consumed and the
+/// caller may retry with corrected data or call `isola_hostcall_response_reject`.
+///
+/// # Safety
+///
+/// - `response` must be a live handle obtained from a `hostcall` callback.
+/// - `data` must point to a valid JSON buffer of `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn isola_hostcall_response_resolve(
+    response: *mut crate::env::HostcallResponse,
+    data: *const u8,
+    len: usize,
+) -> ErrorCode {
+    // Validate before consuming so the handle survives parse errors.
+    let json = unsafe { std::slice::from_raw_parts(data, len) };
+    let Ok(json_str) = std::str::from_utf8(json) else {
+        crate::error::set_last_error(Error::InvalidArgument("Invalid UTF-8 in hostcall response"));
+        return ErrorCode::InvalidArgument;
+    };
+    let Ok(value) = Value::from_json_str(json_str) else {
+        crate::error::set_last_error(Error::InvalidArgument("Invalid JSON in hostcall response"));
+        return ErrorCode::InvalidArgument;
+    };
+    // Now consume the handle.
+    let response = unsafe { Box::from_raw(response) };
+    if response.resolve(value).is_err() {
+        crate::error::set_last_error(Error::Internal(
+            "hostcall response already completed or receiver dropped".to_string(),
+        ));
+        return ErrorCode::Internal;
+    }
+    ErrorCode::Ok
+}
+
+/// Rejects a hostcall with an error message, consuming the handle.
+///
+/// Must be called exactly once per handle. After this call the pointer is
+/// invalid. Use `isola_hostcall_response_resolve` to deliver a result instead.
+///
+/// # Safety
+///
+/// - `response` must be a live handle obtained from a `hostcall` callback.
+/// - `error_message` must be a valid, null-terminated C string.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn isola_hostcall_response_reject(
+    response: *mut crate::env::HostcallResponse,
+    error_message: *const c_char,
+) -> ErrorCode {
+    let response = unsafe { Box::from_raw(response) };
+    let msg = unsafe { CStr::from_ptr(error_message) };
+    let Ok(msg_str) = msg.to_str() else {
+        crate::error::set_last_error(Error::InvalidArgument("Invalid UTF-8 in error message"));
+        return ErrorCode::InvalidArgument;
+    };
+    if response.reject(msg_str.to_string()).is_err() {
+        crate::error::set_last_error(Error::Internal(
+            "hostcall response already completed or receiver dropped".to_string(),
+        ));
+        return ErrorCode::Internal;
+    }
+    ErrorCode::Ok
 }

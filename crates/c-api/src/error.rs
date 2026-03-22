@@ -60,7 +60,7 @@ trait IntoCStr {
 impl IntoCStr for String {
     fn into_cstr(self) -> Cow<'static, CStr> {
         CString::new(self).map_or_else(
-            |_| c"invalid utf-8 error string".into(),
+            |_| c"error string contained interior null byte".into(),
             std::convert::Into::into,
         )
     }
@@ -68,7 +68,7 @@ impl IntoCStr for String {
 impl IntoCStr for &'static str {
     fn into_cstr(self) -> Cow<'static, CStr> {
         CString::new(self).map_or_else(
-            |_| c"invalid utf-8 error string".into(),
+            |_| c"error string contained interior null byte".into(),
             std::convert::Into::into,
         )
     }
@@ -76,27 +76,17 @@ impl IntoCStr for &'static str {
 
 impl Error {
     fn c_error(&mut self) -> *const c_char {
-        match self {
-            Self::InvalidArgument(msg) => {
-                let cstr = msg.into_cstr();
-                *self = Self::C(ErrorCode::InvalidArgument, cstr);
-                self.c_error()
-            }
-            Self::Internal(msg) => {
-                let cstr = msg.clone().into_cstr();
-                *self = Self::C(ErrorCode::Internal, cstr);
-                self.c_error()
-            }
-            Self::StreamFull => {
-                *self = Self::C(ErrorCode::StreamFull, c"Stream is full".into());
-                self.c_error()
-            }
-            Self::StreamClosed => {
-                *self = Self::C(ErrorCode::StreamClosed, c"Stream is closed".into());
-                self.c_error()
-            }
-            Self::C(_, msg) => msg.as_ptr(),
+        if !matches!(self, Self::C(..)) {
+            *self = match self {
+                Self::InvalidArgument(msg) => Self::C(ErrorCode::InvalidArgument, msg.into_cstr()),
+                Self::Internal(msg) => Self::C(ErrorCode::Internal, msg.clone().into_cstr()),
+                Self::StreamFull => Self::C(ErrorCode::StreamFull, c"Stream is full".into()),
+                Self::StreamClosed => Self::C(ErrorCode::StreamClosed, c"Stream is closed".into()),
+                Self::C(..) => unreachable!(),
+            };
         }
+        let Self::C(_, msg) = self else { unreachable!() };
+        msg.as_ptr()
     }
 }
 
