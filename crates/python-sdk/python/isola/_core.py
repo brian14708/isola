@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from os import PathLike, fspath
@@ -15,7 +14,7 @@ import httpx
 from isola._isola import _ContextCore, _StreamCore
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Iterable
+    from collections.abc import AsyncIterator, Iterable, Sequence
 
     from isola._isola import _SandboxCore
 
@@ -173,8 +172,7 @@ class StreamArg:
         async def _produce() -> None:
             try:
                 async for item in source:
-                    payload = _to_json(item)
-                    await self._core.push_json_async(payload)
+                    await self._core.push_async(item)
             finally:
                 self._core.end()
 
@@ -202,7 +200,7 @@ class StreamArg:
             buffered = list(values)
             core = _StreamCore(max(capacity, len(buffered), 1))
             for item in buffered:
-                core.push_json(_to_json(item))
+                core.push(item)
             core.end()
             return cls(core, name=name)
 
@@ -263,7 +261,7 @@ def _configure_core(
     core: _ContextCore | _SandboxCore, patch: dict[str, object]
 ) -> None:
     if patch:
-        core.configure_json(json.dumps(patch, separators=(",", ":")))
+        core.configure(patch)
 
 
 class SandboxManager:
@@ -352,11 +350,11 @@ class SandboxTemplate:
 class Sandbox:
     def __init__(self, core: _SandboxCore) -> None:
         self._core = core
-        self._stream_dispatches: dict[int, Callable[[str, str | None], None]] = {}
+        self._stream_dispatches: dict[int, Callable[[str, object], None]] = {}
         self._next_stream_dispatch_id = 0
-        self._hostcall_handler_dispatch: Callable[[str, str], Awaitable[str]] | None = (
-            None
-        )
+        self._hostcall_handler_dispatch: (
+            Callable[[str, object], Awaitable[object]] | None
+        ) = None
         self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -370,7 +368,7 @@ class Sandbox:
             self._core.set_callback(None)
             return
 
-        def _dispatch(kind: str, data: str | None) -> None:
+        def _dispatch(kind: str, data: object) -> None:
             # Stream listeners can change while events are emitted.
             stream_dispatches = tuple(self._stream_dispatches.values())
             for stream_dispatch in stream_dispatches:
@@ -387,14 +385,12 @@ class Sandbox:
         loop = asyncio.get_running_loop()
         dispatch_hostcalls = dict(hostcalls)
 
-        async def _dispatch(call_type: str, payload_json: str) -> str:
-            payload = cast("JsonValue", json.loads(payload_json))
+        async def _dispatch(call_type: str, payload: object) -> object:
             handler = dispatch_hostcalls.get(call_type)
             if handler is None:
                 msg = f"unsupported hostcall: {call_type}"
                 raise ValueError(msg)
-            result = await handler(payload)
-            return _to_json(result)
+            return await handler(cast("JsonValue", payload))
 
         self._hostcall_handler_dispatch = _dispatch
         self._core.set_hostcall_handler(_dispatch, loop)
@@ -473,33 +469,31 @@ class Sandbox:
             ):
                 dispatches_drained.set_result(None)
 
-        def _dispatch(kind: str, data: str | None) -> None:
+        def _dispatch(kind: str, data: object) -> None:
             nonlocal pending_dispatches
             event: Event
-            if kind == "result_json":
+            if kind == "result":
                 if data is None:
                     return
-                event = ResultEvent(data=cast("JsonValue", json.loads(data)))
-            elif kind == "end_json":
-                event = EndEvent(
-                    data=None if data is None else cast("JsonValue", json.loads(data))
-                )
+                event = ResultEvent(data=cast("JsonValue", data))
+            elif kind == "end":
+                event = EndEvent(data=cast("JsonValue | None", data))
             elif kind == "stdout":
                 if data is None:
                     return
-                event = StdoutEvent(data=data)
+                event = StdoutEvent(data=cast("str", data))
             elif kind == "stderr":
                 if data is None:
                     return
-                event = StderrEvent(data=data)
+                event = StderrEvent(data=cast("str", data))
             elif kind == "error":
                 if data is None:
                     return
-                event = ErrorEvent(data=data)
+                event = ErrorEvent(data=cast("str", data))
             elif kind == "log":
                 if data is None:
                     return
-                event = LogEvent(data=data)
+                event = LogEvent(data=cast("str", data))
             else:
                 return
             pending_dispatches += 1
@@ -561,12 +555,8 @@ class Sandbox:
         self._core.close()
 
 
-def _to_json(value: object) -> str:
-    return json.dumps(value, separators=(",", ":"))
-
-
 def _encode_args(
-    args: list[RunArg] | None,
+    args: Sequence[object] | None,
 ) -> tuple[list[tuple[str, str | None, object]], list[asyncio.Task[None]]]:
     if args is None:
         return [], []
@@ -577,7 +567,7 @@ def _encode_args(
 
     for arg in args:
         if isinstance(arg, Arg):
-            encoded.append(("json", arg.name, _to_json(arg.value)))
+            encoded.append(("json", arg.name, arg.value))
             continue
 
         if isinstance(arg, StreamArg):
@@ -585,7 +575,10 @@ def _encode_args(
             stream_args.append(arg)
             continue
 
-        encoded.append(("json", None, _to_json(arg)))
+        if not isinstance(arg, (bool, int, float, str, list, dict)) and arg is not None:
+            msg = f"invalid run argument type: {type(arg)!r}"
+            raise TypeError(msg)
+        encoded.append(("json", None, cast("object", arg)))
 
     for stream_arg in stream_args:
         producer = stream_arg.start_producer()

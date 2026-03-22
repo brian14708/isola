@@ -235,8 +235,10 @@ async def test_run_stream_yields_events() -> None:
 async def test_template_create_hostcalls_json_roundtrip() -> None:
     class _FakeCore:
         def __init__(self) -> None:
-            self.callback: Callable[[str, str | None], None] | None = None
-            self.hostcall_handler: Callable[[str, str], Awaitable[str]] | None = None
+            self.callback: Callable[[str, object], None] | None = None
+            self.hostcall_handler: (
+                Callable[[str, object], Awaitable[object]] | None
+            ) = None
             self.hostcall_loop: asyncio.AbstractEventLoop | None = None
             self.http_handler: (
                 Callable[
@@ -248,13 +250,13 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
         def set_callback(
-            self, callback: Callable[[str, str | None], None] | None
+            self, callback: Callable[[str, object], None] | None
         ) -> None:
             self.callback = callback
 
         def set_hostcall_handler(
             self,
-            callback: Callable[[str, str], Awaitable[str]] | None,
+            callback: Callable[[str, object], Awaitable[object]] | None,
             event_loop: asyncio.AbstractEventLoop | None,
         ) -> None:
             self.hostcall_handler = callback
@@ -295,9 +297,9 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
     callback = core.hostcall_handler
     assert callback is not None
     assert core.hostcall_loop is asyncio.get_running_loop()
-    assert await callback("lookup_user", '{"user_id":7}') == '{"id":7,"name":"user-7"}'
+    assert await callback("lookup_user", {"user_id": 7}) == {"id": 7, "name": "user-7"}
     with pytest.raises(ValueError, match="unsupported hostcall: missing"):
-        await callback("missing", "{}")
+        await callback("missing", {})
 
     empty_core = _FakeCore()
     empty_template = isola.SandboxTemplate(cast("Any", _FakeContextCore(empty_core)))
@@ -310,7 +312,7 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
 async def test_run_stream_flushes_trailing_scheduled_events() -> None:
     class _FakeCore:
         def __init__(self) -> None:
-            self.callback: Callable[[str, str | None], None] | None = None
+            self.callback: Callable[[str, object], None] | None = None
             self.http_handler: (
                 Callable[
                     [str, str, dict[str, str], bytes | None],
@@ -321,7 +323,7 @@ async def test_run_stream_flushes_trailing_scheduled_events() -> None:
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
         def set_callback(
-            self, callback: Callable[[str, str | None], None] | None
+            self, callback: Callable[[str, object], None] | None
         ) -> None:
             self.callback = callback
 
@@ -345,7 +347,7 @@ async def test_run_stream_flushes_trailing_scheduled_events() -> None:
             callback = self.callback
             assert callback is not None
             callback("stdout", "hello")
-            callback("end_json", "7")
+            callback("end", 7)
 
         def close(self) -> None:
             pass
@@ -365,7 +367,7 @@ async def test_run_stream_flushes_trailing_scheduled_events() -> None:
 async def test_invalid_later_arg_does_not_start_stream_producer() -> None:
     class _FakeCore:
         def __init__(self) -> None:
-            self.callback: Callable[[str, str | None], None] | None = None
+            self.callback: Callable[[str, object], None] | None = None
             self.http_handler: (
                 Callable[
                     [str, str, dict[str, str], bytes | None],
@@ -376,7 +378,7 @@ async def test_invalid_later_arg_does_not_start_stream_producer() -> None:
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
         def set_callback(
-            self, callback: Callable[[str, str | None], None] | None
+            self, callback: Callable[[str, object], None] | None
         ) -> None:
             self.callback = callback
 

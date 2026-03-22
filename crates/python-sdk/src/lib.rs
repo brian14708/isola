@@ -1,3 +1,5 @@
+mod serde;
+
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
@@ -23,7 +25,9 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyModule},
 };
 use pyo3_async_runtimes::TaskLocals;
-use serde::Deserialize;
+use ::serde::Deserialize;
+
+use crate::serde::{py_to_value, value_to_py};
 
 const DEFAULT_STREAM_CAPACITY: usize = 1024;
 const DEFAULT_HTTP_STREAM_CAPACITY: usize = 8;
@@ -201,19 +205,6 @@ impl ContextInner {
                 template: None,
             }),
         }
-    }
-
-    fn set_context_config_json(&self, json: &[u8]) -> Result<()> {
-        let patch: ContextConfigPatch = serde_json::from_slice(json)
-            .map_err(|_| invalid_argument("invalid context config JSON"))?;
-
-        let mut state = self.state.lock();
-
-        if state.template.is_some() {
-            return Err(invalid_argument("context template already initialized"));
-        }
-
-        state.config.apply_patch(patch)
     }
 
     async fn initialize_template(
@@ -495,6 +486,25 @@ impl PyCallback {
             }
         });
     }
+
+    fn emit_value(&self, event: CallbackEvent, data: Option<&Value>) {
+        Python::attach(|py| {
+            let py_data: Py<PyAny> = match data {
+                Some(v) => match value_to_py(py, v) {
+                    Ok(obj) => obj,
+                    Err(err) => {
+                        err.write_unraisable(py, None::<&Bound<'_, PyAny>>);
+                        return;
+                    }
+                },
+                None => py.None(),
+            };
+            let callback = self.callback.bind(py);
+            if let Err(err) = callback.call1((event.as_str(), py_data)) {
+                err.write_unraisable(py, Some(callback));
+            }
+        });
+    }
 }
 
 struct PyHttpHandler {
@@ -741,33 +751,28 @@ impl PyHostcallHandler {
         payload: Value,
     ) -> std::result::Result<Value, BoxError> {
         let call_type = call_type.to_owned();
-        let payload_json = payload
-            .to_json_str()
+        let py_payload = Python::attach(|py| value_to_py(py, &payload))
             .map_err(|e| io_error(format!("failed to encode hostcall payload: {e}")))?;
         let callback = Python::attach(|py| self.callback.clone_ref(py));
 
         let result = self
             .await_coroutine(move |py| {
                 let callback = callback.bind(py);
-                callback.call1((call_type, payload_json))
+                callback.call1((call_type, py_payload.bind(py)))
             })
             .await?;
 
         Python::attach(|py| {
-            let response_json = result
-                .bind(py)
-                .extract::<String>()
-                .map_err(|e| py_error_to_box_error("invalid hostcall response payload", &e))?;
-            Value::from_json_str(&response_json)
-                .map_err(|e| io_error(format!("invalid hostcall response JSON: {e}")))
+            py_to_value(result.bind(py))
+                .map_err(|e| io_error(format!("invalid hostcall response: {e}")))
         })
     }
 }
 
 #[derive(Clone, Copy)]
 enum CallbackEvent {
-    ResultJson,
-    EndJson,
+    Result,
+    End,
     Stdout,
     Stderr,
     Error,
@@ -777,8 +782,8 @@ enum CallbackEvent {
 impl CallbackEvent {
     const fn as_str(self) -> &'static str {
         match self {
-            Self::ResultJson => "result_json",
-            Self::EndJson => "end_json",
+            Self::Result => "result",
+            Self::End => "end",
             Self::Stdout => "stdout",
             Self::Stderr => "stderr",
             Self::Error => "error",
@@ -850,8 +855,10 @@ impl OutputSink for OutputCollector {
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
 
-        self.record(|data| data.result_json.push(text.clone()));
-        self.emit(CallbackEvent::ResultJson, Some(&text));
+        self.record(|data| data.result_json.push(text));
+        if let Some(callback) = &self.callback {
+            callback.emit_value(CallbackEvent::Result, Some(&item));
+        }
         Ok(())
     }
 
@@ -860,10 +867,12 @@ impl OutputSink for OutputCollector {
             let text = item.to_json_str().map_err(|e| -> BoxError {
                 Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
-            self.record(|data| data.final_json = Some(text.clone()));
-            self.emit(CallbackEvent::EndJson, Some(&text));
+            self.record(|data| data.final_json = Some(text));
+            if let Some(callback) = &self.callback {
+                callback.emit_value(CallbackEvent::End, Some(&item));
+            }
         } else {
-            self.emit(CallbackEvent::EndJson, None);
+            self.emit(CallbackEvent::End, None);
         }
 
         Ok(())
@@ -965,10 +974,17 @@ impl PyContext {
         }
     }
 
-    fn configure_json(&self, config_json: &str) -> PyResult<()> {
+    fn configure(&self, config: &Bound<'_, PyAny>) -> PyResult<()> {
+        let patch: ContextConfigPatch =
+            crate::serde::py_to_serde(config).map_err(to_py_err)?;
         let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
-        let bytes = config_json.as_bytes().to_vec();
-        inner.set_context_config_json(&bytes).map_err(to_py_err)
+        let mut state = inner.state.lock();
+        if state.template.is_some() {
+            return Err(to_py_err(invalid_argument(
+                "context template already initialized",
+            )));
+        }
+        state.config.apply_patch(patch).map_err(to_py_err)
     }
 
     #[pyo3(signature = (runtime_path, runtime_name = "python"))]
@@ -1035,12 +1051,8 @@ fn parse_run_args(py: Python<'_>, args: Vec<WireArgument>) -> Result<Vec<RawArgu
     for (kind, name, payload) in args {
         match kind.as_str() {
             "json" => {
-                let json: String = payload
-                    .bind(py)
-                    .extract()
-                    .map_err(|_| invalid_argument("json argument payload must be a string"))?;
-                let value = Value::from_json_str(&json)
-                    .map_err(|_| invalid_argument("invalid JSON format"))?;
+                let value = py_to_value(payload.bind(py))
+                    .map_err(|e| invalid_argument(format!("invalid argument value: {e}")))?;
                 parsed.push(RawArgument::Json(name, value));
             }
             "stream" => {
@@ -1070,9 +1082,9 @@ struct PySandbox {
 
 #[pymethods]
 impl PySandbox {
-    fn configure_json(&self, config_json: &str) -> PyResult<()> {
-        let patch: SandboxConfigPatch = serde_json::from_str(config_json)
-            .map_err(|_| to_py_err(invalid_argument("invalid sandbox config JSON")))?;
+    fn configure(&self, config: &Bound<'_, PyAny>) -> PyResult<()> {
+        let patch: SandboxConfigPatch =
+            crate::serde::py_to_serde(config).map_err(to_py_err)?;
         let mut guard = self.inner.lock();
         match &mut *guard {
             SandboxInner::Pending { config, .. } => config.apply_patch(patch).map_err(to_py_err),
@@ -1391,11 +1403,9 @@ impl StreamHandle {
         })
     }
 
-    #[pyo3(signature = (json, blocking = false))]
-    fn push_json(&self, py: Python<'_>, json: &str, blocking: bool) -> PyResult<()> {
-        let value = Value::from_json_str(json)
-            .map_err(|_| to_py_err(invalid_argument("invalid JSON in stream value")))?;
-
+    #[pyo3(signature = (value, blocking = false))]
+    fn push(&self, py: Python<'_>, value: &Bound<'_, PyAny>, blocking: bool) -> PyResult<()> {
+        let value = py_to_value(value).map_err(to_py_err)?;
         let sender = self.sender().map_err(to_py_err)?;
 
         if blocking {
@@ -1417,9 +1427,12 @@ impl StreamHandle {
         }
     }
 
-    fn push_json_async<'py>(&self, py: Python<'py>, json: &str) -> PyResult<Bound<'py, PyAny>> {
-        let value = Value::from_json_str(json)
-            .map_err(|_| to_py_err(invalid_argument("invalid JSON in stream value")))?;
+    fn push_async<'py>(
+        &self,
+        py: Python<'py>,
+        value: &Bound<'_, PyAny>,
+    ) -> PyResult<Bound<'py, PyAny>> {
+        let value = py_to_value(value).map_err(to_py_err)?;
         let sender = self.sender().map_err(to_py_err)?;
 
         pyo3_async_runtimes::tokio::future_into_py(py, async move {

@@ -20,11 +20,11 @@ futures = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 isola = { workspace = true, features = ["serde"] }
+minicbor-serde = { workspace = true, features = ["alloc"] }
 pyo3 = { workspace = true, features = ["extension-module", "abi3", "abi3-py310"] }
 pyo3-async-runtimes = { workspace = true, features = ["tokio-runtime"] }
 parking_lot = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time"] }
 tokio-stream = { workspace = true }
