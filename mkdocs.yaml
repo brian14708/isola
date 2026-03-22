@@ -3,8 +3,9 @@ site_url: "https://brian14708.github.io/isola/"
 repo_url: "https://github.com/brian14708/isola"
 repo_name: "brian14708/isola"
 nav:
-  - index.md
-  - getting-started.md
+  - Home: index.md
+  - Quick Start: quick-start.md
+  - Python API: python-api.md
 
 theme:
   name: material
@@ -31,8 +32,3 @@ theme:
 
 plugins:
   - search
-
-markdown_extensions:
-  - pymdownx.snippets:
-      base_path: ["."]
-      check_paths: true
