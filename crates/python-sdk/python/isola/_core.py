@@ -315,12 +315,6 @@ class SandboxManager:
         await self._core.initialize_template(normalized_runtime_path, runtime)
         return SandboxTemplate(self._core)
 
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
-
     async def __aenter__(self) -> Self:
         return self
 
@@ -546,12 +540,6 @@ class Sandbox:
             if not run_task.done():
                 run_task.cancel()
                 await asyncio.gather(run_task, return_exceptions=True)
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
     async def __aenter__(self) -> Self:
         await self._core.start()

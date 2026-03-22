@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import errno
 import hashlib
 import io
 import os
@@ -133,7 +134,12 @@ async def _extract_tarball(data: bytes, dest: Path) -> None:
                     extracted_member = copy.copy(member)
                     extracted_member.name = stripped_name
                     tf.extract(extracted_member, tmp_dir)
-            Path(tmp_dir).rename(dest)
+            try:
+                Path(tmp_dir).rename(dest)
+            except OSError as exc:
+                if exc.errno not in {errno.EEXIST, errno.ENOTEMPTY}:
+                    raise
+                shutil.rmtree(tmp_dir, ignore_errors=True)
         except BaseException:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise

@@ -108,15 +108,10 @@ def _resolve_js_runtime_dir() -> Path:
     return runtime_dir
 
 
-def test_context_creation_smoke() -> None:
-    with isola.SandboxManager():
+@pytest.mark.asyncio
+async def test_context_creation_smoke() -> None:
+    async with isola.SandboxManager():
         pass
-
-
-def test_sandbox_config_defaults_are_unlimited() -> None:
-    config: dict[str, object] = {}
-    assert config.get("max_memory") is None
-    assert "timeout" not in config
 
 
 @pytest.mark.asyncio
