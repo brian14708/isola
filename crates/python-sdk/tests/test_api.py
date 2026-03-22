@@ -10,7 +10,7 @@ import pytest
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
 
-    from isola import Event, HttpRequest, HttpResponse
+    from isola import HttpRequest, HttpResponse
     from isola import Sandbox as IsolaSandbox
 
 isola = pytest.importorskip("isola")
@@ -241,10 +241,14 @@ async def test_run_stream_yields_events() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_callback_during_run_stream_keeps_latest_callback() -> None:
+async def test_template_create_hostcalls_json_roundtrip() -> None:
     class _FakeCore:
         def __init__(self) -> None:
             self.callback: Callable[[str, str | None], None] | None = None
+            self.hostcall_handler: (
+                Callable[[str, str], Awaitable[str]] | None
+            ) = None
+            self.hostcall_loop: asyncio.AbstractEventLoop | None = None
             self.http_handler: (
                 Callable[
                     [str, str, dict[str, str], bytes | None],
@@ -259,6 +263,14 @@ async def test_set_callback_during_run_stream_keeps_latest_callback() -> None:
         ) -> None:
             self.callback = callback
 
+        def set_hostcall_handler(
+            self,
+            callback: Callable[[str, str], Awaitable[str]] | None,
+            event_loop: asyncio.AbstractEventLoop | None,
+        ) -> None:
+            self.hostcall_handler = callback
+            self.hostcall_loop = event_loop
+
         def set_http_handler(
             self,
             callback: Callable[
@@ -271,46 +283,38 @@ async def test_set_callback_during_run_stream_keeps_latest_callback() -> None:
             self.http_handler = callback
             self.http_loop = event_loop
 
-        async def run(
-            self, func: str, args: list[tuple[str, str | None, object]]
-        ) -> None:
-            _ = func
-            _ = args
-            callback = self.callback
-            assert callback is not None
-            callback("stdout", "first")
-            await asyncio.sleep(0)
-            callback("stdout", "second")
-            callback("end_json", "1")
-
         def close(self) -> None:
             pass
 
+    class _FakeContextCore:
+        def __init__(self, sandbox_core: _FakeCore) -> None:
+            self.sandbox_core = sandbox_core
+
+        async def instantiate(self) -> _FakeCore:
+            return self.sandbox_core
+
     core = _FakeCore()
-    sandbox = isola.Sandbox(cast("Any", core))
+    template = isola.SandboxTemplate(cast("Any", _FakeContextCore(core)))
 
-    seen_a: list[tuple[str, str | None]] = []
-    seen_b: list[tuple[str, str | None]] = []
+    async def lookup_user(payload: object) -> object:
+        assert payload == {"user_id": 7}
+        await asyncio.sleep(0)
+        return {"id": 7, "name": "user-7"}
 
-    def callback_a(event: Event) -> None:
-        seen_a.append((event.kind, event.data))
+    await template.create(hostcalls={"lookup_user": lookup_user})
 
-    def callback_b(event: Event) -> None:
-        seen_b.append((event.kind, event.data))
-
-    sandbox.set_callback(callback_a)
-
-    async for event in sandbox.run_stream("emit"):
-        if event.kind == "stdout" and event.data == "first":
-            sandbox.set_callback(callback_b)
-
-    callback = core.callback
+    callback = core.hostcall_handler
     assert callback is not None
-    callback("stdout", "after")
-    await asyncio.sleep(0)
+    assert core.hostcall_loop is asyncio.get_running_loop()
+    assert await callback("lookup_user", '{"user_id":7}') == '{"id":7,"name":"user-7"}'
+    with pytest.raises(ValueError, match="unsupported hostcall: missing"):
+        await callback("missing", "{}")
 
-    assert ("stdout", "after") not in seen_a
-    assert ("stdout", "after") in seen_b
+    empty_core = _FakeCore()
+    empty_template = isola.SandboxTemplate(cast("Any", _FakeContextCore(empty_core)))
+    await empty_template.create()
+    assert empty_core.hostcall_handler is None
+    assert empty_core.hostcall_loop is None
 
 
 @pytest.mark.asyncio
@@ -492,6 +496,38 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
         result = await sandbox.run("main", ["https://example.test/bytes"])
         assert result.results == []
         assert result.final == [201, "bytes", "ok"]
+        assert result.errors == []
+    mgr.close()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_hostcalls_roundtrip() -> None:
+    runtime_dir, lib_dir = _resolve_runtime_paths()
+    mgr = isola.SandboxManager()
+    template = await mgr.compile_template(
+        "python",
+        runtime_path=runtime_dir,
+        max_memory=64 * 1024 * 1024,
+        runtime_lib_dir=lib_dir,
+    )
+
+    async def lookup_user(payload: object) -> object:
+        assert payload == {"user_id": 7}
+        await asyncio.sleep(0)
+        return {"user_id": 7, "name": "user-7"}
+
+    sandbox = await template.create(hostcalls={"lookup_user": lookup_user})
+    async with sandbox:
+        await sandbox.load_script(
+            "from sandbox.asyncio import hostcall\n"
+            "\n"
+            "async def main(user_id):\n"
+            "\treturn await hostcall('lookup_user', {'user_id': user_id})\n"
+        )
+
+        result = await sandbox.run("main", [7])
+        assert result.results == []
+        assert result.final == {"user_id": 7, "name": "user-7"}
         assert result.errors == []
     mgr.close()
 

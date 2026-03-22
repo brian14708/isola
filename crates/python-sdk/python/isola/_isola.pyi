@@ -32,6 +32,11 @@ class _SandboxCore:
     def set_callback(
         self, callback: Callable[[str, str | None], None] | None
     ) -> None: ...
+    def set_hostcall_handler(
+        self,
+        callback: Callable[[str, str], Awaitable[str]] | None,
+        event_loop: AbstractEventLoop | None,
+    ) -> None: ...
     def set_http_handler(
         self,
         callback: Callable[

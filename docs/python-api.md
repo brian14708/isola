@@ -94,6 +94,7 @@ sandbox = await template.create(**sandbox_config)
 - `max_memory`: per-sandbox memory limit in bytes
 - `mounts`: `list[MountConfig]`
 - `env`: `dict[str, str]`
+- `hostcalls`: `dict[str, async callable]` used for guest `sandbox.asyncio.hostcall(...)`
 - `http_handler`: async callable used for outbound guest HTTP requests
 
 ### `Sandbox`
@@ -108,8 +109,6 @@ async with sandbox:
 
 Public methods:
 
-- `set_callback(callback)`: receives `Event` values during execution
-- `set_http_handler(handler)`: overrides the HTTP bridge for the sandbox
 - `await load_script(code)`
 - `await run(name, args=None) -> RunResult`
 - `run_stream(name, args=None) -> AsyncIterator[Event]`
@@ -147,6 +146,33 @@ Available constructors:
 
 - `StreamArg.from_iterable(values, *, name=None, capacity=1024)`
 - `StreamArg.from_async_iterable(values, *, name=None, capacity=1024)`
+
+## Hostcalls
+
+Guest Python code can call back into the host with `sandbox.asyncio.hostcall(...)`.
+
+```python
+from sandbox.asyncio import hostcall
+
+
+async def lookup_user(payload: dict[str, object]) -> object:
+    user_id = int(payload["user_id"])
+    return {"user_id": user_id, "name": f"user-{user_id}"}
+
+
+sandbox = await template.create(hostcalls={"lookup_user": lookup_user})
+await sandbox.load_script(
+    "from sandbox.asyncio import hostcall\n"
+    "\n"
+    "async def lookup_user(user_id):\n"
+    "    return await hostcall('lookup_user', {'user_id': user_id})\n"
+)
+result = await sandbox.run("lookup_user", [7])
+```
+
+Configure hostcalls and HTTP behavior when the sandbox is created.
+
+Each hostcall handler receives the decoded JSON payload for its registered call name and must return a JSON-serializable value.
 
 ## Events and Results
 

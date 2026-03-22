@@ -507,6 +507,16 @@ unsafe impl Send for PyHttpHandler {}
 // SAFETY: Python objects are only touched while holding the GIL.
 unsafe impl Sync for PyHttpHandler {}
 
+struct PyHostcallHandler {
+    callback: Py<PyAny>,
+    event_loop: Py<PyAny>,
+}
+
+// SAFETY: Python objects are only touched while holding the GIL.
+unsafe impl Send for PyHostcallHandler {}
+// SAFETY: Python objects are only touched while holding the GIL.
+unsafe impl Sync for PyHostcallHandler {}
+
 enum HttpResponseBody {
     Empty,
     Buffered(Bytes),
@@ -539,6 +549,23 @@ fn py_bytes_to_rust_bytes(value: &Bound<'_, PyAny>) -> std::result::Result<Bytes
     Ok(Bytes::copy_from_slice(py_bytes.as_bytes()))
 }
 
+async fn await_python_coroutine(
+    event_loop: &Py<PyAny>,
+    create_coro: impl for<'py> FnOnce(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
+) -> std::result::Result<Py<PyAny>, BoxError> {
+    let event_loop = Python::attach(|py| event_loop.clone_ref(py));
+    let py_future = Python::attach(|py| {
+        let coro = create_coro(py).map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
+        let locals = TaskLocals::new(event_loop.bind(py).clone());
+        pyo3_async_runtimes::into_future_with_locals(&locals, coro)
+            .map_err(|e| py_error_to_box_error("failed to schedule coroutine", &e))
+    })?;
+
+    py_future
+        .await
+        .map_err(|e| py_error_to_box_error("python coroutine failed", &e))
+}
+
 impl PyHttpHandler {
     const fn new(callback: Py<PyAny>, event_loop: Py<PyAny>) -> Self {
         Self {
@@ -551,18 +578,7 @@ impl PyHttpHandler {
         &self,
         create_coro: impl for<'py> FnOnce(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
     ) -> std::result::Result<Py<PyAny>, BoxError> {
-        let event_loop = Python::attach(|py| self.event_loop.clone_ref(py));
-        let py_future = Python::attach(|py| {
-            let coro =
-                create_coro(py).map_err(|e| py_error_to_box_error("invalid coroutine", &e))?;
-            let locals = TaskLocals::new(event_loop.bind(py).clone());
-            pyo3_async_runtimes::into_future_with_locals(&locals, coro)
-                .map_err(|e| py_error_to_box_error("failed to schedule coroutine", &e))
-        })?;
-
-        py_future
-            .await
-            .map_err(|e| py_error_to_box_error("python coroutine failed", &e))
+        await_python_coroutine(&self.event_loop, create_coro).await
     }
 
     async fn invoke_http_handler(
@@ -704,6 +720,50 @@ impl PyHttpHandler {
     }
 }
 
+impl PyHostcallHandler {
+    const fn new(callback: Py<PyAny>, event_loop: Py<PyAny>) -> Self {
+        Self {
+            callback,
+            event_loop,
+        }
+    }
+
+    async fn await_coroutine(
+        &self,
+        create_coro: impl for<'py> FnOnce(Python<'py>) -> PyResult<Bound<'py, PyAny>> + Send + 'static,
+    ) -> std::result::Result<Py<PyAny>, BoxError> {
+        await_python_coroutine(&self.event_loop, create_coro).await
+    }
+
+    async fn invoke_hostcall(
+        &self,
+        call_type: &str,
+        payload: Value,
+    ) -> std::result::Result<Value, BoxError> {
+        let call_type = call_type.to_owned();
+        let payload_json = payload
+            .to_json_str()
+            .map_err(|e| io_error(format!("failed to encode hostcall payload: {e}")))?;
+        let callback = Python::attach(|py| self.callback.clone_ref(py));
+
+        let result = self
+            .await_coroutine(move |py| {
+                let callback = callback.bind(py);
+                callback.call1((call_type, payload_json))
+            })
+            .await?;
+
+        Python::attach(|py| {
+            let response_json = result
+                .bind(py)
+                .extract::<String>()
+                .map_err(|e| py_error_to_box_error("invalid hostcall response payload", &e))?;
+            Value::from_json_str(&response_json)
+                .map_err(|e| io_error(format!("invalid hostcall response JSON: {e}")))
+        })
+    }
+}
+
 #[derive(Clone, Copy)]
 enum CallbackEvent {
     ResultJson,
@@ -839,6 +899,7 @@ enum SandboxInner {
         config: PendingSandboxConfig,
         callback: Option<Arc<PyCallback>>,
         http_handler: Option<Arc<PyHttpHandler>>,
+        hostcall_handler: Option<Arc<PyHostcallHandler>>,
     },
     Running {
         sandbox: Option<Sandbox<Env>>,
@@ -948,6 +1009,7 @@ impl PyContext {
                             config: PendingSandboxConfig::default(),
                             callback: None,
                             http_handler: None,
+                            hostcall_handler: None,
                         })),
                     },
                 )
@@ -1073,11 +1135,46 @@ impl PySandbox {
         }
     }
 
+    fn set_hostcall_handler(
+        &self,
+        callback: Option<Py<PyAny>>,
+        event_loop: Option<Py<PyAny>>,
+    ) -> PyResult<()> {
+        let hostcall_handler = match (callback, event_loop) {
+            (Some(callback), Some(event_loop)) => {
+                Some(Arc::new(PyHostcallHandler::new(callback, event_loop)))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(to_py_err(invalid_argument(
+                    "callback and event_loop must both be set or both be None",
+                )));
+            }
+        };
+
+        let mut inner = self.inner.lock();
+        match &mut *inner {
+            SandboxInner::Pending {
+                hostcall_handler: slot,
+                ..
+            } => {
+                *slot = hostcall_handler;
+                Ok(())
+            }
+            SandboxInner::Running { .. } => {
+                Err(to_py_err(invalid_argument("sandbox is already running")))
+            }
+            SandboxInner::Uninitialized => {
+                Err(to_py_err(invalid_argument("sandbox is not initialized")))
+            }
+        }
+    }
+
     fn start<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let inner = Arc::clone(&self.inner);
         let ctx = Arc::clone(&self.ctx);
         pyo3_async_runtimes::tokio::future_into_py(py, async move {
-            let (config, callback, http_handler) = {
+            let (config, callback, http_handler, hostcall_handler) = {
                 let mut guard = inner.lock();
                 let current = std::mem::replace(&mut *guard, SandboxInner::Uninitialized);
                 match current {
@@ -1085,7 +1182,8 @@ impl PySandbox {
                         config,
                         callback,
                         http_handler,
-                    } => (config, callback, http_handler),
+                        hostcall_handler,
+                    } => (config, callback, http_handler, hostcall_handler),
                     other => {
                         *guard = other;
                         drop(guard);
@@ -1097,7 +1195,7 @@ impl PySandbox {
             };
 
             let options = config.to_options();
-            let env = Env::new(http_handler.clone());
+            let env = Env::new(http_handler.clone(), hostcall_handler.clone());
 
             match ctx.instantiate_sandbox(options, env).await {
                 Ok(sandbox) => {
@@ -1115,6 +1213,7 @@ impl PySandbox {
                         config,
                         callback,
                         http_handler,
+                        hostcall_handler,
                     };
                     drop(guard);
                     Err(to_py_err(err))
@@ -1340,11 +1439,18 @@ impl StreamHandle {
 #[derive(Clone)]
 struct Env {
     http_handler: Option<Arc<PyHttpHandler>>,
+    hostcall_handler: Option<Arc<PyHostcallHandler>>,
 }
 
 impl Env {
-    const fn new(http_handler: Option<Arc<PyHttpHandler>>) -> Self {
-        Self { http_handler }
+    const fn new(
+        http_handler: Option<Arc<PyHttpHandler>>,
+        hostcall_handler: Option<Arc<PyHostcallHandler>>,
+    ) -> Self {
+        Self {
+            http_handler,
+            hostcall_handler,
+        }
     }
 }
 
@@ -1355,13 +1461,15 @@ impl Host for Env {
         call_type: &str,
         payload: Value,
     ) -> std::result::Result<Value, BoxError> {
-        match call_type {
-            "echo" => Ok(payload),
-            _ => Err(
-                std::io::Error::new(std::io::ErrorKind::Unsupported, "unknown hostcall type")
-                    .into(),
-            ),
-        }
+        let Some(handler) = &self.hostcall_handler else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                format!("unsupported hostcall: {call_type}"),
+            )
+            .into());
+        };
+
+        handler.invoke_hostcall(call_type, payload).await
     }
 
     async fn http_request(

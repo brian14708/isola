@@ -88,6 +88,46 @@ Expected output:
 3
 ```
 
+To call back into the host from Python guest code, pass a `hostcalls` mapping when you create the sandbox, then call it from the guest with `sandbox.asyncio.hostcall(...)`:
+
+```python
+import asyncio
+
+from isola import SandboxManager
+
+
+async def main() -> None:
+    async def lookup_user(payload: dict[str, object]) -> object:
+        user_id = int(payload["user_id"])
+        return {"user_id": user_id, "name": f"user-{user_id}"}
+
+    async with SandboxManager() as manager:
+        template = await manager.compile_template(
+            "python",
+            max_memory=64 * 1024 * 1024,
+        )
+
+        sandbox = await template.create(hostcalls={"lookup_user": lookup_user})
+        async with sandbox:
+            await sandbox.load_script(
+                "from sandbox.asyncio import hostcall\n"
+                "\n"
+                "async def lookup_user(user_id):\n"
+                "    return await hostcall('lookup_user', {'user_id': user_id})\n"
+            )
+            result = await sandbox.run("lookup_user", [7])
+            print(result.final)
+
+
+asyncio.run(main())
+```
+
+Expected output:
+
+```text
+{'user_id': 7, 'name': 'user-7'}
+```
+
 If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `compile_template(...)` instead.
 
 For the SDK surface area and type reference, see [Python API](python-api.md).

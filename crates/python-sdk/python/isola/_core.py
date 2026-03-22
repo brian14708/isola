@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
@@ -27,6 +26,8 @@ RuntimeName = Literal["python", "js"]
 BytesLike = bytes | bytearray | memoryview
 Pathish = str | PathLike[str]
 HttpBodyOut = BytesLike | AsyncIterable[BytesLike] | None
+HostcallHandler = Callable[[JsonValue], Awaitable[object]]
+Hostcalls = dict[str, HostcallHandler]
 _EVENT_KIND_MAP = {"result_json": "result", "end_json": "end"}
 
 
@@ -116,6 +117,7 @@ class SandboxConfig(TypedDict, total=False):
     mounts: list[MountConfig] | None
     env: dict[str, str]
     http_handler: Callable[[HttpRequest], Awaitable[object]] | None
+    hostcalls: Hostcalls | None
 
 
 @dataclass(slots=True)
@@ -331,17 +333,21 @@ class SandboxTemplate:
             patch["env"] = kwargs["env"]
         _configure_core(sandbox._core, patch)  # noqa: SLF001
 
+        hostcalls = kwargs.get("hostcalls")
         http_handler = kwargs.get("http_handler", _default_httpx_handler)
-        sandbox.set_http_handler(http_handler)
+        sandbox._set_hostcalls(hostcalls)  # noqa: SLF001
+        sandbox._set_http_handler(http_handler)  # noqa: SLF001
         return sandbox
 
 
 class Sandbox:
     def __init__(self, core: _SandboxCore) -> None:
         self._core = core
-        self._event_dispatch: Callable[[str, str | None], None] | None = None
         self._stream_dispatches: dict[int, Callable[[str, str | None], None]] = {}
         self._next_stream_dispatch_id = 0
+        self._hostcall_handler_dispatch: (
+            Callable[[str, str], Awaitable[str]] | None
+        ) = None
         self._http_handler_dispatch: (
             Callable[
                 [str, str, dict[str, str], bytes | None],
@@ -349,58 +355,9 @@ class Sandbox:
             ]
             | None
         ) = None
-        self._pending_callback_tasks: set[asyncio.Task[None]] = set()
-
-    def set_callback(
-        self, callback: Callable[[Event], Awaitable[None] | None] | None
-    ) -> None:
-        if callback is None:
-            self._event_dispatch = None
-            self._refresh_core_callback()
-            return
-
-        loop = asyncio.get_running_loop()
-
-        def _dispatch(kind: str, data: str | None) -> None:
-            mapped_kind = _EVENT_KIND_MAP.get(kind, kind)
-            event = Event(kind=cast("EventKind", mapped_kind), data=data)
-
-            def _invoke() -> None:
-                try:
-                    outcome = callback(event)
-                except Exception as exc:  # noqa: BLE001  # pragma: no cover - loop handler path
-                    context: dict[str, object] = {
-                        "message": "isola callback raised synchronously",
-                        "exception": exc,
-                    }
-                    loop.call_exception_handler(context)
-                    return
-                if inspect.isawaitable(outcome):
-                    future = asyncio.ensure_future(outcome)
-                    self._pending_callback_tasks.add(future)
-
-                    def _on_done(task: asyncio.Task[None]) -> None:
-                        self._pending_callback_tasks.discard(task)
-                        if task.cancelled():
-                            return
-                        exc = task.exception()
-                        if exc is not None:  # pragma: no cover - loop handler path
-                            context: dict[str, object] = {
-                                "message": "isola callback task failed",
-                                "exception": exc,
-                                "task": task,
-                            }
-                            loop.call_exception_handler(context)
-
-                    future.add_done_callback(_on_done)
-
-            loop.call_soon_threadsafe(_invoke)
-
-        self._event_dispatch = _dispatch
-        self._refresh_core_callback()
 
     def _refresh_core_callback(self) -> None:
-        if self._event_dispatch is None and not self._stream_dispatches:
+        if not self._stream_dispatches:
             self._core.set_callback(None)
             return
 
@@ -410,13 +367,30 @@ class Sandbox:
             for stream_dispatch in stream_dispatches:
                 stream_dispatch(kind, data)
 
-            event_dispatch = self._event_dispatch
-            if event_dispatch is not None:
-                event_dispatch(kind, data)
-
         self._core.set_callback(_dispatch)
 
-    def set_http_handler(
+    def _set_hostcalls(self, hostcalls: Hostcalls | None) -> None:
+        if hostcalls is None:
+            self._hostcall_handler_dispatch = None
+            self._core.set_hostcall_handler(None, None)
+            return
+
+        loop = asyncio.get_running_loop()
+        dispatch_hostcalls = dict(hostcalls)
+
+        async def _dispatch(call_type: str, payload_json: str) -> str:
+            payload = cast("JsonValue", json.loads(payload_json))
+            handler = dispatch_hostcalls.get(call_type)
+            if handler is None:
+                msg = f"unsupported hostcall: {call_type}"
+                raise ValueError(msg)
+            result = await handler(payload)
+            return _to_json(result)
+
+        self._hostcall_handler_dispatch = _dispatch
+        self._core.set_hostcall_handler(_dispatch, loop)
+
+    def _set_http_handler(
         self, handler: Callable[[HttpRequest], Awaitable[object]] | None
     ) -> None:
         if handler is None:
@@ -587,27 +561,16 @@ class Sandbox:
         await self.aclose()
 
     def close(self) -> None:
-        self._cancel_pending_callback_tasks()
-        self._event_dispatch = None
         self._stream_dispatches.clear()
+        self._hostcall_handler_dispatch = None
         self._http_handler_dispatch = None
         self._core.close()
 
     async def aclose(self) -> None:
-        pending = self._cancel_pending_callback_tasks()
-        if pending:
-            await asyncio.gather(*pending, return_exceptions=True)
-        self._event_dispatch = None
         self._stream_dispatches.clear()
+        self._hostcall_handler_dispatch = None
         self._http_handler_dispatch = None
         self._core.close()
-
-    def _cancel_pending_callback_tasks(self) -> tuple[asyncio.Task[None], ...]:
-        pending = tuple(self._pending_callback_tasks)
-        for task in pending:
-            task.cancel()
-        self._pending_callback_tasks.clear()
-        return pending
 
 
 def _to_json(value: object) -> str:
