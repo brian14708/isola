@@ -24,7 +24,7 @@ pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Stri
     let wasm_digest = wasm_h.finalize();
 
     let mut h = Sha256::new();
-    h.update(b"isola-cache-v1\0");
+    h.update(b"isola-cache-v2\0");
     h.update(wasm_digest);
     h.update(engine_fingerprint(engine).to_le_bytes());
 

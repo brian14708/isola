@@ -1,11 +1,7 @@
 use std::path::Path;
 
-use component_init_transform::Invoker;
-use futures::FutureExt;
-use wasmtime::{
-    Engine, Store,
-    component::{Component, Instance as WasmInstance},
-};
+use wasmtime::{Engine, component::Component};
+use wasmtime_wizer::{WasmtimeWizerComponent, Wizer};
 
 use crate::{
     host::{BoxError, Host, HttpRequest, HttpResponse},
@@ -67,50 +63,51 @@ async fn compile_serialized_component(
     let wasm_bytes = wasm_bytes.to_vec();
 
     tokio::task::spawn_blocking(move || {
-        // Run initialization on a blocking worker so non-Send internals from
-        // component-init-transform do not leak into the outer async future type.
+        // Run initialization on a blocking worker so the compile-time guest
+        // instantiation stays off the main async scheduler.
         tokio::runtime::Handle::current().block_on(async move {
-            let data = component_init_transform::initialize(&wasm_bytes, |instrumented| {
-                let engine = engine.clone();
-                async move {
-                    let component = Component::new(&engine, &instrumented).map_err(Error::Wasm)?;
+            let wizer = Wizer::new();
+            let (cx, instrumented_wasm) = wizer
+                .instrument_component(&wasm_bytes)
+                .map_err(Error::Wasm)?;
 
-                    let linker =
-                        InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
-                    let mut store = InstanceState::new(
-                        &engine,
-                        &directory_mappings,
-                        &cfg.env,
-                        cfg.max_memory,
-                        CompileHost,
-                    )
-                    .map_err(Error::Wasm)?;
-                    store.epoch_deadline_async_yield_and_update(1);
+            let component = Component::new(&engine, &instrumented_wasm).map_err(Error::Wasm)?;
+            let linker = InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
+            let mut store = InstanceState::new(
+                &engine,
+                &directory_mappings,
+                &cfg.env,
+                cfg.max_memory,
+                CompileHost,
+            )
+            .map_err(Error::Wasm)?;
+            store.epoch_deadline_async_yield_and_update(1);
 
-                    let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
-                    let binding = pre
-                        .instantiate_async(&mut store)
-                        .await
-                        .map_err(Error::Wasm)?;
-                    let guest = GuestIndices::new(&pre)
-                        .map_err(Error::Wasm)?
-                        .load(&mut store, &binding)
-                        .map_err(Error::Wasm)?;
+            let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
+            let instance = pre
+                .instantiate_async(&mut store)
+                .await
+                .map_err(Error::Wasm)?;
+            let guest = GuestIndices::new(&pre)
+                .map_err(Error::Wasm)?
+                .load(&mut store, &instance)
+                .map_err(Error::Wasm)?;
 
-                    guest
-                        .call_initialize(&mut store, true, cfg.prelude.as_deref())
-                        .await
-                        .map_err(Error::Wasm)?;
+            guest
+                .call_initialize(&mut store, true, cfg.prelude.as_deref())
+                .await
+                .map_err(Error::Wasm)?;
 
-                    Ok(Box::new(MyInvoker {
-                        store,
-                        instance: binding,
-                    }) as Box<dyn Invoker>)
-                }
-                .boxed()
-            })
-            .await
-            .map_err(|e| Error::Other(e.into()))?;
+            let data = wizer
+                .snapshot_component(
+                    cx,
+                    &mut WasmtimeWizerComponent {
+                        store: &mut store,
+                        instance,
+                    },
+                )
+                .await
+                .map_err(Error::Wasm)?;
 
             let component = Component::new(&engine, &data).map_err(Error::Wasm)?;
             component.serialize().map_err(Error::Wasm)
@@ -118,81 +115,6 @@ async fn compile_serialized_component(
     })
     .await
     .map_err(|e| Error::Other(e.into()))?
-}
-
-// Helper structs for compilation pre-init.
-
-struct MyInvoker<S: Host> {
-    store: Store<InstanceState<S>>,
-    instance: WasmInstance,
-}
-
-#[async_trait::async_trait]
-impl<S: Host> Invoker for MyInvoker<S> {
-    async fn call_s32(&mut self, function: &str) -> anyhow::Result<i32> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (i32,)>(&mut self.store, function)
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
-        let result = func
-            .call_async(&mut self.store, ())
-            .await
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
-            .0;
-        Ok(result)
-    }
-
-    async fn call_s64(&mut self, function: &str) -> anyhow::Result<i64> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (i64,)>(&mut self.store, function)
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
-        let result = func
-            .call_async(&mut self.store, ())
-            .await
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
-            .0;
-        Ok(result)
-    }
-
-    async fn call_f32(&mut self, function: &str) -> anyhow::Result<f32> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (f32,)>(&mut self.store, function)
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
-        let result = func
-            .call_async(&mut self.store, ())
-            .await
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
-            .0;
-        Ok(result)
-    }
-
-    async fn call_f64(&mut self, function: &str) -> anyhow::Result<f64> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (f64,)>(&mut self.store, function)
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
-        let result = func
-            .call_async(&mut self.store, ())
-            .await
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
-            .0;
-        Ok(result)
-    }
-
-    async fn call_list_u8(&mut self, function: &str) -> anyhow::Result<Vec<u8>> {
-        let func = self
-            .instance
-            .get_typed_func::<(), (Vec<u8>,)>(&mut self.store, function)
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?;
-        let result = func
-            .call_async(&mut self.store, ())
-            .await
-            .map_err(|error| anyhow::Error::from_boxed(error.into()))?
-            .0;
-        Ok(result)
-    }
 }
 
 struct CompileHost;
