@@ -6,6 +6,7 @@ nav:
   - Home: index.md
   - Quick Start: quick-start.md
   - Python API: python-api.md
+  - Node.js API: nodejs-api.md
 
 theme:
   name: material

@@ -197,3 +197,5 @@ manager.close();
 ```
 
 If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `compileTemplate(...)` instead.
+
+For the SDK surface area and type reference, see [Node.js API](nodejs-api.md).

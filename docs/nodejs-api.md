@@ -1,0 +1,275 @@
+# Node.js API
+
+The `isola-sdk` package exposes an async API for compiling sandbox templates and
+running code inside isolated runtimes from Node.js.
+
+## Install
+
+```bash
+npm install isola-sdk
+```
+
+## Runtime Resolution
+
+When `runtimePath` is omitted from `manager.compileTemplate(...)`, the SDK
+resolves the runtime automatically, downloads the matching release asset on
+first use, verifies its SHA-256 digest, and caches it under
+`~/.cache/isola/runtimes/`.
+
+Supported runtime names:
+
+- `"python"`
+- `"js"`
+
+Use `version` to resolve a specific release tag. To use a runtime you unpacked
+yourself, pass `runtimePath` and, for Python runtimes, `runtimeLibDir`.
+
+## Lifecycle
+
+The normal flow is:
+
+1. Create a `SandboxManager`
+2. `await manager.compileTemplate(...)`
+3. `await template.create(...)`
+4. `await sandbox.start()`
+5. `await sandbox.loadScript(...)`
+6. `await sandbox.run(...)` or iterate `sandbox.runStream(...)`
+7. `sandbox.close()` and `manager.close()`
+
+```typescript
+import { SandboxManager } from "isola-sdk";
+
+const manager = new SandboxManager();
+
+try {
+  const template = await manager.compileTemplate("python");
+  const sandbox = await template.create();
+
+  try {
+    await sandbox.start();
+    await sandbox.loadScript("def hello(name):\n    return f'hello {name}'");
+    const result = await sandbox.run("hello", ["world"]);
+    console.log(result);
+  } finally {
+    sandbox.close();
+  }
+} finally {
+  manager.close();
+}
+```
+
+## Core Types
+
+### `SandboxManager`
+
+Creates reusable sandbox templates.
+
+```typescript
+const manager = new SandboxManager();
+const template = await manager.compileTemplate(runtime, options);
+manager.close();
+```
+
+`compileTemplate(...)` accepts:
+
+- `runtime`: `"python"` or `"js"`
+- `runtimePath`: directory or path used to initialize the runtime bundle
+- `version`: optional release tag to resolve when auto-downloading a runtime
+- `cacheDir`: template cache directory, or `null` to disable caching
+- `maxMemory`: template memory limit in bytes
+- `prelude`: code injected before user scripts
+- `runtimeLibDir`: runtime library directory for manually provided Python runtimes
+- `mounts`: `MountConfig[]`
+- `env`: `Record<string, string>`
+
+### `SandboxTemplate`
+
+Instantiates sandboxes from a compiled template.
+
+```typescript
+const sandbox = await template.create(options);
+```
+
+`create(...)` accepts:
+
+- `maxMemory`: per-sandbox memory limit in bytes
+- `mounts`: `MountConfig[]`
+- `env`: `Record<string, string>`
+- `hostcalls`: `Record<string, (payload: JsonValue) => Promise<unknown>>`
+- `httpHandler`: `(req: HttpRequest) => Promise<HttpResponse>`
+
+### `Sandbox`
+
+Runs guest code inside an instantiated sandbox.
+
+```typescript
+await sandbox.start();
+await sandbox.loadScript(code);
+const result = await sandbox.run(name, args);
+```
+
+Public methods:
+
+- `await start()`
+- `await loadScript(code)`
+- `await run(name, args?) -> JsonValue | null`
+- `runStream(name, args?) -> AsyncGenerator<Event>`
+- `close()`
+- `await sandbox[Symbol.asyncDispose]()`
+
+Call `start()` before loading scripts or executing functions.
+
+## Arguments
+
+`run(...)` and `runStream(...)` accept positional JSON-like values directly:
+
+```typescript
+const result = await sandbox.run("add", [1, 2]);
+```
+
+Use `Arg` to pass a named argument:
+
+```typescript
+import { Arg } from "isola-sdk";
+
+const result = await sandbox.run("greet", [
+  new Arg("World", "name"),
+  new Arg("Hi", "greeting"),
+]);
+```
+
+## Hostcalls
+
+Register host callbacks when the sandbox is created. Each handler receives the
+decoded JSON payload for its call name and must return a JSON-serializable
+value.
+
+```typescript
+import { SandboxManager } from "isola-sdk";
+
+const manager = new SandboxManager();
+const template = await manager.compileTemplate("python");
+const sandbox = await template.create({
+  hostcalls: {
+    lookup_user: async (payload) => {
+      const { user_id } = payload as { user_id: number };
+      return { user_id, name: `user-${user_id}` };
+    },
+  },
+});
+
+await sandbox.start();
+await sandbox.loadScript(
+  "from sandbox.asyncio import hostcall\n" +
+    "\n" +
+    "async def lookup_user(user_id):\n" +
+    "    return await hostcall('lookup_user', {'user_id': user_id})\n",
+);
+
+const result = await sandbox.run("lookup_user", [7]);
+```
+
+## Events and Results
+
+`run(...)` resolves to the final return value directly:
+
+```typescript
+const result = await sandbox.run("add", [1, 2]);
+```
+
+Use `runStream(...)` when you need yielded values or process output:
+
+```typescript
+for await (const event of sandbox.runStream("compute")) {
+  switch (event.type) {
+    case "result":
+      console.log("intermediate:", event.data);
+      break;
+    case "end":
+      console.log("final:", event.data);
+      break;
+    case "stdout":
+      console.log("stdout:", event.data);
+      break;
+    case "stderr":
+      console.error("stderr:", event.data);
+      break;
+    case "error":
+      console.error("error:", event.data);
+      break;
+    case "log":
+      console.log("log:", event.data);
+      break;
+  }
+}
+```
+
+`Event` is a union of:
+
+- `{ type: "result"; data: JsonValue }`
+- `{ type: "end"; data: JsonValue | null }`
+- `{ type: "stdout"; data: string }`
+- `{ type: "stderr"; data: string }`
+- `{ type: "error"; data: string }`
+- `{ type: "log"; data: string }`
+
+## Filesystem and Environment
+
+Use `MountConfig` to mount host paths into the guest:
+
+```typescript
+const mount = {
+  host: "./data",
+  guest: "/workspace",
+  dir_perms: "read",
+  file_perms: "read",
+};
+```
+
+`dir_perms` and `file_perms` accept:
+
+- `"read"`
+- `"write"`
+- `"read-write"`
+
+Environment variables can be supplied in both template and sandbox config via
+`env: { KEY: "value" }`.
+
+## HTTP Bridge
+
+When guest code makes outbound HTTP requests, the sandbox calls the configured
+`httpHandler`.
+
+```typescript
+import type { HttpRequest, HttpResponse } from "isola-sdk";
+
+async function httpHandler(request: HttpRequest): Promise<HttpResponse> {
+  return {
+    status: 200,
+    headers: { "content-type": "text/plain" },
+    body: Buffer.from("hello world"),
+  };
+}
+```
+
+Request and response shapes:
+
+- `HttpRequest = { method, url, headers, body }`
+- `HttpResponse = { status, headers?, body? }`
+
+`HttpRequest.body` is `Buffer | null`.
+
+`HttpResponse.body` may be:
+
+- `Buffer`
+- `null`
+- omitted
+
+## Errors
+
+`compileTemplate(...)`, `start()`, `loadScript(...)`, and `run(...)` reject when
+runtime setup or execution fails.
+
+`runStream(...)` yields `{ type: "error", data: string }` events for sandbox
+execution failures, and may still throw for setup or transport failures that do
+not surface as stream events.
