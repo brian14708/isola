@@ -13,6 +13,9 @@
     prettier.enable = true;
   };
   settings.formatter = {
+    prettier.excludes = [
+      "pnpm-lock.yaml"
+    ];
     clang-format = {
       excludes = [
         "crates/c-api/include/isola.h"

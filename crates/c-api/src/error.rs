@@ -85,7 +85,9 @@ impl Error {
                 Self::C(..) => unreachable!(),
             };
         }
-        let Self::C(_, msg) = self else { unreachable!() };
+        let Self::C(_, msg) = self else {
+            unreachable!()
+        };
         msg.as_ptr()
     }
 }

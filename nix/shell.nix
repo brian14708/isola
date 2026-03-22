@@ -17,6 +17,8 @@ craneLib.devShell {
     maturin
     cmake
     ninja
+    nodejs
+    pnpm
   ];
 
   env = {

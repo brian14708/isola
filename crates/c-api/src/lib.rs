@@ -835,7 +835,8 @@ pub unsafe extern "C" fn isola_http_response_body_close(body: *mut crate::env::H
 /// invalid. Use `isola_hostcall_response_reject` to deliver an error instead.
 ///
 /// If the data is not valid JSON, the handle is **not** consumed and the
-/// caller may retry with corrected data or call `isola_hostcall_response_reject`.
+/// caller may retry with corrected data or call
+/// `isola_hostcall_response_reject`.
 ///
 /// # Safety
 ///

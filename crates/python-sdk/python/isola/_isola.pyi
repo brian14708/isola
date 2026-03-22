@@ -29,9 +29,7 @@ class _StreamCore:
 
 class _SandboxCore:
     def configure(self, config: object) -> None: ...
-    def set_callback(
-        self, callback: Callable[[str, object], None] | None
-    ) -> None: ...
+    def set_callback(self, callback: Callable[[str, object], None] | None) -> None: ...
     def set_hostcall_handler(
         self,
         callback: Callable[[str, object], Awaitable[object]] | None,

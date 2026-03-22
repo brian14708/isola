@@ -131,3 +131,69 @@ Expected output:
 If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `compile_template(...)` instead.
 
 For the SDK surface area and type reference, see [Python API](python-api.md).
+
+## JavaScript / TypeScript SDK
+
+Install the SDK:
+
+```bash
+npm install isola-sdk
+```
+
+Compile a sandbox template and run code inside it:
+
+```typescript
+import { SandboxManager } from "isola-sdk";
+
+const manager = new SandboxManager();
+
+const template = await manager.compileTemplate("python", {
+  maxMemory: 64 * 1024 * 1024,
+});
+
+await using sandbox = await template.create();
+await sandbox.start();
+await sandbox.loadScript("def add(a, b):\n    return a + b\n");
+const result = await sandbox.run("add", [1, 2]);
+console.log(result); // 3
+
+manager.close();
+```
+
+Expected output:
+
+```text
+3
+```
+
+To call back into the host from guest code, pass a `hostcalls` map when creating the sandbox:
+
+```typescript
+import { SandboxManager } from "isola-sdk";
+
+const manager = new SandboxManager();
+const template = await manager.compileTemplate("python");
+
+await using sandbox = await template.create({
+  hostcalls: {
+    lookup_user: async (payload) => {
+      const { user_id } = payload as { user_id: number };
+      return { user_id, name: `user-${user_id}` };
+    },
+  },
+});
+
+await sandbox.start();
+await sandbox.loadScript(
+  "from sandbox.asyncio import hostcall\n" +
+    "\n" +
+    "async def lookup_user(user_id):\n" +
+    "    return await hostcall('lookup_user', {'user_id': user_id})\n",
+);
+const result = await sandbox.run("lookup_user", [7]);
+console.log(result); // { user_id: 7, name: 'user-7' }
+
+manager.close();
+```
+
+If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `compileTemplate(...)` instead.

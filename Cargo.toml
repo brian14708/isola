@@ -38,6 +38,9 @@ isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
+napi = { version = "3.8", default-features = false }
+napi-build = "2.3"
+napi-derive = "3.5"
 minicbor = "2.0"
 minicbor-serde = "0.6"
 opentelemetry = "0.31"

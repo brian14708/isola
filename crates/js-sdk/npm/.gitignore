@@ -1,0 +1,6 @@
+/node_modules
+/dist
+*.node
+isola.js
+index.js
+index.d.ts

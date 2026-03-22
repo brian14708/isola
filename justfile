@@ -23,7 +23,7 @@ build-wasm:
 test:
     cargo test --all-features
 
-lint: init-py lint-rust lint-python
+lint: init-py lint-rust lint-python lint-js
 
 lint-rust:
     cargo clippy --all-features -- --deny warnings
@@ -35,6 +35,19 @@ lint-python: init-py
     uv run mypy --config-file crates/python-sdk/pyproject.toml
     uv run basedpyright --project crates/python-runtime/pyproject.toml
     uv run basedpyright --project crates/python-sdk/pyproject.toml
+
+lint-js: init-js
+    pnpm --filter isola-sdk tsc --noEmit
+
+build-js: init-js
+    pnpm --filter isola-sdk run build
+
+vitest: build-js
+    pnpm --filter isola-sdk exec env ISOLA_RUNTIME_PATH=../../target pnpm vitest run
+
+[private]
+init-js:
+    pnpm install
 
 pytest: init-py
     uv run pytest ./crates/python-sdk/tests/

@@ -1,0 +1,32 @@
+name: JS
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - renovate/**
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+      - name: Install pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: latest
+      - name: Install dependencies
+        run: pnpm install
+      - name: Type check
+        run: pnpm --filter isola-sdk tsc --noEmit

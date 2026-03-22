@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use ::serde::Deserialize;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream;
@@ -25,7 +26,6 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyModule},
 };
 use pyo3_async_runtimes::TaskLocals;
-use ::serde::Deserialize;
 
 use crate::serde::{py_to_value, value_to_py};
 
@@ -975,8 +975,7 @@ impl PyContext {
     }
 
     fn configure(&self, config: &Bound<'_, PyAny>) -> PyResult<()> {
-        let patch: ContextConfigPatch =
-            crate::serde::py_to_serde(config).map_err(to_py_err)?;
+        let patch: ContextConfigPatch = crate::serde::py_to_serde(config).map_err(to_py_err)?;
         let inner = Arc::clone(self.inner_ref().map_err(to_py_err)?);
         let mut state = inner.state.lock();
         if state.template.is_some() {
@@ -1083,8 +1082,7 @@ struct PySandbox {
 #[pymethods]
 impl PySandbox {
     fn configure(&self, config: &Bound<'_, PyAny>) -> PyResult<()> {
-        let patch: SandboxConfigPatch =
-            crate::serde::py_to_serde(config).map_err(to_py_err)?;
+        let patch: SandboxConfigPatch = crate::serde::py_to_serde(config).map_err(to_py_err)?;
         let mut guard = self.inner.lock();
         match &mut *guard {
             SandboxInner::Pending { config, .. } => config.apply_patch(patch).map_err(to_py_err),

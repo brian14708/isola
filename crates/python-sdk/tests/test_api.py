@@ -236,9 +236,9 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
     class _FakeCore:
         def __init__(self) -> None:
             self.callback: Callable[[str, object], None] | None = None
-            self.hostcall_handler: (
-                Callable[[str, object], Awaitable[object]] | None
-            ) = None
+            self.hostcall_handler: Callable[[str, object], Awaitable[object]] | None = (
+                None
+            )
             self.hostcall_loop: asyncio.AbstractEventLoop | None = None
             self.http_handler: (
                 Callable[
@@ -249,9 +249,7 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
             ) = None
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
-        def set_callback(
-            self, callback: Callable[[str, object], None] | None
-        ) -> None:
+        def set_callback(self, callback: Callable[[str, object], None] | None) -> None:
             self.callback = callback
 
         def set_hostcall_handler(
@@ -322,9 +320,7 @@ async def test_run_stream_flushes_trailing_scheduled_events() -> None:
             ) = None
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
-        def set_callback(
-            self, callback: Callable[[str, object], None] | None
-        ) -> None:
+        def set_callback(self, callback: Callable[[str, object], None] | None) -> None:
             self.callback = callback
 
         def set_http_handler(
@@ -377,9 +373,7 @@ async def test_invalid_later_arg_does_not_start_stream_producer() -> None:
             ) = None
             self.http_loop: asyncio.AbstractEventLoop | None = None
 
-        def set_callback(
-            self, callback: Callable[[str, object], None] | None
-        ) -> None:
+        def set_callback(self, callback: Callable[[str, object], None] | None) -> None:
             self.callback = callback
 
         def set_http_handler(

@@ -1,15 +1,18 @@
+use isola::value::Value;
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
     types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyTuple},
 };
 use serde::{
     Serialize,
-    de::{DeserializeSeed, IntoDeserializer, Visitor, value::{MapDeserializer, SeqDeserializer}},
+    de::{
+        DeserializeSeed, IntoDeserializer, Visitor,
+        value::{MapDeserializer, SeqDeserializer},
+    },
     ser::{SerializeMap, SerializeSeq, SerializeTuple},
 };
 
 use crate::{Error, Result};
-use isola::value::Value;
 
 const MAX_DEPTH: usize = 128;
 
@@ -22,7 +25,10 @@ impl<'py> PyValue<'py> {
         Self(obj)
     }
 
-    fn deserialize<'de, D>(py: Python<'py>, deserializer: D) -> std::result::Result<Bound<'py, PyAny>, D::Error>
+    fn deserialize<'de, D>(
+        py: Python<'py>,
+        deserializer: D,
+    ) -> std::result::Result<Bound<'py, PyAny>, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
@@ -458,7 +464,11 @@ impl<'de> serde::Deserializer<'de> for PyValue<'_> {
         }
     }
 
-    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> std::result::Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(
+        self,
+        _len: usize,
+        visitor: V,
+    ) -> std::result::Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -569,6 +579,7 @@ pub fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<pyo3::Py<PyAny>> {
     let mut deserializer = minicbor_serde::Deserializer::new(value.as_cbor());
     PyValue::deserialize(py, &mut deserializer)
         .map(Bound::unbind)
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("failed to decode value: {e}")))
+        .map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!("failed to decode value: {e}"))
+        })
 }
-
