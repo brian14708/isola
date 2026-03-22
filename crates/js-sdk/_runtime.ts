@@ -48,6 +48,11 @@ function pkgVersion(): string {
   throw new Error("could not determine isola-sdk version from package.json");
 }
 
+function versionTag(ver: string): string {
+  if (ver.startsWith("v") || ver === "latest") return ver;
+  return `v${ver}`;
+}
+
 export async function resolveRuntime(
   runtime: RuntimeName,
   version?: string,
@@ -96,7 +101,7 @@ async function fetchExpectedDigest(
   version: string,
   tarballName: string,
 ): Promise<string> {
-  const url = RELEASE_API.replace("{version}", version);
+  const url = RELEASE_API.replace("{version}", versionTag(version));
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(
@@ -125,7 +130,7 @@ async function downloadTarball(
   tarballName: string,
   expectedDigest: string,
 ): Promise<Buffer> {
-  const url = `https://github.com/brian14708/isola/releases/download/${version}/${tarballName}`;
+  const url = `https://github.com/brian14708/isola/releases/download/${versionTag(version)}/${tarballName}`;
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(

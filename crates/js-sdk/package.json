@@ -15,7 +15,7 @@
     ]
   },
   "scripts": {
-    "build": "napi build --release --platform --manifest-path Cargo.toml --output-dir dist",
+    "build": "napi build --release --platform --js isola.js --manifest-path Cargo.toml --output-dir dist",
     "tsc": "tsc -p tsconfig.json",
     "prepack": "pnpm run tsc",
     "test": "vitest run",

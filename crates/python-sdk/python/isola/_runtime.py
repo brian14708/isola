@@ -27,6 +27,12 @@ _TARBALL_NAMES: dict[str, str] = {
 _RELEASE_API = "https://api.github.com/repos/brian14708/isola/releases/tags/{version}"
 
 
+def _version_tag(ver: str) -> str:
+    if ver.startswith("v") or ver == "latest":
+        return ver
+    return f"v{ver}"
+
+
 def _cache_base() -> Path:
     xdg = os.environ.get("XDG_CACHE_HOME")
     if xdg:
@@ -72,7 +78,7 @@ def _build_config(runtime: RuntimeName, cache_dir: Path) -> TemplateConfig:
 
 
 async def _fetch_expected_digest(version: str, tarball_name: str) -> str:
-    url = _RELEASE_API.format(version=version)
+    url = _RELEASE_API.format(version=_version_tag(version))
     async with httpx.AsyncClient() as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -95,7 +101,7 @@ async def _download_tarball(
 ) -> bytes:
     download_url = (
         "https://github.com/brian14708/isola"
-        f"/releases/download/{version}/{tarball_name}"
+        f"/releases/download/{_version_tag(version)}/{tarball_name}"
     )
     sha = hashlib.sha256()
     chunks: list[bytes] = []

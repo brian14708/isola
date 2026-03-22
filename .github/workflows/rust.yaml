@@ -48,3 +48,5 @@ jobs:
         run: nix --accept-flake-config develop --command just pytest
       - name: Run C integration tests
         run: nix --accept-flake-config develop --command just integration-c
+      - name: Run JS vitest suite
+        run: nix --accept-flake-config develop --command just vitest
