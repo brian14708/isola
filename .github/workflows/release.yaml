@@ -292,6 +292,7 @@ jobs:
     needs: [targets, js-sdk]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write
     steps:
       - name: Checkout your repository using git
@@ -316,5 +317,5 @@ jobs:
       - name: Publish to npm
         if: needs.targets.outputs.release_tag != 'latest'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
         run: pnpm --filter isola-sdk publish --no-git-checks --access public
