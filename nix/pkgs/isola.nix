@@ -7,7 +7,7 @@
 }:
 stdenv.mkDerivation {
   pname = "isola";
-  version = "0.2.1";
+  version = "0.2.2";
 
   dontUnpack = true;
 
