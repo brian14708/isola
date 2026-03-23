@@ -1,5 +1,12 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { SandboxManager, SandboxTemplate, Sandbox, Arg } from "../index.js";
+import { describe, it, expect, beforeAll } from "vitest";
+import * as isola from "../index.js";
+import {
+  SandboxContext,
+  SandboxTemplate,
+  Sandbox,
+  Arg,
+  buildTemplate,
+} from "../index.js";
 import type { Event } from "../types.js";
 
 const RUNTIME_PATH = process.env.ISOLA_RUNTIME_PATH;
@@ -10,18 +17,12 @@ const RUNTIME_NAME = (process.env.ISOLA_RUNTIME_NAME ?? "python") as
 const describeIfRuntime = RUNTIME_PATH ? describe : describe.skip;
 
 describeIfRuntime("isola js-sdk", () => {
-  let manager: SandboxManager;
   let template: SandboxTemplate;
 
   beforeAll(async () => {
-    manager = new SandboxManager();
-    template = await manager.compileTemplate(RUNTIME_NAME, {
+    template = await buildTemplate(RUNTIME_NAME, {
       runtimePath: RUNTIME_PATH!,
     });
-  });
-
-  afterAll(() => {
-    manager.close();
   });
 
   it("should create a sandbox and run a function", async () => {
@@ -218,13 +219,16 @@ describeIfRuntime("isola js-sdk", () => {
 });
 
 describe("isola js-sdk (no runtime)", () => {
+  it("exports SandboxContext instead of SandboxManager", () => {
+    expect(isola.SandboxContext).toBe(SandboxContext);
+    expect("SandboxManager" in isola).toBe(false);
+  });
+
   it("should attempt auto-download when runtimePath is omitted", async () => {
-    const manager = new SandboxManager();
     // Without a runtimePath the SDK tries to auto-download; in a test
     // environment with no network access or a missing release it should
     // reject with some error (not silently succeed).
-    await expect(manager.compileTemplate("python")).rejects.toThrow();
-    manager.close();
+    await expect(buildTemplate("python")).rejects.toThrow();
   });
 });
 
@@ -244,11 +248,9 @@ describe("Arg", () => {
   it("should be recognised by encodeArgs as a named arg", async () => {
     // Verify that Arg instances are encoded as named args by checking the
     // wire path: plain values get name=null, Arg instances get the name.
-    const manager = new SandboxManager();
     // We can't run without a runtime, but we can verify the Arg shape.
     const a = new Arg({ x: 1 }, "opts");
     expect(a.value).toEqual({ x: 1 });
     expect(a.name).toBe("opts");
-    manager.close();
   });
 });

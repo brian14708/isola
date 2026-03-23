@@ -18,24 +18,22 @@ Then compile a Python sandbox template and run code inside it:
 ```python
 import asyncio
 
-from isola import SandboxManager
+from isola import build_template
 
 
 async def main() -> None:
-    async with SandboxManager() as manager:
-        template = await manager.compile_template(
-            "python",
-            max_memory=64 * 1024 * 1024,
-        )
+    template = await build_template(
+        "python",
+        max_memory=64 * 1024 * 1024,
+    )
 
-        sandbox = await template.create()
-        async with sandbox:
-            await sandbox.load_script(
-                "def add(a, b):\n"
-                "    return a + b\n"
-            )
-            result = await sandbox.run("add", [1, 2])
-            print(result)
+    async with template.create() as sandbox:
+        await sandbox.load_script(
+            "def add(a, b):\n"
+            "    return a + b\n"
+        )
+        result = await sandbox.run("add", 1, 2)
+        print(result)
 
 
 asyncio.run(main())
@@ -52,7 +50,7 @@ To call back into the host from Python guest code, pass a `hostcalls` mapping wh
 ```python
 import asyncio
 
-from isola import SandboxManager
+from isola import build_template
 
 
 async def main() -> None:
@@ -60,22 +58,20 @@ async def main() -> None:
         user_id = int(payload["user_id"])
         return {"user_id": user_id, "name": f"user-{user_id}"}
 
-    async with SandboxManager() as manager:
-        template = await manager.compile_template(
-            "python",
-            max_memory=64 * 1024 * 1024,
-        )
+    template = await build_template(
+        "python",
+        max_memory=64 * 1024 * 1024,
+    )
 
-        sandbox = await template.create(hostcalls={"lookup_user": lookup_user})
-        async with sandbox:
-            await sandbox.load_script(
-                "from sandbox.asyncio import hostcall\n"
-                "\n"
-                "async def lookup_user(user_id):\n"
-                "    return await hostcall('lookup_user', {'user_id': user_id})\n"
-            )
-            result = await sandbox.run("lookup_user", [7])
-            print(result)
+    async with template.create(hostcalls={"lookup_user": lookup_user}) as sandbox:
+        await sandbox.load_script(
+            "from sandbox.asyncio import hostcall\n"
+            "\n"
+            "async def lookup_user(user_id):\n"
+            "    return await hostcall('lookup_user', {'user_id': user_id})\n"
+        )
+        result = await sandbox.run("lookup_user", 7)
+        print(result)
 
 
 asyncio.run(main())
@@ -87,7 +83,7 @@ Expected output:
 {'user_id': 7, 'name': 'user-7'}
 ```
 
-If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `compile_template(...)` instead.
+If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `build_template(...)` instead. Use `SandboxContext` only when you want explicit context ownership.
 
 For the SDK surface area and type reference, see [Python API](python-api.md).
 
@@ -102,11 +98,9 @@ npm install isola-sdk
 Compile a sandbox template and run code inside it:
 
 ```typescript
-import { SandboxManager } from "isola-sdk";
+import { buildTemplate } from "isola-sdk";
 
-const manager = new SandboxManager();
-
-const template = await manager.compileTemplate("python", {
+const template = await buildTemplate("python", {
   maxMemory: 64 * 1024 * 1024,
 });
 
@@ -115,8 +109,6 @@ await sandbox.start();
 await sandbox.loadScript("def add(a, b):\n    return a + b\n");
 const result = await sandbox.run("add", [1, 2]);
 console.log(result); // 3
-
-manager.close();
 ```
 
 Expected output:
@@ -128,10 +120,9 @@ Expected output:
 To call back into the host from guest code, pass a `hostcalls` map when creating the sandbox:
 
 ```typescript
-import { SandboxManager } from "isola-sdk";
+import { buildTemplate } from "isola-sdk";
 
-const manager = new SandboxManager();
-const template = await manager.compileTemplate("python");
+const template = await buildTemplate("python");
 
 await using sandbox = await template.create({
   hostcalls: {
@@ -151,10 +142,8 @@ await sandbox.loadScript(
 );
 const result = await sandbox.run("lookup_user", [7]);
 console.log(result); // { user_id: 7, name: 'user-7' }
-
-manager.close();
 ```
 
-If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `compileTemplate(...)` instead.
+If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `buildTemplate(...)` instead. Use `SandboxContext` only when you want explicit context ownership.
 
 For the SDK surface area and type reference, see [Node.js API](nodejs-api.md).

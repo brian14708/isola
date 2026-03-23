@@ -18,7 +18,7 @@ from isola import resolve_runtime
 config = await resolve_runtime("python")
 ```
 
-When `runtime_path` is omitted from `SandboxManager.compile_template(...)`, the SDK resolves the runtime automatically, downloads the matching release asset on first use, verifies its digest, and caches it under `~/.cache/isola/runtimes/`.
+When `runtime_path` is omitted from `build_template(...)`, the SDK resolves the runtime automatically, downloads the matching release asset on first use, verifies its digest, and caches it under `~/.cache/isola/runtimes/`.
 
 Supported runtime names:
 
@@ -29,27 +29,23 @@ Supported runtime names:
 
 The normal flow is:
 
-1. Create a `SandboxManager`
-2. `await manager.compile_template(...)`
-3. `await template.create(...)`
-4. `async with sandbox: ...`
-5. `await sandbox.load_script(...)`
-6. `await sandbox.run(...)` or iterate `sandbox.run_stream(...)`
+1. `await build_template(...)`
+2. `async with template.create(...) as sandbox:`
+3. `await sandbox.load_script(...)`
+4. `await sandbox.run(...)` or iterate `sandbox.run_stream(...)`
 
 ```python
 import asyncio
 
-from isola import SandboxManager
+from isola import build_template
 
 
 async def main() -> None:
-    async with SandboxManager() as manager:
-        template = await manager.compile_template("python")
-        sandbox = await template.create()
-        async with sandbox:
-            await sandbox.load_script("def hello(name):\n    return f'hello {name}'")
-            result = await sandbox.run("hello", ["world"])
-            print(result)
+    template = await build_template("python")
+    async with template.create() as sandbox:
+        await sandbox.load_script("def hello(name):\n    return f'hello {name}'")
+        result = await sandbox.run("hello", "world")
+        print(result)
 
 
 asyncio.run(main())
@@ -57,17 +53,17 @@ asyncio.run(main())
 
 ## Core Types
 
-### `SandboxManager`
+### `build_template(...)`
 
-Creates reusable sandbox templates.
+Builds and returns a reusable sandbox template using an internal `SandboxContext`.
 
 ```python
-manager = SandboxManager()
-template = await manager.compile_template(runtime, *, version=None, **template_config)
-manager.close()
+from isola import build_template
+
+template = await build_template(runtime, *, version=None, **template_config)
 ```
 
-`compile_template(...)` accepts:
+`build_template(...)` accepts:
 
 - `runtime`: `"python"` or `"js"`
 - `version`: optional release tag to resolve when auto-downloading a runtime
@@ -79,17 +75,28 @@ manager.close()
 - `mounts`: `list[MountConfig]`
 - `env`: `dict[str, str]`
 
-`SandboxManager` supports both sync and async context-manager cleanup.
+### `SandboxContext`
+
+Advanced API for explicitly owning a template compilation context. It exposes
+the same template-building behavior as the top-level helper, plus explicit
+`close()` and async context-manager lifecycle control.
+
+`SandboxContext` supports `async with ...` cleanup and explicit `close()`.
 
 ### `SandboxTemplate`
 
 Instantiates sandboxes from a compiled template.
 
 ```python
-sandbox = await template.create(**sandbox_config)
+async with template.create(**sandbox_config) as sandbox:
+    ...
 ```
 
-`create(...)` accepts:
+Use `create(...)` for the normal case where the sandbox lifetime is scoped to an
+async context manager. If you need the raw `Sandbox` object before entering it,
+use `await template.instantiate(**sandbox_config)` instead.
+
+`create(...)` and `instantiate(...)` accept:
 
 - `max_memory`: per-sandbox memory limit in bytes
 - `mounts`: `list[MountConfig]`
@@ -104,14 +111,14 @@ Runs guest code inside an instantiated sandbox.
 ```python
 async with sandbox:
     await sandbox.load_script(code)
-    result = await sandbox.run(name, args=None)
+    result = await sandbox.run(name, *args, **kwargs)
 ```
 
 Public methods:
 
 - `await load_script(code)`
-- `await run(name, args=None) -> JsonValue | None`
-- `run_stream(name, args=None) -> AsyncIterator[Event]`
+- `await run(name, *args, **kwargs) -> JsonValue | None`
+- `run_stream(name, *args, **kwargs) -> AsyncIterator[Event]`
 - `close()`
 - `await aclose()`
 
@@ -122,7 +129,13 @@ Use `async with sandbox:` before executing code. Entering the async context star
 `run(...)` and `run_stream(...)` accept positional JSON values directly:
 
 ```python
-result = await sandbox.run("add", [1, 2])
+result = await sandbox.run("add", 1, 2)
+```
+
+Keyword arguments become named guest arguments:
+
+```python
+result = await sandbox.run("add", a=1, b=2)
 ```
 
 Use `Arg(value, name="...")` to pass a named argument:
@@ -130,7 +143,7 @@ Use `Arg(value, name="...")` to pass a named argument:
 ```python
 from isola import Arg
 
-result = await sandbox.run("add", [Arg(2, name="b"), Arg(1, name="a")])
+result = await sandbox.run("add", Arg(2, name="b"), Arg(1, name="a"))
 ```
 
 Use `StreamArg` for JSON streams passed into guest code:
@@ -139,7 +152,13 @@ Use `StreamArg` for JSON streams passed into guest code:
 from isola import StreamArg
 
 stream = StreamArg.from_iterable([1, 2, 3])
-result = await sandbox.run("consume", [stream])
+result = await sandbox.run("consume", stream)
+```
+
+JSON lists are passed as normal values:
+
+```python
+result = await sandbox.run("consume_list", [1, 2, 3])
 ```
 
 Available constructors:
@@ -160,14 +179,14 @@ async def lookup_user(payload: dict[str, object]) -> object:
     return {"user_id": user_id, "name": f"user-{user_id}"}
 
 
-sandbox = await template.create(hostcalls={"lookup_user": lookup_user})
-await sandbox.load_script(
-    "from sandbox.asyncio import hostcall\n"
-    "\n"
-    "async def lookup_user(user_id):\n"
-    "    return await hostcall('lookup_user', {'user_id': user_id})\n"
-)
-result = await sandbox.run("lookup_user", [7])
+async with template.create(hostcalls={"lookup_user": lookup_user}) as sandbox:
+    await sandbox.load_script(
+        "from sandbox.asyncio import hostcall\n"
+        "\n"
+        "async def lookup_user(user_id):\n"
+        "    return await hostcall('lookup_user', {'user_id': user_id})\n"
+    )
+    result = await sandbox.run("lookup_user", 7)
 ```
 
 Configure hostcalls and HTTP behavior when the sandbox is created.
@@ -179,7 +198,7 @@ Each hostcall handler receives the decoded JSON payload for its registered call 
 `run(...)` returns the final value directly:
 
 ```python
-result = await sandbox.run("add", [1, 2])
+result = await sandbox.run("add", 1, 2)
 assert result == 3
 ```
 

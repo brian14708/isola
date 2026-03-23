@@ -126,10 +126,22 @@ function resultToEvents(result: NativeRunResult): Event[] {
 }
 
 // ---------------------------------------------------------------------------
-// SandboxManager
+// Top-level template helper
 // ---------------------------------------------------------------------------
 
-export class SandboxManager {
+export async function buildTemplate(
+  runtime: RuntimeName,
+  options?: TemplateOptions,
+): Promise<SandboxTemplate> {
+  const context = new SandboxContext();
+  return await context.compileTemplate(runtime, options);
+}
+
+// ---------------------------------------------------------------------------
+// SandboxContext
+// ---------------------------------------------------------------------------
+
+export class SandboxContext {
   private _core: InstanceType<typeof ContextCore>;
 
   constructor() {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
+from itertools import starmap
 from os import PathLike, fspath
 from typing import TYPE_CHECKING, Literal, cast
 from typing_extensions import Self, TypedDict, Unpack
@@ -264,7 +265,7 @@ def _configure_core(
         core.configure(patch)
 
 
-class SandboxManager:
+class SandboxContext:
     def __init__(self) -> None:
         self._core = _ContextCore()
 
@@ -323,11 +324,24 @@ class SandboxManager:
         self._core.close()
 
 
+async def build_template(
+    runtime: RuntimeName,
+    *,
+    version: str | None = None,
+    **kwargs: Unpack[TemplateConfig],
+) -> SandboxTemplate:
+    context = SandboxContext()
+    return await context.compile_template(runtime, version=version, **kwargs)
+
+
 class SandboxTemplate:
     def __init__(self, core: _ContextCore) -> None:
         self._core = core
 
-    async def create(self, **kwargs: Unpack[SandboxConfig]) -> Sandbox:
+    def create(self, **kwargs: Unpack[SandboxConfig]) -> _SandboxContext:
+        return _SandboxContext(self, kwargs)
+
+    async def instantiate(self, **kwargs: Unpack[SandboxConfig]) -> Sandbox:
         core = await self._core.instantiate()
         sandbox = Sandbox(core)
 
@@ -345,6 +359,32 @@ class SandboxTemplate:
         sandbox._set_hostcalls(hostcalls)  # noqa: SLF001
         sandbox._set_http_handler(http_handler)  # noqa: SLF001
         return sandbox
+
+
+class _SandboxContext:
+    def __init__(self, template: SandboxTemplate, kwargs: SandboxConfig) -> None:
+        self._template = template
+        self._kwargs = kwargs
+        self._used = False
+        self._sandbox: Sandbox | None = None
+
+    async def __aenter__(self) -> Sandbox:
+        if self._used:
+            msg = "sandbox context cannot be entered more than once"
+            raise RuntimeError(msg)
+        self._used = True
+
+        sandbox = await self._template.instantiate(**self._kwargs)
+        await sandbox.__aenter__()
+        self._sandbox = sandbox
+        return sandbox
+
+    async def __aexit__(self, *args: object) -> None:
+        sandbox = self._sandbox
+        if sandbox is None:
+            return
+        self._sandbox = None
+        await sandbox.__aexit__(*args)
 
 
 class Sandbox:
@@ -425,15 +465,18 @@ class Sandbox:
         await self._core.load_script(code)
 
     async def run(
-        self, name: str, args: list[RunArg] | None = None
+        self, name: str, /, *args: RunArg, **kwargs: RunArg
     ) -> JsonValue | None:
+        final_args = _merge_run_args(args, kwargs)
         final: JsonValue | None = None
-        async for event in self.run_stream(name, args):
+        async for event in self.run_stream(name, *final_args):
             if isinstance(event, EndEvent):
                 final = event.data
         return final
 
-    async def _run_operation(self, name: str, args: list[RunArg] | None = None) -> None:
+    async def _run_operation(
+        self, name: str, args: Sequence[RunArg] | None = None
+    ) -> None:
         encoded_args, producers = _encode_args(args)
         operation = self._core.run(name, encoded_args)
 
@@ -450,8 +493,9 @@ class Sandbox:
             await asyncio.gather(*producers)
 
     async def run_stream(
-        self, name: str, args: list[RunArg] | None = None
+        self, name: str, /, *args: RunArg, **kwargs: RunArg
     ) -> AsyncIterator[Event]:
+        final_args = _merge_run_args(args, kwargs)
         queue: asyncio.Queue[Event] = asyncio.Queue()
         loop = asyncio.get_running_loop()
         pending_dispatches = 0
@@ -503,7 +547,7 @@ class Sandbox:
         self._next_stream_dispatch_id += 1
         self._stream_dispatches[stream_dispatch_id] = _dispatch
         self._refresh_core_callback()
-        run_task = asyncio.create_task(self._run_operation(name, args))
+        run_task = asyncio.create_task(self._run_operation(name, final_args))
 
         try:
             while True:
@@ -586,6 +630,40 @@ def _encode_args(
             producers.append(producer)
 
     return encoded, producers
+
+
+def _merge_run_args(
+    args: tuple[RunArg, ...], kwargs: dict[str, RunArg]
+) -> tuple[RunArg, ...]:
+    if not kwargs:
+        return args
+
+    named_args = tuple(starmap(_normalize_keyword_arg, kwargs.items()))
+    return args + named_args
+
+
+def _normalize_keyword_arg(name: str, value: RunArg) -> RunArg:
+    if isinstance(value, Arg):
+        if value.name is not None and value.name != name:
+            msg = (
+                f"keyword argument {name!r} conflicts with explicit argument name "
+                f"{value.name!r}"
+            )
+            raise TypeError(msg)
+        value.name = name
+        return value
+
+    if isinstance(value, StreamArg):
+        if value.name is not None and value.name != name:
+            msg = (
+                f"keyword argument {name!r} conflicts with explicit argument name "
+                f"{value.name!r}"
+            )
+            raise TypeError(msg)
+        value.name = name
+        return value
+
+    return Arg(value, name=name)
 
 
 def _normalize_http_response_body(body: object) -> tuple[str, object]:

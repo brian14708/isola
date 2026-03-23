@@ -10,12 +10,13 @@ from isola._core import (
     ResultEvent,
     Sandbox,
     SandboxConfig,
-    SandboxManager,
+    SandboxContext,
     SandboxTemplate,
     StderrEvent,
     StdoutEvent,
     StreamArg,
     TemplateConfig,
+    build_template,
 )
 from isola._isola import (
     InternalError,
@@ -41,7 +42,7 @@ __all__ = [
     "ResultEvent",
     "Sandbox",
     "SandboxConfig",
-    "SandboxManager",
+    "SandboxContext",
     "SandboxTemplate",
     "StderrEvent",
     "StdoutEvent",
@@ -49,5 +50,6 @@ __all__ = [
     "StreamClosedError",
     "StreamFullError",
     "TemplateConfig",
+    "build_template",
     "resolve_runtime",
 ]

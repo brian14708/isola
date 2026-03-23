@@ -11,7 +11,7 @@ npm install isola-sdk
 
 ## Runtime Resolution
 
-When `runtimePath` is omitted from `manager.compileTemplate(...)`, the SDK
+When `runtimePath` is omitted from `buildTemplate(...)`, the SDK
 resolves the runtime automatically, downloads the matching release asset on
 first use, verifies its SHA-256 digest, and caches it under
 `~/.cache/isola/runtimes/`.
@@ -28,49 +28,42 @@ yourself, pass `runtimePath` and, for Python runtimes, `runtimeLibDir`.
 
 The normal flow is:
 
-1. Create a `SandboxManager`
-2. `await manager.compileTemplate(...)`
-3. `await template.create(...)`
-4. `await sandbox.start()`
-5. `await sandbox.loadScript(...)`
-6. `await sandbox.run(...)` or iterate `sandbox.runStream(...)`
-7. `sandbox.close()` and `manager.close()`
+1. `await buildTemplate(...)`
+2. `await template.create(...)`
+3. `await sandbox.start()`
+4. `await sandbox.loadScript(...)`
+5. `await sandbox.run(...)` or iterate `sandbox.runStream(...)`
+6. `sandbox.close()`
 
 ```typescript
-import { SandboxManager } from "isola-sdk";
+import { buildTemplate } from "isola-sdk";
 
-const manager = new SandboxManager();
+const template = await buildTemplate("python");
+const sandbox = await template.create();
 
 try {
-  const template = await manager.compileTemplate("python");
-  const sandbox = await template.create();
-
-  try {
-    await sandbox.start();
-    await sandbox.loadScript("def hello(name):\n    return f'hello {name}'");
-    const result = await sandbox.run("hello", ["world"]);
-    console.log(result);
-  } finally {
-    sandbox.close();
-  }
+  await sandbox.start();
+  await sandbox.loadScript("def hello(name):\n    return f'hello {name}'");
+  const result = await sandbox.run("hello", ["world"]);
+  console.log(result);
 } finally {
-  manager.close();
+  sandbox.close();
 }
 ```
 
 ## Core Types
 
-### `SandboxManager`
+### `buildTemplate(...)`
 
-Creates reusable sandbox templates.
+Builds and returns a reusable sandbox template using an internal `SandboxContext`.
 
 ```typescript
-const manager = new SandboxManager();
-const template = await manager.compileTemplate(runtime, options);
-manager.close();
+import { buildTemplate } from "isola-sdk";
+
+const template = await buildTemplate(runtime, options);
 ```
 
-`compileTemplate(...)` accepts:
+`buildTemplate(...)` accepts:
 
 - `runtime`: `"python"` or `"js"`
 - `runtimePath`: directory or path used to initialize the runtime bundle
@@ -81,6 +74,12 @@ manager.close();
 - `runtimeLibDir`: runtime library directory for manually provided Python runtimes
 - `mounts`: `MountConfig[]`
 - `env`: `Record<string, string>`
+
+### `SandboxContext`
+
+Advanced API for explicitly owning a template compilation context. It exposes
+the same template-building behavior as the top-level helper, plus explicit
+`close()` ownership when you need to manage the context directly.
 
 ### `SandboxTemplate`
 
@@ -145,10 +144,9 @@ decoded JSON payload for its call name and must return a JSON-serializable
 value.
 
 ```typescript
-import { SandboxManager } from "isola-sdk";
+import { buildTemplate } from "isola-sdk";
 
-const manager = new SandboxManager();
-const template = await manager.compileTemplate("python");
+const template = await buildTemplate("python");
 const sandbox = await template.create({
   hostcalls: {
     lookup_user: async (payload) => {
@@ -267,7 +265,7 @@ Request and response shapes:
 
 ## Errors
 
-`compileTemplate(...)`, `start()`, `loadScript(...)`, and `run(...)` reject when
+`buildTemplate(...)`, `start()`, `loadScript(...)`, and `run(...)` reject when
 runtime setup or execution fails.
 
 `runStream(...)` yields `{ type: "error", data: string }` events for sandbox

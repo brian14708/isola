@@ -20,6 +20,40 @@ In practice, that means compiling a reusable sandbox template once, then
 instantiating isolated sandboxes with explicit policy around memory,
 filesystem mounts, environment variables, outbound HTTP, and host callbacks.
 
+## ⚡ Quick Start
+
+If you just want to see Isola run, install the Python SDK:
+
+```bash
+pip install isola
+```
+
+```python
+import asyncio
+
+from isola import build_template
+
+
+async def main() -> None:
+    # First run may take a few seconds: build_template(...) downloads the
+    # runtime from GitHub Releases, verifies it, caches it, and precompiles
+    # a reusable template.
+    template = await build_template("python")
+
+    async with template.create() as sandbox:
+        await sandbox.load_script(
+            "from sandbox.http import fetch\n"
+            "\n"
+            "async def main(url):\n"
+            "    async with fetch('GET', url) as resp:\n"
+            "        return await resp.ajson()\n"
+        )
+        print(await sandbox.run("main", "https://httpbin.org/get"))
+
+
+asyncio.run(main())
+```
+
 ## 🎯 Potential Good Fits
 
 - AI code execution, where an agent writes short Python or JavaScript helpers
