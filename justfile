@@ -45,6 +45,7 @@ init-js:
     pnpm install
 
 pytest: init-py
+    cd ./crates/python-sdk/ && maturin develop --release
     uv run pytest ./crates/python-sdk/tests/
 
 integration-c:
@@ -54,4 +55,4 @@ integration-c:
 
 [private]
 init-py:
-    uv sync --all-packages
+    uv sync --all-packages --no-install-project
