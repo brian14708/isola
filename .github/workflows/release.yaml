@@ -10,8 +10,6 @@ on:
 permissions: {}
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
   GH_REPO: ${{ github.repository }}
 
 jobs:
@@ -48,38 +46,6 @@ jobs:
               -f ref="refs/tags/latest" \
               -f sha="$GITHUB_SHA" >/dev/null
           fi
-  oci:
-    name: OCI
-    needs: [targets, python-runtime, js-runtime]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout your repository using git
-        uses: actions/checkout@v6
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-      - name: Setup Cachix
-        uses: cachix/cachix-action@v17
-        with:
-          name: isola
-          authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
-      - name: Build container image
-        run: |
-          nix --accept-flake-config build .#packages.x86_64-linux.oci
-          ./result | docker load
-      - name: Log in to the Container registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Tag and push image
-        run: |
-          docker tag isola:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.release_tag }}
-          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.targets.outputs.release_tag }}
-
   python-runtime:
     name: Python Runtime
     needs: targets

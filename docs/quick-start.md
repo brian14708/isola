@@ -2,49 +2,8 @@
 
 This page covers the fastest ways to get Isola running:
 
-- Run the packaged HTTP server with Docker and call it with `curl`
 - Embed the runtime directly from Python with the `isola` SDK
-
-## Docker and `curl`
-
-Start the published server image:
-
-```bash
-docker run --rm -p 3000:3000 ghcr.io/brian14708/isola:latest
-```
-
-Execute a small Python generator over HTTP as a stream:
-
-```bash
-curl -N http://127.0.0.1:3000/v1/execute/stream \
-  -H 'content-type: application/json' \
-  -d '{
-    "runtime": "python",
-    "script": "def count(n):\n    for i in range(n):\n        yield i",
-    "function": "count",
-    "args": [3]
-  }'
-```
-
-Expected response:
-
-```text
-event: data
-data: {"value":0}
-
-event: data
-data: {"value":1}
-
-event: data
-data: {"value":2}
-
-event: done
-data: {}
-```
-
-The same server also exposes an OpenAPI document at `http://127.0.0.1:3000/openapi.json`.
-
-If you set `"trace": true` in the request body, trace records are emitted as separate `event: trace` entries before the final `event: done`.
+- Embed the runtime directly from Node.js with `isola-sdk`
 
 ## Python SDK
 

@@ -4,11 +4,6 @@
   "ignorePaths": ["crates/python-runtime/pyproject.toml"],
   "packageRules": [
     {
-      "groupName": "opentelemetry",
-      "matchPackageNames": ["/^opentelemetry/", "/^tracing-opentelemetry/"],
-      "matchUpdateTypes": ["minor"]
-    },
-    {
       "groupName": "wasmtime",
       "matchPackageNames": ["/^wasi-/", "/^wasmtime/"],
       "matchUpdateTypes": ["major"]
