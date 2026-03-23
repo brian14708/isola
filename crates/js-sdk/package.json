@@ -24,7 +24,7 @@
   "devDependencies": {
     "@napi-rs/cli": "^3",
     "@types/node": "^24.0.0",
-    "typescript": "^5",
+    "typescript": "^6.0.0",
     "vitest": "^4.0.0"
   },
   "packageManager": "pnpm@10.32.1",
