@@ -16,12 +16,14 @@
   },
   "scripts": {
     "build": "napi build --release --platform --js isola.js --manifest-path Cargo.toml --output-dir dist",
+    "lint": "biome check && tsc --noEmit",
     "tsc": "tsc -p tsconfig.json",
     "prepack": "pnpm run tsc",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.4.8",
     "@napi-rs/cli": "^3",
     "@types/node": "^24.0.0",
     "typescript": "^6.0.0",

@@ -32,7 +32,7 @@ lint-python: init-py
     uv run basedpyright --project crates/python-sdk/pyproject.toml
 
 lint-js: init-js
-    pnpm --filter isola-sdk tsc --noEmit
+    pnpm --filter isola-sdk run lint
 
 build-js: init-js
     pnpm --filter isola-sdk run build

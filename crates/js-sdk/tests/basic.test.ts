@@ -1,12 +1,5 @@
-import { describe, it, expect, beforeAll } from "vitest";
-import * as isola from "../index.js";
-import {
-  SandboxContext,
-  SandboxTemplate,
-  Sandbox,
-  Arg,
-  buildTemplate,
-} from "../index.js";
+import { beforeAll, describe, expect, it } from "vitest";
+import { Arg, buildTemplate, type SandboxTemplate } from "../index.js";
 import type { Event } from "../types.js";
 
 const RUNTIME_PATH = process.env.ISOLA_RUNTIME_PATH;
@@ -21,6 +14,7 @@ describeIfRuntime("isola js-sdk", () => {
 
   beforeAll(async () => {
     template = await buildTemplate(RUNTIME_NAME, {
+      // biome-ignore lint/style/noNonNullAssertion: guarded by describeIfRuntime
       runtimePath: RUNTIME_PATH!,
     });
   });
@@ -81,7 +75,7 @@ describeIfRuntime("isola js-sdk", () => {
     expect(results[0].data).toBe(1);
     expect(results[1].data).toBe(2);
     expect(end).toBeDefined();
-    expect(end!.data).toBeNull();
+    expect(end?.data).toBeNull();
     sandbox.close();
   });
 

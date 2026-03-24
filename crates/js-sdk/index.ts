@@ -1,6 +1,6 @@
-// @ts-expect-error - napi bindings are generated at build time
-import { ContextCore, SandboxCore } from "./isola.js";
 import { resolveRuntime } from "./_runtime.js";
+// @ts-expect-error - napi bindings are generated at build time
+import { ContextCore, type SandboxCore } from "./isola.js";
 
 import type {
   Event,
@@ -336,6 +336,7 @@ export class Sandbox {
     try {
       while (true) {
         while (queue.length > 0) {
+          // biome-ignore lint/style/noNonNullAssertion: length checked above
           yield queue.shift()!;
         }
         if (done) break;
