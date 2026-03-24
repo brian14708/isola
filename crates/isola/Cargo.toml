@@ -5,7 +5,7 @@ edition.workspace = true
 publish = true
 license.workspace = true
 description = "Isola runtime"
-documentation.workspace = true
+documentation = "https://docs.rs/isola"
 homepage.workspace = true
 repository.workspace = true
 

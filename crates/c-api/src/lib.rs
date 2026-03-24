@@ -11,6 +11,7 @@ use isola::{
     sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
     value::Value,
 };
+use serde::Deserialize;
 use tokio::runtime::{Builder, Runtime};
 
 use crate::{
@@ -149,9 +150,57 @@ impl OutputSink for SandboxHandler {
 // Context
 // ---------------------------------------------------------------------------
 
+/// JSON schema for the `"env"` config key: `{"name": "VAR", "value": "val"}`
+#[derive(Deserialize)]
+struct EnvConfig {
+    name: String,
+    value: String,
+}
+
+/// JSON schema for the `"mount"` config key:
+/// `{"host": "/host/path", "guest": "/guest/path", "writable": false}`
+#[derive(Deserialize)]
+struct MountConfig {
+    host: String,
+    guest: String,
+    #[serde(default)]
+    writable: bool,
+}
+
+impl MountConfig {
+    fn dir_perms(&self) -> DirPerms {
+        if self.writable {
+            DirPerms::READ | DirPerms::MUTATE
+        } else {
+            DirPerms::READ
+        }
+    }
+
+    fn file_perms(&self) -> FilePerms {
+        if self.writable {
+            FilePerms::READ | FilePerms::WRITE
+        } else {
+            FilePerms::READ
+        }
+    }
+}
+
+const DEFAULT_MAX_MEMORY: usize = 64 * 1024 * 1024;
+const DEFAULT_PRELUDE: &str = "import sandbox.asyncio";
+
+#[derive(Default)]
+struct ContextConfig {
+    max_memory: Option<usize>,
+    prelude: Option<String>,
+    cache: Option<String>,
+    env: Vec<(String, String)>,
+    mounts: Vec<MountConfig>,
+}
+
 pub struct ContextHandle {
     rt: Runtime,
     module: Option<SandboxTemplate<Env>>,
+    config: ContextConfig,
 }
 
 impl ContextHandle {
@@ -178,12 +227,52 @@ impl ContextHandle {
                 .build()
                 .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
         };
-        Ok(Box::new(Self { rt, module: None }))
+        Ok(Box::new(Self {
+            rt,
+            module: None,
+            config: ContextConfig::default(),
+        }))
     }
 
-    fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
-        _ = self;
-        todo!();
+    fn set_config(&mut self, key: &CStr, value: &CStr) -> Result<()> {
+        if self.module.is_some() {
+            return Err(Error::InvalidArgument(
+                "Cannot set config after initialization",
+            ));
+        }
+        let key = key
+            .to_str()
+            .map_err(|_| Error::InvalidArgument("Invalid UTF-8 in config key"))?;
+        let value = value
+            .to_str()
+            .map_err(|_| Error::InvalidArgument("Invalid UTF-8 in config value"))?;
+
+        match key {
+            "max_memory" => {
+                let bytes: usize = value
+                    .parse()
+                    .map_err(|_| Error::InvalidArgument("Invalid max_memory value"))?;
+                self.config.max_memory = Some(bytes);
+            }
+            "prelude" => {
+                self.config.prelude = Some(value.to_string());
+            }
+            "cache" => {
+                self.config.cache = Some(value.to_string());
+            }
+            "env" => {
+                let env: EnvConfig = serde_json::from_str(value)
+                    .map_err(|e| Error::Internal(format!("Invalid JSON for env: {e}")))?;
+                self.config.env.push((env.name, env.value));
+            }
+            "mount" => {
+                let mount: MountConfig = serde_json::from_str(value)
+                    .map_err(|e| Error::Internal(format!("Invalid JSON for mount: {e}")))?;
+                self.config.mounts.push(mount);
+            }
+            _ => return Err(Error::InvalidArgument("Unknown config key")),
+        }
+        Ok(())
     }
 
     fn load(&mut self, path: &str) -> Result<()> {
@@ -208,12 +297,39 @@ impl ContextHandle {
         );
         lib_dir.push("lib");
 
+        let max_memory = self.config.max_memory.unwrap_or(DEFAULT_MAX_MEMORY);
+        let prelude = match self.config.prelude.take() {
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s),
+            None => Some(DEFAULT_PRELUDE.to_string()),
+        };
+        let cache = self
+            .config
+            .cache
+            .take()
+            .map_or_else(|| parent.join("cache"), PathBuf::from);
+
         self.rt.block_on(async {
-            let module = SandboxTemplate::<Env>::builder()
-                .prelude(Some("import sandbox.asyncio".to_string()))
-                .cache(Some(parent.join("cache")))
-                .max_memory(64 * 1024 * 1024)
-                .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ)
+            let mut builder = SandboxTemplate::<Env>::builder()
+                .prelude(prelude)
+                .cache(Some(cache))
+                .max_memory(max_memory)
+                .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
+
+            for mount in &self.config.mounts {
+                builder = builder.mount(
+                    &mount.host,
+                    &mount.guest,
+                    mount.dir_perms(),
+                    mount.file_perms(),
+                );
+            }
+
+            for (k, v) in &self.config.env {
+                builder.env(k, v);
+            }
+
+            let module = builder
                 .build(&path)
                 .await
                 .map_err(|e| Error::Internal(format!("Failed to load runtime: {e}")))?;
@@ -223,19 +339,15 @@ impl ContextHandle {
     }
 
     fn new_sandbox(&self) -> Result<SandboxHandle<'_>> {
-        let Some(module) = &self.module else {
+        if self.module.is_none() {
             return Err(Error::InvalidArgument("Runtime not loaded"));
-        };
-        let handler_slot = Arc::new(OnceLock::new());
-        let env = Env::new(handler_slot.clone());
-        let sandbox = self
-            .rt
-            .block_on(async { module.instantiate(env, SandboxOptions::default()).await })
-            .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
+        }
         Ok(SandboxHandle {
             ctx: self,
-            handler_slot,
-            inner: SandboxInner::Pending { sandbox },
+            handler_slot: Arc::new(OnceLock::new()),
+            inner: SandboxInner::Pending {
+                options: SandboxOptions::default(),
+            },
         })
     }
 }
@@ -277,6 +389,23 @@ pub unsafe extern "C" fn isola_context_initialize(
 
 /// Sets a configuration value for the isola context.
 ///
+/// Must be called **before** `isola_context_initialize`. Returns
+/// `ISOLA_ERROR_CODE_INVALID_ARGUMENT` if the context is already initialized
+/// or if `key` is unrecognized.
+///
+/// # Supported keys
+///
+/// | Key        | Value                                                | Default                         |
+/// |------------|------------------------------------------------------|---------------------------------|
+/// | `max_memory` | Decimal byte count (e.g. `"67108864"` for 64 MiB). | `67108864` (64 MiB)            |
+/// | `prelude`  | Guest prelude source code. Empty string disables it. | `"import sandbox.asyncio"`      |
+/// | `cache`    | Path to the compiled-component cache directory.      | `<wasm_dir>/cache`              |
+/// | `env`      | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*                        |
+/// | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none; `/lib` always mounted)* |
+///
+/// The `env` and `mount` keys may be called multiple times to add multiple
+/// entries. For `mount`, `writable` defaults to `false` when omitted.
+///
 /// # Safety
 ///
 /// The caller must ensure that both `key` and `value` are valid,
@@ -303,7 +432,7 @@ pub extern "C" fn isola_context_destroy(_ctx: Box<ContextHandle>) {}
 enum SandboxInner {
     Uninitialized,
     Pending {
-        sandbox: Sandbox<Env>,
+        options: SandboxOptions,
     },
     Running {
         sandbox: Sandbox<Env>,
@@ -318,8 +447,42 @@ pub struct SandboxHandle<'a> {
 }
 
 impl SandboxHandle<'_> {
-    fn set_config(&self, _key: &CStr, _value: &CStr) -> Result<()> {
-        todo!()
+    fn set_config(&mut self, key: &CStr, value: &CStr) -> Result<()> {
+        let SandboxInner::Pending { options } = &mut self.inner else {
+            return Err(Error::InvalidArgument("Cannot set config after start"));
+        };
+        let key = key
+            .to_str()
+            .map_err(|_| Error::InvalidArgument("Invalid UTF-8 in config key"))?;
+        let value = value
+            .to_str()
+            .map_err(|_| Error::InvalidArgument("Invalid UTF-8 in config value"))?;
+
+        match key {
+            "max_memory" => {
+                let bytes: usize = value
+                    .parse()
+                    .map_err(|_| Error::InvalidArgument("Invalid max_memory value"))?;
+                options.max_memory(bytes);
+            }
+            "env" => {
+                let env: EnvConfig = serde_json::from_str(value)
+                    .map_err(|e| Error::Internal(format!("Invalid JSON for env: {e}")))?;
+                options.env(&env.name, &env.value);
+            }
+            "mount" => {
+                let mount: MountConfig = serde_json::from_str(value)
+                    .map_err(|e| Error::Internal(format!("Invalid JSON for mount: {e}")))?;
+                options.mount(
+                    &mount.host,
+                    &mount.guest,
+                    mount.dir_perms(),
+                    mount.file_perms(),
+                );
+            }
+            _ => return Err(Error::InvalidArgument("Unknown config key")),
+        }
+        Ok(())
     }
 
     fn set_handler(&self, handler: Arc<SandboxHandler>) -> Result<()> {
@@ -330,12 +493,25 @@ impl SandboxHandle<'_> {
 
     fn start(&mut self) -> Result<()> {
         match std::mem::replace(&mut self.inner, SandboxInner::Uninitialized) {
-            SandboxInner::Pending { sandbox } => {
+            SandboxInner::Pending { options } => {
                 let handler = self
                     .handler_slot
                     .get()
                     .ok_or(Error::InvalidArgument("Handler not set"))?
                     .clone();
+
+                let module = self
+                    .ctx
+                    .module
+                    .as_ref()
+                    .ok_or(Error::InvalidArgument("Runtime not loaded"))?;
+                let env = Env::new(self.handler_slot.clone());
+                let sandbox = self
+                    .ctx
+                    .rt
+                    .block_on(async { module.instantiate(env, options).await })
+                    .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
+
                 self.inner = SandboxInner::Running { sandbox, handler };
                 Ok(())
             }
@@ -449,7 +625,23 @@ pub unsafe extern "C" fn isola_sandbox_create<'a>(
 #[unsafe(no_mangle)]
 pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle<'_>>) {}
 
-/// Sets a configuration value for the sandbox.
+/// Sets a per-sandbox configuration value, overriding context-level defaults.
+///
+/// Must be called **after** `isola_sandbox_create` and **before**
+/// `isola_sandbox_start`. Returns `ISOLA_ERROR_CODE_INVALID_ARGUMENT` if the
+/// sandbox has already been started or if `key` is unrecognized.
+///
+/// # Supported keys
+///
+/// | Key          | Value                                                | Default         |
+/// |--------------|------------------------------------------------------|-----------------|
+/// | `max_memory` | Decimal byte count (e.g. `"33554432"` for 32 MiB).  | *(from context)*|
+/// | `env`        | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*        |
+/// | `mount`      | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none)*        |
+///
+/// The `env` and `mount` keys may be called multiple times. Per-sandbox
+/// settings are merged with context-level defaults: `max_memory` replaces,
+/// `env` overrides by key, and `mount` overrides by guest path.
 ///
 /// # Safety
 ///

@@ -168,6 +168,23 @@ enum isola_error_code isola_context_initialize(struct isola_context_handle *ctx,
 /**
  * Sets a configuration value for the isola context.
  *
+ * Must be called **before** `isola_context_initialize`. Returns
+ * `ISOLA_ERROR_CODE_INVALID_ARGUMENT` if the context is already initialized
+ * or if `key` is unrecognized.
+ *
+ * # Supported keys
+ *
+ * | Key        | Value                                                | Default                         |
+ * |------------|------------------------------------------------------|---------------------------------|
+ * | `max_memory` | Decimal byte count (e.g. `"67108864"` for 64 MiB). | `67108864` (64 MiB)            |
+ * | `prelude`  | Guest prelude source code. Empty string disables it. | `"import sandbox.asyncio"`      |
+ * | `cache`    | Path to the compiled-component cache directory.      | `<wasm_dir>/cache`              |
+ * | `env`      | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*                        |
+ * | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none; `/lib` always mounted)* |
+ *
+ * The `env` and `mount` keys may be called multiple times to add multiple
+ * entries. For `mount`, `writable` defaults to `false` when omitted.
+ *
  * # Safety
  *
  * The caller must ensure that both `key` and `value` are valid,
@@ -193,7 +210,23 @@ enum isola_error_code isola_sandbox_create(const struct isola_context_handle *ct
 void isola_sandbox_destroy(struct isola_sandbox_handle *_sandbox);
 
 /**
- * Sets a configuration value for the sandbox.
+ * Sets a per-sandbox configuration value, overriding context-level defaults.
+ *
+ * Must be called **after** `isola_sandbox_create` and **before**
+ * `isola_sandbox_start`. Returns `ISOLA_ERROR_CODE_INVALID_ARGUMENT` if the
+ * sandbox has already been started or if `key` is unrecognized.
+ *
+ * # Supported keys
+ *
+ * | Key          | Value                                                | Default         |
+ * |--------------|------------------------------------------------------|-----------------|
+ * | `max_memory` | Decimal byte count (e.g. `"33554432"` for 32 MiB).  | *(from context)*|
+ * | `env`        | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*        |
+ * | `mount`      | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none)*        |
+ *
+ * The `env` and `mount` keys may be called multiple times. Per-sandbox
+ * settings are merged with context-level defaults: `max_memory` replaces,
+ * `env` overrides by key, and `mount` overrides by guest path.
  *
  * # Safety
  *
