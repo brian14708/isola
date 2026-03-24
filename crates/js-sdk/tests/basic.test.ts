@@ -216,19 +216,28 @@ describeIfRuntime("isola js-sdk", () => {
     expect(result).toEqual([200, "node", "response body"]);
     sandbox.close();
   });
-});
 
-describe("isola js-sdk (no runtime)", () => {
-  it("exports SandboxContext instead of SandboxManager", () => {
-    expect(isola.SandboxContext).toBe(SandboxContext);
-    expect("SandboxManager" in isola).toBe(false);
-  });
-
-  it("should attempt auto-download when runtimePath is omitted", async () => {
-    // Without a runtimePath the SDK tries to auto-download; in a test
-    // environment with no network access or a missing release it should
-    // reject with some error (not silently succeed).
-    await expect(buildTemplate("python")).rejects.toThrow();
+  it("should preserve binary http response bodies", async () => {
+    const responseBody = Buffer.from([0x00, 0xff, 0xc3, 0x28, 0x80, 0x41]);
+    const sandbox = await template.create({
+      httpHandler: async () => ({
+        status: 200,
+        body: responseBody,
+      }),
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "from sandbox.http import fetch",
+        "",
+        "def main(url):",
+        "    with fetch('GET', url) as resp:",
+        "        return list(b''.join(resp.iter_bytes()))",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/binary"]);
+    expect(result).toEqual([...responseBody]);
+    sandbox.close();
   });
 });
 

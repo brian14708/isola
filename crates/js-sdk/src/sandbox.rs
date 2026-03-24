@@ -397,14 +397,16 @@ impl SandboxCore {
     }
 
     /// Set the HTTP handler: (method, url, headersJson, body) =>
-    /// Promise<responseJson>
+    /// Promise<response>
     #[napi(
-        ts_args_type = "handler: ((method: string, url: string, headersJson: string, body: Buffer | null) => Promise<string>) | null"
+        ts_args_type = "handler: ((method: string, url: string, headersJson: string, body: Buffer | null) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null }>) | null"
     )]
     #[allow(clippy::type_complexity)]
     pub fn set_http_handler(
         &self,
-        handler: Option<Function<(String, String, String, Option<Buffer>), Promise<String>>>,
+        handler: Option<
+            Function<(String, String, String, Option<Buffer>), Promise<crate::env::JsHttpResponse>>,
+        >,
     ) -> napi::Result<()> {
         let js_handler = handler
             .map(|cb| {

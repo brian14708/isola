@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -13,9 +13,17 @@ use napi::{
     bindgen_prelude::{Buffer, Promise},
     threadsafe_function::ThreadsafeFunction,
 };
+use napi_derive::napi;
 
 fn io_error(msg: impl Into<String>) -> BoxError {
     Box::new(std::io::Error::other(msg.into()))
+}
+
+#[napi(object)]
+pub struct JsHttpResponse {
+    pub status: u16,
+    pub headers: Option<BTreeMap<String, String>>,
+    pub body: Option<Buffer>,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +79,7 @@ impl JsHostcallHandler {
 
 type HttpTsfn = ThreadsafeFunction<
     (String, String, String, Option<Buffer>),
-    Promise<String>,
+    Promise<JsHttpResponse>,
     (String, String, String, Option<Buffer>),
     Status,
     false,
@@ -121,30 +129,20 @@ impl JsHttpHandler {
             .await
             .map_err(|e| io_error(format!("HTTP JS handler failed: {e}")))?;
 
-        let result_json = promise
+        let resp = promise
             .await
             .map_err(|e| io_error(format!("HTTP JS promise rejected: {e}")))?;
 
-        let resp: serde_json::Value = serde_json::from_str(&result_json)
-            .map_err(|e| io_error(format!("invalid HTTP response JSON: {e}")))?;
+        let mut builder = http::Response::builder().status(resp.status);
 
-        let status = resp["status"]
-            .as_u64()
-            .ok_or_else(|| io_error("HTTP response missing status"))?;
-        let status = u16::try_from(status).map_err(|_| io_error("HTTP status out of range"))?;
-
-        let mut builder = http::Response::builder().status(status);
-
-        if let Some(headers_obj) = resp["headers"].as_object() {
-            for (k, v) in headers_obj {
-                if let Some(val) = v.as_str() {
-                    builder = builder.header(k.as_str(), val);
-                }
+        if let Some(headers) = resp.headers {
+            for (k, v) in headers {
+                builder = builder.header(k, v);
             }
         }
 
-        let body_stream: HttpBodyStream = if let Some(body_b64) = resp["body"].as_str() {
-            let body_bytes = Bytes::from(body_b64.to_owned().into_bytes());
+        let body_stream: HttpBodyStream = if let Some(body) = resp.body {
+            let body_bytes = Bytes::from(Vec::<u8>::from(body));
             Box::pin(stream::once(async move { Ok(Frame::data(body_bytes)) }))
         } else {
             Box::pin(stream::empty())

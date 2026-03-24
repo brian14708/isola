@@ -33,6 +33,11 @@ type WireArgument = [string, string | null, unknown];
 type NativeCallbackArgs = [string, string | null];
 type NativeHostcallArgs = [string, string];
 type NativeHttpArgs = [string, string, string, Buffer | null];
+type NativeHttpResponse = {
+  status: number;
+  headers?: Record<string, string>;
+  body?: Buffer | null;
+};
 type NativeRunResult = {
   resultJson: string[];
   finalJson?: string;
@@ -244,17 +249,20 @@ export class Sandbox {
 
   /** @internal */
   _setHttpHandler(handler: (req: HttpRequest) => Promise<HttpResponse>): void {
-    this._core.setHttpHandler(async (...raw: unknown[]): Promise<string> => {
-      const [method, url, headersJson, body] = unpackTuple<NativeHttpArgs>(raw);
-      const headers = JSON.parse(headersJson) as Record<string, string>;
-      const req: HttpRequest = { method, url, headers, body };
-      const resp = await handler(req);
-      return JSON.stringify({
-        status: resp.status,
-        headers: resp.headers ?? {},
-        body: resp.body ? resp.body.toString() : null,
-      });
-    });
+    this._core.setHttpHandler(
+      async (...raw: unknown[]): Promise<NativeHttpResponse> => {
+        const [method, url, headersJson, body] =
+          unpackTuple<NativeHttpArgs>(raw);
+        const headers = JSON.parse(headersJson) as Record<string, string>;
+        const req: HttpRequest = { method, url, headers, body };
+        const resp = await handler(req);
+        return {
+          status: resp.status,
+          headers: resp.headers,
+          body: resp.body ?? null,
+        };
+      },
+    );
   }
 
   async start(): Promise<void> {
