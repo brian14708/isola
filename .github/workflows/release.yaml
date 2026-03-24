@@ -1,9 +1,6 @@
 name: Release
 
 on:
-  workflow_dispatch:
-  schedule:
-    - cron: "30 4 * * 2"
   release:
     types: [created]
 
@@ -16,36 +13,13 @@ jobs:
   targets:
     name: Tag
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       release_tag: ${{ steps.resolve.outputs.release_tag }}
     steps:
       - name: Resolve release tag
         id: resolve
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
         run: |
-          if [ "${GITHUB_EVENT_NAME}" = "release" ] && [ -n "${RELEASE_TAG}" ]; then
-            tag="${RELEASE_TAG}"
-          else
-            tag="latest"
-          fi
-
-          echo "release_tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Move latest tag to current commit
-        if: steps.resolve.outputs.release_tag == 'latest'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          if ! gh api -X PATCH "repos/$GH_REPO/git/refs/tags/latest" \
-            -f sha="$GITHUB_SHA" \
-            -F force=true >/dev/null 2>&1; then
-            gh api -X POST "repos/$GH_REPO/git/refs" \
-              -f ref="refs/tags/latest" \
-              -f sha="$GITHUB_SHA" >/dev/null
-          fi
+          echo "release_tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
   python-runtime:
     name: Python Runtime
     needs: targets
@@ -167,7 +141,6 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Publish
-        if: needs.targets.outputs.release_tag != 'latest'
         run: |
           uv publish dist/*
 
@@ -252,16 +225,10 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-      - name: Dry run crates publish to crates.io
-        if: needs.targets.outputs.release_tag == 'latest'
-        run: |
-          cargo publish --locked --dry-run --registry crates-io
       - name: Authenticate with crates.io
-        if: needs.targets.outputs.release_tag != 'latest'
         id: cargo_auth
         uses: rust-lang/crates-io-auth-action@v1
       - name: Publish crates to crates.io
-        if: needs.targets.outputs.release_tag != 'latest'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.cargo_auth.outputs.token }}
         run: |
@@ -347,14 +314,12 @@ jobs:
           path: crates/js-sdk/npm
           merge-multiple: true
       - name: Publish platform packages
-        if: needs.targets.outputs.release_tag != 'latest'
         working-directory: crates/js-sdk/npm
         env:
           NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: pnpm exec napi pre-publish --npm-dir . --no-gh-release
       - name: Publish root package
-        if: needs.targets.outputs.release_tag != 'latest'
         working-directory: crates/js-sdk/npm
         env:
           NPM_CONFIG_PROVENANCE: true
