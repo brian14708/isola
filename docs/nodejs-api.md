@@ -156,6 +156,9 @@ Register host callbacks when the sandbox is created. Each handler receives the
 decoded JSON payload for its call name and must return a JSON-serializable
 value.
 
+Python guests call back into the host with `sandbox.asyncio.hostcall(...)`.
+JS guests call back into the host with top-level `await hostcall(...)`.
+
 ```typescript
 import { buildTemplate } from "isola-core";
 

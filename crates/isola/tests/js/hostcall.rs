@@ -5,9 +5,7 @@ use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
 
 use super::common::{TestHost, build_module};
 
-#[tokio::test]
-#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
-async fn integration_js_async_hostcall_echo() -> Result<()> {
+async fn assert_echo_hostcall(script: &str) -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
@@ -17,12 +15,7 @@ async fn integration_js_async_hostcall_echo() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script(
-            "async function main() {\n\
-                 return await _isola_sys.hostcall('echo', [1, 2, 3]);\n\
-             }",
-            NoopOutputSink::shared(),
-        )
+        .eval_script(script, NoopOutputSink::shared())
         .await
         .context("failed to evaluate hostcall script")?;
 
@@ -44,4 +37,15 @@ async fn integration_js_async_hostcall_echo() -> Result<()> {
     assert_eq!(value, vec![1, 2, 3]);
 
     Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_async_hostcall_echo() -> Result<()> {
+    assert_echo_hostcall(
+        "async function main() {\n\
+             return await hostcall('echo', [1, 2, 3]);\n\
+         }",
+    )
+    .await
 }

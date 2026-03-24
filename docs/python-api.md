@@ -169,7 +169,9 @@ Available constructors:
 
 ## Hostcalls
 
-Guest Python code can call back into the host with `sandbox.asyncio.hostcall(...)`.
+Guest Python code can call back into the host with
+`sandbox.asyncio.hostcall(...)`. JS guests call back into the host with
+top-level `await hostcall(...)`.
 
 ```python
 from sandbox.asyncio import hostcall

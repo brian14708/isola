@@ -47,11 +47,11 @@ globalThis._isola_async = {
   },
 };
 
-// Wrap _isola_sys.hostcall to return a Promise.
-// The Rust side now returns a pollable handle (u32) instead of blocking.
+// Expose a top-level hostcall helper that returns a Promise.
+// The Rust side returns a pollable handle (u32) instead of blocking.
 (function () {
   var _raw_hostcall = _isola_sys.hostcall;
-  _isola_sys.hostcall = function (callType, payload) {
+  globalThis.hostcall = function (callType, payload) {
     var handle = _raw_hostcall(callType, payload);
     return _isola_async._wait(handle, function () {
       return _isola_sys._finish_hostcall(handle);
