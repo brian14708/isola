@@ -32,13 +32,13 @@ lint-python: init-py
     uv run basedpyright --project crates/python-sdk/pyproject.toml
 
 lint-js: init-js
-    pnpm --filter isola-sdk run lint
+    pnpm --filter isola-core run lint
 
 build-js: init-js
-    pnpm --filter isola-sdk run build
+    pnpm --filter isola-core run build
 
 vitest: build-js
-    pnpm --filter isola-sdk exec env ISOLA_RUNTIME_PATH=../../target pnpm vitest run
+    pnpm --filter isola-core exec env ISOLA_RUNTIME_PATH=../../../target pnpm run test
 
 [private]
 init-js:

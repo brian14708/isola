@@ -1,0 +1,26 @@
+{
+  "name": "isola-core-linux-x64-gnu",
+  "version": "0.2.2",
+  "cpu": [
+    "x64"
+  ],
+  "main": "isola.linux-x64-gnu.node",
+  "files": [
+    "isola.linux-x64-gnu.node"
+  ],
+  "description": "Node.js SDK for Isola sandboxed code execution",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brian14708/isola"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

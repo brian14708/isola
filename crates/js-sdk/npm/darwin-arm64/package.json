@@ -1,0 +1,23 @@
+{
+  "name": "isola-core-darwin-arm64",
+  "version": "0.2.2",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "isola.darwin-arm64.node",
+  "files": [
+    "isola.darwin-arm64.node"
+  ],
+  "description": "Node.js SDK for Isola sandboxed code execution",
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brian14708/isola"
+  },
+  "os": [
+    "darwin"
+  ]
+}

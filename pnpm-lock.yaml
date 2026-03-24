@@ -6,7 +6,7 @@ settings:
 
 importers:
 
-  crates/js-sdk:
+  crates/js-sdk/npm:
     devDependencies:
       '@biomejs/biome':
         specifier: ^2.4.8

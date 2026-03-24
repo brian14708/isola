@@ -1,2 +1,2 @@
 packages:
-  - crates/js-sdk
+  - crates/js-sdk/npm

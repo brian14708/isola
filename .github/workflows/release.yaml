@@ -199,6 +199,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
@@ -206,13 +207,17 @@ jobs:
       - name: Dry run crates publish to crates.io
         if: needs.targets.outputs.release_tag == 'latest'
         run: |
-          cargo publish --locked --dry-run
+          cargo publish --locked --dry-run --registry crates-io
+      - name: Authenticate with crates.io
+        if: needs.targets.outputs.release_tag != 'latest'
+        id: cargo_auth
+        uses: rust-lang/crates-io-auth-action@v1
       - name: Publish crates to crates.io
         if: needs.targets.outputs.release_tag != 'latest'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.cargo_auth.outputs.token }}
         run: |
-          cargo publish --locked
+          cargo publish --locked --registry crates-io
 
   js-sdk:
     name: JS SDK (${{ matrix.settings.target }})
@@ -224,8 +229,10 @@ jobs:
         settings:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            package_dir: linux-x64-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
+            package_dir: darwin-arm64
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
@@ -245,12 +252,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install
       - name: Build native module
-        run: pnpm --filter isola-sdk run build -- --target ${{ matrix.settings.target }}
+        run: pnpm --filter isola-core run build -- --target ${{ matrix.settings.target }}
+      - name: Stage platform package
+        run: cp crates/js-sdk/npm/dist/isola.*.node crates/js-sdk/npm/${{ matrix.settings.package_dir }}/
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
           name: js-sdk-${{ matrix.settings.target }}
-          path: crates/js-sdk/dist/isola.*.node
+          path: |
+            crates/js-sdk/npm/dist
+            crates/js-sdk/npm/${{ matrix.settings.package_dir }}
           if-no-files-found: error
 
   js-sdk-publish:
@@ -278,10 +289,19 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           pattern: js-sdk-*
-          path: crates/js-sdk/dist
+          path: crates/js-sdk/npm
           merge-multiple: true
-      - name: Publish to npm
+      - name: Publish platform packages
         if: needs.targets.outputs.release_tag != 'latest'
+        working-directory: crates/js-sdk/npm
         env:
           NPM_CONFIG_PROVENANCE: true
-        run: pnpm --filter isola-sdk publish --no-git-checks --access public
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm exec napi pre-publish --npm-dir . --no-gh-release
+      - name: Publish root package
+        if: needs.targets.outputs.release_tag != 'latest'
+        working-directory: crates/js-sdk/npm
+        env:
+          NPM_CONFIG_PROVENANCE: true
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public

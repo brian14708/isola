@@ -1,5 +1,5 @@
 {
-  "name": "isola-sdk",
+  "name": "isola-core",
   "version": "0.2.2",
   "description": "Node.js SDK for Isola sandboxed code execution",
   "main": "dist/index.js",
@@ -9,16 +9,16 @@
   ],
   "napi": {
     "binaryName": "isola",
+    "npmClient": "npm",
     "targets": [
       "x86_64-unknown-linux-gnu",
       "aarch64-apple-darwin"
     ]
   },
   "scripts": {
-    "build": "napi build --release --platform --js isola.js --manifest-path Cargo.toml --output-dir dist",
-    "lint": "biome check && tsc --noEmit",
+    "build": "pnpm run tsc && napi build --release --platform --js isola.js --manifest-path ../Cargo.toml --output-dir dist",
+    "lint": "biome check src tests && tsc --noEmit -p tsconfig.json",
     "tsc": "tsc -p tsconfig.json",
-    "prepack": "pnpm run tsc",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -30,6 +30,9 @@
     "vitest": "^4.0.0"
   },
   "packageManager": "pnpm@10.32.1",
+  "publishConfig": {
+    "access": "public"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

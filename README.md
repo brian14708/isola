@@ -1,9 +1,8 @@
 # 🏝️ Isola
 
-[![Docs](https://img.shields.io/badge/docs-online-0f172a?logo=materialformkdocs&logoColor=white)](https://brian14708.github.io/isola/)
 [![crates.io](https://img.shields.io/crates/v/isola?logo=rust)](https://crates.io/crates/isola)
 [![PyPI](https://img.shields.io/pypi/v/isola?logo=python&logoColor=white)](https://pypi.org/project/isola/)
-[![npm](https://img.shields.io/npm/v/isola-sdk?logo=npm)](https://www.npmjs.com/package/isola-sdk)
+[![npm](https://img.shields.io/npm/v/isola-core?logo=npm)](https://www.npmjs.com/package/isola-core)
 [![License](https://img.shields.io/badge/license-Apache%202.0-2563eb)](LICENSE)
 
 Isola is a Rust runtime, with Python and Node.js SDKs, for running untrusted

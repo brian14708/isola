@@ -3,7 +3,7 @@
 This page covers the fastest ways to get Isola running:
 
 - Embed the runtime directly from Python with the `isola` SDK
-- Embed the runtime directly from Node.js with `isola-sdk`
+- Embed the runtime directly from Node.js with `isola-core`
 
 ## Python SDK
 
@@ -92,13 +92,13 @@ For the SDK surface area and type reference, see [Python API](python-api.md).
 Install the SDK:
 
 ```bash
-npm install isola-sdk
+npm install isola-core
 ```
 
 Compile a sandbox template and run code inside it:
 
 ```typescript
-import { buildTemplate } from "isola-sdk";
+import { buildTemplate } from "isola-core";
 
 const template = await buildTemplate("python", {
   maxMemory: 64 * 1024 * 1024,
@@ -120,7 +120,7 @@ Expected output:
 To call back into the host from guest code, pass a `hostcalls` map when creating the sandbox:
 
 ```typescript
-import { buildTemplate } from "isola-sdk";
+import { buildTemplate } from "isola-core";
 
 const template = await buildTemplate("python");
 

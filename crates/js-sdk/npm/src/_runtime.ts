@@ -31,21 +31,25 @@ function cacheBase(): string {
 
 function pkgVersion(): string {
   // Search upward from __dirname for the package's own package.json.
-  // At runtime __dirname is dist/; during tests (vitest/vite) it is the
-  // source root — so we walk up until we find a package.json with our name.
+  // At runtime __dirname is npm/dist/; during tests (vitest/vite) it is the
+  // source root, so we also check a nested npm/package.json as we walk up.
   let dir = __dirname;
-  for (let i = 0; i < 3; i++) {
-    const candidate = path.join(dir, "package.json");
-    try {
-      const pkg = JSON.parse(fs.readFileSync(candidate, "utf-8")) as {
-        name?: string;
-        version: string;
-      };
-      if (pkg.name === "isola-sdk") return pkg.version;
-    } catch {}
+  for (let i = 0; i < 4; i++) {
+    for (const candidate of [
+      path.join(dir, "package.json"),
+      path.join(dir, "npm", "package.json"),
+    ]) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(candidate, "utf-8")) as {
+          name?: string;
+          version: string;
+        };
+        if (pkg.name === "isola-core") return pkg.version;
+      } catch {}
+    }
     dir = path.dirname(dir);
   }
-  throw new Error("could not determine isola-sdk version from package.json");
+  throw new Error("could not determine isola-core version from package.json");
 }
 
 function versionTag(ver: string): string {

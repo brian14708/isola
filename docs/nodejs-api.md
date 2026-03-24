@@ -1,12 +1,12 @@
 # Node.js API
 
-The `isola-sdk` package exposes an async API for compiling sandbox templates and
+The `isola-core` package exposes an async API for compiling sandbox templates and
 running code inside isolated runtimes from Node.js.
 
 ## Install
 
 ```bash
-npm install isola-sdk
+npm install isola-core
 ```
 
 ## Runtime Resolution
@@ -36,7 +36,7 @@ The normal flow is:
 6. `sandbox.close()`
 
 ```typescript
-import { buildTemplate } from "isola-sdk";
+import { buildTemplate } from "isola-core";
 
 const template = await buildTemplate("python");
 const sandbox = await template.create();
@@ -58,7 +58,7 @@ try {
 Builds and returns a reusable sandbox template using an internal `SandboxContext`.
 
 ```typescript
-import { buildTemplate } from "isola-sdk";
+import { buildTemplate } from "isola-core";
 
 const template = await buildTemplate(runtime, options);
 ```
@@ -129,7 +129,7 @@ const result = await sandbox.run("add", [1, 2]);
 Use `Arg` to pass a named argument:
 
 ```typescript
-import { Arg } from "isola-sdk";
+import { Arg } from "isola-core";
 
 const result = await sandbox.run("greet", [
   new Arg("World", "name"),
@@ -144,7 +144,7 @@ decoded JSON payload for its call name and must return a JSON-serializable
 value.
 
 ```typescript
-import { buildTemplate } from "isola-sdk";
+import { buildTemplate } from "isola-core";
 
 const template = await buildTemplate("python");
 const sandbox = await template.create({
@@ -239,7 +239,7 @@ When guest code makes outbound HTTP requests, the sandbox calls the configured
 `httpHandler`.
 
 ```typescript
-import type { HttpRequest, HttpResponse } from "isola-sdk";
+import type { HttpRequest, HttpResponse } from "isola-core";
 
 async function httpHandler(request: HttpRequest): Promise<HttpResponse> {
   return {

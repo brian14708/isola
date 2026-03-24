@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { Arg, buildTemplate, type SandboxTemplate } from "../index.js";
-import type { Event } from "../types.js";
+import { Arg, buildTemplate, type SandboxTemplate } from "../src/index.js";
+import type { Event } from "../src/types.js";
 
 const RUNTIME_PATH = process.env.ISOLA_RUNTIME_PATH;
 const RUNTIME_NAME = (process.env.ISOLA_RUNTIME_NAME ?? "python") as
