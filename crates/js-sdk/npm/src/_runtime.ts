@@ -186,6 +186,8 @@ async function extractTarball(data: Buffer, dest: string): Promise<void> {
 async function parseTar(data: Buffer, dest: string): Promise<void> {
   const BLOCK = 512;
   let offset = 0;
+  let pendingPath: string | null = null;
+  let pendingLinkName: string | null = null;
 
   while (offset + BLOCK <= data.length) {
     const hdr = data.subarray(offset, offset + BLOCK);
@@ -197,13 +199,35 @@ async function parseTar(data: Buffer, dest: string): Promise<void> {
     const modeStr = nullTerm(hdr, 100, 108).trim();
     const sizeStr = nullTerm(hdr, 124, 136).trim();
     const typeFlag = String.fromCharCode(hdr[156]);
-    const linkName = nullTerm(hdr, 157, 257);
+    const rawLinkName = nullTerm(hdr, 157, 257);
     const prefix = nullTerm(hdr, 345, 500);
 
-    const fullName = prefix ? `${prefix}/${name}` : name;
+    const rawFullName = prefix ? `${prefix}/${name}` : name;
     const size = sizeStr ? parseInt(sizeStr, 8) : 0;
     const fileData = data.subarray(offset, offset + size);
     offset += Math.ceil(size / BLOCK) * BLOCK;
+
+    if (typeFlag === "L") {
+      pendingPath = nullTerm(fileData, 0, fileData.length);
+      continue;
+    }
+
+    if (typeFlag === "K") {
+      pendingLinkName = nullTerm(fileData, 0, fileData.length);
+      continue;
+    }
+
+    if (typeFlag === "x" || typeFlag === "g") {
+      const pax = parsePax(fileData);
+      pendingPath = pax.path ?? pendingPath;
+      pendingLinkName = pax.linkName ?? pendingLinkName;
+      continue;
+    }
+
+    const fullName = pendingPath ?? rawFullName;
+    const linkName = pendingLinkName ?? rawLinkName;
+    pendingPath = null;
+    pendingLinkName = null;
 
     const stripped = stripFirstComponent(fullName);
     if (!stripped) continue;
@@ -231,6 +255,33 @@ async function parseTar(data: Buffer, dest: string): Promise<void> {
 
 function nullTerm(buf: Buffer, start: number, end: number): string {
   return buf.toString("utf8", start, end).replace(/\0.*$/, "");
+}
+
+function parsePax(data: Buffer): { path?: string; linkName?: string } {
+  const result: { path?: string; linkName?: string } = {};
+  const text = data.toString("utf8");
+  let offset = 0;
+
+  while (offset < text.length) {
+    const space = text.indexOf(" ", offset);
+    if (space === -1) break;
+
+    const recordLen = Number.parseInt(text.slice(offset, space), 10);
+    if (!Number.isFinite(recordLen) || recordLen <= space - offset + 1) break;
+
+    const record = text.slice(space + 1, offset + recordLen - 1);
+    const eq = record.indexOf("=");
+    if (eq !== -1) {
+      const key = record.slice(0, eq);
+      const value = record.slice(eq + 1);
+      if (key === "path") result.path = value;
+      if (key === "linkpath") result.linkName = value;
+    }
+
+    offset += recordLen;
+  }
+
+  return result;
 }
 
 function stripFirstComponent(p: string): string | null {
