@@ -108,26 +108,64 @@ jobs:
             --clobber
 
   python-sdk:
-    name: Python SDK (${{ matrix.os }})
+    name: Python SDK Wheel (${{ matrix.settings.target }})
     needs: targets
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.settings.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        settings:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - name: Build Linux Python SDK wheel
+        if: runner.os == 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.settings.target }}
+          manylinux: "2014"
+          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist
+      - name: Build host Python SDK wheel
+        if: runner.os != 'Linux'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          target: ${{ matrix.settings.target }}
+          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: python-sdk-${{ matrix.settings.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  python-sdk-publish:
+    name: Python SDK Publish
+    needs: [targets, python-sdk]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
     steps:
-      - name: Checkout your repository using git
-        uses: actions/checkout@v6
-      - name: Build Python SDK artifacts
-        uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist
       - name: Setup uv
         uses: astral-sh/setup-uv@v7
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: python-sdk-*
+          path: dist
+          merge-multiple: true
       - name: Publish
         if: needs.targets.outputs.release_tag != 'latest'
         run: |
@@ -135,62 +173,72 @@ jobs:
 
   library:
     needs: targets
+    name: Library (${{ matrix.settings.target }})
     strategy:
+      fail-fast: false
       matrix:
-        include:
+        settings:
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            lib_name: libisola.so
+            archive_name: libisola-x86_64-unknown-linux-gnu.tar.gz
+            import_lib: ""
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            lib_name: libisola.so
+            archive_name: libisola-aarch64-unknown-linux-gnu.tar.gz
+            import_lib: ""
           - os: macos-latest
-    runs-on: ${{ matrix.os }}
+            target: aarch64-apple-darwin
+            lib_name: libisola.dylib
+            archive_name: libisola-aarch64-apple-darwin.tar.gz
+            import_lib: ""
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            lib_name: isola.dll
+            archive_name: libisola-x86_64-pc-windows-msvc.tar.gz
+            import_lib: isola.dll.lib
+    runs-on: ${{ matrix.settings.os }}
     permissions:
       contents: write
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          target: ${{ matrix.settings.target }}
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
       - name: Package library artifact
-        id: package_lib
+        shell: bash
         run: |
           mkdir -p dist
-
-          os="$(uname -s)"
-          arch="$(uname -m)"
-
-          case "$os" in
-            Linux)
-              os_part="unknown-linux-gnu"
-              lib_ext="so"
-              ;;
-            Darwin)
-              os_part="apple-darwin"
-              lib_ext="dylib"
-              ;;
-            *) echo "Unsupported OS: $os" >&2; exit 1 ;;
-          esac
-
-          case "$arch" in
-            x86_64|amd64) arch_part="x86_64" ;;
-            arm64|aarch64) arch_part="aarch64" ;;
-            *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
-          esac
-
-          triple="${arch_part}-${os_part}"
           mkdir -p dist/libisola/lib
 
-          cargo build --locked --profile release-lto -p isola-c-api-export
+          cargo build --locked --profile release-lto --target "${{ matrix.settings.target }}" -p isola-c-api-export
 
-          cp "target/release-lto/libisola.${lib_ext}" dist/libisola/lib/
+          target_dir="target/${{ matrix.settings.target }}/release-lto"
+          cp "$target_dir/${{ matrix.settings.lib_name }}" dist/libisola/lib/
+          if [ -n "${{ matrix.settings.import_lib }}" ]; then
+            import_lib_path="$target_dir/${{ matrix.settings.import_lib }}"
+            if [ ! -f "$import_lib_path" ]; then
+              import_lib_path="$(find "$target_dir" -maxdepth 1 -type f -name '*.lib' | head -n 1)"
+            fi
+            if [ -z "$import_lib_path" ] || [ ! -f "$import_lib_path" ]; then
+              echo "missing import library in $target_dir" >&2
+              exit 1
+            fi
+            cp "$import_lib_path" dist/libisola/lib/
+          fi
           cp -r crates/c-api/include dist/libisola/
-
-          echo "triple=${triple}" >> "$GITHUB_OUTPUT"
-          tar -C dist/libisola -czf "dist/libisola-${triple}.tar.gz" lib include
+          tar -C dist/libisola -czf "dist/${{ matrix.settings.archive_name }}" lib include
       - name: Upload library artifact to target release
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
-            dist/libisola-${{ steps.package_lib.outputs.triple }}.tar.gz \
+            "dist/${{ matrix.settings.archive_name }}" \
             --clobber
 
   cargo_publish:
@@ -230,9 +278,15 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             package_dir: linux-x64-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            package_dir: linux-arm64-gnu
           - os: macos-latest
             target: aarch64-apple-darwin
             package_dir: darwin-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            package_dir: win32-x64-msvc
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v6
@@ -254,6 +308,7 @@ jobs:
       - name: Build native module
         run: pnpm --filter isola-core run build -- --target ${{ matrix.settings.target }}
       - name: Stage platform package
+        shell: bash
         run: cp crates/js-sdk/npm/dist/isola.*.node crates/js-sdk/npm/${{ matrix.settings.package_dir }}/
       - name: Upload artifact
         uses: actions/upload-artifact@v7

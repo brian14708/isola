@@ -1,0 +1,23 @@
+{
+  "name": "isola-core-win32-x64-msvc",
+  "version": "0.3.1",
+  "cpu": [
+    "x64"
+  ],
+  "main": "isola.win32-x64-msvc.node",
+  "files": [
+    "isola.win32-x64-msvc.node"
+  ],
+  "description": "Node.js SDK for Isola sandboxed code execution",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/brian14708/isola"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "os": [
+    "win32"
+  ]
+}
