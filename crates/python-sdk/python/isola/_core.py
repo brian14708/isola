@@ -7,7 +7,7 @@ from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from itertools import starmap
 from os import PathLike, fspath
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 from typing_extensions import Self, TypedDict, Unpack
 
 import httpx
@@ -77,6 +77,10 @@ class HttpResponse:
     body: HttpBodyOut = None
 
 
+HttpHandler: TypeAlias = Callable[[HttpRequest], Awaitable[object]]
+HttpHandlerConfig: TypeAlias = HttpHandler | Literal[True] | None
+
+
 async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
     client = httpx.AsyncClient()
     try:
@@ -131,7 +135,7 @@ class SandboxConfig(TypedDict, total=False):
     max_memory: int | None
     mounts: list[MountConfig] | None
     env: dict[str, str]
-    http_handler: Callable[[HttpRequest], Awaitable[object]] | None
+    http_handler: HttpHandlerConfig
     hostcalls: Hostcalls | None
 
 
@@ -265,6 +269,17 @@ def _configure_core(
         core.configure(patch)
 
 
+def _resolve_http_handler(handler: object) -> HttpHandler | None:
+    if handler is None:
+        return None
+    if handler is True:
+        return _default_httpx_handler
+    if isinstance(handler, bool):
+        msg = "http_handler must be an async callable, True, or None"
+        raise TypeError(msg)
+    return cast("HttpHandler", handler)
+
+
 class SandboxContext:
     def __init__(self) -> None:
         self._core = _ContextCore()
@@ -355,7 +370,8 @@ class SandboxTemplate:
         _configure_core(sandbox._core, patch)  # noqa: SLF001
 
         hostcalls = kwargs.get("hostcalls")
-        http_handler = kwargs.get("http_handler", _default_httpx_handler)
+        http_handler_config: object = kwargs.get("http_handler")
+        http_handler = _resolve_http_handler(http_handler_config)
         sandbox._set_hostcalls(hostcalls)  # noqa: SLF001
         sandbox._set_http_handler(http_handler)  # noqa: SLF001
         return sandbox

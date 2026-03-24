@@ -39,7 +39,7 @@ async def main() -> None:
     # a reusable template.
     template = await build_template("python")
 
-    async with template.create() as sandbox:
+    async with template.create(http_handler=True) as sandbox:
         await sandbox.load_script(
             "from sandbox.http import fetch\n"
             "\n"
