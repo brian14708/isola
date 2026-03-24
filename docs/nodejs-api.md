@@ -100,7 +100,9 @@ const sandbox = await template.create(options);
 - `mounts`: `MountConfig[]`
 - `env`: `Record<string, string>`
 - `hostcalls`: `Record<string, (payload: JsonValue) => Promise<unknown>>`
-- `httpHandler`: `(req: HttpRequest) => Promise<HttpResponse>`
+- `http`: `true` to use the built-in `fetch` bridge, or
+  `(req: HttpRequest) => Promise<HttpResponse>` for a custom outbound HTTP policy
+- `httpHandler`: legacy alias for `http`
 
 ### `Sandbox`
 
@@ -262,7 +264,8 @@ Environment variables can be supplied in both template and sandbox config via
 ## HTTP Bridge
 
 When guest code makes outbound HTTP requests, the sandbox calls the configured
-`httpHandler`.
+`http` bridge. Pass `http: true` to use the built-in Node `fetch` pass-through,
+or provide your own async handler to enforce a custom HTTP policy.
 
 The guest-side request APIs used inside the sandbox are documented in
 [Python Guest API](python-guest-api.md) and
@@ -271,13 +274,15 @@ The guest-side request APIs used inside the sandbox are documented in
 ```typescript
 import type { HttpRequest, HttpResponse } from "isola-core";
 
-async function httpHandler(request: HttpRequest): Promise<HttpResponse> {
+async function http(request: HttpRequest): Promise<HttpResponse> {
   return {
     status: 200,
     headers: { "content-type": "text/plain" },
     body: Buffer.from("hello world"),
   };
 }
+
+const sandbox = await template.create({ http });
 ```
 
 Request and response shapes:

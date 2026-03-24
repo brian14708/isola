@@ -19,6 +19,10 @@ In practice, that means compiling a reusable sandbox template once, then
 instantiating isolated sandboxes with explicit policy around memory,
 filesystem mounts, environment variables, outbound HTTP, and host callbacks.
 
+> [!WARNING]
+> The Python and Node.js SDK APIs are not yet stable. Expect breaking changes
+> across early releases.
+
 ## ⚡ Quick Start
 
 If you just want to see Isola run, install the Python SDK:
@@ -39,7 +43,7 @@ async def main() -> None:
     # a reusable template.
     template = await build_template("python")
 
-    async with template.create(http_handler=True) as sandbox:
+    async with template.create(http=True) as sandbox:
         await sandbox.load_script(
             "from sandbox.http import fetch\n"
             "\n"
@@ -89,6 +93,6 @@ asyncio.run(main())
 
 Isola is intended for untrusted guest code, but it is still a library you embed
 inside your own process. The host surface is explicit and should stay
-small: mounts, environment variables, HTTP handlers, and hostcalls are the main
+small: mounts, environment variables, HTTP bridges, and hostcalls are the main
 places where policy mistakes can expose capabilities. Treat those boundaries as
 part of your application security model.

@@ -108,8 +108,9 @@ use `await template.instantiate(**sandbox_config)` instead.
 - `mounts`: `list[MountConfig]`
 - `env`: `dict[str, str]`
 - `hostcalls`: `dict[str, async callable]` used for guest `sandbox.asyncio.hostcall(...)`
-- `http_handler`: `None` to disable guest HTTP, `True` to use the built-in
-  `httpx` bridge, or an async callable for a custom outbound HTTP policy
+- `http`: `None` to disable guest HTTP, `True` to use the built-in `httpx`
+  bridge, or an async callable for a custom outbound HTTP policy
+- `http_handler`: legacy alias for `http`
 
 ### `Sandbox`
 
@@ -263,8 +264,8 @@ Environment variables can be supplied in both template and sandbox config via `e
 
 ## HTTP Bridge
 
-Outbound guest HTTP is disabled unless you pass `http_handler=` when creating
-the sandbox. Use `http_handler=True` to enable the built-in `httpx` pass-through
+Outbound guest HTTP is disabled unless you pass `http=` when creating
+the sandbox. Use `http=True` to enable the built-in `httpx` pass-through
 bridge, or provide your own async handler to enforce a custom HTTP policy.
 
 The guest-side request APIs used inside the sandbox are documented in
@@ -282,7 +283,7 @@ async def body() -> AsyncIterator[bytes]:
     yield b"world"
 
 
-async def http_handler(request: HttpRequest) -> HttpResponse:
+async def http(request: HttpRequest) -> HttpResponse:
     return HttpResponse(
         status=200,
         headers={"content-type": "text/plain"},
@@ -290,7 +291,7 @@ async def http_handler(request: HttpRequest) -> HttpResponse:
     )
 
 
-async with template.create(http_handler=http_handler) as sandbox:
+async with template.create(http=http) as sandbox:
     ...
 ```
 

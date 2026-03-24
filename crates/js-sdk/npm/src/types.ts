@@ -25,7 +25,8 @@ export interface SandboxOptions {
   mounts?: MountConfig[];
   env?: Record<string, string>;
   hostcalls?: Record<string, (payload: JsonValue) => Promise<unknown>>;
-  httpHandler?: (req: HttpRequest) => Promise<HttpResponse>;
+  http?: HttpHandlerConfig;
+  httpHandler?: HttpHandlerConfig;
 }
 
 export interface HttpRequest {
@@ -40,6 +41,9 @@ export interface HttpResponse {
   headers?: Record<string, string>;
   body?: Buffer | null;
 }
+
+export type HttpHandler = (req: HttpRequest) => Promise<HttpResponse>;
+export type HttpHandlerConfig = HttpHandler | true;
 
 export interface ResultEvent {
   type: "result";

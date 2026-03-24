@@ -79,6 +79,7 @@ class HttpResponse:
 
 HttpHandler: TypeAlias = Callable[[HttpRequest], Awaitable[object]]
 HttpHandlerConfig: TypeAlias = HttpHandler | Literal[True] | None
+_MISSING = object()
 
 
 async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
@@ -135,6 +136,7 @@ class SandboxConfig(TypedDict, total=False):
     max_memory: int | None
     mounts: list[MountConfig] | None
     env: dict[str, str]
+    http: HttpHandlerConfig
     http_handler: HttpHandlerConfig
     hostcalls: Hostcalls | None
 
@@ -275,7 +277,7 @@ def _resolve_http_handler(handler: object) -> HttpHandler | None:
     if handler is True:
         return _default_httpx_handler
     if isinstance(handler, bool):
-        msg = "http_handler must be an async callable, True, or None"
+        msg = "http/http_handler must be an async callable, True, or None"
         raise TypeError(msg)
     return cast("HttpHandler", handler)
 
@@ -370,8 +372,17 @@ class SandboxTemplate:
         _configure_core(sandbox._core, patch)  # noqa: SLF001
 
         hostcalls = kwargs.get("hostcalls")
-        http_handler_config: object = kwargs.get("http_handler")
-        http_handler = _resolve_http_handler(http_handler_config)
+        http_config = kwargs.get("http", _MISSING)
+        legacy_http_config = kwargs.get("http_handler", _MISSING)
+        if http_config is not _MISSING and legacy_http_config is not _MISSING:
+            msg = "pass only one of http or http_handler"
+            raise TypeError(msg)
+        selected_http_config = (
+            http_config if http_config is not _MISSING else legacy_http_config
+        )
+        http_handler = _resolve_http_handler(
+            None if selected_http_config is _MISSING else selected_http_config
+        )
         sandbox._set_hostcalls(hostcalls)  # noqa: SLF001
         sandbox._set_http_handler(http_handler)  # noqa: SLF001
         return sandbox

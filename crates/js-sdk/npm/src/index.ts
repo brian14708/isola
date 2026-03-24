@@ -3,6 +3,8 @@ import { resolveRuntime } from "./_runtime.js";
 import { ContextCore, type SandboxCore } from "./isola.js";
 import type {
   Event,
+  HttpHandler,
+  HttpHandlerConfig,
   HttpRequest,
   HttpResponse,
   JsonValue,
@@ -16,6 +18,8 @@ import { Arg } from "./types.js";
 
 export type {
   Event,
+  HttpHandler,
+  HttpHandlerConfig,
   HttpRequest,
   HttpResponse,
   JsonValue,
@@ -162,6 +166,34 @@ function resultToEvents(result: NativeRunResult): Event[] {
   return events;
 }
 
+async function defaultHttpHandler(request: HttpRequest): Promise<HttpResponse> {
+  if (typeof fetch !== "function") {
+    throw new Error(
+      "global fetch is not available; pass a custom http handler",
+    );
+  }
+
+  const response = await fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body ?? undefined,
+  });
+
+  const body = Buffer.from(await response.arrayBuffer());
+  return {
+    status: response.status,
+    headers: Object.fromEntries(response.headers.entries()),
+    body,
+  };
+}
+
+function resolveHttpHandler(
+  http: HttpHandlerConfig | undefined,
+): HttpHandler | undefined {
+  if (http === undefined) return undefined;
+  return http === true ? defaultHttpHandler : http;
+}
+
 // ---------------------------------------------------------------------------
 // Top-level template helper
 // ---------------------------------------------------------------------------
@@ -243,8 +275,12 @@ export class SandboxTemplate {
     if (options?.hostcalls) {
       sandbox._setHostcalls(options.hostcalls);
     }
-    if (options?.httpHandler) {
-      sandbox._setHttpHandler(options.httpHandler);
+    if (options?.http !== undefined && options?.httpHandler !== undefined) {
+      throw new TypeError("pass only one of http or httpHandler");
+    }
+    const http = resolveHttpHandler(options?.http ?? options?.httpHandler);
+    if (http) {
+      sandbox._setHttpHandler(http);
     }
 
     return sandbox;

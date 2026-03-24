@@ -190,7 +190,7 @@ describeIfRuntime("isola js-sdk", () => {
 
   it("should support http handler", async () => {
     const sandbox = await template.create({
-      httpHandler: async (req) => {
+      http: async (req) => {
         expect(req.method).toBe("GET");
         expect(req.url).toBe("https://example.test/hello");
         return {
@@ -219,7 +219,7 @@ describeIfRuntime("isola js-sdk", () => {
   it("should preserve binary http response bodies", async () => {
     const responseBody = Buffer.from([0x00, 0xff, 0xc3, 0x28, 0x80, 0x41]);
     const sandbox = await template.create({
-      httpHandler: async () => ({
+      http: async () => ({
         status: 200,
         body: responseBody,
       }),
@@ -237,6 +237,47 @@ describeIfRuntime("isola js-sdk", () => {
     const result = await sandbox.run("main", ["https://example.test/binary"]);
     expect(result).toEqual([...responseBody]);
     sandbox.close();
+  });
+
+  it("should support http: true", async () => {
+    const fetchMock = vi.fn(async () => {
+      const headers = new Headers({ "x-test": "builtin" });
+      return new Response(Buffer.from("builtin response"), {
+        status: 203,
+        headers,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const sandbox = await template.create({ http: true });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "from sandbox.http import fetch",
+        "",
+        "def main(url):",
+        "    with fetch('GET', url) as resp:",
+        "        data = b''.join(resp.iter_bytes())",
+        "        return [resp.status, resp.headers.get('x-test'), data.decode()]",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/builtin"]);
+    expect(result).toEqual([203, "builtin", "builtin response"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://example.test/builtin",
+      expect.objectContaining({ method: "GET" }),
+    );
+    sandbox.close();
+    vi.unstubAllGlobals();
+  });
+
+  it("should reject conflicting http keys", async () => {
+    await expect(
+      template.create({
+        http: async () => ({ status: 200 }),
+        httpHandler: async () => ({ status: 200 }),
+      }),
+    ).rejects.toThrow("pass only one of http or httpHandler");
   });
 });
 

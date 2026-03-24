@@ -507,7 +507,118 @@ async def test_two_sandboxes_can_run_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_http_handler_bytes_response_shape() -> None:
+async def test_template_create_accepts_http_alias() -> None:
+    class _FakeCore:
+        def __init__(self) -> None:
+            self.callback: Callable[[str, object], None] | None = None
+            self.http_handler: (
+                Callable[
+                    [str, str, dict[str, str], bytes | None],
+                    Awaitable[tuple[int, dict[str, str], str, object]],
+                ]
+                | None
+            ) = None
+            self.http_loop: asyncio.AbstractEventLoop | None = None
+
+        def configure(self, _: object) -> None:
+            pass
+
+        def set_callback(self, callback: Callable[[str, object], None] | None) -> None:
+            self.callback = callback
+
+        def set_http_handler(
+            self,
+            callback: Callable[
+                [str, str, dict[str, str], bytes | None],
+                Awaitable[tuple[int, dict[str, str], str, object]],
+            ]
+            | None,
+            event_loop: asyncio.AbstractEventLoop | None,
+        ) -> None:
+            self.http_handler = callback
+            self.http_loop = event_loop
+
+        @staticmethod
+        def set_hostcall_handler(
+            callback: Callable[[str, object], Awaitable[object]] | None,
+            event_loop: asyncio.AbstractEventLoop | None,
+        ) -> None:
+            _ = callback
+            _ = event_loop
+
+        def close(self) -> None:
+            pass
+
+    class _FakeContextCore:
+        def __init__(self, sandbox_core: _FakeCore) -> None:
+            self.sandbox_core = sandbox_core
+
+        async def instantiate(self) -> _FakeCore:
+            return self.sandbox_core
+
+    core = _FakeCore()
+    template = isola.SandboxTemplate(cast("Any", _FakeContextCore(core)))
+
+    async def http(request: HttpRequest) -> HttpResponse:
+        _ = request
+        await asyncio.sleep(0)
+        return cast("HttpResponse", isola.HttpResponse(status=204))
+
+    await template.instantiate(http=http)
+
+    assert core.http_handler is not None
+    assert core.http_loop is asyncio.get_running_loop()
+
+
+@pytest.mark.asyncio
+async def test_template_create_rejects_conflicting_http_keys() -> None:
+    class _FakeCore:
+        def configure(self, _: object) -> None:
+            pass
+
+        def set_callback(self, _: Callable[[str, object], None] | None) -> None:
+            pass
+
+        @staticmethod
+        def set_http_handler(
+            callback: Callable[
+                [str, str, dict[str, str], bytes | None],
+                Awaitable[tuple[int, dict[str, str], str, object]],
+            ]
+            | None,
+            event_loop: asyncio.AbstractEventLoop | None,
+        ) -> None:
+            _ = callback
+            _ = event_loop
+
+        @staticmethod
+        def set_hostcall_handler(
+            callback: Callable[[str, object], Awaitable[object]] | None,
+            event_loop: asyncio.AbstractEventLoop | None,
+        ) -> None:
+            _ = callback
+            _ = event_loop
+
+        def close(self) -> None:
+            pass
+
+    class _FakeContextCore:
+        @staticmethod
+        async def instantiate() -> _FakeCore:
+            return _FakeCore()
+
+    template = isola.SandboxTemplate(cast("Any", _FakeContextCore()))
+
+    async def http(_: HttpRequest) -> HttpResponse:
+        await asyncio.sleep(0)
+        return cast("HttpResponse", isola.HttpResponse(status=200))
+
+    with pytest.raises(TypeError, match="pass only one of http or http_handler"):
+        await template.instantiate(http=http, http_handler=http)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_http_bytes_response_shape() -> None:
     runtime_dir, lib_dir = _resolve_runtime_paths()
     template = await isola.build_template(
         "python",
@@ -516,7 +627,7 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
         runtime_lib_dir=lib_dir,
     )
 
-    async def http_handler(_: HttpRequest) -> HttpResponse:
+    async def http(_: HttpRequest) -> HttpResponse:
         await asyncio.sleep(0)
         return cast(
             "HttpResponse",
@@ -527,7 +638,7 @@ async def test_sandbox_http_handler_bytes_response_shape() -> None:
             ),
         )
 
-    async with template.create(http_handler=http_handler) as sandbox:
+    async with template.create(http=http) as sandbox:
         await sandbox.load_script(_FETCH_SCRIPT)
 
         result = await sandbox.run("main", "https://example.test/bytes")
@@ -562,7 +673,7 @@ async def test_sandbox_hostcalls_roundtrip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sandbox_http_handler_stream_response_shape() -> None:
+async def test_sandbox_http_stream_response_shape() -> None:
     runtime_dir, lib_dir = _resolve_runtime_paths()
     template = await isola.build_template(
         "python",
@@ -577,7 +688,7 @@ async def test_sandbox_http_handler_stream_response_shape() -> None:
         await asyncio.sleep(0)
         yield b"b"
 
-    async def http_handler(req: HttpRequest) -> HttpResponse:
+    async def http(req: HttpRequest) -> HttpResponse:
         assert req.method == "GET"
         assert req.url == "https://example.test/stream"
         await asyncio.sleep(0)
@@ -590,7 +701,7 @@ async def test_sandbox_http_handler_stream_response_shape() -> None:
             ),
         )
 
-    async with template.create(http_handler=http_handler) as sandbox:
+    async with template.create(http=http) as sandbox:
         await sandbox.load_script(_FETCH_SCRIPT)
 
         result = await sandbox.run("main", "https://example.test/stream")
@@ -611,7 +722,7 @@ async def test_sandbox_caller_timeout_does_not_break_following_requests() -> Non
         await asyncio.sleep(0)
         return cast("HttpResponse", isola.HttpResponse(status=200, body=b"ok"))
 
-    async with template.create(http_handler=warmup_handler) as warmup:
+    async with template.create(http=warmup_handler) as warmup:
         await warmup.load_script(_FETCH_SCRIPT)
         result = await warmup.run("main", "https://example.test/warmup")
         assert result == [200, None, "ok"]
@@ -623,7 +734,7 @@ async def test_sandbox_caller_timeout_does_not_break_following_requests() -> Non
             message = "unreachable"
             raise AssertionError(message)
 
-        async with template.create(http_handler=hanging_handler) as sandbox:
+        async with template.create(http=hanging_handler) as sandbox:
             await sandbox.load_script(_FETCH_SCRIPT)
             with pytest.raises(asyncio.TimeoutError):
                 await asyncio.wait_for(
@@ -636,7 +747,7 @@ async def test_sandbox_caller_timeout_does_not_break_following_requests() -> Non
         await asyncio.sleep(0)
         return cast("HttpResponse", isola.HttpResponse(status=200, body=b"ok"))
 
-    async with template.create(http_handler=recovery_handler) as sandbox:
+    async with template.create(http=recovery_handler) as sandbox:
         await sandbox.load_script(_FETCH_SCRIPT)
         result = await sandbox.run("main", "https://example.test/recovery")
         assert result == [200, None, "ok"]
