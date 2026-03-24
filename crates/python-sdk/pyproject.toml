@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "isola"
-version = "0.2.2"
+version = "0.3.0"
 description = "Async Python bindings for the Isola runtime"
 license = "Apache-2.0"
 readme = "README.md"
