@@ -1,6 +1,6 @@
 [project]
 name = "isola-python-runtime"
-version = "0.3.1"
+version = "0.3.2"
 requires-python = ">=3.14"
 dependencies = [
     "pydantic>=2.11.1",
