@@ -1,9 +1,13 @@
 # Quick Start
 
-This page covers the fastest ways to get Isola running:
+This page covers the fastest host-side ways to get Isola running:
 
 - Embed the runtime directly from Python with the `isola` SDK
 - Embed the runtime directly from Node.js with `isola-core`
+
+For the APIs available inside sandboxed guest code, see
+[Python Guest API](python-guest-api.md) and
+[JavaScript Guest API](javascript-guest-api.md).
 
 ## Python SDK
 
@@ -85,7 +89,9 @@ Expected output:
 
 If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `build_template(...)` instead. Outbound guest HTTP is disabled by default; pass `http_handler=True` for the built-in `httpx` bridge or supply `http_handler=` with your own async handler. Use `SandboxContext` only when you want explicit context ownership.
 
-For the SDK surface area and type reference, see [Python API](python-api.md).
+For the host-side SDK surface area and type reference, see
+[Python Host API](python-api.md). For the guest-side runtime modules used inside
+the sandbox, see [Python Guest API](python-guest-api.md).
 
 ## JavaScript / TypeScript SDK
 
@@ -146,4 +152,6 @@ console.log(result); // { user_id: 7, name: 'user-7' }
 
 If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `buildTemplate(...)` instead. Use `SandboxContext` only when you want explicit context ownership.
 
-For the SDK surface area and type reference, see [Node.js API](nodejs-api.md).
+For the host-side SDK surface area and type reference, see
+[Node.js Host API](nodejs-api.md). For the guest-side globals available inside
+the sandbox, see [JavaScript Guest API](javascript-guest-api.md).

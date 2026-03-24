@@ -5,8 +5,12 @@ repo_name: "brian14708/isola"
 nav:
   - Home: index.md
   - Quick Start: quick-start.md
-  - Python API: python-api.md
-  - Node.js API: nodejs-api.md
+  - Host APIs:
+      - Python SDK: python-api.md
+      - Node.js SDK: nodejs-api.md
+  - Guest APIs:
+      - Python Guest Runtime: python-guest-api.md
+      - JavaScript Guest Runtime: javascript-guest-api.md
 
 theme:
   name: material

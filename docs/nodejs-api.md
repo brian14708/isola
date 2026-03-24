@@ -1,7 +1,12 @@
-# Node.js API
+# Node.js Host API
 
-The `isola-core` package exposes an async API for compiling sandbox templates and
-running code inside isolated runtimes from Node.js.
+The `isola-core` package exposes an async host-side API for compiling sandbox
+templates and running code inside isolated runtimes from Node.js.
+
+This page documents the embedding SDK that runs in your host process. For the
+Python modules available inside Python guests, see
+[Python Guest API](python-guest-api.md). For the JavaScript globals available
+inside JS guests, see [JavaScript Guest API](javascript-guest-api.md).
 
 ## Install
 
@@ -153,11 +158,16 @@ pass a single object as a positional argument, wrap it in that array:
 ## Hostcalls
 
 Register host callbacks when the sandbox is created. Each handler receives the
-decoded JSON payload for its call name and must return a JSON-serializable
-value.
+decoded payload for its call name and must return a serializable value.
 
-Python guests call back into the host with `sandbox.asyncio.hostcall(...)`.
-JS guests call back into the host with top-level `await hostcall(...)`.
+Guest sandboxes invoke these handlers with their runtime-specific guest APIs:
+
+- Python guests use `sandbox.asyncio.hostcall(...)`
+- JS guests use top-level `await hostcall(...)`
+
+Those guest-side call sites are documented separately in
+[Python Guest API](python-guest-api.md) and
+[JavaScript Guest API](javascript-guest-api.md).
 
 ```typescript
 import { buildTemplate } from "isola-core";
@@ -253,6 +263,10 @@ Environment variables can be supplied in both template and sandbox config via
 
 When guest code makes outbound HTTP requests, the sandbox calls the configured
 `httpHandler`.
+
+The guest-side request APIs used inside the sandbox are documented in
+[Python Guest API](python-guest-api.md) and
+[JavaScript Guest API](javascript-guest-api.md).
 
 ```typescript
 import type { HttpRequest, HttpResponse } from "isola-core";

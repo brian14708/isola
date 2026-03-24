@@ -1,6 +1,12 @@
-# Python API
+# Python Host API
 
-The `isola` package exposes an async API for compiling sandbox templates and running code inside isolated runtimes.
+The `isola` package exposes an async host-side API for compiling sandbox
+templates and running code inside isolated runtimes.
+
+This page documents the embedding SDK that runs in your host process. For the
+Python modules available inside sandboxed guest code, see
+[Python Guest API](python-guest-api.md). For the JavaScript globals available
+inside JS guests, see [JavaScript Guest API](javascript-guest-api.md).
 
 ## Install
 
@@ -169,9 +175,17 @@ Available constructors:
 
 ## Hostcalls
 
-Guest Python code can call back into the host with
-`sandbox.asyncio.hostcall(...)`. JS guests call back into the host with
-top-level `await hostcall(...)`.
+Register host callbacks when the sandbox is created. Each handler receives the
+decoded payload for its call name and must return a serializable value.
+
+Guest sandboxes invoke these handlers with their runtime-specific guest APIs:
+
+- Python guests use `sandbox.asyncio.hostcall(...)`
+- JS guests use top-level `await hostcall(...)`
+
+Those guest-side call sites are documented separately in
+[Python Guest API](python-guest-api.md) and
+[JavaScript Guest API](javascript-guest-api.md).
 
 ```python
 from sandbox.asyncio import hostcall
@@ -193,8 +207,6 @@ async with template.create(hostcalls={"lookup_user": lookup_user}) as sandbox:
 ```
 
 Configure hostcalls and HTTP behavior when the sandbox is created.
-
-Each hostcall handler receives the decoded JSON payload for its registered call name and must return a JSON-serializable value.
 
 ## Events and Results
 
@@ -254,6 +266,10 @@ Environment variables can be supplied in both template and sandbox config via `e
 Outbound guest HTTP is disabled unless you pass `http_handler=` when creating
 the sandbox. Use `http_handler=True` to enable the built-in `httpx` pass-through
 bridge, or provide your own async handler to enforce a custom HTTP policy.
+
+The guest-side request APIs used inside the sandbox are documented in
+[Python Guest API](python-guest-api.md) and
+[JavaScript Guest API](javascript-guest-api.md).
 
 ```python
 from collections.abc import AsyncIterator
