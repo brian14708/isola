@@ -1,5 +1,10 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import { Arg, buildTemplate, type SandboxTemplate } from "../src/index.js";
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  Arg,
+  buildTemplate,
+  Sandbox,
+  type SandboxTemplate,
+} from "../src/index.js";
 import type { Event } from "../src/types.js";
 
 const RUNTIME_PATH = process.env.ISOLA_RUNTIME_PATH;
@@ -255,5 +260,100 @@ describe("Arg", () => {
     const a = new Arg({ x: 1 }, "opts");
     expect(a.value).toEqual({ x: 1 });
     expect(a.name).toBe("opts");
+  });
+});
+
+describe("kwargs", () => {
+  it("should merge positional args and kwargs in run", async () => {
+    const run = vi.fn(async () => ({
+      resultJson: [],
+      finalJson: JSON.stringify(3),
+      stdout: [],
+      stderr: [],
+      logs: [],
+      errors: [],
+    }));
+    const sandbox = new Sandbox({
+      run,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    const result = await sandbox.run("add", [1], { b: 2 });
+
+    expect(run).toHaveBeenCalledWith("add", [
+      ["json", null, 1],
+      ["json", "b", 2],
+    ]);
+    expect(result).toBe(3);
+  });
+
+  it("should support kwargs in runStream", async () => {
+    let callback: ((kind: string, data: string | null) => void) | null = null;
+    const run = vi.fn(async () => {
+      callback?.("result", JSON.stringify("streamed"));
+      return {
+        resultJson: [],
+        finalJson: JSON.stringify("done"),
+        stdout: [],
+        stderr: [],
+        logs: [],
+        errors: [],
+      };
+    });
+    const sandbox = new Sandbox({
+      run,
+      close: vi.fn(),
+      setCallback: vi.fn((next) => {
+        callback = next as typeof callback;
+      }),
+    } as never);
+
+    const events = [];
+    for await (const event of sandbox.runStream("greet", [], {
+      name: "World",
+    })) {
+      events.push(event);
+    }
+
+    expect(run).toHaveBeenCalledWith("greet", [["json", "name", "World"]]);
+    expect(events).toEqual([
+      { type: "result", data: "streamed" },
+      { type: "end", data: "done" },
+    ]);
+  });
+
+  it("should reject conflicting Arg names in kwargs", async () => {
+    const run = vi.fn();
+    const sandbox = new Sandbox({
+      run,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("greet", [], {
+        greeting: new Arg("Hi", "salutation"),
+      }),
+    ).rejects.toThrow(
+      "keyword argument 'greeting' conflicts with explicit argument name 'salutation'",
+    );
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("should reject kwargs passed as the second argument", async () => {
+    const run = vi.fn();
+    const sandbox = new Sandbox({
+      run,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("greet", { name: "World" } as never),
+    ).rejects.toThrow(
+      "sandbox args must be an array; pass kwargs as the third argument",
+    );
+    expect(run).not.toHaveBeenCalled();
   });
 });

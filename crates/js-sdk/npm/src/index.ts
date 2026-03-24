@@ -1,16 +1,18 @@
 import { resolveRuntime } from "./_runtime.js";
 // @ts-expect-error - napi bindings are generated at build time
 import { ContextCore, type SandboxCore } from "./isola.js";
-
 import type {
   Event,
   HttpRequest,
   HttpResponse,
   JsonValue,
+  RunArg,
+  RunKwargs,
   RuntimeName,
   SandboxOptions,
   TemplateOptions,
 } from "./types.js";
+import { Arg } from "./types.js";
 
 export type {
   Event,
@@ -18,6 +20,8 @@ export type {
   HttpResponse,
   JsonValue,
   MountConfig,
+  RunArg,
+  RunKwargs,
   RuntimeName,
   SandboxOptions,
   TemplateOptions,
@@ -47,15 +51,43 @@ type NativeRunResult = {
   errors: string[];
 };
 
-function encodeArgs(args?: unknown[]): WireArgument[] {
+function encodeArgs(args?: RunArg[]): WireArgument[] {
   if (!args) return [];
   return args.map((arg): WireArgument => {
-    if (arg instanceof Object && "name" in arg && "value" in arg) {
+    if (arg instanceof Arg) {
       const a = arg as { value: unknown; name?: string };
       return ["json", a.name ?? null, a.value];
     }
     return ["json", null, arg];
   });
+}
+
+function normalizeKeywordArg(name: string, value: RunArg): Arg {
+  if (value instanceof Arg) {
+    if (value.name !== undefined && value.name !== name) {
+      throw new TypeError(
+        `keyword argument '${name}' conflicts with explicit argument name '${value.name}'`,
+      );
+    }
+    return new Arg(value.value, name);
+  }
+  return new Arg(value, name);
+}
+
+function mergeRunArgs(args?: RunArg[], kwargs?: RunKwargs): RunArg[] {
+  if (args !== undefined && !Array.isArray(args)) {
+    throw new TypeError(
+      "sandbox args must be an array; pass kwargs as the third argument",
+    );
+  }
+
+  if (!kwargs) return args ? [...args] : [];
+
+  return (args ? [...args] : []).concat(
+    Object.entries(kwargs).map(([name, value]) =>
+      normalizeKeywordArg(name, value),
+    ),
+  );
 }
 
 function unpackTuple<T extends unknown[]>(raw: unknown[]): T {
@@ -273,8 +305,12 @@ export class Sandbox {
     await this._core.loadScript(code);
   }
 
-  async run(name: string, args?: unknown[]): Promise<JsonValue | null> {
-    const encoded = encodeArgs(args);
+  async run(
+    name: string,
+    args?: RunArg[],
+    kwargs?: RunKwargs,
+  ): Promise<JsonValue | null> {
+    const encoded = encodeArgs(mergeRunArgs(args, kwargs));
     const result = await this._core.run(name, encoded);
     return result.finalJson
       ? (JSON.parse(result.finalJson) as JsonValue)
@@ -283,7 +319,8 @@ export class Sandbox {
 
   async *runStream(
     name: string,
-    args?: unknown[],
+    args?: RunArg[],
+    kwargs?: RunKwargs,
   ): AsyncGenerator<Event, void, undefined> {
     const queue: Event[] = [];
     const emitted = new Map<string, number>();
@@ -317,7 +354,7 @@ export class Sandbox {
       }
     });
 
-    const encoded = encodeArgs(args);
+    const encoded = encodeArgs(mergeRunArgs(args, kwargs));
     const runPromise = this._core
       .run(name, encoded)
       .then((result: NativeRunResult) => {

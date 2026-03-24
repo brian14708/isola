@@ -85,3 +85,6 @@ export class Arg {
     public name?: string,
   ) {}
 }
+
+export type RunArg = JsonValue | Arg;
+export type RunKwargs = Record<string, RunArg>;

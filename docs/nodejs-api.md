@@ -111,8 +111,8 @@ Public methods:
 
 - `await start()`
 - `await loadScript(code)`
-- `await run(name, args?) -> JsonValue | null`
-- `runStream(name, args?) -> AsyncGenerator<Event>`
+- `await run(name, args?, kwargs?) -> JsonValue | null`
+- `runStream(name, args?, kwargs?) -> AsyncGenerator<Event>`
 - `close()`
 - `await sandbox[Symbol.asyncDispose]()`
 
@@ -126,6 +126,15 @@ Call `start()` before loading scripts or executing functions.
 const result = await sandbox.run("add", [1, 2]);
 ```
 
+Pass kwargs as the third argument:
+
+```typescript
+const result = await sandbox.run("greet", [], {
+  name: "World",
+  greeting: "Hi",
+});
+```
+
 Use `Arg` to pass a named argument:
 
 ```typescript
@@ -136,6 +145,10 @@ const result = await sandbox.run("greet", [
   new Arg("Hi", "greeting"),
 ]);
 ```
+
+The second argument must always be the positional args array. If you need to
+pass a single object as a positional argument, wrap it in that array:
+`sandbox.run("echo", [{ hello: "world" }])`.
 
 ## Hostcalls
 
