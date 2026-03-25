@@ -1,3 +1,5 @@
+#![allow(linker_messages)]
+
 mod error;
 mod script;
 mod serde;

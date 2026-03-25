@@ -93,6 +93,7 @@ stdenv.mkDerivation {
         cp --no-preserve=mode -rL $pkg/${pythonSitePackages}/* $dev/${pythonSitePackages}/
       done
       cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so $dev/lib
+      cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/noeh/*.so $dev/lib
 
       mkdir -p $out/${pythonSitePackages} $out/lib/python${pythonVersion}/lib-dynload
       for pkg in ${outPackagesList}; do
