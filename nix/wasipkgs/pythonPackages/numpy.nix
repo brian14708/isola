@@ -26,6 +26,29 @@ stdenv.mkDerivation {
   configurePhase = ''
     runHook preConfigure
 
+    wasi_longdouble_size="$(
+      ${sdk}/bin/clang -dM -E -x c /dev/null \
+        --target=wasm32-wasip1 \
+        --sysroot=${sdk}/share/wasi-sysroot | sed -n 's/^#define __SIZEOF_LONG_DOUBLE__ //p'
+    )"
+    wasi_longdouble_mant_dig="$(
+      ${sdk}/bin/clang -dM -E -x c /dev/null \
+        --target=wasm32-wasip1 \
+        --sysroot=${sdk}/share/wasi-sysroot | sed -n 's/^#define __LDBL_MANT_DIG__ //p'
+    )"
+    case "$wasi_longdouble_size:$wasi_longdouble_mant_dig" in
+      8:53)
+        wasi_longdouble_format=IEEE_DOUBLE_LE
+        ;;
+      16:113)
+        wasi_longdouble_format=IEEE_QUAD_LE
+        ;;
+      *)
+        echo "unsupported WASI long double format: size=$wasi_longdouble_size mant_dig=$wasi_longdouble_mant_dig" >&2
+        exit 1
+        ;;
+    esac
+
     # Create Meson cross-compilation configuration
     cat > cross.cfg << EOF
     [constants]
@@ -62,7 +85,7 @@ stdenv.mkDerivation {
     endian = 'little'
 
     [properties]
-    longdouble_format = 'IEEE_DOUBLE_LE'
+    longdouble_format = '$wasi_longdouble_format'
     EOF
 
     export PYTHONPATH=${python}/lib/python3.14

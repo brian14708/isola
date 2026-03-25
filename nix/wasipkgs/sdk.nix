@@ -4,11 +4,12 @@
   autoPatchelfHook,
   lib,
   binaryen,
+  ncurses,
 }:
 
 stdenv.mkDerivation (finalAttrs: rec {
   pname = "wasi-sdk";
-  version = "30";
+  version = "32";
 
   src = fetchurl (
     let
@@ -16,22 +17,22 @@ stdenv.mkDerivation (finalAttrs: rec {
         if stdenv.hostPlatform.system == "x86_64-linux" then
           {
             os = "x86_64-linux";
-            hash = "sha256-BQdnnf8WgUt0UWzZaamxbSztE0c4gCS8eWYmRkjHi/s=";
+            hash = "sha256-VfxSPr+8mPadEDT8/Lg9H/VhDNmrfs7vbNCXowuk75M=";
           }
         else if stdenv.hostPlatform.system == "aarch64-linux" then
           {
             os = "arm64-linux";
-            hash = "sha256-byl3lCMI2RsBI5eNo8ag1vzngJlLOwIACMYX4mdk6kA=";
+            hash = "sha256-sgcIZebLDB6Xo45qyNnDep380HUnZOurxrrNPmDO25Y=";
           }
         else if stdenv.hostPlatform.system == "aarch64-darwin" then
           {
             os = "arm64-macos";
-            hash = "sha256-LC7ZkpaFfmD9FMP0D+ImIx8pZAlQJJEJRwQInDGhZ0A=";
+            hash = "sha256-ODvn/gCuBGkeGFkWT9mZcKUoxV1iS4hu1Z95M4mLkz0=";
           }
         else if stdenv.hostPlatform.system == "x86_64-darwin" then
           {
             os = "x86_64-macos";
-            hash = "sha256-FZSgeRMJeBvw0CJEMcNVbsSiMmsgVoe2WfZVDQjYsT4=";
+            hash = "sha256-o2yasQakCr6KBRJ5wjPGurcZpXiOzAeI6NFBeW61Wxs=";
           }
         else
           throw "Unsupported platform: ${stdenv.hostPlatform.system}";
@@ -44,11 +45,15 @@ stdenv.mkDerivation (finalAttrs: rec {
 
   nativeBuildInputs = [ binaryen ] ++ lib.optionals stdenv.isLinux [ autoPatchelfHook ];
 
-  buildInputs = lib.optionals stdenv.isLinux [ stdenv.cc.cc ];
+  buildInputs = lib.optionals stdenv.isLinux [
+    stdenv.cc.cc
+    ncurses
+  ];
 
   dontBuild = true;
   dontConfigure = true;
   dontStrip = true;
+  dontUpdateAutotoolsGnuConfigScripts = true;
 
   installPhase = ''
     runHook preInstall

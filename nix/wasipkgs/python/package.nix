@@ -73,6 +73,11 @@ stdenv.mkDerivation rec {
       --prefix $out \
       --output $out/lib/python314.zip
 
+    clang_rt_builtins="$(
+      find ${sdk}/lib/clang -path '*/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a' -print -quit
+    )"
+    test -n "$clang_rt_builtins"
+
     touch $out/python-stub.c
     $CC $CFLAGS \
       -shared -o $out/lib/libpython3.14.so \
@@ -87,7 +92,7 @@ stdenv.mkDerivation rec {
       $PWD/Modules/_hacl/libHacl_HMAC.a \
       $PWD/Modules/_decimal/libmpdec/libmpdec.a \
       $PWD/Modules/expat/libexpat.a \
-      ${sdk}/lib/clang/21/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a \
+      "$clang_rt_builtins" \
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-signal.so \
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so \
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-getpid.so \
