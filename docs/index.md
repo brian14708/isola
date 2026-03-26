@@ -1,7 +1,5 @@
 ---
 title: Home
-hide:
-  - toc
 ---
 
 # Isola
@@ -16,3 +14,6 @@ The documentation is split by where code runs:
   policy.
 - Guest APIs cover the Python `sandbox.*` modules and the JavaScript globals
   available inside sandboxed code.
+- Use-case guides cover higher-level integration patterns. Start with
+  [Codemode](codemode-use-case.md) if you want model-written code to orchestrate
+  tools inside a sandbox instead of exposing every tool directly to the model.
