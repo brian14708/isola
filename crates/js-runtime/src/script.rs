@@ -1,10 +1,11 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, path::Path};
 
 use rquickjs::{Array, Context, Ctx, Function, Object, Runtime, Value, function::Args};
 
 use crate::{
     error::{Error, Result},
     serde::{cbor_to_js, js_to_cbor_emit},
+    transpile::strip_typescript,
     wasm::{future, isola::script::host::EmitType},
 };
 
@@ -20,16 +21,20 @@ pub enum InputValue<'a> {
 }
 
 impl Scope {
+    fn transpile(code: &str, source_name: Option<&Path>) -> Result<String> {
+        strip_typescript(code, source_name).map_err(|err| Error::Transpile(err.to_string()))
+    }
+
     fn input_to_js<'js>(ctx: &Ctx<'js>, input: InputValue<'_>) -> Result<Value<'js>> {
         match input {
-            InputValue::Cbor(cbor) => cbor_to_js(ctx, cbor.as_ref()).map_err(|e| Error::JsError {
+            InputValue::Cbor(cbor) => cbor_to_js(ctx, cbor.as_ref()).map_err(|e| Error::Js {
                 cause: e,
                 stack: None,
             }),
             InputValue::Iter(items) => {
                 let arr = Array::new(ctx.clone()).map_err(|_| Error::from_js_catch(ctx))?;
                 for (index, item) in items.into_iter().enumerate() {
-                    let value = cbor_to_js(ctx, &item).map_err(|e| Error::JsError {
+                    let value = cbor_to_js(ctx, &item).map_err(|e| Error::Js {
                         cause: e,
                         stack: None,
                     })?;
@@ -55,15 +60,17 @@ impl Scope {
     }
 
     pub fn load_script(&self, code: &str) -> Result<()> {
+        let code = Self::transpile(code, None)?;
         self.context.with(|ctx| {
-            ctx.eval::<(), _>(code)
+            ctx.eval::<(), _>(code.as_str())
                 .map_err(|_| Error::from_js_catch(&ctx))
         })
     }
 
     pub fn load_file(&self, path: &str) -> Result<()> {
         let code = std::fs::read_to_string(path)
-            .map_err(|_| Error::UnexpectedError("failed to read script"))?;
+            .map_err(|_| Error::Unexpected("failed to read script"))?;
+        let code = Self::transpile(&code, Some(Path::new(path)))?;
         self.context.with(|ctx| {
             ctx.eval::<(), _>(code.as_str())
                 .map_err(|_| Error::from_js_catch(&ctx))
@@ -84,7 +91,7 @@ impl Scope {
             let obj = if val.is_function() {
                 let func = val
                     .as_function()
-                    .ok_or(Error::UnexpectedError("expected function"))?;
+                    .ok_or(Error::Unexpected("expected function"))?;
 
                 // Build arguments
                 let mut args: Vec<Value<'_>> = Vec::new();
@@ -152,12 +159,12 @@ impl Scope {
 
             // No microtasks remaining — poll pending WASI I/O
             if !future::has_pending() {
-                return Err(Error::UnexpectedError("promise never resolved"));
+                return Err(Error::Unexpected("promise never resolved"));
             }
 
             let ready_handles = future::poll_all();
             if ready_handles.is_empty() {
-                return Err(Error::UnexpectedError("poll returned no ready handles"));
+                return Err(Error::Unexpected("poll returned no ready handles"));
             }
 
             // Call JS _isola_async._resolve(readyHandles)
@@ -185,7 +192,7 @@ impl Scope {
         if result.is_promise() {
             let promise = result
                 .as_promise()
-                .ok_or(Error::UnexpectedError("expected promise"))?;
+                .ok_or(Error::Unexpected("expected promise"))?;
 
             self.drive_promise(ctx, promise)
         } else {
@@ -240,18 +247,16 @@ impl Scope {
                     if value.is_undefined() {
                         callback(EmitType::End, &[]);
                     } else {
-                        js_to_cbor_emit(value, EmitType::End, callback).map_err(|e| {
-                            Error::JsError {
-                                cause: e,
-                                stack: None,
-                            }
+                        js_to_cbor_emit(value, EmitType::End, callback).map_err(|e| Error::Js {
+                            cause: e,
+                            stack: None,
                         })?;
                     }
                     return Ok(());
                 }
 
                 js_to_cbor_emit(value, EmitType::PartialResult, &mut *callback).map_err(|e| {
-                    Error::JsError {
+                    Error::Js {
                         cause: e,
                         stack: None,
                     }
@@ -261,7 +266,7 @@ impl Scope {
 
         // Regular serializable value
         if Self::is_serializable(&obj) {
-            return js_to_cbor_emit(obj, EmitType::End, callback).map_err(|e| Error::JsError {
+            return js_to_cbor_emit(obj, EmitType::End, callback).map_err(|e| Error::Js {
                 cause: e,
                 stack: None,
             });
@@ -292,7 +297,7 @@ impl Scope {
                         .get("value")
                         .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
                     js_to_cbor_emit(value, EmitType::PartialResult, &mut *callback).map_err(
-                        |e| Error::JsError {
+                        |e| Error::Js {
                             cause: e,
                             stack: None,
                         },
@@ -301,7 +306,7 @@ impl Scope {
             }
         }
 
-        Err(Error::UnexpectedError(
+        Err(Error::Unexpected(
             "Return type is not serializable or iterable",
         ))
     }
@@ -325,9 +330,9 @@ impl Scope {
 
             // Drive the promise to completion
             let iter_result = if next_result.is_promise() {
-                let promise = next_result.as_promise().ok_or(Error::UnexpectedError(
-                    "expected promise from async generator",
-                ))?;
+                let promise = next_result
+                    .as_promise()
+                    .ok_or(Error::Unexpected("expected promise from async generator"))?;
                 self.drive_promise(ctx, promise)?
             } else {
                 next_result
@@ -336,7 +341,7 @@ impl Scope {
             let iter_obj: Object<'_> = iter_result
                 .as_object()
                 .cloned()
-                .ok_or(Error::UnexpectedError("expected object from next()"))?;
+                .ok_or(Error::Unexpected("expected object from next()"))?;
             let done: bool = iter_obj.get("done").unwrap_or(false);
             let value: Value<'_> = iter_obj
                 .get("value")
@@ -346,18 +351,16 @@ impl Scope {
                 if value.is_undefined() {
                     callback(EmitType::End, &[]);
                 } else {
-                    js_to_cbor_emit(value, EmitType::End, callback).map_err(|e| {
-                        Error::JsError {
-                            cause: e,
-                            stack: None,
-                        }
+                    js_to_cbor_emit(value, EmitType::End, callback).map_err(|e| Error::Js {
+                        cause: e,
+                        stack: None,
                     })?;
                 }
                 return Ok(());
             }
 
             js_to_cbor_emit(value, EmitType::PartialResult, &mut *callback).map_err(|e| {
-                Error::JsError {
+                Error::Js {
                     cause: e,
                     stack: None,
                 }

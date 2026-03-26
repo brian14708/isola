@@ -140,3 +140,25 @@ async fn build_module_with_policy(
 pub async fn build_module() -> Result<Option<SandboxTemplate<TestHost>>> {
     build_module_with_policy(None).await
 }
+
+pub async fn build_module_with_prelude(
+    prelude: Option<String>,
+) -> Result<Option<SandboxTemplate<TestHost>>> {
+    let _build_guard = build_module_lock().lock().await;
+    let Some(wasm) = resolve_prereqs()? else {
+        return Ok(None);
+    };
+    let cache_dir = wasm
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
+        .join("cache");
+
+    let module = SandboxTemplate::<TestHost>::builder()
+        .cache(Some(cache_dir))
+        .prelude(prelude)
+        .build(&wasm)
+        .await
+        .context("failed to build module from JS integration wasm bundle")?;
+
+    Ok(Some(module))
+}

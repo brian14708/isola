@@ -4,11 +4,14 @@ use anyhow::{Context, Result};
 use futures::stream;
 use isola::{
     host::NoopOutputSink,
-    sandbox::{Arg, CallOutput, Error as IsolaError, Sandbox, SandboxOptions, args},
+    sandbox::{
+        Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
+    },
     value::Value,
 };
+use tempfile::tempdir;
 
-use super::common::{TestHost, build_module};
+use super::common::{TestHost, build_module, build_module_with_prelude};
 
 async fn call_with_timeout<I>(
     sandbox: &mut Sandbox<TestHost>,
@@ -598,5 +601,160 @@ function main(values) {
         .context("failed to decode stream-arg result")?;
     assert_eq!(value, vec![2, 4, 6]);
 
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_typescript_eval_and_call_roundtrip() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "function main(value: number): number { return value + 1; }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate typescript script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", args![41_i64]?, Duration::from_secs(5))
+        .await
+        .context("failed to call typescript function")?;
+
+    let value: i64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode typescript result")?;
+    assert_eq!(value, 42);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_typescript_async_hostcall_roundtrip() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "async function main(name: string): Promise<{ name: string }> {\n\
+                 return await hostcall(\"echo\", { name } as { name: string });\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate hostcall typescript script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args!["isola"]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call hostcall typescript function")?;
+
+    let value: serde_json::Value = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode hostcall typescript result")?;
+    assert_eq!(value, serde_json::json!({ "name": "isola" }));
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_typescript_prelude_executes() -> Result<()> {
+    let Some(module) =
+        build_module_with_prelude(Some("const preludeValue: number = 42;".to_string())).await?
+    else {
+        return Ok(());
+    };
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "function main() { return preludeValue; }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate consumer script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call prelude function")?;
+
+    let value: i64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode prelude result")?;
+    assert_eq!(value, 42);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_typescript_eval_file_roundtrip() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let fixture_dir = tempdir().context("failed to create tempdir")?;
+    let script_path = fixture_dir.path().join("guest.ts");
+    std::fs::write(
+        &script_path,
+        "function main(input: number): number { return input * 2; }",
+    )
+    .context("failed to write typescript guest file")?;
+
+    let mut options = SandboxOptions::default();
+    options.mount(
+        fixture_dir.path(),
+        "/workspace",
+        DirPerms::READ,
+        FilePerms::READ,
+    );
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), options)
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_file("/workspace/guest.ts", NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate typescript guest file")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", args![21_i64]?, Duration::from_secs(5))
+        .await
+        .context("failed to call file-backed typescript function")?;
+
+    let value: i64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode file-backed typescript result")?;
+    assert_eq!(value, 42);
     Ok(())
 }

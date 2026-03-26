@@ -89,7 +89,7 @@ impl runtime::Guest for Global {
     fn eval_script(script: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
-                || Err(Error::UnexpectedError("Sandbox not initialized").into()),
+                || Err(Error::Unexpected("Sandbox not initialized").into()),
                 |sandbox| {
                     sandbox
                         .load_script(&script)
@@ -102,7 +102,7 @@ impl runtime::Guest for Global {
     fn eval_file(path: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
-                || Err(Error::UnexpectedError("Sandbox not initialized").into()),
+                || Err(Error::Unexpected("Sandbox not initialized").into()),
                 |sandbox| {
                     sandbox
                         .load_file(&path)
@@ -115,7 +115,7 @@ impl runtime::Guest for Global {
     fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
-                || Err(Error::UnexpectedError("Sandbox not initialized").into()),
+                || Err(Error::Unexpected("Sandbox not initialized").into()),
                 |sandbox| {
                     let mut positional = vec![];
                     let mut named = vec![];
