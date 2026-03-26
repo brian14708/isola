@@ -1627,7 +1627,7 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "isola"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "isola-c-api"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1680,14 +1680,14 @@ dependencies = [
 
 [[package]]
 name = "isola-c-api-export"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "isola-c-api",
 ]
 
 [[package]]
 name = "isola-js-runtime"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "heapless",
  "minicbor",
@@ -1704,7 +1704,7 @@ dependencies = [
 
 [[package]]
 name = "isola-js-sdk"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1725,7 +1725,7 @@ dependencies = [
 
 [[package]]
 name = "isola-python-runtime"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64",
  "eventsource",
@@ -1745,7 +1745,7 @@ dependencies = [
 
 [[package]]
 name = "isola-python-sdk"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5188,7 +5188,7 @@ checksum = "32ac00cd3f8ec9c1d33fb3e7958a82df6989c42d747bd326c822b1d625283547"
 
 [[package]]
 name = "xtask"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "glob",

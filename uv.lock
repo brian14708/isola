@@ -192,7 +192,7 @@ wheels = [
 
 [[package]]
 name = "isola"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "crates/python-sdk" }
 dependencies = [
     { name = "httpx" },
@@ -227,7 +227,7 @@ test = [
 
 [[package]]
 name = "isola-python-runtime"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "crates/python-runtime" }
 dependencies = [
     { name = "cbor2" },
@@ -246,7 +246,7 @@ requires-dist = [
 
 [[package]]
 name = "isola-workspace"
-version = "0.4.0"
+version = "0.4.1"
 source = { virtual = "." }
 
 [package.dev-dependencies]
