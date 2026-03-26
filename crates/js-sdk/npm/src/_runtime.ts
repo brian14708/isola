@@ -53,7 +53,7 @@ function pkgVersion(): string {
 }
 
 function versionTag(ver: string): string {
-  if (ver.startsWith("v") || ver === "latest") return ver;
+  if (ver.startsWith("v")) return ver;
   return `v${ver}`;
 }
 

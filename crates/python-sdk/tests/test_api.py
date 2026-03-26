@@ -42,11 +42,6 @@ def test_strip_first_path_component_flattens_bundle_root() -> None:
     assert strip_first_path_component("isola-python-runtime") is None
 
 
-def test_version_tag_rejects_latest() -> None:
-    with pytest.raises(ValueError, match="version='latest' is not supported"):
-        runtime_module._version_tag("latest")  # noqa: SLF001
-
-
 def _resolve_runtime_paths() -> tuple[Path, Path]:
     workspace_root = Path(__file__).resolve().parents[3]
     runtime_dir = workspace_root / "target"

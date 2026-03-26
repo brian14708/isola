@@ -9,7 +9,8 @@
 //!
 //! Download and extract the Python runtime bundle first:
 //! ```bash
-//! curl -L -o isola-python-runtime.tar.gz https://github.com/brian14708/isola/releases/download/latest/isola-python-runtime.tar.gz
+//! VERSION=v0.x.y
+//! curl -L -o isola-python-runtime.tar.gz "https://github.com/brian14708/isola/releases/download/${VERSION}/isola-python-runtime.tar.gz"
 //! tar xzf isola-python-runtime.tar.gz
 //! mkdir -p isola-python-runtime/cache
 //! ```
