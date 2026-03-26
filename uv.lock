@@ -196,6 +196,7 @@ version = "0.4.0"
 source = { editable = "crates/python-sdk" }
 dependencies = [
     { name = "httpx" },
+    { name = "typing-extensions" },
 ]
 
 [package.dev-dependencies]
@@ -209,7 +210,10 @@ test = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "httpx", specifier = ">=0.28.1" }]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+]
 
 [package.metadata.requires-dev]
 dev = [

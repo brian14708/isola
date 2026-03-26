@@ -9,7 +9,10 @@ description = "Async Python bindings for the Isola runtime"
 license = "Apache-2.0"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["httpx>=0.28.1"]
+dependencies = [
+    "httpx>=0.28.1",
+    "typing-extensions>=4.15.0",
+]
 classifiers = [
   "Programming Language :: Rust",
   "Programming Language :: Python :: 3",

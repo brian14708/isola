@@ -28,7 +28,13 @@ _RELEASE_API = "https://api.github.com/repos/brian14708/isola/releases/tags/{ver
 
 
 def _version_tag(ver: str) -> str:
-    if ver.startswith("v") or ver == "latest":
+    if ver == "latest":
+        msg = (
+            "version='latest' is not supported; "
+            "use an explicit release version such as '0.2.0' or 'v0.2.0'"
+        )
+        raise ValueError(msg)
+    if ver.startswith("v"):
         return ver
     return f"v{ver}"
 
