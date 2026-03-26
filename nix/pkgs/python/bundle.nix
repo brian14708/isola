@@ -6,7 +6,7 @@
 }:
 let
   inherit (wasipkgs) sdk python;
-  pythonVersion = python.host.pythonVersion;
+  inherit (python.host) pythonVersion;
   pythonSitePackages = "lib/python${pythonVersion}/site-packages";
 
   bundlePackages =

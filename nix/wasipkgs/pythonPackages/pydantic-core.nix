@@ -1,37 +1,55 @@
 {
+  crane,
   stdenv,
-  fetchurl,
+  pkgs,
   makeRustPlatform,
   maturin,
   pkg-config,
+  runCommand,
   rust-bin,
   wasipkgs,
-  symlinkJoin,
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
   inherit (python) host;
-  rustToolchain = (rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml);
+  pydanticCore = host.pkgs.pydantic-core;
+  inherit (pydanticCore) version src;
+  rustToolchain = rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml;
+  craneLib = (crane.mkLib pkgs).overrideToolchain (
+    p: p.rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml
+  );
   rustPlatform = makeRustPlatform {
     rustc = rustToolchain;
     cargo = rustToolchain;
   };
-in
-stdenv.mkDerivation rec {
-  pname = "${host.pkgs.pydantic-core.pname}-wasi";
-  inherit (host.pkgs.pydantic-core) version src;
-  cargoDeps = symlinkJoin {
-    name = "pydantic-core-wasi-deps";
-    paths = [
-      (rustPlatform.fetchCargoVendor {
-        inherit src;
-        hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
-      })
-      (rustPlatform.importCargoLock {
-        lockFile = "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library/Cargo.lock";
-      })
+  packageCargoDeps = rustPlatform.fetchCargoVendor {
+    inherit src;
+    hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
+  };
+  mergedCargoDeps = craneLib.vendorMultipleCargoDeps {
+    inherit (craneLib.findCargoFiles src) cargoConfigs;
+    cargoLockList = [
+      "${src}/Cargo.lock"
+      "${rustToolchain.passthru.availableComponents.rust-src}/lib/rustlib/src/rust/library/Cargo.lock"
     ];
   };
+in
+stdenv.mkDerivation rec {
+  pname = "${pydanticCore.pname}-wasi";
+  inherit version src;
+  cargoDeps = runCommand "pydantic-core-wasi-deps" { } ''
+    mkdir -p "$out/.cargo"
+    ln -s ${mergedCargoDeps}/config.toml "$out/.cargo/config.toml"
+    ln -s ${packageCargoDeps}/Cargo.lock "$out/Cargo.lock"
+
+    for dep in ${mergedCargoDeps}/*; do
+      name="$(basename "$dep")"
+      case "$name" in
+        config.toml) continue ;;
+      esac
+      ln -s "$dep" "$out/$name"
+    done
+  '';
   dontStrip = true;
 
   nativeBuildInputs = [

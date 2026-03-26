@@ -30,7 +30,13 @@
             rust-overlay.overlays.default
             (final: prev: {
               wasipkgs = prev.lib.packagesFromDirectoryRecursive {
-                callPackage = prev.lib.callPackageWith final;
+                callPackage = prev.lib.callPackageWith (
+                  final
+                  // {
+                    inherit crane;
+                    pkgs = final;
+                  }
+                );
                 directory = ./nix/wasipkgs;
               };
             })
