@@ -25,7 +25,7 @@ use std::{
 use futures::{Stream, stream};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-use wasmtime::{Engine, Store};
+use wasmtime::{Engine, Store, component::Component};
 pub use wasmtime_wasi::{DirPerms, FilePerms};
 
 #[cfg(feature = "serde")]
@@ -157,10 +157,10 @@ pub struct SandboxTemplateBuilder {
 /// A `SandboxTemplate` is an immutable, reusable compiled artifact.
 /// Instantiate it to create one or more independent [`Sandbox`] values with
 /// isolated runtime state.
-pub struct SandboxTemplate<H: Host> {
+pub struct SandboxTemplate {
     pub(crate) base_options: SandboxOptions,
     pub(crate) engine: Engine,
-    pub(crate) pre: SandboxPre<InstanceState<H>>,
+    pub(crate) component: Component,
     pub(crate) ticker: Arc<EpochTickerRegistration>,
 }
 
@@ -321,7 +321,7 @@ impl SandboxTemplateBuilder {
 
     /// # Errors
     /// Returns an error if the template cannot be built or compiled.
-    pub async fn build<H: Host>(self, wasm: impl AsRef<Path>) -> Result<SandboxTemplate<H>> {
+    pub async fn build(self, wasm: impl AsRef<Path>) -> Result<SandboxTemplate> {
         let wasm_path = std::fs::canonicalize(wasm.as_ref()).map_err(Error::from)?;
         let base_options = self.base_options;
         let cfg = InternalModuleConfig {
@@ -338,9 +338,6 @@ impl SandboxTemplateBuilder {
 
         let component =
             load_or_compile_component(&engine, &wasm_path, &cfg.directory_mappings, &cfg).await?;
-
-        let linker = InstanceState::<H>::new_linker(&engine).map_err(Error::Wasm)?;
-        let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
         Engine::tls_eager_initialize();
         let ticker = global_epoch_ticker()
             .map_err(Error::from)?
@@ -348,15 +345,15 @@ impl SandboxTemplateBuilder {
 
         Ok(SandboxTemplate {
             base_options,
-            pre: SandboxPre::new(pre).map_err(Error::Wasm)?,
-            ticker,
             engine,
+            component,
+            ticker,
         })
     }
 }
 
-impl<H: Host> SandboxTemplate<H> {
-    /// Create a builder for this host type.
+impl SandboxTemplate {
+    /// Create a builder for a reusable sandbox template.
     #[must_use]
     pub fn builder() -> SandboxTemplateBuilder {
         SandboxTemplateBuilder::default()
@@ -370,7 +367,11 @@ impl<H: Host> SandboxTemplate<H> {
     ///
     /// # Errors
     /// Returns an error if instantiation fails.
-    pub async fn instantiate(&self, host: H, options: SandboxOptions) -> Result<Sandbox<H>> {
+    pub async fn instantiate<H: Host>(
+        &self,
+        host: H,
+        options: SandboxOptions,
+    ) -> Result<Sandbox<H>> {
         let ticker = Arc::clone(&self.ticker);
         let merged = self.base_options.merged_with(&options);
 
@@ -384,8 +385,12 @@ impl<H: Host> SandboxTemplate<H> {
         .map_err(Error::Wasm)?;
         store.epoch_deadline_async_yield_and_update(1);
 
-        let bindings = self
-            .pre
+        let linker = InstanceState::<H>::new_linker(&self.engine).map_err(Error::Wasm)?;
+        let pre = linker
+            .instantiate_pre(&self.component)
+            .map_err(Error::Wasm)?;
+        let bindings = SandboxPre::new(pre)
+            .map_err(Error::Wasm)?
             .instantiate_async(&mut store)
             .await
             .map_err(Error::Wasm)?;

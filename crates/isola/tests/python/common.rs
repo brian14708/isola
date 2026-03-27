@@ -136,9 +136,7 @@ fn build_module_lock() -> &'static tokio::sync::Mutex<()> {
     BUILD_MODULE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-async fn build_module_with_policy(
-    max_memory: Option<usize>,
-) -> Result<Option<SandboxTemplate<TestHost>>> {
+async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<SandboxTemplate>> {
     // Serialize compilation because tests can run in parallel and share cache
     // paths.
     let _build_guard = build_module_lock().lock().await;
@@ -150,7 +148,7 @@ async fn build_module_with_policy(
         .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
         .join("cache");
 
-    let mut builder = SandboxTemplate::<TestHost>::builder()
+    let mut builder = SandboxTemplate::builder()
         .prelude(Some("import sandbox.asyncio".to_string()))
         .cache(Some(cache_dir))
         .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
@@ -166,12 +164,10 @@ async fn build_module_with_policy(
     Ok(Some(module))
 }
 
-pub async fn build_module() -> Result<Option<SandboxTemplate<TestHost>>> {
+pub async fn build_module() -> Result<Option<SandboxTemplate>> {
     build_module_with_policy(None).await
 }
 
-pub async fn build_module_with_max_memory(
-    max_memory: usize,
-) -> Result<Option<SandboxTemplate<TestHost>>> {
+pub async fn build_module_with_max_memory(max_memory: usize) -> Result<Option<SandboxTemplate>> {
     build_module_with_policy(Some(max_memory)).await
 }

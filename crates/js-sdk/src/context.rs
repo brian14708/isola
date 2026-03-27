@@ -256,7 +256,7 @@ fn resolve_runtime_lib_dir(
 
 struct ContextState {
     config: ContextConfig,
-    template: Option<Arc<SandboxTemplate<Env>>>,
+    template: Option<Arc<SandboxTemplate>>,
 }
 
 pub struct ContextInner {
@@ -294,7 +294,7 @@ impl ContextInner {
             state.config.clone()
         };
 
-        let mut builder = SandboxTemplate::<Env>::builder();
+        let mut builder = SandboxTemplate::builder();
         builder = builder.prelude(config.prelude.clone());
         if let Some(max_memory) = config.max_memory {
             builder = builder.max_memory(max_memory);
@@ -334,7 +334,7 @@ impl ContextInner {
         }
 
         let template = builder
-            .build::<Env>(&wasm_path)
+            .build(&wasm_path)
             .await
             .map_err(|e| Error::Internal(format!("Failed to load runtime template: {e}")))?;
 

@@ -112,9 +112,7 @@ fn build_module_lock() -> &'static tokio::sync::Mutex<()> {
     BUILD_MODULE_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-async fn build_module_with_policy(
-    max_memory: Option<usize>,
-) -> Result<Option<SandboxTemplate<TestHost>>> {
+async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<SandboxTemplate>> {
     let _build_guard = build_module_lock().lock().await;
     let Some(wasm) = resolve_prereqs()? else {
         return Ok(None);
@@ -124,7 +122,7 @@ async fn build_module_with_policy(
         .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
         .join("cache");
 
-    let mut builder = SandboxTemplate::<TestHost>::builder().cache(Some(cache_dir));
+    let mut builder = SandboxTemplate::builder().cache(Some(cache_dir));
     if let Some(max_memory) = max_memory {
         builder = builder.max_memory(max_memory);
     }
@@ -137,13 +135,11 @@ async fn build_module_with_policy(
     Ok(Some(module))
 }
 
-pub async fn build_module() -> Result<Option<SandboxTemplate<TestHost>>> {
+pub async fn build_module() -> Result<Option<SandboxTemplate>> {
     build_module_with_policy(None).await
 }
 
-pub async fn build_module_with_prelude(
-    prelude: Option<String>,
-) -> Result<Option<SandboxTemplate<TestHost>>> {
+pub async fn build_module_with_prelude(prelude: Option<String>) -> Result<Option<SandboxTemplate>> {
     let _build_guard = build_module_lock().lock().await;
     let Some(wasm) = resolve_prereqs()? else {
         return Ok(None);
@@ -153,7 +149,7 @@ pub async fn build_module_with_prelude(
         .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
         .join("cache");
 
-    let module = SandboxTemplate::<TestHost>::builder()
+    let module = SandboxTemplate::builder()
         .cache(Some(cache_dir))
         .prelude(prelude)
         .build(&wasm)

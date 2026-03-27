@@ -199,7 +199,7 @@ struct ContextConfig {
 
 pub struct ContextHandle {
     rt: Runtime,
-    module: Option<SandboxTemplate<Env>>,
+    module: Option<SandboxTemplate>,
     config: ContextConfig,
 }
 
@@ -310,7 +310,7 @@ impl ContextHandle {
             .map_or_else(|| parent.join("cache"), PathBuf::from);
 
         self.rt.block_on(async {
-            let mut builder = SandboxTemplate::<Env>::builder()
+            let mut builder = SandboxTemplate::builder()
                 .prelude(prelude)
                 .cache(Some(cache))
                 .max_memory(max_memory)
