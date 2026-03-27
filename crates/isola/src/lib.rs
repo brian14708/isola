@@ -31,7 +31,7 @@
 //!
 //! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     let template = SandboxTemplate::<MyHost>::builder()
+//!     let template = SandboxTemplate::builder()
 //!         .cache(Some("./isola-python-runtime/cache".into()))
 //!         .max_memory(64 * 1024 * 1024)
 //!         .mount(
@@ -40,7 +40,7 @@
 //!             DirPerms::READ,
 //!             FilePerms::READ,
 //!         )
-//!         .build::<MyHost>("./isola-python-runtime/bin/python.wasm")
+//!         .build("./isola-python-runtime/bin/python.wasm")
 //!         .await?;
 //!
 //!     let mut sandbox = template
