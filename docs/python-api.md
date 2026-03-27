@@ -14,23 +14,6 @@ inside JS guests, see [JavaScript Guest API](javascript-guest-api.md).
 pip install isola
 ```
 
-## Runtime Resolution
-
-Use `resolve_runtime(runtime, *, version=None)` to fetch the runtime bundle config directly:
-
-```python
-from isola import resolve_runtime
-
-config = await resolve_runtime("python")
-```
-
-When `runtime_path` is omitted from `build_template(...)`, the SDK resolves the runtime automatically, downloads the matching release asset on first use, verifies its digest, and caches it under `~/.cache/isola/runtimes/`.
-
-Supported runtime names:
-
-- `"python"`
-- `"js"`
-
 ## Lifecycle
 
 The normal flow is:
@@ -56,6 +39,29 @@ async def main() -> None:
 
 asyncio.run(main())
 ```
+
+## Runtime Resolution
+
+Most users can skip this section and let `build_template(...)` handle runtime
+downloads automatically.
+
+Use `resolve_runtime(runtime, *, version=None)` to fetch the runtime bundle
+config directly:
+
+```python
+from isola import resolve_runtime
+
+config = await resolve_runtime("python")
+```
+
+When `runtime_path` is omitted from `build_template(...)`, the SDK resolves the
+runtime automatically, downloads the matching release asset on first use,
+verifies its digest, and caches it under `~/.cache/isola/runtimes/`.
+
+Supported runtime names:
+
+- `"python"`
+- `"js"`
 
 ## Core Types
 

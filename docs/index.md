@@ -4,16 +4,17 @@ title: Home
 
 # Isola
 
-Isola provides a sandboxed Rust runtime plus Python and Node.js SDKs for
-running untrusted workloads with explicit resource and environment controls.
+Isola runs untrusted workloads inside reusable WebAssembly sandboxes.
 
-The documentation is split by where code runs:
+Host APIs run in your Python or Node.js process. Guest APIs run inside the
+sandbox.
 
-- Host APIs cover the Python `isola` SDK and the Node.js `isola-core` SDK used
-  to compile templates, create sandboxes, and configure hostcalls or HTTP
-  policy.
-- Guest APIs cover the Python `sandbox.*` modules and the JavaScript globals
-  available inside sandboxed code.
-- Use-case guides cover higher-level integration patterns. Start with
-  [Codemode](codemode-use-case.md) if you want model-written code to orchestrate
-  tools inside a sandbox instead of exposing every tool directly to the model.
+## Start Here
+
+- Embedding from Python: [Quick Start](quick-start.md) or
+  [Python Host API](python-api.md)
+- Embedding from Node.js: [Quick Start](quick-start.md) or
+  [Node.js Host API](nodejs-api.md)
+- Writing guest code: [Python Guest API](python-guest-api.md) or
+  [JavaScript Guest API](javascript-guest-api.md)
+- Building an LLM code-execution tool: [Code Mode](codemode-use-case.md)

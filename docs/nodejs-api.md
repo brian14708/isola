@@ -14,21 +14,6 @@ inside JS guests, see [JavaScript Guest API](javascript-guest-api.md).
 npm install isola-core
 ```
 
-## Runtime Resolution
-
-When `runtimePath` is omitted from `buildTemplate(...)`, the SDK
-resolves the runtime automatically, downloads the matching release asset on
-first use, verifies its SHA-256 digest, and caches it under
-`~/.cache/isola/runtimes/`.
-
-Supported runtime names:
-
-- `"python"`
-- `"js"`
-
-Use `version` to resolve a specific release tag. To use a runtime you unpacked
-yourself, pass `runtimePath` and, for Python runtimes, `runtimeLibDir`.
-
 ## Lifecycle
 
 The normal flow is:
@@ -55,6 +40,23 @@ try {
   sandbox.close();
 }
 ```
+
+## Runtime Resolution
+
+Most users can skip manual runtime management and let `buildTemplate(...)`
+handle runtime downloads automatically.
+
+When `runtimePath` is omitted from `buildTemplate(...)`, the SDK resolves the
+runtime automatically, downloads the matching release asset on first use,
+verifies its SHA-256 digest, and caches it under `~/.cache/isola/runtimes/`.
+
+Supported runtime names:
+
+- `"python"`
+- `"js"`
+
+Use `version` to resolve a specific release tag. To use a runtime you unpacked
+yourself, pass `runtimePath` and, for Python runtimes, `runtimeLibDir`.
 
 ## Core Types
 

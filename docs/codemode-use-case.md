@@ -196,23 +196,23 @@ Use this exact shape:
 """.strip()
 
 async def run_code(template, code: str) -> object:
-async with template.create(
-hostcalls={
-"get_current_weather": get_current_weather,
-"get_forecast": get_forecast,
-"get_air_quality": get_air_quality,
-"get_advisory": get_advisory,
-}
-) as sandbox:
-await sandbox.load_script(code)
-return await sandbox.run("main")
+    async with template.create(
+        hostcalls={
+            "get_current_weather": get_current_weather,
+            "get_forecast": get_forecast,
+            "get_air_quality": get_air_quality,
+            "get_advisory": get_advisory,
+        }
+    ) as sandbox:
+        await sandbox.load_script(code)
+        return await sandbox.run("main")
 
 async def agent_loop(template, tools: list[dict[str, object]], prompt: str) -> str:
-response = await client.responses.create(
-model=MODEL,
-tools=tools,
-input=prompt,
-)
+    response = await client.responses.create(
+        model=MODEL,
+        tools=tools,
+        input=prompt,
+    )
 
     while True:
         tool_outputs = []
@@ -241,7 +241,7 @@ input=prompt,
         )
 
 async def main() -> None:
-template = await build_template("python", prelude=PRELUDE)
+    template = await build_template("python", prelude=PRELUDE)
 
     tools = [
         {
@@ -272,11 +272,14 @@ asyncio.run(main())
 
 ## Example Run
 
-Running the example prints three things:
+During development, it is useful to inspect three things:
 
 - `call_code`: the Python the model generated for `run_code`
 - `json_response`: the JSON-encoded value returned by `run_code`
 - `final_result`: the final plain-text answer after the model sees that tool result
+
+The example above only prints `final_result`, but the other two values are
+useful when you are debugging or tuning the tool description.
 
 For one sample run, the generated code looked like this:
 

@@ -1,13 +1,15 @@
 # Quick Start
 
-This page covers the fastest host-side ways to get Isola running:
+This page shows the fastest host-side path from Python or Node.js.
 
-- Embed the runtime directly from Python with the `isola` SDK
-- Embed the runtime directly from Node.js with `isola-core`
+## What Runs Where
 
-For the APIs available inside sandboxed guest code, see
-[Python Guest API](python-guest-api.md) and
-[JavaScript Guest API](javascript-guest-api.md).
+- Host code runs in your app and uses the `isola` or `isola-core` SDK to build
+  templates, create sandboxes, and configure policy.
+- Guest code runs inside the sandbox and uses Python `sandbox.*` modules or
+  JavaScript globals like `hostcall(...)` and `fetch(...)`.
+- For guest-side APIs, see [Python Guest API](python-guest-api.md) and
+  [JavaScript Guest API](javascript-guest-api.md).
 
 ## Python SDK
 
@@ -17,7 +19,7 @@ Install the SDK:
 pip install isola
 ```
 
-Then compile a Python sandbox template and run code inside it:
+Run a small Python guest:
 
 ```python
 import asyncio
@@ -26,18 +28,14 @@ from isola import build_template
 
 
 async def main() -> None:
-    template = await build_template(
-        "python",
-        max_memory=64 * 1024 * 1024,
-    )
+    template = await build_template("python")
 
     async with template.create() as sandbox:
         await sandbox.load_script(
             "def add(a, b):\n"
             "    return a + b\n"
         )
-        result = await sandbox.run("add", 1, 2)
-        print(result)
+        print(await sandbox.run("add", 1, 2))
 
 
 asyncio.run(main())
@@ -49,49 +47,11 @@ Expected output:
 3
 ```
 
-To call back into the host from Python guest code, pass a `hostcalls` mapping when you create the sandbox, then call it from the guest with `sandbox.asyncio.hostcall(...)`:
+Use `build_template("js")` instead to run a JavaScript guest.
 
-```python
-import asyncio
-
-from isola import build_template
-
-
-async def main() -> None:
-    async def lookup_user(payload: dict[str, object]) -> object:
-        user_id = int(payload["user_id"])
-        return {"user_id": user_id, "name": f"user-{user_id}"}
-
-    template = await build_template(
-        "python",
-        max_memory=64 * 1024 * 1024,
-    )
-
-    async with template.create(hostcalls={"lookup_user": lookup_user}) as sandbox:
-        await sandbox.load_script(
-            "from sandbox.asyncio import hostcall\n"
-            "\n"
-            "async def lookup_user(user_id):\n"
-            "    return await hostcall('lookup_user', {'user_id': user_id})\n"
-        )
-        result = await sandbox.run("lookup_user", 7)
-        print(result)
-
-
-asyncio.run(main())
-```
-
-Expected output:
-
-```text
-{'user_id': 7, 'name': 'user-7'}
-```
-
-If you omit `runtime_path`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtime_path` and `runtime_lib_dir` to `build_template(...)` instead. Outbound guest HTTP is disabled by default; pass `http=True` for the built-in bridge or supply `http=` with your own async handler. Use `SandboxContext` only when you want explicit context ownership.
-
-For the host-side SDK surface area and type reference, see
-[Python Host API](python-api.md). For the guest-side runtime modules used inside
-the sandbox, see [Python Guest API](python-guest-api.md).
+If `runtime_path` is omitted, the SDK downloads and caches the runtime on first
+use. For `hostcalls`, mounts, environment variables, and HTTP policy, see
+[Python Host API](python-api.md).
 
 ## JavaScript / TypeScript SDK
 
@@ -101,20 +61,21 @@ Install the SDK:
 npm install isola-core
 ```
 
-Compile a sandbox template and run code inside it:
+Run a small Python guest from Node.js:
 
 ```typescript
 import { buildTemplate } from "isola-core";
 
-const template = await buildTemplate("python", {
-  maxMemory: 64 * 1024 * 1024,
-});
+const template = await buildTemplate("python");
+const sandbox = await template.create();
 
-await using sandbox = await template.create();
-await sandbox.start();
-await sandbox.loadScript("def add(a, b):\n    return a + b\n");
-const result = await sandbox.run("add", [1, 2]);
-console.log(result); // 3
+try {
+  await sandbox.start();
+  await sandbox.loadScript("def add(a, b):\n    return a + b\n");
+  console.log(await sandbox.run("add", [1, 2]));
+} finally {
+  sandbox.close();
+}
 ```
 
 Expected output:
@@ -123,35 +84,8 @@ Expected output:
 3
 ```
 
-To call back into the host from guest code, pass a `hostcalls` map when creating the sandbox:
+Use `buildTemplate("js")` instead to run a JavaScript guest.
 
-```typescript
-import { buildTemplate } from "isola-core";
-
-const template = await buildTemplate("python");
-
-await using sandbox = await template.create({
-  hostcalls: {
-    lookup_user: async (payload) => {
-      const { user_id } = payload as { user_id: number };
-      return { user_id, name: `user-${user_id}` };
-    },
-  },
-});
-
-await sandbox.start();
-await sandbox.loadScript(
-  "from sandbox.asyncio import hostcall\n" +
-    "\n" +
-    "async def lookup_user(user_id):\n" +
-    "    return await hostcall('lookup_user', {'user_id': user_id})\n",
-);
-const result = await sandbox.run("lookup_user", [7]);
-console.log(result); // { user_id: 7, name: 'user-7' }
-```
-
-If you omit `runtimePath`, the SDK downloads the matching runtime bundle on first use, verifies it, and caches it under `~/.cache/isola/runtimes/`. To use a runtime you unpacked yourself, pass `runtimePath` (and `runtimeLibDir` for Python) to `buildTemplate(...)` instead. Use `SandboxContext` only when you want explicit context ownership.
-
-For the host-side SDK surface area and type reference, see
-[Node.js Host API](nodejs-api.md). For the guest-side globals available inside
-the sandbox, see [JavaScript Guest API](javascript-guest-api.md).
+If `runtimePath` is omitted, the SDK downloads and caches the runtime on first
+use. For `hostcalls`, mounts, environment variables, and HTTP policy, see
+[Node.js Host API](nodejs-api.md).
