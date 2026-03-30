@@ -24,14 +24,14 @@ craneLib.buildPackage {
   inherit src;
   strictDeps = true;
 
-  CARGO_PROFILE = "release-lto";
+  CARGO_PROFILE = "release";
   cargoExtraArgs = "-p isola-c-api-export";
   installPhase = ''
     runHook preInstall
 
     mkdir -p $out/lib
 
-    cp target/release-lto/libisola.* $out/lib/
+    cp target/release/libisola.* $out/lib/
     rm $out/lib/libisola.d
     runHook postInstall
 

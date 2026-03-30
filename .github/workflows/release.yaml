@@ -196,9 +196,9 @@ jobs:
           mkdir -p dist
           mkdir -p dist/libisola/lib
 
-          cargo build --locked --profile release-lto --target "${{ matrix.settings.target }}" -p isola-c-api-export
+          cargo build --locked --release --target "${{ matrix.settings.target }}" -p isola-c-api-export
 
-          target_dir="target/${{ matrix.settings.target }}/release-lto"
+          target_dir="target/${{ matrix.settings.target }}/release"
           cp "$target_dir/${{ matrix.settings.lib_name }}" dist/libisola/lib/
           if [ -n "${{ matrix.settings.import_lib }}" ]; then
             import_lib_path="$target_dir/${{ matrix.settings.import_lib }}"

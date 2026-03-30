@@ -59,7 +59,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-python-runtime"
+        "cargo b -Z build-std=std,panic_abort --release --target {TARGET} -p isola-python-runtime"
     )
     .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
     .env("RUSTFLAGS", "-C relocation-model=pic")
@@ -67,7 +67,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!(
-            "target/{TARGET}/release-lto/isola_python_runtime.wasm"
+            "target/{TARGET}/release/isola_python_runtime.wasm"
         )],
         "target/python.wasm".to_string(),
         |inp, out| -> Result<()> {
@@ -146,13 +146,13 @@ fn build_js(sh: &Shell) -> Result<()> {
 
     cmd!(
         sh,
-        "cargo b -Z build-std=std,panic_abort --profile release-lto --target {TARGET} -p isola-js-runtime"
+        "cargo b -Z build-std=std,panic_abort --release --target {TARGET} -p isola-js-runtime"
     )
     .env("RUSTFLAGS", "-C relocation-model=pic")
     .run()?;
 
     run_if_changed(
-        vec![format!("target/{TARGET}/release-lto/isola_js_runtime.wasm")],
+        vec![format!("target/{TARGET}/release/isola_js_runtime.wasm")],
         "target/js.wasm".to_string(),
         |inp, out| -> Result<()> {
             fn lib(
