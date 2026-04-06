@@ -11,5 +11,6 @@ fn main() {
         let lib_dir = PathBuf::from(&wasi_dev).join("lib");
         println!("cargo:rustc-link-search=native={}", lib_dir.display());
         println!("cargo:rustc-link-arg=-shared");
+        println!("cargo:rustc-link-arg=--allow-undefined");
     }
 }

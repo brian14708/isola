@@ -5,6 +5,7 @@ fn main() {
     if target.starts_with("wasm32") {
         let outdir = PathBuf::from(std::env::var("WASI_PYTHON_DEV").unwrap());
         println!("cargo:rustc-link-arg=-shared");
+        println!("cargo:rustc-link-arg=--allow-undefined");
         let lib_paths = vec!["lib"];
         for lib_path in &lib_paths {
             let mut dst = outdir.clone();

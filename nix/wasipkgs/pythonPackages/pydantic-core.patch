@@ -21,9 +21,10 @@ diff --git a/build.rs b/build.rs
 index 41a831e..61d0dec 100644
 --- a/build.rs
 +++ b/build.rs
-@@ -13,4 +13,5 @@ fn main() {
+@@ -13,4 +13,6 @@ fn main() {
      }
      println!("cargo:rustc-check-cfg=cfg(specified_profile_use)");
      println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());
 +    println!("cargo:rustc-link-arg=-shared");
++    println!("cargo:rustc-link-arg=--allow-undefined");
  }
