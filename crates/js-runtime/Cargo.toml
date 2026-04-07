@@ -15,7 +15,7 @@ crate-type = ["cdylib"]
 heapless = { workspace = true }
 minicbor = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
-oxc = { version = "0.123.0", features = ["codegen", "semantic", "transformer"] }
+oxc = { version = "0.124.0", features = ["codegen", "semantic", "transformer"] }
 rquickjs = { workspace = true, features = ["classes", "properties"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
