@@ -66,9 +66,7 @@ fn build_python(sh: &Shell) -> Result<()> {
     .run()?;
 
     run_if_changed(
-        vec![format!(
-            "target/{TARGET}/release/isola_python_runtime.wasm"
-        )],
+        vec![format!("target/{TARGET}/release/isola_python_runtime.wasm")],
         "target/python.wasm".to_string(),
         |inp, out| -> Result<()> {
             fn lib(

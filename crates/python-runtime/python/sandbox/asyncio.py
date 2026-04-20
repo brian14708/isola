@@ -218,8 +218,17 @@ class PollLoop(asyncio.AbstractEventLoop):
         *,
         name: str | None = None,
         context: Context | None = None,
+        eager_start: bool | None = None,
     ) -> asyncio.Task[T]:
-        return asyncio.Task(coro, loop=self, name=name, context=context)
+        if eager_start is None:
+            return asyncio.Task(coro, loop=self, name=name, context=context)
+        return asyncio.Task(
+            coro,
+            loop=self,
+            name=name,
+            context=context,
+            eager_start=eager_start,
+        )
 
     @override
     def create_future(self) -> asyncio.Future[object]:
@@ -234,7 +243,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         pass
 
     @override
-    async def shutdown_default_executor(self, timeout: float | None = None) -> None:  # noqa: ASYNC109
+    async def shutdown_default_executor(self, timeout: float | None = None) -> None:
         pass
 
 
