@@ -23,7 +23,7 @@ jobs:
         with:
           python-version: "3.14"
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8.1.0
       - name: Sync Python dependencies
         run: uv sync --all-packages --no-install-package isola
       - name: Ruff check
