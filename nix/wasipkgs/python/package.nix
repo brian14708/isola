@@ -95,6 +95,31 @@ stdenv.mkDerivation rec {
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libc.so
     rm $out/lib/libpython3.14.a $out/python-stub.c
 
+    # CPython's WASI build-details.json is missing ABI suffix metadata that
+    # maturin expects for cross-compilation.
+    ${python314}/bin/python3 - <<'PY'
+    import json
+    from pathlib import Path
+
+    root = Path("${placeholder "out"}/lib/python3.14")
+    build_details_path = root / "build-details.json"
+    sysconfig_vars_path = root / "_sysconfig_vars__wasi_wasm32-wasi.json"
+
+    with sysconfig_vars_path.open() as f:
+        sysconfig_vars = json.load(f)
+    with build_details_path.open() as f:
+        build_details = json.load(f)
+
+    build_details.setdefault("abi", {})["extension_suffix"] = sysconfig_vars["EXT_SUFFIX"]
+    build_details["abi"].setdefault("stable_abi_suffix", ".abi3.so")
+    build_details.setdefault("libpython", {})["dynamic"] = "//lib/libpython3.14.so"
+    build_details["libpython"].setdefault("link_extensions", False)
+
+    with build_details_path.open("w") as f:
+        json.dump(build_details, f, indent=2)
+        f.write("\n")
+    PY
+
     rm -rf $out/bin/
     rm -rf $out/lib/python3.14/config-3.14-wasm32-wasi/
     find $out/ -type f -name "*.a" -exec rm {} +

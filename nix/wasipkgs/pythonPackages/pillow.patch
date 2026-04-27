@@ -34,14 +34,14 @@ index 3a72a07..4df3d1b 100644
                  self.set(f, None)
  
          def require(self, feat: str) -> bool:
-@@ -374,6 +374,7 @@ class pil_build_ext(build_ext):
+@@ -373,6 +373,7 @@ class pil_build_ext(build_ext):
          self.disable_platform_guessing = self.check_configuration(
              "platform-guessing", "disable"
          )
 +        self.disable_platform_guessing = True
-         self.add_imaging_libs = ""
          build_ext.initialize_options(self)
          for x in self.feature:
+             setattr(self, f"disable_{x}", self.check_configuration(x, "disable"))
 diff --git a/src/libImaging/Jpeg.h b/src/libImaging/Jpeg.h
 index e07904f..402e555 100644
 --- a/src/libImaging/Jpeg.h
