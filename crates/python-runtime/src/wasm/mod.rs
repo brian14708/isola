@@ -104,7 +104,7 @@ pub mod sys_module {
                 Ok((vec, count))
             },
         )?;
-        assert!(pollables.len() == poll.len());
+        assert_eq!(pollables.len(), poll.len());
 
         let py = poll.py();
         if ready_count > 0 {
