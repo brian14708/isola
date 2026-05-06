@@ -105,19 +105,15 @@ impl JsHttpHandler {
         let method = incoming.method().as_str().to_owned();
         let url = incoming.uri().to_string();
 
-        let headers: serde_json::Value = incoming
+        let headers: BTreeMap<String, String> = incoming
             .headers()
             .iter()
             .filter_map(|(k, v)| {
-                v.to_str().ok().map(|val| {
-                    (
-                        k.as_str().to_string(),
-                        serde_json::Value::String(val.to_string()),
-                    )
-                })
+                v.to_str()
+                    .ok()
+                    .map(|val| (k.as_str().to_string(), val.to_string()))
             })
-            .collect::<serde_json::Map<_, _>>()
-            .into();
+            .collect();
         let headers_json = serde_json::to_string(&headers)
             .map_err(|e| io_error(format!("failed to serialize headers: {e}")))?;
 

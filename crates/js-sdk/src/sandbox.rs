@@ -132,9 +132,8 @@ impl OutputSink for OutputCollector {
         let text = item.to_json_str().map_err(|e| -> BoxError {
             Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
         })?;
+        self.emit(CallbackEvent::Result, Some(&text));
         self.record(|data| data.result_json.push(text));
-        let json_str = item.to_json_str().ok();
-        self.emit(CallbackEvent::Result, json_str.as_deref());
         Ok(())
     }
 
@@ -143,9 +142,8 @@ impl OutputSink for OutputCollector {
             let text = item.to_json_str().map_err(|e| -> BoxError {
                 Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
             })?;
+            self.emit(CallbackEvent::End, Some(&text));
             self.record(|data| data.final_json = Some(text));
-            let json_str = item.to_json_str().ok();
-            self.emit(CallbackEvent::End, json_str.as_deref());
         } else {
             self.emit(CallbackEvent::End, None);
         }

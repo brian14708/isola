@@ -75,14 +75,14 @@ const MAX_BUFFER: usize = 1024;
 const MAX_UTF8_BYTES: usize = 4;
 
 impl TraceOutputStream {
-    fn record(&mut self, s: &str) -> StreamResult<()> {
+    fn record(&mut self, message: String) -> StreamResult<()> {
         if self.in_flight.is_some() {
             return Err(StreamError::Trap(wasmtime::Error::msg(
                 "write not permitted while emit pending",
             )));
         }
 
-        if s.is_empty() {
+        if message.is_empty() {
             return Ok(());
         }
 
@@ -92,7 +92,6 @@ impl TraceOutputStream {
 
         let level = self.level;
         let context = self.context;
-        let message = s.to_string();
         let mut future = Box::pin(async move {
             sink.on_log(level, context, &message)
                 .await
@@ -171,13 +170,8 @@ impl OutputStream for TraceOutputStream {
             &self.buffer
         };
         let (s, remainder) = decode_utf8(buf);
-        let message = if s.is_empty() {
-            None
-        } else {
-            Some(s.into_owned())
-        };
-        if let Some(message) = message {
-            self.record(&message)?;
+        if !s.is_empty() {
+            self.record(s.into_owned())?;
         }
         self.buffer.clear();
         if !remainder.is_empty() {
@@ -200,13 +194,8 @@ impl OutputStream for TraceOutputStream {
 
         if !self.buffer.is_empty() {
             let (s, remainder) = decode_utf8(&self.buffer);
-            let message = if s.is_empty() {
-                None
-            } else {
-                Some(s.into_owned())
-            };
-            if let Some(message) = message {
-                self.record(&message)?;
+            if !s.is_empty() {
+                self.record(s.into_owned())?;
             }
             self.buffer.clear();
             if !remainder.is_empty() {

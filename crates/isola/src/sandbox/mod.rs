@@ -411,13 +411,13 @@ impl<H: Host> Sandbox<H> {
         code: impl AsRef<str>,
         sink: Arc<dyn OutputSink>,
     ) -> Result<()> {
-        let code = code.as_ref().to_string();
+        let code = code.as_ref();
         let mut store = CallCleanup::new(&mut self.store);
         store.set_sink(Arc::clone(&sink));
         let result = self
             .bindings
             .isola_script_runtime()
-            .call_eval_script(&mut store, &code)
+            .call_eval_script(&mut store, code)
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
         result.map_err(Error::Wasm)??;

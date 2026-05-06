@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use pyo3::{
     PyTypeInfo,
-    exceptions::PyNameError,
+    exceptions::{PyNameError, PyValueError},
     intern,
     prelude::*,
     sync::PyOnceLock,
@@ -90,7 +90,12 @@ impl Scope {
                     .call1((meta,))
                     .map_err(|e| Error::from_pyerr(py, e))?;
             }
-            let code = std::ffi::CString::new(code).unwrap();
+            let code = std::ffi::CString::new(code).map_err(|e| {
+                Error::from_pyerr(
+                    py,
+                    PyValueError::new_err(format!("script contains NUL byte: {e}")),
+                )
+            })?;
             py.run(
                 &code,
                 Some(

@@ -34,10 +34,11 @@ pub mod http_module {
     };
 
     #[pyfunction]
-    fn new_buffer(kind: &str) -> ResponseBuffer {
-        ResponseBuffer {
-            inner: Buffer::new(kind),
-        }
+    fn new_buffer(kind: &str) -> PyResult<ResponseBuffer> {
+        let inner = Buffer::new(kind).ok_or_else(|| {
+            pyo3::exceptions::PyValueError::new_err(format!("invalid buffer kind: {kind}"))
+        })?;
+        Ok(ResponseBuffer { inner })
     }
 
     #[pyfunction]
@@ -246,7 +247,9 @@ pub mod http_module {
             kind: &str,
             size: i64,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
-            let mut buf = Buffer::new(kind);
+            let mut buf = Buffer::new(kind).ok_or_else(|| {
+                pyo3::exceptions::PyValueError::new_err(format!("invalid buffer kind: {kind}"))
+            })?;
             while let Some(p) = read_into(self, &mut buf, size)? {
                 p.block();
             }

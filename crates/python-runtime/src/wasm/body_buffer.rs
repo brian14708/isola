@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, io::Read};
+use std::collections::VecDeque;
 
 use eventsource::event::parse_event_line;
 use pyo3::{
@@ -24,14 +24,14 @@ pub enum Buffer {
 }
 
 impl Buffer {
-    pub fn new(kind: &str) -> Self {
+    pub fn new(kind: &str) -> Option<Self> {
         match kind {
-            "binary" | "bytes" => Self::Bytes(Bytes::default()),
-            "lines" => Self::Lines(Lines::default()),
-            "json" => Self::Json(Json::default()),
-            "text" => Self::Text(Text::default()),
-            "sse" => Self::ServerSentEvent(ServerSentEvent::default()),
-            _ => panic!("Invalid buffer kind: {kind}"),
+            "binary" | "bytes" => Some(Self::Bytes(Bytes::default())),
+            "lines" => Some(Self::Lines(Lines::default())),
+            "json" => Some(Self::Json(Json::default())),
+            "text" => Some(Self::Text(Text::default())),
+            "sse" => Some(Self::ServerSentEvent(ServerSentEvent::default())),
+            _ => None,
         }
     }
 }
@@ -98,14 +98,12 @@ impl BodyBuffer for Bytes {
         if self.buffer.is_empty() {
             return Ok(None);
         }
-        Ok(Some(
-            PyBytes::new_with(py, self.buffer.len(), |dest| {
-                dest.copy_from_slice(&std::mem::take(&mut self.buffer));
-                Ok(())
-            })
-            .unwrap()
-            .into_any(),
-        ))
+        let buffer = std::mem::take(&mut self.buffer);
+        let bytes = PyBytes::new_with(py, buffer.len(), |dest| {
+            dest.copy_from_slice(&buffer);
+            Ok(())
+        })?;
+        Ok(Some(bytes.into_any()))
     }
 
     fn decode_all<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
@@ -128,11 +126,7 @@ impl BodyBuffer for Lines {
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         let b = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
-            (_, Some(idx)) => {
-                let mut b = vec![0; idx + 1];
-                self.buffer.read_exact(&mut b).unwrap();
-                b
-            }
+            (_, Some(idx)) => self.buffer.drain(..=idx).collect::<Vec<_>>(),
             (true, None) => {
                 if self.buffer.is_empty() {
                     return Ok(None);
@@ -268,11 +262,7 @@ impl BodyBuffer for ServerSentEvent {
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         loop {
             let line = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
-                (_, Some(idx)) => {
-                    let mut b = vec![0; idx + 1];
-                    self.buffer.read_exact(&mut b).unwrap();
-                    b
-                }
+                (_, Some(idx)) => self.buffer.drain(..=idx).collect::<Vec<_>>(),
                 (true, None) => {
                     if self.buffer.is_empty() {
                         if !self.event.is_empty() {

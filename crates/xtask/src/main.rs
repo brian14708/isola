@@ -38,6 +38,7 @@ const TASKS: &[(&str, Task)] = &[
     ("build-js", build_js),
 ];
 
+#[expect(clippy::unnecessary_wraps, reason = "matches Task fn signature")]
 fn print_help(_sh: &Shell) -> Result<()> {
     println!("Tasks:");
     for (name, _) in TASKS {
@@ -67,7 +68,7 @@ fn build_python(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/isola_python_runtime.wasm")],
-        "target/python.wasm".to_string(),
+        "target/python.wasm",
         |inp, out| -> Result<()> {
             fn lib(
                 name: impl Into<String>,
@@ -151,7 +152,7 @@ fn build_js(sh: &Shell) -> Result<()> {
 
     run_if_changed(
         vec![format!("target/{TARGET}/release/isola_js_runtime.wasm")],
-        "target/js.wasm".to_string(),
+        "target/js.wasm",
         |inp, out| -> Result<()> {
             fn lib(
                 name: impl Into<String>,
@@ -211,14 +212,14 @@ fn build_js(sh: &Shell) -> Result<()> {
 
 fn run_if_changed(
     inputs: Vec<String>,
-    output: String,
+    output: &str,
     f: impl FnOnce(Vec<PathBuf>, &Path) -> Result<()>,
 ) -> Result<()> {
     let inputs = inputs
         .into_iter()
         .map(|s| PathBuf::from_str(&s).unwrap())
         .collect::<Vec<_>>();
-    let output = Path::new(&output);
+    let output = Path::new(output);
     if output.exists() {
         let output_time = output.metadata()?.modified()?;
         for input in &inputs {

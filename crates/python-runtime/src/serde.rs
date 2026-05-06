@@ -131,7 +131,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, v).clone().into_any())
+        Ok(PyBytes::new(self.0, v).into_any())
     }
 
     #[inline]
@@ -139,7 +139,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, v).clone().into_any())
+        Ok(PyBytes::new(self.0, v).into_any())
     }
 
     #[inline]
@@ -147,7 +147,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, &v).clone().into_any())
+        Ok(PyBytes::new(self.0, &v).into_any())
     }
 
     #[inline]
