@@ -1,2 +1,3 @@
 packages:
   - crates/js-sdk/npm
+minimumReleaseAge: 0
