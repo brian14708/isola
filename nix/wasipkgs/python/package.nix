@@ -69,7 +69,12 @@ stdenv.mkDerivation rec {
     export _PYTHON_HOST_PLATFORM=wasi-wasm32
     export _PYTHON_SYSCONFIGDATA_NAME=_sysconfigdata__wasi_wasm32-wasi
 
-    ${python314}/bin/python3 $PWD/Tools/wasm/emscripten/wasm_assets.py \
+    wasm_assets_script="$PWD/Platforms/emscripten/wasm_assets.py"
+    if [ ! -e "$wasm_assets_script" ]; then
+      wasm_assets_script="$PWD/Tools/wasm/emscripten/wasm_assets.py"
+    fi
+
+    ${python314}/bin/python3 "$wasm_assets_script" \
       --prefix $out \
       --output $out/lib/python314.zip
 
