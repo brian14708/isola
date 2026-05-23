@@ -37,7 +37,7 @@ napi = { version = "3.8", default-features = false }
 napi-build = "2.3"
 napi-derive = "3.5"
 minicbor = "2.0"
-minicbor-serde = "0.6"
+minicbor-serde = "0.7"
 parking_lot = "0.12"
 pyo3 = "0.28"
 pyo3-async-runtimes = "0.28"
