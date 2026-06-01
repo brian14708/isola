@@ -6,5 +6,5 @@ mod serde;
 mod transpile;
 mod wasm;
 
-#[allow(unused)]
+#[expect(unused)]
 use wasm::Global;

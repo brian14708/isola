@@ -20,7 +20,7 @@ pub fn register(ctx: &Ctx<'_>) {
     globals.set("_isola_serde", serde_mod).unwrap();
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn js_serde_dumps<'js>(
     ctx: Ctx<'js>,
     value: Value<'js>,
@@ -50,7 +50,7 @@ fn js_serde_dumps<'js>(
     }
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn js_serde_loads<'js>(
     ctx: Ctx<'js>,
     data: Value<'js>,

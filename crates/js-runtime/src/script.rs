@@ -10,7 +10,10 @@ use crate::{
 };
 
 pub struct Scope {
-    #[allow(dead_code)] // Runtime must be kept alive for the context to function
+    #[expect(
+        dead_code,
+        reason = "runtime must be kept alive for the context to function"
+    )]
     runtime: Runtime,
     context: Context,
 }
@@ -128,7 +131,7 @@ impl Scope {
     /// 3. Call JS `_isola_async._resolve(readyHandles)` to resolve
     ///    corresponding Promises
     /// 4. New microtasks are created → repeat
-    #[allow(clippy::unused_self)]
+    #[expect(clippy::unused_self)]
     fn drive_promise<'js>(
         &self,
         ctx: &Ctx<'js>,
@@ -200,7 +203,6 @@ impl Scope {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     fn emit_result<'js>(
         &self,
         ctx: &Ctx<'js>,

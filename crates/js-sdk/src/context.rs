@@ -135,7 +135,7 @@ impl PendingSandboxConfig {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(clippy::option_option, reason = "JSON patch needs tri-state fields")]
+#[expect(clippy::option_option, reason = "JSON patch needs tri-state fields")]
 struct ContextConfigPatch {
     #[serde(default)]
     cache_dir: Option<Option<String>>,
@@ -153,7 +153,7 @@ struct ContextConfigPatch {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(clippy::option_option, reason = "JSON patch needs tri-state fields")]
+#[expect(clippy::option_option, reason = "JSON patch needs tri-state fields")]
 pub struct SandboxConfigPatch {
     #[serde(default)]
     pub(crate) max_memory: Option<Option<u64>>,
@@ -459,8 +459,7 @@ impl ContextCore {
     }
 
     #[napi]
-    #[allow(clippy::unused_async)]
-    pub async fn instantiate(&self) -> napi::Result<SandboxCore> {
+    pub fn instantiate(&self) -> napi::Result<SandboxCore> {
         let inner = Arc::clone(self.inner_ref().map_err(napi::Error::from)?);
         if !inner.has_template() {
             return Err(napi::Error::from(invalid_argument(

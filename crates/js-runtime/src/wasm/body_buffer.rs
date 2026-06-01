@@ -8,7 +8,7 @@
 // This module provides the lower-level buffer types for
 // potential streaming support in the future.
 
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 use std::collections::VecDeque;
 

@@ -48,10 +48,12 @@ impl StreamHandle {
     }
 
     #[napi]
-    #[allow(clippy::needless_pass_by_value)]
     pub fn push(&self, value: serde_json::Value) -> napi::Result<()> {
-        let value = Value::from_serde(&value)
-            .map_err(|e| napi::Error::from(invalid_argument(format!("invalid value: {e}"))))?;
+        let value = {
+            let json = value;
+            Value::from_serde(&json)
+                .map_err(|e| napi::Error::from(invalid_argument(format!("invalid value: {e}"))))?
+        };
         let sender = self.sender().map_err(napi::Error::from)?;
 
         match sender.try_send(value) {
