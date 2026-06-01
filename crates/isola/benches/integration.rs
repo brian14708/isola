@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![expect(dead_code)]
 
 #[path = "../tests/js/common.rs"]
 mod js_common;

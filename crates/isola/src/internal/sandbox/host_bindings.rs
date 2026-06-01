@@ -73,6 +73,10 @@ impl Pollable for FutureHostcall {
     }
 }
 
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "WIT-generated host traits are clearer as async methods even when some return immediately"
+)]
 impl<T: HostView> Host for HostImpl<T> {
     async fn blocking_emit(&mut self, emit_type: EmitType, cbor: Vec<u8>) -> wasmtime::Result<()> {
         let emit_value = match emit_type {
@@ -104,6 +108,10 @@ impl<T: HostView> Host for HostImpl<T> {
     }
 }
 
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "WIT-generated host traits are clearer as async methods even when some return immediately"
+)]
 impl<T: HostView> HostValueIterator for HostImpl<T> {
     async fn read(
         &mut self,
@@ -133,6 +141,10 @@ impl<T: HostView> HostValueIterator for HostImpl<T> {
     }
 }
 
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "WIT-generated host traits are clearer as async methods even when some return immediately"
+)]
 impl<T: HostView> HostFutureHostcall for HostImpl<T> {
     async fn subscribe(
         &mut self,

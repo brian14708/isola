@@ -175,7 +175,12 @@ impl<H: Host> InstanceState<H> {
         self.sink = sink;
     }
 
-    #[allow(clippy::needless_pass_by_ref_mut, clippy::unused_async)]
+    #[expect(
+        clippy::needless_pass_by_ref_mut,
+        clippy::unused_async,
+        clippy::unused_async_trait_impl,
+        reason = "the async boundary is kept consistent with call cleanup hooks"
+    )]
     pub async fn flush_logs(&mut self) -> wasmtime::Result<()> {
         Ok(())
     }

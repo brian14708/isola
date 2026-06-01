@@ -43,7 +43,7 @@ pub fn register(ctx: &Ctx<'_>) {
     globals.set("_isola_http", http).unwrap();
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn js_send<'js>(
     _ctx: Ctx<'js>,
     method: String,
@@ -57,12 +57,11 @@ fn js_send<'js>(
         .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 fn js_recv(ctx: Ctx<'_>, handle: u32) -> rquickjs::Result<Object<'_>> {
     future::recv_http(&ctx, handle)
 }
 
-#[allow(clippy::needless_pass_by_value)]
 fn js_new_buffer(ctx: Ctx<'_>, kind: String) -> rquickjs::Result<Object<'_>> {
     let buf = Object::new(ctx.clone())
         .map_err(|e| rquickjs::Error::new_from_js_message("buffer", "error", &e.to_string()))?;
@@ -128,7 +127,7 @@ fn append_headers(header_fields: &Fields, headers: &Value<'_>) -> Result<(), Str
 }
 
 /// Send an HTTP request (non-blocking). Returns a pollable handle.
-#[allow(clippy::too_many_lines, clippy::needless_pass_by_value)]
+#[expect(clippy::too_many_lines, clippy::needless_pass_by_value)]
 fn send_impl(
     method: &str,
     url: &str,
@@ -261,7 +260,7 @@ fn send_impl(
     Ok(handle)
 }
 
-#[allow(clippy::needless_pass_by_value)]
+#[expect(clippy::needless_pass_by_value)]
 pub fn build_response_object<'js>(
     ctx: &Ctx<'js>,
     response: IncomingResponse,

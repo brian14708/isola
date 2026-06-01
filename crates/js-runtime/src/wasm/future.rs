@@ -25,7 +25,7 @@ thread_local! {
     static PENDING: RefCell<Vec<Option<PendingEntry>>> = const { RefCell::new(Vec::new()) };
 }
 
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 pub fn register(pollable: wasi::io::poll::Pollable, op: PendingOp) -> u32 {
     PENDING.with(|p| {
         let mut p = p.borrow_mut();
@@ -72,7 +72,7 @@ fn invalid_handle_error(handle: u32) -> rquickjs::Error {
 /// Poll all registered pollables via `wasi:io/poll::poll`.
 /// Returns handles of ready entries (entries remain in the registry until
 /// `take()`).
-#[allow(clippy::cast_possible_truncation)]
+#[expect(clippy::cast_possible_truncation)]
 pub fn poll_all() -> Vec<u32> {
     PENDING.with(|p| {
         let p = p.borrow();

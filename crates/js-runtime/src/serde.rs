@@ -93,7 +93,7 @@ impl<'de, 'js> Visitor<'de> for JsVisitor<'js> {
             i.into_js(&self.0)
                 .map_err(|e| serde::de::Error::custom(e.to_string()))
         } else {
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_precision_loss)]
             (v as f64)
                 .into_js(&self.0)
                 .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -104,7 +104,7 @@ impl<'de, 'js> Visitor<'de> for JsVisitor<'js> {
     where
         E: serde::de::Error,
     {
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss)]
         self.visit_f64(v as f64)
     }
 
@@ -116,7 +116,7 @@ impl<'de, 'js> Visitor<'de> for JsVisitor<'js> {
             i.into_js(&self.0)
                 .map_err(|e| serde::de::Error::custom(e.to_string()))
         } else {
-            #[allow(clippy::cast_precision_loss)]
+            #[expect(clippy::cast_precision_loss)]
             (v as f64)
                 .into_js(&self.0)
                 .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -127,7 +127,7 @@ impl<'de, 'js> Visitor<'de> for JsVisitor<'js> {
     where
         E: serde::de::Error,
     {
-        #[allow(clippy::cast_precision_loss)]
+        #[expect(clippy::cast_precision_loss)]
         self.visit_f64(v as f64)
     }
 

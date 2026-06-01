@@ -308,7 +308,7 @@ impl ContextInner {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(clippy::option_option, reason = "JSON patch needs tri-state fields")]
+#[expect(clippy::option_option, reason = "JSON patch needs tri-state fields")]
 struct ContextConfigPatch {
     #[serde(default)]
     cache_dir: Option<Option<String>>,
@@ -385,7 +385,7 @@ struct MountConfigInput {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-#[allow(clippy::option_option, reason = "JSON patch needs tri-state fields")]
+#[expect(clippy::option_option, reason = "JSON patch needs tri-state fields")]
 struct SandboxConfigPatch {
     #[serde(default)]
     max_memory: Option<Option<u64>>,

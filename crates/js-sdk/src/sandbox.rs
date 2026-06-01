@@ -25,6 +25,8 @@ use crate::{
 type CallbackTsfn = Arc<
     ThreadsafeFunction<(String, Option<String>), (), (String, Option<String>), napi::Status, false>,
 >;
+type HttpHandlerFunction<'env> =
+    Function<'env, (String, String, String, Option<Buffer>), Promise<crate::env::JsHttpResponse>>;
 
 // ---------------------------------------------------------------------------
 // RunResult
@@ -238,7 +240,7 @@ type WireArgument = (String, Option<String>, serde_json::Value);
 
 enum RawArgument {
     Json(Option<String>, Value),
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
 }
 
@@ -399,13 +401,7 @@ impl SandboxCore {
     #[napi(
         ts_args_type = "handler: ((method: string, url: string, headersJson: string, body: Buffer | null) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null }>) | null"
     )]
-    #[allow(clippy::type_complexity)]
-    pub fn set_http_handler(
-        &self,
-        handler: Option<
-            Function<(String, String, String, Option<Buffer>), Promise<crate::env::JsHttpResponse>>,
-        >,
-    ) -> napi::Result<()> {
+    pub fn set_http_handler(&self, handler: Option<HttpHandlerFunction<'_>>) -> napi::Result<()> {
         let js_handler = handler
             .map(|cb| {
                 let tsfn = cb.build_threadsafe_function().build()?;
