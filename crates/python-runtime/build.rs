@@ -20,17 +20,17 @@ fn main() {
     // Emit explicit link flags for `isola-python` so `cargo test --all-features`
     // still links test binaries correctly.
     let py_cfg = pyo3_build_config::get();
-    if let Some(lib_name) = py_cfg.lib_name.as_deref() {
+    if let Some(lib_name) = py_cfg.lib_name() {
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
         let alias = if target_os == "windows" {
             "pythonXY:"
         } else {
             ""
         };
-        let link_model = if py_cfg.shared { "" } else { "static=" };
+        let link_model = if py_cfg.shared() { "" } else { "static=" };
         println!("cargo:rustc-link-lib={link_model}{alias}{lib_name}");
     }
-    if let Some(lib_dir) = py_cfg.lib_dir.as_deref() {
+    if let Some(lib_dir) = py_cfg.lib_dir() {
         println!("cargo:rustc-link-search=native={lib_dir}");
     }
 }
