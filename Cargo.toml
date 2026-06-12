@@ -41,7 +41,7 @@ minicbor-serde = "0.7"
 parking_lot = "0.12"
 pyo3 = "0.28"
 pyo3-async-runtimes = "0.28"
-pyo3-build-config = "0.28"
+pyo3-build-config = "0.29"
 reqwest = { version = "0.13", default-features = false }
 rquickjs = "0.12"
 serde = "1.0"
