@@ -50,3 +50,49 @@ jobs:
         run: nix --accept-flake-config develop --command just integration-c
       - name: Run JS vitest suite
         run: nix --accept-flake-config develop --command just vitest
+      # Stage the platform-independent wasm bundles so the macOS/Windows jobs
+      # can run the integration suite without rebuilding them under Nix.
+      - name: Stage cross-platform bundles
+        run: |
+          nix --accept-flake-config develop --command bash -euo pipefail -c '
+            mkdir -p artifact/target artifact/runtime
+            cp target/python.wasm target/js.wasm artifact/target/
+            cp -RL "$WASI_PYTHON_RUNTIME"/. artifact/runtime/
+          '
+      - name: Upload wasm bundles
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-bundles
+          path: artifact/
+          retention-days: 1
+
+  # Run the Rust integration suite on macOS and Windows using the wasm bundles
+  # built by the Linux `integration` job. Ubuntu is already covered above.
+  integration-cross:
+    needs: integration
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout your repository using git
+        uses: actions/checkout@v6
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - name: Cache Rust artifacts
+        uses: Swatinem/rust-cache@v2
+      - name: Download wasm bundles
+        uses: actions/download-artifact@v4
+        with:
+          name: wasm-bundles
+          path: artifact
+      - name: Stage wasm bundles
+        shell: bash
+        run: |
+          mkdir -p target
+          cp artifact/target/python.wasm artifact/target/js.wasm target/
+      - name: Run integration test
+        shell: bash
+        env:
+          WASI_PYTHON_RUNTIME: ${{ github.workspace }}/artifact/runtime
+        run: cargo test --release -p isola --test integration
