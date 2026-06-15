@@ -3,6 +3,7 @@ use std::path::Path;
 use oxc::{
     allocator::Allocator,
     codegen::Codegen,
+    diagnostics::Diagnostics,
     parser::Parser,
     semantic::SemanticBuilder,
     span::SourceType,
@@ -17,14 +18,10 @@ pub struct TranspileError {
 }
 
 impl TranspileError {
-    fn from_diagnostics(
-        source_name: &Path,
-        source_text: &str,
-        errors: Vec<oxc::diagnostics::OxcDiagnostic>,
-    ) -> Self {
-        let rendered = errors
+    fn from_diagnostics(source_name: &Path, source_text: &str, diagnostics: Diagnostics) -> Self {
+        let rendered = diagnostics
             .into_iter()
-            .map(|error| format!("{:?}", error.with_source_code(source_text.to_owned())))
+            .map(|diagnostic| format!("{:?}", diagnostic.with_source_code(source_text.to_owned())))
             .collect::<Vec<_>>()
             .join("\n");
         Self {
@@ -44,11 +41,11 @@ pub fn strip_typescript(
         .with_typescript(true);
 
     let parser = Parser::new(&allocator, source_text, source_type).parse();
-    if !parser.errors.is_empty() {
+    if parser.diagnostics.has_errors() {
         return Err(TranspileError::from_diagnostics(
             source_name,
             source_text,
-            parser.errors,
+            parser.diagnostics,
         ));
     }
 
@@ -57,22 +54,22 @@ pub fn strip_typescript(
         .with_check_syntax_error(true)
         .with_excess_capacity(2.0)
         .build(&program);
-    if !semantic.errors.is_empty() {
+    if semantic.diagnostics.has_errors() {
         return Err(TranspileError::from_diagnostics(
             source_name,
             source_text,
-            semantic.errors,
+            semantic.diagnostics,
         ));
     }
 
     let scoping = semantic.semantic.into_scoping();
     let transformed = Transformer::new(&allocator, source_name, &TransformOptions::default())
         .build_with_scoping(scoping, &mut program);
-    if !transformed.errors.is_empty() {
+    if transformed.diagnostics.has_errors() {
         return Err(TranspileError::from_diagnostics(
             source_name,
             source_text,
-            transformed.errors,
+            transformed.diagnostics,
         ));
     }
 
