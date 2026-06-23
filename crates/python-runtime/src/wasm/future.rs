@@ -1,44 +1,73 @@
-use std::ops::Deref;
+use std::{
+    cell::RefCell,
+    time::{Duration, Instant},
+};
 
-use pyo3::{Borrowed, PyAny, PyRefMut, PyResult, intern, pyclass, pymethods, types::PyAnyMethods};
+use futures::future::join_all;
+use pyo3::{PyRefMut, pyclass, pymethods};
+use wit_bindgen::block_on;
 
-use super::wasi;
+use crate::wasm::isola::script::host;
+
+enum PollState {
+    Ready,
+    Sleep(Instant),
+    Released,
+}
 
 #[pyclass]
 pub struct PyPollable {
-    inner: Option<wasi::io::poll::Pollable>,
-    refcnt: usize,
+    state: PollState,
 }
 
-impl From<wasi::io::poll::Pollable> for PyPollable {
-    fn from(p: wasi::io::poll::Pollable) -> Self {
+impl Default for PyPollable {
+    fn default() -> Self {
         Self {
-            inner: Some(p),
-            refcnt: 1,
+            state: PollState::Ready,
         }
     }
 }
 
 impl PyPollable {
-    const fn get_pollable(&self) -> &wasi::io::poll::Pollable {
-        self.inner.as_ref().expect("pollable already released")
+    pub fn sleep(duration: Duration) -> Self {
+        Self {
+            state: Instant::now()
+                .checked_add(duration)
+                .map_or(PollState::Ready, PollState::Sleep),
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        match self.state {
+            PollState::Ready | PollState::Released => true,
+            PollState::Sleep(ready_at) => Instant::now() >= ready_at,
+        }
+    }
+
+    pub fn wait_until_ready(&self) {
+        if let PollState::Sleep(ready_at) = self.state
+            && let Some(remaining) = ready_at.checked_duration_since(Instant::now())
+        {
+            std::thread::sleep(remaining);
+        }
+    }
+
+    pub const fn ready_at(&self) -> Option<Instant> {
+        match self.state {
+            PollState::Sleep(ready_at) => Some(ready_at),
+            PollState::Ready | PollState::Released => None,
+        }
     }
 }
 
 #[pymethods]
 impl PyPollable {
     fn subscribe(mut slf: PyRefMut<'_, Self>) -> Option<PyRefMut<'_, Self>> {
-        if let Some(inner) = &slf.inner {
-            if inner.ready() {
-                slf.refcnt = 0;
-                slf.inner.take();
-                None
-            } else {
-                slf.refcnt += 1;
-                Some(slf)
-            }
-        } else {
+        if slf.is_ready() {
+            slf.state = PollState::Ready;
             None
+        } else {
+            Some(slf)
         }
     }
 
@@ -46,131 +75,200 @@ impl PyPollable {
         let _ = self;
     }
 
-    #[inline]
-    fn release(&mut self) {
-        if self.refcnt > 1 {
-            self.refcnt -= 1;
-            return;
-        }
-        self.inner.take();
+    const fn release(&mut self) {
+        self.state = PollState::Released;
     }
 
     fn wait(&mut self) {
-        if let Some(inner) = self.inner.take() {
-            inner.block();
+        self.wait_until_ready();
+        self.state = PollState::Ready;
+    }
+}
+
+/// A host call submitted by the guest but not necessarily executed yet.
+///
+/// `result` stays `None` until the call is driven, either concurrently with
+/// other pending calls by [`drive_pending_calls`] (the async path, invoked from
+/// the `PollLoop`) or synchronously on its own by [`drive_one`] (the blocking
+/// path).
+struct DeferredCall {
+    call_type: String,
+    payload: Vec<u8>,
+    result: Option<Result<Vec<u8>, String>>,
+}
+
+thread_local! {
+    static CALLS: RefCell<Vec<Option<DeferredCall>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Register a deferred host call, returning a handle into the call registry.
+#[expect(clippy::cast_possible_truncation)]
+pub fn register_call(call_type: String, payload: Vec<u8>) -> u32 {
+    CALLS.with(|c| {
+        let mut c = c.borrow_mut();
+        let op = DeferredCall {
+            call_type,
+            payload,
+            result: None,
+        };
+        for (i, slot) in c.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(op);
+                return i as u32;
+            }
         }
-    }
+        let idx = c.len();
+        c.push(Some(op));
+        idx as u32
+    })
 }
 
-pub struct Pollable<'py>(PyRefMut<'py, PyPollable>);
+/// Execute every registered host call that has not been driven yet, **all
+/// concurrently** in a single `block_on`. Awaited-together calls (e.g.
+/// `asyncio.gather`) are all registered before the `PollLoop` drives them, so
+/// their host round-trips overlap. Sequential `await`s register one call at a
+/// time and therefore still run serially.
+pub fn drive_pending_calls() {
+    let reqs: Vec<(usize, String, Vec<u8>)> = CALLS.with(|c| {
+        c.borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| match slot {
+                Some(DeferredCall {
+                    call_type,
+                    payload,
+                    result: None,
+                }) => Some((i, call_type.clone(), payload.clone())),
+                _ => None,
+            })
+            .collect()
+    });
+    if reqs.is_empty() {
+        return;
+    }
 
-impl<'py> Pollable<'py> {
-    pub fn subscribe(p: Borrowed<'_, 'py, PyAny>) -> PyResult<Option<Self>> {
-        let p = p.call_method0(intern!(p.py(), "subscribe"))?;
-        if p.is_none() {
-            return Ok(None);
+    let results = block_on(join_all(reqs.into_iter().map(
+        |(i, call_type, payload)| async move { (i, host::hostcall(call_type, payload).await) },
+    )));
+
+    CALLS.with(|c| {
+        let mut c = c.borrow_mut();
+        for (i, res) in results {
+            if let Some(Some(call)) = c.get_mut(i) {
+                call.result = Some(res);
+            }
         }
-        Ok(Some(Self(p.cast_exact::<PyPollable>()?.borrow_mut())))
+    });
+}
+
+/// Consume a driven call's result (async path: the `PollLoop` has already run
+/// `drive_pending_calls`).
+pub fn take_result(handle: u32) -> Result<Vec<u8>, String> {
+    let call = CALLS.with(|c| {
+        c.borrow_mut()
+            .get_mut(handle as usize)
+            .and_then(Option::take)
+    });
+    match call {
+        Some(DeferredCall {
+            result: Some(result),
+            ..
+        }) => result,
+        _ => Err("invalid or undriven call handle".to_string()),
     }
 }
 
-impl Deref for Pollable<'_> {
-    type Target = wasi::io::poll::Pollable;
-    fn deref(&self) -> &Self::Target {
-        self.0.get_pollable()
+/// Drive a single call to completion synchronously and consume it (blocking
+/// path). If it was already driven, returns the cached result.
+pub fn drive_one(handle: u32) -> Result<Vec<u8>, String> {
+    let call = CALLS.with(|c| {
+        c.borrow_mut()
+            .get_mut(handle as usize)
+            .and_then(Option::take)
+    });
+    match call {
+        Some(DeferredCall {
+            result: Some(result),
+            ..
+        }) => result,
+        Some(DeferredCall {
+            call_type, payload, ..
+        }) => block_on(host::hostcall(call_type, payload)),
+        None => Err("invalid call handle".to_string()),
     }
 }
 
-impl Drop for Pollable<'_> {
-    fn drop(&mut self) {
-        self.0.release();
-    }
+/// Drop a call without consuming its result.
+pub fn release_call(handle: u32) {
+    CALLS.with(|c| {
+        if let Some(slot) = c.borrow_mut().get_mut(handle as usize) {
+            *slot = None;
+        }
+    });
 }
 
 macro_rules! create_future {
-    ($name:ident, $future_type:ty, $type:ty) => {
+    ($name:ident, $result_type:ty, $type:ty) => {
         #[::pyo3::prelude::pyclass]
         struct $name {
-            inner: Option<$future_type>,
+            handle: u32,
         }
 
         impl $name {
-            const fn new(f: $future_type) -> Self {
-                Self { inner: Some(f) }
+            const fn new(handle: u32) -> Self {
+                Self { handle }
             }
         }
 
         #[::pyo3::prelude::pymethods]
         impl $name {
-            fn wait(mut slf: ::pyo3::PyRefMut<'_, Self>) -> PyResult<$type> {
-                match slf.inner.take() {
-                    Some(f) => {
-                        f.subscribe().block();
-                        f.get().expect("not ready").expect("wasm error").try_into()
-                    }
-                    _ => panic!("invalid state"),
-                }
+            fn wait(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
+                crate::wasm::future::drive_one(slf.handle).try_into()
             }
 
-            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
-                match slf.inner.as_ref() {
-                    Some(f) => Some(f.subscribe().into()),
-                    _ => None,
-                }
+            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                Some(crate::wasm::future::PyPollable::default())
             }
 
-            fn get(mut slf: ::pyo3::PyRefMut<'_, Self>) -> PyResult<$type> {
-                match slf.inner.take() {
-                    Some(f) => f.get().expect("not ready").expect("wasm error").try_into(),
-                    _ => panic!("invalid state"),
-                }
+            fn get(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
+                crate::wasm::future::take_result(slf.handle).try_into()
             }
 
-            fn release(mut slf: ::pyo3::PyRefMut<'_, Self>) {
-                slf.inner.take();
+            fn release(slf: ::pyo3::PyRef<'_, Self>) {
+                crate::wasm::future::release_call(slf.handle);
             }
         }
     };
-    ($name:ident, $future_type:ty, $convert:ident -> $type:ty) => {
+    ($name:ident, $result_type:ty, $convert:ident -> $type:ty) => {
         #[::pyo3::prelude::pyclass]
         struct $name {
-            inner: Option<$future_type>,
+            handle: u32,
         }
 
         impl $name {
-            const fn new(f: $future_type) -> Self {
-                Self { inner: Some(f) }
+            const fn new(handle: u32) -> Self {
+                Self { handle }
             }
         }
 
         #[::pyo3::prelude::pymethods]
         impl $name {
-            fn wait(mut slf: ::pyo3::PyRefMut<'_, Self>) -> $type {
-                match slf.inner.take() {
-                    Some(f) => {
-                        f.subscribe().block();
-                        $convert(slf.py(), f.get().expect("not ready").expect("wasm error"))
-                    }
-                    _ => panic!("invalid state"),
-                }
+            fn wait(slf: ::pyo3::PyRef<'_, Self>) -> $type {
+                let py = slf.py();
+                $convert(py, crate::wasm::future::drive_one(slf.handle))
             }
 
-            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
-                match slf.inner.as_ref() {
-                    Some(f) => Some(f.subscribe().into()),
-                    _ => None,
-                }
+            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                Some(crate::wasm::future::PyPollable::default())
             }
 
-            fn get(mut slf: ::pyo3::PyRefMut<'_, Self>) -> $type {
-                match slf.inner.take() {
-                    Some(f) => $convert(slf.py(), f.get().expect("not ready").expect("wasm error")),
-                    _ => panic!("invalid state"),
-                }
+            fn get(slf: ::pyo3::PyRef<'_, Self>) -> $type {
+                let py = slf.py();
+                $convert(py, crate::wasm::future::take_result(slf.handle))
             }
 
-            fn release(mut slf: ::pyo3::PyRefMut<'_, Self>) {
-                slf.inner.take();
+            fn release(slf: ::pyo3::PyRef<'_, Self>) {
+                crate::wasm::future::release_call(slf.handle);
             }
         }
     };

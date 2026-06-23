@@ -100,6 +100,62 @@ def main(url):
     Ok(())
 }
 
+/// A zero-length `read(0)` must return promptly (not spin on the always-ready
+/// pollable) and must leave the response readable for a subsequent full read.
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_http_zero_length_read_does_not_hang() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/body"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("hello world"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+from sandbox.http import fetch
+
+def main(url):
+    with fetch("GET", url) as resp:
+        resp.read(0)        # must not hang
+        return resp.text()  # response still readable afterwards
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate zero-length read script")?;
+
+    let url_arg = format!("{}/body", server.uri());
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![url_arg]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("zero-length read hung or failed")?;
+
+    let value: String = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode response body")?;
+    assert_eq!(value, "hello world");
+
+    Ok(())
+}
+
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_http_status_errors_surface() -> Result<()> {
@@ -299,6 +355,70 @@ def main(url):
     assert!(
         value.contains("Response already read"),
         "unexpected second-read error message: {value}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_http_timeout_is_enforced() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/slow"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_millis(200))
+                .set_body_string("too late"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+from sandbox.http import fetch
+
+def main(url):
+    try:
+        with fetch("GET", f"{url}/slow", timeout=0.05) as resp:
+            return resp.text()
+    except Exception as e:
+        return str(e)
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate timeout script")?;
+
+    let url_arg = server.uri();
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![url_arg]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call timeout function")?;
+
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let value: String = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode timeout result")?;
+    assert!(
+        value.contains("timed out"),
+        "unexpected timeout error message: {value}"
     );
 
     Ok(())

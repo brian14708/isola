@@ -1,15 +1,11 @@
 #[pyo3::pymodule]
 #[pyo3(name = "_isola_http")]
 pub mod http_module {
-    use std::{
-        borrow::Cow,
-        io::{BufWriter, Write},
-    };
-
     use pyo3::{
         prelude::*,
         types::{PyBytes, PyDict},
     };
+    use serde::{Deserialize as _, Serialize as _};
     use url::Url;
 
     use crate::{
@@ -18,18 +14,6 @@ pub mod http_module {
             PyPollable,
             body_buffer::{BodyBuffer, Buffer},
             future::create_future,
-            wasi::{
-                http::{
-                    outgoing_handler::{
-                        ErrorCode, FutureIncomingResponse, OutgoingRequest, RequestOptions, handle,
-                    },
-                    types::{Fields, IncomingBody, IncomingResponse, Method, OutgoingBody, Scheme},
-                },
-                io::{
-                    poll::Pollable,
-                    streams::{InputStream, StreamError},
-                },
-            },
         },
     };
 
@@ -62,27 +46,22 @@ pub mod http_module {
                 .map_or(Body::Object(body.clone()), Body::Bytes)
         });
 
-        let header_fields = Fields::new();
+        let mut header_fields = Vec::new();
         if let Some(headers) = headers {
             for (k, v) in headers {
                 let k: String = k.extract()?;
                 let v: &str = v.extract()?;
-                let v = v.as_bytes().to_vec();
-                header_fields
-                    .append(&k, &v)
-                    .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+                header_fields.push((k, v.as_bytes().to_vec()));
             }
         }
-        if matches!(body, Body::Object(_)) && !header_fields.has("content-type") {
-            header_fields
-                .append("content-type", b"application/json")
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        if matches!(body, Body::Object(_))
+            && !header_fields
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+        {
+            header_fields.push(("content-type".to_string(), b"application/json".to_vec()));
         }
 
-        let request = OutgoingRequest::new(header_fields);
-        request.set_method(&to_method(method)).map_err(|()| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid method".to_string())
-        })?;
         let mut u = Url::parse(url)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
         if let Some(params) = params {
@@ -90,142 +69,139 @@ pub mod http_module {
                 u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
             }
         }
-        request.set_authority(Some(u.authority())).map_err(|()| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid authority".to_string())
-        })?;
-        request
-            .set_scheme(Some(&match u.scheme() {
-                "http" => Scheme::Http,
-                "https" => Scheme::Https,
-                s => Scheme::Other(s.to_string()),
-            }))
-            .map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid scheme".to_string())
-            })?;
-        let mut pq = Cow::Borrowed(u.path());
-        if let Some(q) = u.query() {
-            let mut copy = pq.to_string();
-            copy.push('?');
-            copy.push_str(q);
-            pq = Cow::Owned(copy);
-        }
+        let timeout_ms = timeout
+            .filter(|timeout| timeout.is_finite() && *timeout > 0.0)
+            .map(|timeout| std::time::Duration::from_secs_f64(timeout).as_millis())
+            .map(|timeout_ms| u64::try_from(timeout_ms).unwrap_or(u64::MAX));
 
-        request.set_path_with_query(Some(&pq)).map_err(|()| {
-            PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid path".to_string())
-        })?;
-
-        let opt = RequestOptions::new();
-        if let Some(timeout) = timeout {
-            opt.set_first_byte_timeout(Some(
-                u64::try_from(std::time::Duration::from_secs_f64(timeout).as_nanos())
-                    .expect("duration is too large"),
-            ))
-            .map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid timeout".to_string())
-            })?;
-        }
-
-        let ob = if matches!(body, Body::None) {
-            None
-        } else {
-            Some(request.body().map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid body".to_string())
-            })?)
+        let body = match &body {
+            Body::None => None,
+            Body::Bytes(b) => Some(b.as_bytes().to_vec()),
+            Body::Object(b) => {
+                let mut bytes = Vec::new();
+                python_to_json_writer(b.clone(), &mut bytes)
+                    .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?;
+                Some(bytes)
+            }
         };
 
-        let resp = handle(request, Some(opt))
+        let mut request = serde_json::json!({
+            "method": method,
+            "url": u.to_string(),
+            "headers": header_fields,
+            "body": body,
+        });
+        if let Some(timeout_ms) = timeout_ms {
+            request["timeout_ms"] = serde_json::json!(timeout_ms);
+        }
+        let mut payload = Vec::new();
+        request
+            .serialize(&mut minicbor_serde::Serializer::new(&mut payload))
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-
-        if let Some(ob) = ob {
-            let mut os = ob.write().map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid body".to_string())
-            })?;
-
-            match body {
-                Body::None => {}
-                Body::Bytes(b) => {
-                    os.write_all(b.as_bytes()).map_err(|_e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid body".to_string())
-                    })?;
-                }
-                Body::Object(b) => {
-                    python_to_json_writer(b, BufWriter::new(&mut os)).map_err(|_e| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error")
-                    })?;
-                }
-            }
-
-            drop(os);
-            OutgoingBody::finish(ob, None).map_err(|_e| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid body".to_string())
-            })?;
-        }
-
-        Ok(PyFutureResponse::new(resp))
+        Ok(PyFutureResponse::new(crate::wasm::future::register_call(
+            "__isola_http".to_string(),
+            payload,
+        )))
     }
 
-    fn to_method(method: &str) -> Method {
-        match method {
-            "GET" => Method::Get,
-            "POST" => Method::Post,
-            "DELETE" => Method::Delete,
-            "HEAD" => Method::Head,
-            "PATCH" => Method::Patch,
-            "PUT" => Method::Put,
-            m => Method::Other(m.to_string()),
-        }
-    }
-
-    create_future!(PyFutureResponse, FutureIncomingResponse, PyResponse);
+    create_future!(PyFutureResponse, Result<Vec<u8>, String>, PyResponse);
 
     #[pyclass]
     struct PyResponse {
-        stream: Option<InputStream>,
-        body: Option<IncomingBody>,
-        response: Option<IncomingResponse>,
+        status: u16,
+        headers: Vec<(String, Vec<u8>)>,
+        body: Vec<u8>,
+        cursor: usize,
+        consumed: bool,
+        closed: bool,
     }
 
-    impl TryFrom<Result<IncomingResponse, ErrorCode>> for PyResponse {
+    impl TryFrom<Result<Vec<u8>, String>> for PyResponse {
         type Error = PyErr;
 
-        fn try_from(value: Result<IncomingResponse, ErrorCode>) -> Result<Self, Self::Error> {
+        fn try_from(value: Result<Vec<u8>, String>) -> Result<Self, Self::Error> {
             match value {
-                Ok(response) => Ok(Self {
-                    response: Some(response),
-                    body: None,
-                    stream: None,
-                }),
-                Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    e.to_string(),
-                )),
+                Ok(response) => {
+                    let mut deserializer = minicbor_serde::Deserializer::new(&response);
+                    let response =
+                        serde_json::Value::deserialize(&mut deserializer).map_err(|e| {
+                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
+                        })?;
+                    let headers = response
+                        .get("headers")
+                        .and_then(serde_json::Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|header| {
+                            let pair = header.as_array()?;
+                            let name = pair.first()?.as_str()?.to_string();
+                            let value = pair
+                                .get(1)?
+                                .as_array()?
+                                .iter()
+                                .filter_map(serde_json::Value::as_u64)
+                                .filter_map(|b| u8::try_from(b).ok())
+                                .collect::<Vec<_>>();
+                            Some((name, value))
+                        })
+                        .collect();
+                    let body = response
+                        .get("body")
+                        .and_then(serde_json::Value::as_array)
+                        .into_iter()
+                        .flatten()
+                        .filter_map(serde_json::Value::as_u64)
+                        .filter_map(|b| u8::try_from(b).ok())
+                        .collect();
+                    Ok(Self {
+                        status: response
+                            .get("status")
+                            .and_then(serde_json::Value::as_u64)
+                            .and_then(|s| u16::try_from(s).ok())
+                            .ok_or_else(|| {
+                                PyErr::new::<pyo3::exceptions::PyTypeError, _>(
+                                    "missing HTTP status",
+                                )
+                            })?,
+                        headers,
+                        body,
+                        cursor: 0,
+                        consumed: false,
+                        closed: false,
+                    })
+                }
+                Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)),
             }
         }
     }
 
     #[pymethods]
     impl PyResponse {
-        fn close(&mut self) {
-            self.stream.take();
-            self.body.take();
-            self.response.take();
+        const fn close(&mut self) {
+            self.closed = true;
         }
 
-        fn status(&self) -> u16 {
-            self.response.as_ref().expect("response closed").status()
+        fn status(&self) -> PyResult<u16> {
+            if self.closed {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "response closed",
+                ));
+            }
+            Ok(self.status)
         }
 
         fn headers<'py>(slf: &Bound<'py, Self>) -> PyResult<Bound<'py, PyDict>> {
-            let hdrs = slf
-                .borrow()
-                .response
-                .as_ref()
-                .expect("response closed")
-                .headers();
+            let borrowed = slf.borrow();
+            if borrowed.closed {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "response closed",
+                ));
+            }
             let d = PyDict::new(slf.py());
-            for (k, v) in hdrs.entries() {
+            for (k, v) in &borrowed.headers {
                 d.set_item(
                     k,
-                    std::str::from_utf8(&v).map_err(|_| {
+                    std::str::from_utf8(v).map_err(|_| {
                         PyErr::new::<pyo3::exceptions::PyTypeError, _>("invalid header value")
                     })?,
                 )?;
@@ -238,7 +214,7 @@ pub mod http_module {
             buf: &mut ResponseBuffer,
             size: i64,
         ) -> PyResult<Option<PyPollable>> {
-            read_into(self, &mut buf.inner, size).map(|p| p.map(Into::into))
+            read_into(self, &mut buf.inner, size)
         }
 
         fn blocking_read<'py>(
@@ -247,11 +223,17 @@ pub mod http_module {
             kind: &str,
             size: i64,
         ) -> PyResult<Option<Bound<'py, PyAny>>> {
+            if self.consumed {
+                return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                    "Response already read",
+                ));
+            }
             let mut buf = Buffer::new(kind).ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(format!("invalid buffer kind: {kind}"))
             })?;
-            while let Some(p) = read_into(self, &mut buf, size)? {
-                p.block();
+            while read_into(self, &mut buf, size)?.is_some() {}
+            if size < 0 {
+                self.consumed = true;
             }
             buf.decode_all(py)
         }
@@ -267,57 +249,40 @@ pub mod http_module {
         slf: &mut PyResponse,
         buf: &mut impl BodyBuffer,
         size: i64,
-    ) -> PyResult<Option<Pollable>> {
-        let stream = if let Some(b) = slf.stream.as_mut() {
-            b
-        } else {
-            slf.body = Some(
-                slf.response
-                    .as_mut()
-                    .expect("response closed")
-                    .consume()
-                    .map_err(|()| {
-                        PyErr::new::<pyo3::exceptions::PyTypeError, _>("Response already read")
-                    })?,
-            );
-            slf.stream = Some(slf.body.as_ref().unwrap().stream().map_err(|()| {
-                PyErr::new::<pyo3::exceptions::PyTypeError, _>("Response already read")
-            })?);
-            slf.stream.as_mut().unwrap()
-        };
-
+    ) -> PyResult<Option<PyPollable>> {
+        if slf.closed {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "response closed",
+            ));
+        }
+        if slf.consumed {
+            return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                "Response already read",
+            ));
+        }
         let read_size = if size < 0 {
-            16384
+            slf.body.len().saturating_sub(slf.cursor)
         } else {
-            u64::try_from(size).expect("size is too large")
+            usize::try_from(size).expect("size is too large")
         };
-        loop {
-            match InputStream::read(stream, read_size) {
-                Ok(v) => {
-                    if !v.is_empty() {
-                        buf.write(v);
-                        if size < 0 {
-                            continue;
-                        }
-                    }
-
-                    let poll = stream.subscribe();
-                    return Ok(Some(poll));
-                }
-                Err(StreamError::LastOperationFailed(e)) => {
-                    slf.stream.take();
-                    slf.body.take();
-                    return Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                        e.to_debug_string(),
-                    ));
-                }
-                Err(StreamError::Closed) => {
-                    buf.close();
-                    slf.stream.take();
-                    slf.body.take();
-                    return Ok(None);
-                }
-            }
+        // A zero-length read makes no progress. Report completion immediately so
+        // callers that loop until `None` (e.g. `blocking_read`, `_aread`) don't
+        // spin forever on the always-ready pollable. The response is left
+        // unconsumed so subsequent reads still work.
+        if read_size == 0 && slf.cursor < slf.body.len() {
+            return Ok(None);
+        }
+        let end = slf.cursor.saturating_add(read_size).min(slf.body.len());
+        if slf.cursor < end {
+            buf.write(slf.body[slf.cursor..end].to_vec());
+            slf.cursor = end;
+        }
+        if slf.cursor >= slf.body.len() {
+            buf.close();
+            slf.consumed = true;
+            Ok(None)
+        } else {
+            Ok(Some(PyPollable::default()))
         }
     }
 
