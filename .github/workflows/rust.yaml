@@ -54,11 +54,11 @@ jobs:
       # can run the integration suite without rebuilding them under Nix.
       - name: Stage cross-platform bundles
         run: |
-          nix --accept-flake-config develop --command bash -euo pipefail -c '
+          nix --accept-flake-config develop --command bash -euo pipefail -c "
             mkdir -p artifact/target artifact/runtime
             cp target/python.wasm target/js.wasm artifact/target/
-            cp -RL "$WASI_PYTHON_RUNTIME"/. artifact/runtime/
-          '
+            cp -RL \"\$WASI_PYTHON_RUNTIME\"/. artifact/runtime/
+          "
       - name: Upload wasm bundles
         uses: actions/upload-artifact@v7
         with:
