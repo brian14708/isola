@@ -10,14 +10,11 @@ wasmtime::component::bindgen!({
     exports: {
         default: async | trappable,
     },
-    ownership: Borrowing {
-        duplicate_if_necessary: true
-    },
+    ownership: Owning,
     with: {
-        "wasi:io": wasmtime_wasi::p2::bindings::io,
+        "wasi:http": wasmtime_wasi_http::p3::bindings::http,
         "wasi:logging": crate::internal::wasm::logging::bindings,
         "isola:script/host.value-iterator": host_bindings::ValueIterator,
-        "isola:script/host.future-hostcall": host_bindings::FutureHostcall,
     },
 });
 
@@ -62,10 +59,12 @@ impl<T: ?Sized + HostView> HostView for &mut T {
 
 pub struct HostImpl<T>(pub T);
 
+pub struct LinkerHost<T>(T);
+
+impl<T: 'static> HasData for LinkerHost<T> {
+    type Data<'a> = HostImpl<&'a mut T>;
+}
+
 pub fn add_to_linker<T: HostView>(l: &mut Linker<T>) -> wasmtime::Result<()> {
-    struct Host<T>(T);
-    impl<T: 'static> HasData for Host<T> {
-        type Data<'a> = HostImpl<&'a mut T>;
-    }
-    self::isola::script::host::add_to_linker::<_, Host<T>>(l, |t| HostImpl(t))
+    self::isola::script::host::add_to_linker::<_, LinkerHost<T>>(l, |t| HostImpl(t))
 }

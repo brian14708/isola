@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
 use futures::StreamExt;
+use http_body_util::BodyExt as _;
 use tokio::time::timeout;
 use tracing::Instrument;
 use wasmtime::{
@@ -11,11 +12,9 @@ use wasmtime::{
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
     WasiHttpCtx,
-    p2::{
-        HttpResult, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
+    p3::{
+        RequestOptions, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
         bindings::http::types::ErrorCode,
-        body::{HyperIncomingBody, HyperOutgoingBody},
-        types::{HostFutureIncomingResponse, IncomingResponse, OutgoingRequestConfig},
     },
 };
 
@@ -48,15 +47,24 @@ struct InstanceHttpHooks<H: Host> {
     host: Arc<H>,
 }
 
+type HttpSendResult = Result<
+    (
+        http::Response<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
+        Box<dyn Future<Output = Result<(), ErrorCode>> + Send>,
+    ),
+    wasmtime_wasi::TrappableError<ErrorCode>,
+>;
+
 const MAX_OUTGOING_HTTP_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MAX_BUFFERED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 async fn collect_outgoing_http_body(
-    mut body: HyperOutgoingBody,
+    body: http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>,
     max_bytes: usize,
     read_timeout: std::time::Duration,
 ) -> Result<Option<Bytes>, ErrorCode> {
+    let mut body = body;
     let bytes = timeout(read_timeout, async {
         let mut buf = BytesMut::new();
         while let Some(frame) = http_body_util::BodyExt::frame(&mut body).await {
@@ -91,7 +99,8 @@ impl<H: Host> InstanceState<H> {
     pub fn new_linker(engine: &Engine) -> wasmtime::Result<Linker<Self>> {
         let mut linker = Linker::<Self>::new(engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)?;
-        wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)?;
+        wasmtime_wasi::p3::add_to_linker(&mut linker)?;
+        wasmtime_wasi_http::p3::add_to_linker(&mut linker)?;
         wasm::logging::add_to_linker(&mut linker)?;
         add_to_linker(&mut linker)?;
         Ok(linker)
@@ -188,10 +197,13 @@ impl<H: Host> InstanceState<H> {
     #[cfg(test)]
     fn send_request(
         &mut self,
-        request: hyper::Request<HyperOutgoingBody>,
-        config: OutgoingRequestConfig,
-    ) -> HttpResult<HostFutureIncomingResponse> {
-        self.http_hooks.send_request(request, config)
+        request: http::Request<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
+        options: Option<RequestOptions>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = HttpSendResult> + Send>> {
+        Box::into_pin(
+            self.http_hooks
+                .send_request(request, options, Box::new(async { Ok(()) })),
+        )
     }
 }
 
@@ -217,12 +229,13 @@ impl<H: Host> WasiHttpView for InstanceState<H> {
 impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
     fn send_request(
         &mut self,
-        request: hyper::Request<HyperOutgoingBody>,
-        config: OutgoingRequestConfig,
-    ) -> HttpResult<HostFutureIncomingResponse> {
+        request: http::Request<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
+        options: Option<RequestOptions>,
+        fut: Box<dyn Future<Output = Result<(), ErrorCode>> + Send>,
+    ) -> Box<dyn Future<Output = HttpSendResult> + Send> {
         let host = Arc::clone(&self.host);
 
-        let handle = wasmtime_wasi::runtime::spawn(
+        Box::new(
             async move {
                 let (parts, body) = request.into_parts();
                 let headers = parts.headers;
@@ -237,8 +250,10 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
                     }
                 }
 
-                let body_timeout = config
+                let options = options.unwrap_or_default();
+                let body_timeout = options
                     .connect_timeout
+                    .unwrap_or(MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT)
                     .min(MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT);
                 let body =
                     collect_outgoing_http_body(body, MAX_OUTGOING_HTTP_BODY_BYTES, body_timeout)
@@ -248,31 +263,25 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
                 *req.method_mut() = parts.method;
                 *req.uri_mut() = parts.uri;
                 *req.headers_mut() = headers;
-                let resp = timeout(config.first_byte_timeout, host.http_request(req))
+                let first_byte_timeout = options
+                    .first_byte_timeout
+                    .unwrap_or(std::time::Duration::from_secs(600));
+                let resp = timeout(first_byte_timeout, host.http_request(req))
                     .await
                     .map_err(|_e| ErrorCode::HttpResponseTimeout)?
                     .map_err(|e| ErrorCode::InternalError(Some(format!("request error: {e}"))))?;
 
-                let (part, body) = resp
-                    .map(|b| {
-                        http_body_util::StreamBody::new(
-                            b.map(|e| e.map_err(|e| ErrorCode::InternalError(Some(e.to_string())))),
-                        )
-                    })
-                    .into_parts();
+                let resp = resp.map(|b| {
+                    http_body_util::StreamBody::new(
+                        b.map(|e| e.map_err(|e| ErrorCode::InternalError(Some(e.to_string())))),
+                    )
+                    .boxed_unsync()
+                });
 
-                Ok(Ok(IncomingResponse {
-                    resp: hyper::Response::<HyperIncomingBody>::from_parts(
-                        part,
-                        HyperIncomingBody::new(body),
-                    ),
-                    worker: None,
-                    between_bytes_timeout: config.between_bytes_timeout,
-                }))
+                Ok((resp, fut))
             }
             .in_current_span(),
-        );
-        Ok(HostFutureIncomingResponse::pending(handle))
+        )
     }
 }
 
@@ -391,10 +400,7 @@ mod tests {
     use std::{sync::Arc, time::Duration};
 
     use http_body::Frame;
-    use http_body_util::BodyExt as _;
     use parking_lot::Mutex;
-    use wasmtime_wasi::p2::Pollable as _;
-    use wasmtime_wasi_http::p2::bindings::http::types::ErrorCode as TypesErrorCode;
 
     use super::*;
     use crate::host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse};
@@ -469,8 +475,8 @@ mod tests {
         };
 
         // A body that never completes.
-        let body: HyperOutgoingBody = http_body_util::StreamBody::new(futures::stream::pending::<
-            Result<Frame<Bytes>, TypesErrorCode>,
+        let body = http_body_util::StreamBody::new(futures::stream::pending::<
+            Result<Frame<Bytes>, ErrorCode>,
         >())
         .boxed_unsync();
 
@@ -480,22 +486,22 @@ mod tests {
             .body(body)
             .expect("request build");
 
-        let cfg = OutgoingRequestConfig {
-            use_tls: false,
-            connect_timeout: Duration::from_millis(20),
-            first_byte_timeout: Duration::from_secs(1),
-            between_bytes_timeout: Duration::from_secs(1),
+        let options = RequestOptions {
+            connect_timeout: Some(Duration::from_millis(20)),
+            first_byte_timeout: Some(Duration::from_secs(1)),
+            between_bytes_timeout: Some(Duration::from_secs(1)),
         };
 
-        let mut fut = state.send_request(req, cfg).expect("send_request");
-        timeout(Duration::from_millis(500), fut.ready())
-            .await
-            .expect("ready in time");
+        let result = timeout(
+            Duration::from_millis(500),
+            state.send_request(req, Some(options)),
+        )
+        .await
+        .expect("ready in time");
 
-        let err = match fut.unwrap_ready() {
-            Ok(Ok(_)) => panic!("expected timeout"),
-            Ok(Err(e)) => e,
-            Err(e) => e.downcast::<ErrorCode>().expect("downcast ErrorCode"),
+        let err = match result {
+            Ok(_) => panic!("expected timeout"),
+            Err(e) => e.downcast().expect("downcast ErrorCode"),
         };
         assert!(matches!(err, ErrorCode::ConnectionWriteTimeout));
         assert!(host.calls().is_empty());
@@ -503,9 +509,9 @@ mod tests {
 
     #[tokio::test]
     async fn outgoing_http_body_is_capped() {
-        let body: HyperOutgoingBody = http_body_util::StreamBody::new(futures::stream::iter([
-            Ok::<_, TypesErrorCode>(Frame::data(Bytes::from_static(b"abcd"))),
-            Ok::<_, TypesErrorCode>(Frame::data(Bytes::from_static(b"e"))),
+        let body = http_body_util::StreamBody::new(futures::stream::iter([
+            Ok::<_, ErrorCode>(Frame::data(Bytes::from_static(b"abcd"))),
+            Ok::<_, ErrorCode>(Frame::data(Bytes::from_static(b"e"))),
         ]))
         .boxed_unsync();
 
@@ -534,8 +540,8 @@ mod tests {
             output_buffer: OutputBuffer::new(),
         };
 
-        let body: HyperOutgoingBody = http_body_util::StreamBody::new(futures::stream::empty::<
-            Result<Frame<Bytes>, TypesErrorCode>,
+        let body = http_body_util::StreamBody::new(futures::stream::empty::<
+            Result<Frame<Bytes>, ErrorCode>,
         >())
         .boxed_unsync();
 
@@ -550,24 +556,20 @@ mod tests {
             .body(body)
             .expect("request build");
 
-        let cfg = OutgoingRequestConfig {
-            use_tls: false,
-            connect_timeout: Duration::from_secs(1),
-            first_byte_timeout: Duration::from_secs(1),
-            between_bytes_timeout: Duration::from_secs(1),
+        let options = RequestOptions {
+            connect_timeout: Some(Duration::from_secs(1)),
+            first_byte_timeout: Some(Duration::from_secs(1)),
+            between_bytes_timeout: Some(Duration::from_secs(1)),
         };
 
-        let mut fut = state.send_request(req, cfg).expect("send_request");
-        timeout(Duration::from_millis(500), fut.ready())
-            .await
-            .expect("ready in time");
-
-        let incoming = match fut.unwrap_ready() {
-            Ok(Ok(v)) => v,
-            Ok(Err(e)) => panic!("expected response, got outgoing handler error: {e:?}"),
-            Err(e) => panic!("expected response, got transport error: {e:?}"),
-        };
-        assert_eq!(incoming.resp.status(), http::StatusCode::FOUND);
+        let (incoming, _io) = timeout(
+            Duration::from_millis(500),
+            state.send_request(req, Some(options)),
+        )
+        .await
+        .expect("ready in time")
+        .expect("expected response");
+        assert_eq!(incoming.status(), http::StatusCode::FOUND);
 
         let calls = host.calls();
         assert_eq!(calls.len(), 1);

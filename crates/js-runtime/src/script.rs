@@ -123,11 +123,11 @@ impl Scope {
         })
     }
 
-    /// Drive a Promise to completion using the WASI poll-based event loop.
+    /// Drive a Promise to completion using the runtime async handle loop.
     ///
     /// 1. Execute microtasks (`execute_pending_job`)
-    /// 2. If promise unresolved and pending WASI ops exist → call
-    ///    `wasi:io/poll::poll`
+    /// 2. If promise unresolved and pending runtime ops exist, resolve ready
+    ///    handles
     /// 3. Call JS `_isola_async._resolve(readyHandles)` to resolve
     ///    corresponding Promises
     /// 4. New microtasks are created → repeat
@@ -167,7 +167,25 @@ impl Scope {
 
             let ready_handles = future::poll_all();
             if ready_handles.is_empty() {
-                return Err(Error::Unexpected("poll returned no ready handles"));
+                // Execute any host calls that were submitted but not yet driven.
+                // They run concurrently, so awaited-together ops (Promise.all)
+                // overlap their host round-trips.
+                if future::drive_pending() {
+                    continue;
+                }
+                // Only timed sleeps remain: wait until the nearest deadline.
+                match future::next_deadline() {
+                    Some(at) => {
+                        let now = std::time::Instant::now();
+                        if at > now {
+                            std::thread::sleep(at - now);
+                        }
+                    }
+                    // has_pending() was true but nothing is ready and nothing is
+                    // timed: unreachable today, but don't spin forever.
+                    None => return Err(Error::Unexpected("promise never resolved")),
+                }
+                continue;
             }
 
             // Call JS _isola_async._resolve(readyHandles)

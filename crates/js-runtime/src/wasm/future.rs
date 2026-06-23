@@ -1,63 +1,87 @@
-use std::cell::RefCell;
-
-use rquickjs::{Array, Ctx, Function, Object, Value};
-
-use super::wasi::{
-    self, http::outgoing_handler::FutureIncomingResponse, io::poll::poll as wasi_poll,
+use std::{
+    cell::RefCell,
+    time::{Duration, Instant},
 };
+
+use futures::future::join_all;
+use rquickjs::{Array, Ctx, Function, Object, Value};
+use wit_bindgen::block_on;
+
+use super::isola::script::host;
 use crate::serde as js_serde;
 
 pub enum PendingOp {
-    Http {
-        response: FutureIncomingResponse,
-        url: String,
+    /// A host call (a plain `hostcall` or an HTTP request, which is itself a
+    /// `hostcall`) that has been submitted by the guest. `result` stays `None`
+    /// until the poll loop drives it in `drive_pending`; multiple un-driven
+    /// host calls are then issued concurrently. `url` is `Some` for HTTP
+    /// requests and is used to build the response object.
+    HostCall {
+        call_type: String,
+        payload: Vec<u8>,
+        url: Option<String>,
+        result: Option<Result<Vec<u8>, String>>,
     },
-    Hostcall(super::isola::script::host::FutureHostcall),
-    Sleep,
+    Sleep(Option<Instant>),
 }
 
-struct PendingEntry {
-    pollable: wasi::io::poll::Pollable,
-    op: PendingOp,
+impl PendingOp {
+    fn is_ready(&self) -> bool {
+        match self {
+            Self::HostCall { result, .. } => result.is_some(),
+            Self::Sleep(None) => true,
+            Self::Sleep(Some(ready_at)) => Instant::now() >= *ready_at,
+        }
+    }
+}
+
+/// Build a deferred plain `hostcall` op (driven later, possibly concurrently).
+pub const fn hostcall(call_type: String, payload: Vec<u8>) -> PendingOp {
+    PendingOp::HostCall {
+        call_type,
+        payload,
+        url: None,
+        result: None,
+    }
+}
+
+/// Build a deferred HTTP request op. `url` is retained to build the response.
+pub fn http(payload: Vec<u8>, url: String) -> PendingOp {
+    PendingOp::HostCall {
+        call_type: "__isola_http".to_string(),
+        payload,
+        url: Some(url),
+        result: None,
+    }
 }
 
 thread_local! {
-    static PENDING: RefCell<Vec<Option<PendingEntry>>> = const { RefCell::new(Vec::new()) };
+    static PENDING: RefCell<Vec<Option<PendingOp>>> = const { RefCell::new(Vec::new()) };
 }
 
 #[expect(clippy::cast_possible_truncation)]
-pub fn register(pollable: wasi::io::poll::Pollable, op: PendingOp) -> u32 {
+pub fn register(op: PendingOp) -> u32 {
     PENDING.with(|p| {
         let mut p = p.borrow_mut();
-        let entry = PendingEntry { pollable, op };
-        // Find first free slot
         for (i, slot) in p.iter_mut().enumerate() {
             if slot.is_none() {
-                *slot = Some(entry);
+                *slot = Some(op);
                 return i as u32;
             }
         }
         let idx = p.len();
-        p.push(Some(entry));
+        p.push(Some(op));
         idx as u32
     })
 }
 
-/// Remove a pending entry and return only the operation.
-/// The pollable is dropped first to satisfy WASI resource parenting
-/// (the pollable is a child of the operation resource).
 fn take(handle: u32) -> rquickjs::Result<PendingOp> {
     PENDING.with(|p| {
         let mut p = p.borrow_mut();
         let slot = p
             .get_mut(handle as usize)
             .ok_or_else(|| invalid_handle_error(handle))?;
-        let entry = slot.take().ok_or_else(|| invalid_handle_error(handle))?;
-        // Drop pollable before returning the op — the pollable is a child
-        // resource of the op (FutureIncomingResponse / FutureHostcall) in
-        // the WASI resource table, so it must be dropped first.
-        drop(entry.pollable);
-        Ok(entry.op)
+        slot.take().ok_or_else(|| invalid_handle_error(handle))
     })
 }
 
@@ -69,42 +93,80 @@ fn invalid_handle_error(handle: u32) -> rquickjs::Error {
     )
 }
 
-/// Poll all registered pollables via `wasi:io/poll::poll`.
-/// Returns handles of ready entries (entries remain in the registry until
-/// `take()`).
 #[expect(clippy::cast_possible_truncation)]
 pub fn poll_all() -> Vec<u32> {
     PENDING.with(|p| {
-        let p = p.borrow();
-
-        // Collect active entries: (slot_index, &pollable)
-        let active: Vec<(usize, &wasi::io::poll::Pollable)> = p
+        p.borrow()
             .iter()
             .enumerate()
-            .filter_map(|(i, slot)| slot.as_ref().map(|e| (i, &e.pollable)))
-            .collect();
-
-        if active.is_empty() {
-            return Vec::new();
-        }
-
-        let pollables: Vec<&wasi::io::poll::Pollable> =
-            active.iter().map(|(_, poll)| *poll).collect();
-        let ready_indices = wasi_poll(&pollables);
-
-        ready_indices
-            .iter()
-            .map(|&idx| active[idx as usize].0 as u32)
+            .filter_map(|(i, slot)| slot.as_ref().filter(|op| op.is_ready()).map(|_| i as u32))
             .collect()
     })
 }
 
-/// Resolve ready handles: take entries from registry and call JS
-/// `_isola_async._resolve()`. Returns the taken entries paired with their
-/// handles for the caller to process, or resolves them directly via JS if a
-/// context is provided.
+/// Earliest instant at which a currently-pending op becomes ready.
+///
+/// Only timed sleeps (`Sleep(Some)`) are not ready immediately, so this is the
+/// next wakeup deadline for the poll loop. When `poll_all()` returns empty,
+/// every pending op is a timed sleep and this is `Some`.
+pub fn next_deadline() -> Option<Instant> {
+    PENDING.with(|p| {
+        p.borrow()
+            .iter()
+            .filter_map(|slot| match slot {
+                Some(PendingOp::Sleep(Some(at))) => Some(*at),
+                _ => None,
+            })
+            .min()
+    })
+}
+
+/// Drive every host call that has been submitted but not yet executed.
+///
+/// All un-driven host calls are issued **concurrently** in a single
+/// `block_on`, so `Promise.all([fetch(a), fetch(b)])` (which submits both ops
+/// before the poll loop runs) overlaps their host round-trips. Sequential
+/// `await fetch(a); await fetch(b)` still runs serially because only one op is
+/// outstanding when the loop drives.
+///
+/// Returns `true` if at least one host call was driven (the caller should
+/// re-poll for readiness), `false` if there was nothing to drive.
+pub fn drive_pending() -> bool {
+    let reqs: Vec<(usize, String, Vec<u8>)> = PENDING.with(|p| {
+        p.borrow()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, slot)| match slot {
+                Some(PendingOp::HostCall {
+                    call_type,
+                    payload,
+                    result: None,
+                    ..
+                }) => Some((i, call_type.clone(), payload.clone())),
+                _ => None,
+            })
+            .collect()
+    });
+    if reqs.is_empty() {
+        return false;
+    }
+
+    let results = block_on(join_all(reqs.into_iter().map(
+        |(i, call_type, payload)| async move { (i, host::hostcall(call_type, payload).await) },
+    )));
+
+    PENDING.with(|p| {
+        let mut p = p.borrow_mut();
+        for (i, res) in results {
+            if let Some(Some(PendingOp::HostCall { result, .. })) = p.get_mut(i) {
+                *result = Some(res);
+            }
+        }
+    });
+    true
+}
+
 pub fn resolve_ready(ctx: &Ctx<'_>, ready_handles: &[u32]) -> rquickjs::Result<()> {
-    // Build array of ready handles for JS
     let arr = Array::new(ctx.clone())?;
     for (i, &h) in ready_handles.iter().enumerate() {
         arr.set(i, h)?;
@@ -121,56 +183,51 @@ pub fn has_pending() -> bool {
     PENDING.with(|p| p.borrow().iter().any(Option::is_some))
 }
 
-/// Retrieve the result of a completed HTTP operation as a JS response object.
 pub fn recv_http<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Object<'js>> {
     let op = take(handle)?;
     match op {
-        PendingOp::Http { response, url } => {
-            let response = response
-                .get()
-                .expect("response not ready")
-                .expect("wasm error")
-                .map_err(|e| {
-                    rquickjs::Error::new_from_js_message("fetch", "error", &e.to_string())
-                })?;
-            super::http::build_response_object(ctx, response, &url)
+        PendingOp::HostCall {
+            result: Some(response),
+            url: Some(url),
+            ..
+        } => {
+            let response =
+                response.map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))?;
+            super::http::build_response_object(ctx, &response, &url)
                 .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))
         }
         _ => Err(rquickjs::Error::new_from_js_message(
             "recv",
             "error",
-            "handle is not an HTTP operation",
+            "handle is not a completed HTTP operation",
         )),
     }
 }
 
-/// Retrieve the result of a completed hostcall as a JS value.
 pub fn finish_hostcall<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Value<'js>> {
     let op = take(handle)?;
     match op {
-        PendingOp::Hostcall(future) => {
-            let result = future
-                .get()
-                .expect("hostcall not ready")
-                .expect("wasm error");
-            let cbor_result = result.map_err(|e| {
-                rquickjs::Error::new_from_js_message("hostcall", "error", &e.to_debug_string())
-            })?;
+        PendingOp::HostCall {
+            result: Some(result),
+            url: None,
+            ..
+        } => {
+            let cbor_result = result
+                .map_err(|e| rquickjs::Error::new_from_js_message("hostcall", "error", &e))?;
             js_serde::cbor_to_js(ctx, &cbor_result)
                 .map_err(|e| rquickjs::Error::new_from_js_message("cbor", "value", &e))
         }
         _ => Err(rquickjs::Error::new_from_js_message(
             "hostcall",
             "error",
-            "handle is not a hostcall operation",
+            "handle is not a completed hostcall operation",
         )),
     }
 }
 
-/// Consume a completed sleep handle (no result value).
 pub fn finish_sleep(handle: u32) -> rquickjs::Result<()> {
     let op = take(handle)?;
-    if matches!(op, PendingOp::Sleep) {
+    if matches!(op, PendingOp::Sleep(_)) {
         Ok(())
     } else {
         Err(rquickjs::Error::new_from_js_message(
@@ -185,18 +242,23 @@ pub fn register_js(ctx: &Ctx<'_>) {
     let globals = ctx.globals();
     let sys: Object<'_> = globals.get("_isola_sys").unwrap();
 
-    // _isola_sys._drain_jobs - no-op, kept for compatibility
     sys.set(
         "_drain_jobs",
         rquickjs::Function::new(ctx.clone(), || {}).unwrap(),
     )
     .unwrap();
 
-    // _isola_sys._finish_sleep(handle) -> void
-    // Consumes a completed sleep handle.
     sys.set(
         "_finish_sleep",
         rquickjs::Function::new(ctx.clone(), finish_sleep).unwrap(),
     )
     .unwrap();
+}
+
+pub fn sleep(duration: f64) -> PendingOp {
+    if duration.is_finite() && duration > 0.0 {
+        PendingOp::Sleep(Instant::now().checked_add(Duration::from_secs_f64(duration)))
+    } else {
+        PendingOp::Sleep(None)
+    }
 }

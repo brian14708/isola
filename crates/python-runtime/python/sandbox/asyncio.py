@@ -93,30 +93,49 @@ class PollLoop(asyncio.AbstractEventLoop):
                 if not handle._cancelled:  # noqa: SLF001
                     handle._run()  # noqa: SLF001
 
+            # `_isola_sys.poll` blocks internally until the nearest pending
+            # deadline and always returns a `bytes` of length `len(self.wakers)`,
+            # so it is truthy whenever there are wakers to dispatch.
             if self.wakers and (readyset := _isola_sys.poll(self.wakers)):
-                new_wakers: list[
-                    tuple[
-                        _isola_sys.Pollable[object],
-                        asyncio.Future[object] | asyncio.Handle,
-                    ]
-                ] = []
-                for is_ready, (pollable, waker) in zip(
-                    readyset, self.wakers, strict=True
-                ):
-                    if is_ready:
-                        if isinstance(waker, asyncio.Handle):
-                            self.handles.append(waker)
-                        elif not waker.cancelled():
-                            waker.set_result(pollable.get())
-                            pollable.release()
-                    else:
-                        new_wakers.append((pollable, waker))
-                self.wakers = new_wakers
+                self._dispatch_ready(readyset)
 
         if not future.done() and self.running:
             msg = "Deadlock detected"
             raise RuntimeError(msg)
         return future.result()
+
+    def _dispatch_ready(self, readyset: bytes) -> None:
+        new_wakers: list[
+            tuple[
+                _isola_sys.Pollable[object],
+                asyncio.Future[object] | asyncio.Handle,
+            ]
+        ] = []
+        for is_ready, (pollable, waker) in zip(readyset, self.wakers, strict=True):
+            if not is_ready:
+                new_wakers.append((pollable, waker))
+            elif isinstance(waker, asyncio.Handle):
+                self.handles.append(waker)
+            else:
+                self._resume_future(pollable, waker)
+        self.wakers = new_wakers
+
+    @staticmethod
+    def _resume_future(
+        pollable: _isola_sys.Pollable[object],
+        waker: asyncio.Future[object],
+    ) -> None:
+        # Resolve the awaiting coroutine. `pollable.get()` raises when the
+        # underlying host call failed; route that to the future so user code can
+        # catch it at the `await` point instead of crashing the event loop.
+        if not waker.cancelled():
+            try:
+                waker.set_result(pollable.get())
+            except Exception as exc:  # noqa: BLE001
+                waker.set_exception(exc)
+        # Release regardless of cancellation so the host-side call slot is
+        # always reclaimed.
+        pollable.release()
 
     def _cleanup(self) -> None:
         while self.handles or self.wakers:

@@ -461,6 +461,55 @@ async fn integration_python_call_timeout() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_asyncio_sleep_respects_delay() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+import asyncio
+import sandbox.asyncio
+
+async def main():
+    loop = asyncio.get_running_loop()
+    start = loop.time()
+    fut = loop.create_future()
+    loop.call_later(0.05, fut.set_result, None)
+    await fut
+    return loop.time() - start
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate asyncio sleep script")?;
+
+    let started = std::time::Instant::now();
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call asyncio sleep function")?;
+    let host_elapsed = started.elapsed();
+
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let elapsed: f64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode elapsed time")?;
+    assert!(
+        elapsed >= 0.045 || host_elapsed >= Duration::from_millis(45),
+        "sleep resolved too early, guest_elapsed={elapsed}, host_elapsed={host_elapsed:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
     let Some(module) = build_module_with_max_memory(MEMORY_CAP_BYTES).await? else {
         return Ok(());

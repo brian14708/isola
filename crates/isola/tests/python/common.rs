@@ -37,6 +37,15 @@ impl Host for TestHost {
     ) -> std::result::Result<Value, BoxError> {
         match call_type {
             "echo" => Ok(payload),
+            // Sleep for the payload's milliseconds, then echo it back. Used by
+            // integration tests to prove concurrent host calls overlap in time.
+            "delay" => {
+                let ms: u64 = payload
+                    .to_serde()
+                    .map_err(|e| -> BoxError { Box::new(std::io::Error::other(e.to_string())) })?;
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                Ok(payload)
+            }
             _ => Err(std::io::Error::other(format!("unsupported hostcall: {call_type}")).into()),
         }
     }

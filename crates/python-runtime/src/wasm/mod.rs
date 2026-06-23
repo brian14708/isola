@@ -6,11 +6,11 @@ mod http;
 mod logging;
 mod serde;
 
-use std::cell::RefCell;
+use std::{cell::RefCell, time::Instant};
 
 use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
 
-use self::{exports::isola::script::runtime, isola::script::host, wasi::io::streams::StreamError};
+use self::{exports::isola::script::runtime, isola::script::host};
 use crate::{
     error::Error,
     script::{InputValue, Scope},
@@ -27,54 +27,46 @@ wit_bindgen::generate!({
 #[pymodule]
 #[pyo3(name = "_isola_sys")]
 pub mod sys_module {
-    use std::{ops::Deref, time::Duration};
+    use std::time::{Duration, Instant};
 
     use pyo3::{
-        Bound, PyAny, PyErr, PyResult, Python, pyfunction,
-        types::{PyBytes, PyList, PyListMethods, PyTuple, PyTupleMethods},
+        Bound, PyAny, PyErr, PyRef, PyResult, Python, pyfunction,
+        types::{PyAnyMethods, PyBytes, PyList, PyListMethods},
     };
-    use smallvec::{SmallVec, smallvec};
 
     #[pymodule_export]
     use super::future::PyPollable;
-    use super::wasi::{
-        clocks::monotonic_clock::{now, subscribe_duration},
-        io::poll::poll as host_poll,
-    };
     use crate::{
         serde::{cbor_to_python, python_to_cbor, python_to_cbor_emit},
-        wasm::{
-            future::{Pollable, create_future},
-            isola::script::host,
-            wasi,
-        },
+        wasm::{future::create_future, isola::script::host},
     };
 
-    fn cbor_convert(
-        py: Python<'_>,
-        cbor: Result<Vec<u8>, wasi::io::error::Error>,
-    ) -> PyResult<Bound<'_, PyAny>> {
+    fn cbor_convert(py: Python<'_>, cbor: Result<Vec<u8>, String>) -> PyResult<Bound<'_, PyAny>> {
         cbor_to_python(
             py,
-            &cbor
-                .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_debug_string()))?,
+            &cbor.map_err(PyErr::new::<pyo3::exceptions::PyTypeError, _>)?,
         )
     }
-    create_future!(PyFutureHostcall, super::host::FutureHostcall, cbor_convert -> PyResult<Bound<'_, PyAny>>);
+    create_future!(PyFutureHostcall, Result<Vec<u8>, String>, cbor_convert -> PyResult<Bound<'_, PyAny>>);
 
     #[pyfunction]
     #[pyo3(signature = (duration))]
     fn sleep(duration: f64) -> PyPollable {
-        subscribe_duration(
-            u64::try_from(Duration::from_secs_f64(duration).as_nanos())
-                .expect("duration is too large"),
-        )
-        .into()
+        if duration.is_finite() && duration > 0.0 {
+            PyPollable::sleep(Duration::from_secs_f64(duration))
+        } else {
+            PyPollable::default()
+        }
     }
 
     #[pyfunction]
     fn monotonic() -> f64 {
-        Duration::from_nanos(now()).as_secs_f64()
+        super::MONOTONIC_BASE.with(|base| {
+            base.borrow_mut()
+                .get_or_insert_with(Instant::now)
+                .elapsed()
+                .as_secs_f64()
+        })
     }
 
     #[pyfunction]
@@ -85,48 +77,47 @@ pub mod sys_module {
     #[pyfunction]
     fn hostcall(call_type: &str, payload: Bound<'_, PyAny>) -> PyResult<PyFutureHostcall> {
         let cbor_payload = python_to_cbor(payload)?;
-        let future_hostcall = host::hostcall(call_type, &cbor_payload);
-        Ok(PyFutureHostcall::new(future_hostcall))
+        Ok(PyFutureHostcall::new(crate::wasm::future::register_call(
+            call_type.to_string(),
+            cbor_payload,
+        )))
     }
 
     #[pyfunction]
     #[pyo3(signature = (poll))]
-    fn poll<'py>(poll: &Bound<'py, PyList>) -> PyResult<Option<Bound<'py, PyBytes>>> {
-        let (pollables, ready_count) = poll.iter().try_fold(
-            (SmallVec::<[_; 8]>::with_capacity(poll.len()), 0),
-            |(mut vec, mut count), p| -> PyResult<_> {
-                let pollable =
-                    Pollable::subscribe(p.cast_exact::<PyTuple>()?.get_borrowed_item(0)?)?;
-                if pollable.is_none() {
-                    count += 1;
-                }
-                vec.push(pollable);
-                Ok((vec, count))
-            },
-        )?;
-        assert_eq!(pollables.len(), poll.len());
-
-        let py = poll.py();
-        if ready_count > 0 {
-            Ok(Some(PyBytes::new(
-                py,
-                &pollables
-                    .into_iter()
-                    .map(|p| u8::from(p.is_none()))
-                    .collect::<SmallVec<[_; 8]>>(),
-            )))
-        } else {
-            let handles = pollables
-                .iter()
-                .map(|p| p.as_ref().unwrap().deref())
-                .collect::<SmallVec<[_; 8]>>();
-
-            let mut result: SmallVec<[_; 8]> = smallvec![0; poll.len()];
-            for index in host_poll(&handles) {
-                result[index as usize] = 1;
-            }
-            Ok(Some(PyBytes::new(py, &result)))
+    fn poll<'py>(poll: &Bound<'py, PyList>) -> Bound<'py, PyBytes> {
+        // Execute any host calls submitted but not yet driven. They run
+        // concurrently, so calls awaited together (e.g. `asyncio.gather`)
+        // overlap their host round-trips instead of serializing.
+        fn item_pollable<'py>(item: &Bound<'py, PyAny>) -> Option<PyRef<'py, PyPollable>> {
+            item.get_item(0)
+                .ok()?
+                .extract::<PyRef<'_, PyPollable>>()
+                .ok()
         }
+
+        fn ready_set(pollables: &Bound<'_, PyList>) -> Vec<u8> {
+            pollables
+                .iter()
+                .map(|item| item_pollable(&item).is_none_or(|pollable| pollable.is_ready()))
+                .map(u8::from)
+                .collect::<Vec<_>>()
+        }
+
+        crate::wasm::future::drive_pending_calls();
+
+        let ready = ready_set(poll);
+        if ready.iter().all(|is_ready| *is_ready == 0) {
+            if let Some(ready_at) = poll
+                .iter()
+                .filter_map(|item| item_pollable(&item).and_then(|pollable| pollable.ready_at()))
+                .min()
+            {
+                std::thread::sleep(ready_at.saturating_duration_since(Instant::now()));
+            }
+            return PyBytes::new(poll.py(), &ready_set(poll));
+        }
+        PyBytes::new(poll.py(), &ready)
     }
 }
 
@@ -178,10 +169,22 @@ impl runtime::Guest for Global {
                 reset_adapter_state();
                 wasilibc_reset_preopens();
             }
+
+            // A monotonic base captured during initialize() (snapshot/build
+            // time) would be frozen into the Wizer snapshot and is meaningless
+            // at runtime, so clear it here; `monotonic()` lazily establishes the
+            // base on its first runtime call instead (see MONOTONIC_BASE).
+            MONOTONIC_BASE.with(|base| {
+                base.borrow_mut().take();
+            });
         }
     }
 
-    fn eval_script(script: String) -> Result<(), runtime::Error> {
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "WIT async export requires an async trait method"
+    )]
+    async fn eval_script(script: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
@@ -196,7 +199,11 @@ impl runtime::Guest for Global {
         })
     }
 
-    fn eval_file(path: String) -> Result<(), runtime::Error> {
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "WIT async export requires an async trait method"
+    )]
+    async fn eval_file(path: String) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             if let Some(sandbox) = sandbox.as_ref() {
                 let script = std::fs::read_to_string(std::path::Path::new(&path))
@@ -212,7 +219,11 @@ impl runtime::Guest for Global {
         })
     }
 
-    fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "WIT async export requires an async trait method"
+    )]
+    async fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
@@ -256,17 +267,13 @@ impl ArgIter {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
-        match self.iter.blocking_read() {
-            Ok(c) => Ok(Some(
+        match wit_bindgen::block_on(self.iter.read()) {
+            Some(c) => Ok(Some(
                 cbor_to_python(py, &c)
                     .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
                     .into(),
             )),
-            Err(StreamError::Closed) => Ok(None),
-            Err(StreamError::LastOperationFailed(e)) => Err(PyErr::new::<
-                pyo3::exceptions::PyTypeError,
-                _,
-            >(e.to_debug_string())),
+            None => Ok(None),
         }
     }
 
@@ -278,8 +285,8 @@ impl ArgIter {
     }
 
     fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<Py<PyAny>>, Option<PyPollable>)> {
-        match self.iter.read() {
-            Some(Ok(c)) => Ok((
+        match wit_bindgen::block_on(self.iter.read()) {
+            Some(c) => Ok((
                 true,
                 Some(
                     cbor_to_python(py, &c)
@@ -290,47 +297,12 @@ impl ArgIter {
                 ),
                 None,
             )),
-            Some(Err(StreamError::Closed)) => Ok((false, None, None)),
-            Some(Err(StreamError::LastOperationFailed(e))) => {
-                Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                    e.to_debug_string(),
-                ))
-            }
-            None => Ok((true, None, Some(PyPollable::from(self.iter.subscribe())))),
+            None => Ok((false, None, None)),
         }
     }
 }
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
-}
-
-impl std::io::Write for wasi::io::streams::OutputStream {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        let n = loop {
-            match self.check_write().map(std::num::NonZeroU64::new) {
-                Ok(Some(n)) => {
-                    break n;
-                }
-                Ok(None) => {
-                    self.subscribe().block();
-                }
-                Err(StreamError::Closed) => return Ok(0),
-                Err(StreamError::LastOperationFailed(e)) => {
-                    return Err(std::io::Error::other(e.to_debug_string()));
-                }
-            }
-        };
-        let n = n.get().try_into().map_err(std::io::Error::other)?;
-        let n = buf.len().min(n);
-        Self::write(self, &buf[..n]).map_err(|e| match e {
-            StreamError::Closed => std::io::ErrorKind::UnexpectedEof.into(),
-            StreamError::LastOperationFailed(e) => std::io::Error::other(e.to_debug_string()),
-        })?;
-        Ok(n)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.blocking_flush().map_err(std::io::Error::other)
-    }
+    static MONOTONIC_BASE: RefCell<Option<Instant>> = const { RefCell::new(None) };
 }

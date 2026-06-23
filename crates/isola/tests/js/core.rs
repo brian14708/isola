@@ -499,6 +499,106 @@ async function main() {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_sleep_respects_delay() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+async function main() {
+    const start = _isola_sys.monotonic();
+    await _isola_sys.sleep(0.05);
+    return _isola_sys.monotonic() - start;
+}
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate sleep script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call sleep function")?;
+
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let elapsed: f64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode elapsed time")?;
+    assert!(
+        elapsed >= 0.045,
+        "sleep resolved too early, elapsed={elapsed}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_mixed_polling_resolves_ready_handles_incrementally() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+async function main() {
+    const events = [];
+    const start = _isola_sys.monotonic();
+
+    const immediate = hostcall("echo", "hostcall").then(function (value) {
+        events.push(["hostcall", value, _isola_sys.monotonic() - start]);
+    });
+    const delayed = _isola_sys.sleep(0.05).then(function () {
+        events.push(["sleep", "done", _isola_sys.monotonic() - start]);
+    });
+
+    await Promise.all([immediate, delayed]);
+    return events;
+}
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate mixed polling script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call mixed polling function")?;
+
+    assert!(output.items.is_empty(), "expected no partial outputs");
+    let events: serde_json::Value = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode mixed polling result")?;
+    assert_eq!(events[0][0], "hostcall");
+    assert_eq!(events[0][1], "hostcall");
+    assert_eq!(events[1][0], "sleep");
+    assert_eq!(events[1][1], "done");
+    let sleep_elapsed = events[1][2]
+        .as_f64()
+        .context("expected sleep elapsed seconds")?;
+    assert!(
+        sleep_elapsed >= 0.045,
+        "sleep resolved too early, elapsed={sleep_elapsed}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_set_interval_and_clear_interval() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());

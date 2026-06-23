@@ -417,10 +417,11 @@ impl<H: Host> Sandbox<H> {
         let result = self
             .bindings
             .isola_script_runtime()
-            .call_eval_script(&mut store, code)
+            .func_eval_script()
+            .call_async(&mut store, (code.to_string(),))
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
-        result.map_err(Error::Wasm)??;
+        result.map_err(Error::Wasm)?.0?;
         flush_result?;
         Ok(())
     }
@@ -435,10 +436,11 @@ impl<H: Host> Sandbox<H> {
         let result = self
             .bindings
             .isola_script_runtime()
-            .call_eval_file(&mut store, guest_path)
+            .func_eval_file()
+            .call_async(&mut store, (guest_path.to_string(),))
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
-        result.map_err(Error::Wasm)??;
+        result.map_err(Error::Wasm)?.0?;
         flush_result?;
         Ok(())
     }
@@ -491,11 +493,11 @@ impl<H: Host> Sandbox<H> {
             .map(|arg| match arg {
                 Arg::Positional(value) => Ok(RawArgument {
                     name: None,
-                    value: WasmValue::Cbor(value.as_cbor()),
+                    value: WasmValue::Cbor(value.as_cbor().to_vec()),
                 }),
                 Arg::Named(name, value) => Ok(RawArgument {
-                    name: Some(name.as_str()),
-                    value: WasmValue::Cbor(value.as_cbor()),
+                    name: Some(name.clone()),
+                    value: WasmValue::Cbor(value.as_cbor().to_vec()),
                 }),
                 Arg::PositionalStream(stream_arg) => {
                     let stream = std::mem::replace(stream_arg, Box::pin(stream::empty()));
@@ -517,7 +519,7 @@ impl<H: Host> Sandbox<H> {
                         .push(ValueIterator::new(stream))
                         .map_err(|e| Error::Other(e.into()))?;
                     Ok(RawArgument {
-                        name: Some(name.as_str()),
+                        name: Some(name.clone()),
                         value: WasmValue::CborIterator(iter),
                     })
                 }
@@ -528,10 +530,11 @@ impl<H: Host> Sandbox<H> {
         let result = self
             .bindings
             .isola_script_runtime()
-            .call_call_func(&mut store, function, &internal_args)
+            .func_call_func()
+            .call_async(&mut store, (function.to_string(), internal_args.into_vec()))
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
-        result.map_err(Error::Wasm)??;
+        result.map_err(Error::Wasm)?.0?;
         flush_result?;
         Ok(())
     }
