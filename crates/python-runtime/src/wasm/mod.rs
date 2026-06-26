@@ -47,7 +47,7 @@ pub mod sys_module {
             &cbor.map_err(PyErr::new::<pyo3::exceptions::PyTypeError, _>)?,
         )
     }
-    create_future!(PyFutureHostcall, Result<Vec<u8>, String>, cbor_convert -> PyResult<Bound<'_, PyAny>>);
+    create_future!(PyFutureHostcall, cbor_convert -> PyResult<Bound<'_, PyAny>>);
 
     #[pyfunction]
     #[pyo3(signature = (duration))]

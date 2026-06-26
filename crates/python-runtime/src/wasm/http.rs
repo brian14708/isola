@@ -104,7 +104,7 @@ pub mod http_module {
         )))
     }
 
-    create_future!(PyFutureResponse, Result<Vec<u8>, String>, PyResponse);
+    create_future!(PyFutureResponse, PyResponse);
 
     #[pyclass]
     struct PyResponse {
@@ -135,24 +135,15 @@ pub mod http_module {
                         .filter_map(|header| {
                             let pair = header.as_array()?;
                             let name = pair.first()?.as_str()?.to_string();
-                            let value = pair
-                                .get(1)?
-                                .as_array()?
-                                .iter()
-                                .filter_map(serde_json::Value::as_u64)
-                                .filter_map(|b| u8::try_from(b).ok())
-                                .collect::<Vec<_>>();
+                            let value = decode_byte_array(pair.get(1)?.as_array()?);
                             Some((name, value))
                         })
                         .collect();
                     let body = response
                         .get("body")
                         .and_then(serde_json::Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(serde_json::Value::as_u64)
-                        .filter_map(|b| u8::try_from(b).ok())
-                        .collect();
+                        .map(|arr| decode_byte_array(arr))
+                        .unwrap_or_default();
                     Ok(Self {
                         status: response
                             .get("status")
@@ -243,6 +234,15 @@ pub mod http_module {
         fn drop(&mut self) {
             self.close();
         }
+    }
+
+    /// Decode a CBOR-transported byte array (serialized as a sequence of
+    /// integers) back into raw bytes.
+    fn decode_byte_array(arr: &[serde_json::Value]) -> Vec<u8> {
+        arr.iter()
+            .filter_map(serde_json::Value::as_u64)
+            .filter_map(|b| u8::try_from(b).ok())
+            .collect()
     }
 
     fn read_into(

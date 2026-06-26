@@ -12,7 +12,6 @@ use crate::wasm::isola::script::host;
 enum PollState {
     Ready,
     Sleep(Instant),
-    Released,
 }
 
 #[pyclass]
@@ -39,7 +38,7 @@ impl PyPollable {
 
     pub fn is_ready(&self) -> bool {
         match self.state {
-            PollState::Ready | PollState::Released => true,
+            PollState::Ready => true,
             PollState::Sleep(ready_at) => Instant::now() >= ready_at,
         }
     }
@@ -55,7 +54,7 @@ impl PyPollable {
     pub const fn ready_at(&self) -> Option<Instant> {
         match self.state {
             PollState::Sleep(ready_at) => Some(ready_at),
-            PollState::Ready | PollState::Released => None,
+            PollState::Ready => None,
         }
     }
 }
@@ -76,7 +75,7 @@ impl PyPollable {
     }
 
     const fn release(&mut self) {
-        self.state = PollState::Released;
+        self.state = PollState::Ready;
     }
 
     fn wait(&mut self) {
@@ -161,15 +160,15 @@ pub fn drive_pending_calls() {
     });
 }
 
+/// Remove a call from the registry and hand back its slot contents, if any.
+fn take_call(handle: u32) -> Option<DeferredCall> {
+    CALLS.with(|c| c.borrow_mut().get_mut(handle as usize).and_then(Option::take))
+}
+
 /// Consume a driven call's result (async path: the `PollLoop` has already run
 /// `drive_pending_calls`).
 pub fn take_result(handle: u32) -> Result<Vec<u8>, String> {
-    let call = CALLS.with(|c| {
-        c.borrow_mut()
-            .get_mut(handle as usize)
-            .and_then(Option::take)
-    });
-    match call {
+    match take_call(handle) {
         Some(DeferredCall {
             result: Some(result),
             ..
@@ -181,12 +180,7 @@ pub fn take_result(handle: u32) -> Result<Vec<u8>, String> {
 /// Drive a single call to completion synchronously and consume it (blocking
 /// path). If it was already driven, returns the cached result.
 pub fn drive_one(handle: u32) -> Result<Vec<u8>, String> {
-    let call = CALLS.with(|c| {
-        c.borrow_mut()
-            .get_mut(handle as usize)
-            .and_then(Option::take)
-    });
-    match call {
+    match take_call(handle) {
         Some(DeferredCall {
             result: Some(result),
             ..
@@ -208,7 +202,7 @@ pub fn release_call(handle: u32) {
 }
 
 macro_rules! create_future {
-    ($name:ident, $result_type:ty, $type:ty) => {
+    ($name:ident, $type:ty) => {
         #[::pyo3::prelude::pyclass]
         struct $name {
             handle: u32,
@@ -239,7 +233,7 @@ macro_rules! create_future {
             }
         }
     };
-    ($name:ident, $result_type:ty, $convert:ident -> $type:ty) => {
+    ($name:ident, $convert:ident -> $type:ty) => {
         #[::pyo3::prelude::pyclass]
         struct $name {
             handle: u32,

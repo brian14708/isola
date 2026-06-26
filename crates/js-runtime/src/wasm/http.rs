@@ -162,6 +162,15 @@ fn send_impl(
     Ok(future::register(future::http(payload, u.to_string())))
 }
 
+/// Decode a CBOR-transported byte array (serialized as a sequence of integers)
+/// back into raw bytes.
+fn decode_byte_array(arr: &[serde_json::Value]) -> Vec<u8> {
+    arr.iter()
+        .filter_map(serde_json::Value::as_u64)
+        .filter_map(|b| u8::try_from(b).ok())
+        .collect()
+}
+
 fn serde_to_cbor(value: &impl Serialize) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
     value
@@ -220,11 +229,7 @@ pub fn build_response_object<'js>(
             let Some(v) = pair.get(1).and_then(serde_json::Value::as_array) else {
                 continue;
             };
-            let v = v
-                .iter()
-                .filter_map(serde_json::Value::as_u64)
-                .filter_map(|b| u8::try_from(b).ok())
-                .collect::<Vec<_>>();
+            let v = decode_byte_array(v);
             if let Ok(v_str) = std::str::from_utf8(&v) {
                 let pair = Array::new(ctx.clone()).map_err(|e| e.to_string())?;
                 pair.set(0, k).map_err(|e| e.to_string())?;
@@ -240,14 +245,12 @@ pub fn build_response_object<'js>(
         .set("headersList", hdr_list)
         .map_err(|e| e.to_string())?;
 
-    let buf = response
-        .get("body")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| "missing HTTP body".to_string())?
-        .iter()
-        .filter_map(serde_json::Value::as_u64)
-        .filter_map(|b| u8::try_from(b).ok())
-        .collect::<Vec<_>>();
+    let buf = decode_byte_array(
+        response
+            .get("body")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| "missing HTTP body".to_string())?,
+    );
     if buf.len() > MAX_INCOMING_HTTP_BODY_BYTES {
         return Err(format!(
             "response body exceeds maximum size of {MAX_INCOMING_HTTP_BODY_BYTES} bytes"
