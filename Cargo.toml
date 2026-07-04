@@ -33,7 +33,7 @@ http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
-napi = { version = "3.8", default-features = false }
+napi = { version = "3.10", default-features = false }
 napi-build = "2.3"
 napi-derive = "3.5"
 minicbor = "2.0"
