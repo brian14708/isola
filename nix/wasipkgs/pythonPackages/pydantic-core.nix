@@ -13,7 +13,8 @@ let
   inherit (wasipkgs) wasi-optimize-hook sdk python;
   inherit (python) host;
   pydanticCore = host.pkgs.pydantic-core;
-  inherit (pydanticCore) version src;
+  inherit (pydanticCore) version;
+  src = pydanticCore.src + "/pydantic-core";
   rustToolchain = rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml;
   craneLib = (crane.mkLib pkgs).overrideToolchain (
     p: p.rust-bin.fromRustupToolchainFile ../../../rust-toolchain.toml
@@ -24,7 +25,7 @@ let
   };
   packageCargoDeps = rustPlatform.fetchCargoVendor {
     inherit src;
-    hash = "sha256-Kvc0a34C6oGc9oS/iaPaazoVUWn5ABUgrmPa/YocV+Y=";
+    hash = "sha256-5L317YTV7/Bc/YJLLzc745oJntiYkcZupdeUxiQwcOU=";
   };
   mergedCargoDeps = craneLib.vendorMultipleCargoDeps {
     inherit (craneLib.findCargoFiles src) cargoConfigs;
@@ -65,6 +66,15 @@ stdenv.mkDerivation rec {
   buildInputs = [ python ];
 
   patches = [ ./pydantic-core.patch ];
+
+  postPatch = ''
+    substituteInPlace build.rs \
+      --replace-fail \
+      '    println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());' \
+      '    println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());
+    println!("cargo:rustc-link-arg=-shared");
+    println!("cargo:rustc-link-arg=--allow-undefined");'
+  '';
 
   configurePhase = ''
     runHook preConfigure

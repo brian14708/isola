@@ -9,41 +9,6 @@
      '-fno-rtti',  # no runtime type information
    ]
  endif
---- a/numpy/_core/src/common/npy_hashtable.cpp	2026-02-01 03:50:45.000000000 +0800
-+++ b/numpy/_core/src/common/npy_hashtable.cpp	2026-02-26 22:03:21.517425486 +0800
-@@ -15,7 +15,6 @@
- #include "npy_hashtable.h"
- 
- #include <mutex>
--#include <shared_mutex>
- 
- #include "templ_common.h"
- #include <new>
-@@ -112,14 +111,6 @@
-         return NULL;
-     }
- 
--#ifdef Py_GIL_DISABLED
--    res->mutex = new(std::nothrow) std::shared_mutex();
--    if (res->mutex == nullptr) {
--        PyErr_NoMemory();
--        PyMem_Free(res);
--        return NULL;
--    }
--#endif
-     return res;
- }
- 
-@@ -128,9 +119,6 @@
- PyArrayIdentityHash_Dealloc(PyArrayIdentityHash *tb)
- {
-     PyMem_Free(tb->buckets);
--#ifdef Py_GIL_DISABLED
--    delete (std::shared_mutex *)tb->mutex;
--#endif
-     PyMem_Free(tb);
- }
- 
 --- a/numpy/_core/src/multiarray/unique.cpp	2026-02-01 03:50:45.000000000 +0800
 +++ b/numpy/_core/src/multiarray/unique.cpp	2026-02-26 22:12:23.103291300 +0800
 @@ -6,9 +6,7 @@

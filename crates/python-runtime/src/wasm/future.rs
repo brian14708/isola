@@ -162,7 +162,11 @@ pub fn drive_pending_calls() {
 
 /// Remove a call from the registry and hand back its slot contents, if any.
 fn take_call(handle: u32) -> Option<DeferredCall> {
-    CALLS.with(|c| c.borrow_mut().get_mut(handle as usize).and_then(Option::take))
+    CALLS.with(|c| {
+        c.borrow_mut()
+            .get_mut(handle as usize)
+            .and_then(Option::take)
+    })
 }
 
 /// Consume a driven call's result (async path: the `PollLoop` has already run
