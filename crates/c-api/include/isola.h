@@ -26,9 +26,14 @@ typedef enum isola_callback_event {
   ISOLA_CALLBACK_EVENT_LOG = 5,
 } isola_callback_event;
 
+typedef enum isola_argument_kind {
+  ISOLA_ARGUMENT_KIND_VALUE = 0,
+  ISOLA_ARGUMENT_KIND_STREAM = 1,
+} isola_argument_kind;
+
 typedef enum isola_argument_type {
   ISOLA_ARGUMENT_TYPE_JSON = 0,
-  ISOLA_ARGUMENT_TYPE_JSON_STREAM = 1,
+  ISOLA_ARGUMENT_TYPE_CBOR = 1,
 } isola_argument_type;
 
 typedef struct isola_context_handle isola_context_handle;
@@ -130,13 +135,18 @@ typedef struct isola_blob {
   size_t len;
 } isola_blob;
 
-typedef union isola_argument_value {
+typedef struct isola_encoded_value {
+  enum isola_argument_type format;
   struct isola_blob data;
+} isola_encoded_value;
+
+typedef union isola_argument_value {
+  struct isola_encoded_value value;
   const struct isola_stream_handle *stream;
 } isola_argument_value;
 
 typedef struct isola_argument {
-  enum isola_argument_type type;
+  enum isola_argument_kind kind;
   const char *name;
   union isola_argument_value value;
 } isola_argument;
@@ -289,7 +299,8 @@ enum isola_error_code isola_sandbox_run(struct isola_sandbox_handle *sandbox,
  * The caller must ensure that `out_stream` is a valid pointer to an
  * uninitialized `Box<StreamHandle>`.
  */
-enum isola_error_code isola_stream_create(struct isola_stream_handle **out_stream);
+enum isola_error_code isola_stream_create(enum isola_argument_type format,
+                                          struct isola_stream_handle **out_stream);
 
 /**
  * Pushes data to a stream.

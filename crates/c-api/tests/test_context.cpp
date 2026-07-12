@@ -56,16 +56,45 @@ TEST_CASE("Context") {
   REQUIRE(isola_sandbox_load_script(sandbox, "def main(i):\n\treturn i",
                                     1000) == 0);
   isola_argument args[1];
-  args[0].type = ISOLA_ARGUMENT_TYPE_JSON;
+  args[0].kind = ISOLA_ARGUMENT_KIND_VALUE;
   args[0].name = nullptr;
-  args[0].value.data.data = reinterpret_cast<const uint8_t *>("100");
-  args[0].value.data.len = 3;
+  args[0].value.value.format = ISOLA_ARGUMENT_TYPE_JSON;
+  args[0].value.value.data.data = reinterpret_cast<const uint8_t *>("100");
+  args[0].value.value.data.len = 3;
   REQUIRE(isola_sandbox_run(sandbox, "main", args, 1, 1000) == 0);
 
-  REQUIRE(outputs.results.size() == 101);
+  const uint8_t cbor_integer[] = {0x18, 0x64};
+  args[0].value.value.format = ISOLA_ARGUMENT_TYPE_CBOR;
+  args[0].value.value.data.data = cbor_integer;
+  args[0].value.value.data.len = sizeof(cbor_integer);
+  REQUIRE(isola_sandbox_run(sandbox, "main", args, 1, 1000) == 0);
+
+  REQUIRE(outputs.results.size() == 102);
   for (size_t i = 0; i < outputs.results.size(); ++i) {
-    REQUIRE(outputs.results[i] == std::to_string(i));
+    REQUIRE(outputs.results[i] == std::to_string(i < 100 ? i : 100));
   }
+
+  REQUIRE(isola_sandbox_load_script(sandbox,
+                                    "async def main(values):\n"
+                                    "    total = 0\n"
+                                    "    async for value in values:\n"
+                                    "        total += value\n"
+                                    "    return total\n",
+                                    1000) == 0);
+  isola_stream_handle *stream;
+  REQUIRE(isola_stream_create(ISOLA_ARGUMENT_TYPE_CBOR, &stream) == 0);
+  args[0].kind = ISOLA_ARGUMENT_KIND_STREAM;
+  args[0].value.stream = stream;
+  std::thread producer([stream]() {
+    const uint8_t one[] = {0x01};
+    const uint8_t two[] = {0x02};
+    REQUIRE(isola_stream_push(stream, one, sizeof(one), 1) == 0);
+    REQUIRE(isola_stream_push(stream, two, sizeof(two), 1) == 0);
+    REQUIRE(isola_stream_end(stream) == 0);
+  });
+  REQUIRE(isola_sandbox_run(sandbox, "main", args, 1, 1000) == 0);
+  producer.join();
+  REQUIRE(outputs.results.back() == "3");
 
   REQUIRE(isola_sandbox_load_script(sandbox,
                                     "import sandbox.logging\n"
@@ -76,8 +105,8 @@ TEST_CASE("Context") {
                                     1000) == 0);
   REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 1000) == 0);
 
-  REQUIRE(outputs.results.size() == 102);
-  REQUIRE(outputs.results[101] == "101");
+  REQUIRE(outputs.results.size() == 104);
+  REQUIRE(outputs.results[103] == "101");
   REQUIRE(!outputs.stdout.empty());
   REQUIRE(outputs.stdout[0].find("hello-stdout") != std::string::npos);
   REQUIRE(!outputs.logs.empty());

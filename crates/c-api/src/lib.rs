@@ -558,7 +558,14 @@ impl SandboxHandle<'_> {
                             None => Arg::Positional(value),
                         })
                     }
-                    RawArgument::JsonStream(name, receiver) => {
+                    RawArgument::Cbor(name, value) => {
+                        let value = Value::from_cbor(value);
+                        Ok(match name {
+                            Some(name) => Arg::Named(name, value),
+                            None => Arg::Positional(value),
+                        })
+                    }
+                    RawArgument::Stream(name, receiver) => {
                         let stream =
                             Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
                         Ok(match name {
@@ -752,19 +759,32 @@ pub unsafe extern "C" fn isola_sandbox_run(
                 }
             };
 
-            let validated_arg = match arg.r#type {
-                ArgumentType::Json => {
-                    let json_data = unsafe { arg.value.data };
-                    let value =
-                        unsafe { std::slice::from_raw_parts(json_data.data, json_data.len) };
-                    ValidatedArgument::Json(name, value.to_vec())
+            let validated_arg = match arg.kind {
+                ArgumentKind::Value => {
+                    let encoded = unsafe { arg.value.value };
+                    match encoded.format {
+                        ArgumentType::Json => {
+                            let value = unsafe { blob_as_slice(encoded.data) };
+                            let Some(value) = value else {
+                                return ErrorCode::InvalidArgument;
+                            };
+                            ValidatedArgument::Json(name, value.to_vec())
+                        }
+                        ArgumentType::Cbor => {
+                            let value = unsafe { blob_as_slice(encoded.data) };
+                            let Some(value) = value else {
+                                return ErrorCode::InvalidArgument;
+                            };
+                            ValidatedArgument::Cbor(name, value.to_vec())
+                        }
+                    }
                 }
-                ArgumentType::JsonStream => {
+                ArgumentKind::Stream => {
                     let stream_ptr = unsafe { arg.value.stream };
-                    if !stream_ptrs.insert(stream_ptr) {
+                    if stream_ptr.is_null() || !stream_ptrs.insert(stream_ptr) {
                         return ErrorCode::InvalidArgument;
                     }
-                    ValidatedArgument::JsonStream(name, stream_ptr)
+                    ValidatedArgument::Stream(name, stream_ptr)
                 }
             };
             validated_args.push(validated_arg);
@@ -779,7 +799,8 @@ pub unsafe extern "C" fn isola_sandbox_run(
     for arg in validated_args {
         let parsed = match arg {
             ValidatedArgument::Json(name, value) => RawArgument::Json(name, value),
-            ValidatedArgument::JsonStream(name, stream_ptr) => {
+            ValidatedArgument::Cbor(name, value) => RawArgument::Cbor(name, value),
+            ValidatedArgument::Stream(name, stream_ptr) => {
                 let Some(index) = receivers.iter().position(|(ptr, _)| *ptr == stream_ptr) else {
                     crate::error::set_last_error(Error::Internal(
                         "validated stream receiver was not acquired".to_string(),
@@ -787,7 +808,7 @@ pub unsafe extern "C" fn isola_sandbox_run(
                     return ErrorCode::Internal;
                 };
                 let (_, receiver) = receivers.swap_remove(index);
-                RawArgument::JsonStream(name, receiver)
+                RawArgument::Stream(name, receiver)
             }
         };
         parsed_args.push(parsed);
@@ -802,9 +823,16 @@ pub unsafe extern "C" fn isola_sandbox_run(
 // ---------------------------------------------------------------------------
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub enum ArgumentType {
     Json = 0,
-    JsonStream = 1,
+    Cbor = 1,
+}
+
+#[repr(C)]
+pub enum ArgumentKind {
+    Value = 0,
+    Stream = 1,
 }
 
 #[repr(C)]
@@ -816,14 +844,21 @@ pub struct Blob {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub union ArgumentValue {
+pub struct EncodedValue {
+    pub format: ArgumentType,
     pub data: Blob,
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub union ArgumentValue {
+    pub value: EncodedValue,
     pub stream: *const StreamHandle,
 }
 
 #[repr(C)]
 pub struct Argument {
-    pub r#type: ArgumentType,
+    pub kind: ArgumentKind,
     pub name: *const c_char,
     pub value: ArgumentValue,
 }
@@ -833,6 +868,7 @@ pub struct Argument {
 // ---------------------------------------------------------------------------
 
 pub struct StreamHandle {
+    format: ArgumentType,
     sender: std::sync::Mutex<Option<tokio::sync::mpsc::Sender<Value>>>,
     receiver: std::sync::Mutex<Option<tokio::sync::mpsc::Receiver<Value>>>,
 }
@@ -855,12 +891,21 @@ impl StreamHandle {
 
 enum RawArgument {
     Json(Option<String>, Vec<u8>),
-    JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
+    Cbor(Option<String>, Vec<u8>),
+    Stream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
 }
 
 enum ValidatedArgument {
     Json(Option<String>, Vec<u8>),
-    JsonStream(Option<String>, *const StreamHandle),
+    Cbor(Option<String>, Vec<u8>),
+    Stream(Option<String>, *const StreamHandle),
+}
+
+unsafe fn blob_as_slice<'a>(blob: Blob) -> Option<&'a [u8]> {
+    if blob.len == 0 {
+        return Some(&[]);
+    }
+    (!blob.data.is_null()).then(|| unsafe { std::slice::from_raw_parts(blob.data, blob.len) })
 }
 
 fn take_stream_receivers(
@@ -888,9 +933,13 @@ fn take_stream_receivers(
 /// The caller must ensure that `out_stream` is a valid pointer to an
 /// uninitialized `Box<StreamHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_stream_create(out_stream: *mut Box<StreamHandle>) -> ErrorCode {
+pub unsafe extern "C" fn isola_stream_create(
+    format: ArgumentType,
+    out_stream: *mut Box<StreamHandle>,
+) -> ErrorCode {
     let (sender, receiver) = tokio::sync::mpsc::channel(1024);
     let stream = Box::new(StreamHandle {
+        format,
         sender: std::sync::Mutex::new(Some(sender)),
         receiver: std::sync::Mutex::new(Some(receiver)),
     });
@@ -919,18 +968,32 @@ pub unsafe extern "C" fn isola_stream_push(
     len: usize,
     blocking: c_int,
 ) -> ErrorCode {
-    let data = unsafe { std::slice::from_raw_parts(data, len) };
-    let Ok(json) = std::str::from_utf8(data) else {
-        let err = Error::InvalidArgument("Invalid UTF-8 in stream value");
+    let Some(data) = (unsafe { blob_as_slice(Blob { data, len }) }) else {
+        let err = Error::InvalidArgument("Invalid stream buffer");
         crate::error::set_last_error(err);
         return ErrorCode::InvalidArgument;
     };
-    let Ok(value) = Value::from_json_str(json) else {
-        let err = Error::InvalidArgument("Invalid JSON in stream value");
-        crate::error::set_last_error(err);
-        return ErrorCode::InvalidArgument;
+    let value = match stream.format {
+        ArgumentType::Json => {
+            let Ok(json) = std::str::from_utf8(data) else {
+                let err = Error::InvalidArgument("Invalid UTF-8 in stream value");
+                crate::error::set_last_error(err);
+                return ErrorCode::InvalidArgument;
+            };
+            let Ok(value) = Value::from_json_str(json) else {
+                let err = Error::InvalidArgument("Invalid JSON in stream value");
+                crate::error::set_last_error(err);
+                return ErrorCode::InvalidArgument;
+            };
+            value
+        }
+        ArgumentType::Cbor => Value::from_cbor(data.to_vec()),
     };
 
+    send_stream_value(stream, value, blocking)
+}
+
+fn send_stream_value(stream: &StreamHandle, value: Value, blocking: c_int) -> ErrorCode {
     // Clone the sender so we don't hold the lock during blocking_send.
     let sender = stream.sender.lock().unwrap().as_ref().cloned();
     let Some(sender) = sender else {
