@@ -270,6 +270,39 @@ mod tests {
     }
 
     #[test]
+    fn failed_python_to_cbor_emit_does_not_finalize() {
+        let mut emissions = Vec::new();
+
+        Python::initialize();
+        Python::attach(|py| {
+            let long_string = PyString::new(py, &"x".repeat(2048)).into_any();
+            let unsupported = py
+                .import("builtins")
+                .unwrap()
+                .getattr("object")
+                .unwrap()
+                .call0()
+                .unwrap();
+            let value = PyList::new(py, [long_string, unsupported])
+                .unwrap()
+                .into_any();
+
+            let result = python_to_cbor_emit(value, EmitType::End, |emit_type, bytes| {
+                emissions.push((emit_type, bytes.to_vec()));
+            });
+            assert!(result.is_err());
+        });
+
+        assert!(!emissions.is_empty(), "expected at least one full chunk");
+        assert_eq!(emissions.last(), Some(&(EmitType::Abort, Vec::new())));
+        assert!(
+            emissions[..emissions.len() - 1]
+                .iter()
+                .all(|(emit_type, _)| *emit_type == EmitType::Continuation)
+        );
+    }
+
+    #[test]
     fn test() {
         let content = r#"
 i = 1

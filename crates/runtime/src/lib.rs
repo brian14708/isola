@@ -10,7 +10,7 @@ mod time;
 pub mod wasi_http;
 
 pub use cbor::CallbackWriter;
-pub use time::{Deadline, monotonic};
+pub use time::{Deadline, DeadlineOverflow, monotonic};
 pub use wit_bindgen::block_on;
 
 wit_bindgen::generate!({

@@ -18,6 +18,7 @@ let
       ../../../Cargo.lock
       ../../../Cargo.toml
       ../../../crates/isola/wit
+      (craneLib.fileset.commonCargoSources ../../../crates/runtime)
       (craneLib.fileset.commonCargoSources ../../../crates/xtask)
       (craneLib.fileset.commonCargoSources ../../../crates/python-runtime)
     ];

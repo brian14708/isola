@@ -11,6 +11,11 @@
 globalThis._isola_async = {
   _pending: new Map(), // handle -> {resolve, reject, getResult}
   _raw_sleep: null, // native _isola_sys.sleep(handle) before Promise wrapper
+  _resetTimers: function () {},
+  _cancelError: Object.assign(
+    new Error("operation cancelled at sandbox boundary"),
+    { __isolaCancelled: true },
+  ),
 
   // Register a pending operation. Returns a Promise that resolves
   // when the Rust event loop detects the pollable is ready.
@@ -40,6 +45,38 @@ globalThis._isola_async = {
         }
       }
     }
+  },
+
+  _cancel: function (handle, reason) {
+    var entry = _isola_async._pending.get(handle);
+    if (!entry) {
+      return false;
+    }
+    _isola_async._pending.delete(handle);
+    _isola_sys._release(handle);
+    entry.reject(reason);
+    return true;
+  },
+
+  _cancel_all: function () {
+    var entries = Array.from(_isola_async._pending.entries());
+    _isola_async._pending.clear();
+    _isola_async._resetTimers();
+    for (var i = 0; i < entries.length; i++) {
+      var handle = entries[i][0];
+      var entry = entries[i][1];
+      _isola_sys._release(handle);
+      entry.reject(_isola_async._cancelError);
+    }
+    return entries.length;
+  },
+
+  _discard_all: function () {
+    for (var handle of _isola_async._pending.keys()) {
+      _isola_sys._release(handle);
+    }
+    _isola_async._pending.clear();
+    _isola_async._resetTimers();
   },
 
   has_pending: function () {
@@ -124,6 +161,9 @@ globalThis._isola_async = {
         function (err) {
           timer.settled = true;
           _timers.delete(timerId);
+          if (err === _isola_async._cancelError) {
+            return;
+          }
           throw err;
         },
       );
@@ -164,12 +204,15 @@ globalThis._isola_async = {
 
     // Remove this wait entry from both JS and Rust registries.
     _isola_async._pending.delete(timer.handle);
-    try {
-      _isola_sys._finish_sleep(timer.handle);
-    } catch (_err) {
-      // A near-simultaneous resolve may have already consumed the handle.
-    }
+    _isola_sys._release(timer.handle);
   }
+
+  _isola_async._resetTimers = function () {
+    for (var timer of _timers.values()) {
+      timer.settled = true;
+    }
+    _timers.clear();
+  };
 
   globalThis.setTimeout = function (callback, delay) {
     return setTimer(

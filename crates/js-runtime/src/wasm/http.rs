@@ -115,7 +115,7 @@ fn send_impl(
     let is_json_body = body.is_object()
         && !body.is_null()
         && body.as_string().is_none()
-        && rquickjs::ArrayBuffer::from_value(body.clone()).is_none();
+        && js_serde::array_buffer_from_value(body.clone()).is_none();
 
     if is_json_body && !header_fields.iter().any(|(name, _)| name == "content-type") {
         header_fields.push(("content-type".to_string(), b"application/json".to_vec()));
@@ -220,7 +220,7 @@ pub fn build_response_object<'js>(
 fn body_to_bytes(body: Value<'_>, is_json_body: bool) -> Result<Vec<u8>, String> {
     if let Some(s) = body.as_string() {
         Ok(s.to_string().map_err(|e| e.to_string())?.into_bytes())
-    } else if let Some(buf) = rquickjs::ArrayBuffer::from_value(body.clone()) {
+    } else if let Some(buf) = js_serde::array_buffer_from_value(body.clone()) {
         Ok(buf.as_bytes().unwrap_or_default().to_vec())
     } else if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(body.clone()) {
         Ok(ta.as_bytes().unwrap_or_default().to_vec())

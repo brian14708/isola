@@ -30,6 +30,7 @@ impl<T: HostView> Host for HostImpl<T> {
             EmitType::Continuation => EmitValue::Continuation(cbor.into()),
             EmitType::End => EmitValue::End(cbor.into()),
             EmitType::PartialResult => EmitValue::PartialResult(cbor.into()),
+            EmitType::Abort => EmitValue::Abort,
         };
         self.0.emit(emit_value).await
     }

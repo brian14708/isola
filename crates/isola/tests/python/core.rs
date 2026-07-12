@@ -107,6 +107,53 @@ async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_self_rescheduling_callback_does_not_starve_timer() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import asyncio\n\
+             async def main():\n\
+             \tloop = asyncio.get_running_loop()\n\
+             \tdone = loop.create_future()\n\
+             \tturns = 0\n\
+             \tdef reschedule():\n\
+             \t\tnonlocal turns\n\
+             \t\tturns += 1\n\
+             \t\tloop.call_soon(reschedule)\n\
+             \tloop.call_soon(reschedule)\n\
+             \tloop.call_later(0.01, lambda: None)\n\
+             \tloop.call_later(0.05, done.set_result, None)\n\
+             \tawait done\n\
+             \treturn turns",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate callback fairness script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
+        .await
+        .context("self-rescheduling callback starved the timer")?;
+    let turns: i64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode callback count")?;
+
+    assert!(turns > 0);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_call_with_sink_does_not_retain_refs() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -182,6 +229,51 @@ async fn integration_python_streaming_output() -> Result<()> {
     assert_eq!(values, vec![0, 1, 2]);
 
     assert!(output.result.is_none(), "expected null end output");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_failed_emit_does_not_corrupt_next_output() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import _isola_sys\n\
+             def main():\n\
+             \ttry:\n\
+             \t\t_isola_sys.emit([\"x\" * 2048, object()])\n\
+             \texcept ValueError:\n\
+             \t\tpass\n\
+             \t_isola_sys.emit(\"valid\")\n\
+             \treturn \"done\"",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate failed emit script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call failed emit function")?;
+    assert_eq!(output.items.len(), 1, "failed emit should not reach sink");
+    let item: String = output.items[0]
+        .to_serde()
+        .context("failed to decode valid partial output")?;
+    assert_eq!(item, "valid");
+    let result: String = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode final output")?;
+    assert_eq!(result, "done");
 
     Ok(())
 }
@@ -527,6 +619,102 @@ async def main():
     assert!(
         elapsed >= 0.045 || host_elapsed >= Duration::from_millis(45),
         "sleep resolved too early, guest_elapsed={elapsed}, host_elapsed={host_elapsed:?}"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_runner_finalizes_retained_async_generators() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+finalized = []
+retained = None
+
+async def values(name):
+    try:
+        yield 1
+    finally:
+        finalized.append(name)
+
+async def start():
+    global retained
+    retained = values("retained")
+    await anext(retained)
+    released = values("released")
+    await anext(released)
+
+def observe():
+    return sorted(finalized)
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate async-generator finalization script")?;
+
+    call_with_timeout(&mut sandbox, "start", [], Duration::from_secs(2))
+        .await
+        .context("failed to start retained async generator")?;
+    let output = call_with_timeout(&mut sandbox, "observe", [], Duration::from_secs(2))
+        .await
+        .context("failed to observe async-generator finalization")?;
+    let finalized: Vec<String> = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode async-generator finalization result")?;
+
+    assert_eq!(finalized, vec!["released", "retained"]);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_oversized_sleep_is_rejected() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import _isola_sys\n\
+             def main():\n\
+             \ttry:\n\
+             \t\t_isola_sys.sleep(1e300)\n\
+             \texcept OverflowError:\n\
+             \t\treturn True\n\
+             \treturn False",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate oversized sleep script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call oversized sleep function")?;
+    let rejected: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode oversized sleep result")?;
+    assert!(
+        rejected,
+        "oversized Python sleep should raise OverflowError"
     );
 
     Ok(())

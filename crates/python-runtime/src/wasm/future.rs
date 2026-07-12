@@ -1,60 +1,93 @@
-use std::time::{Duration, Instant};
-
 use isola_runtime::{
     Deadline,
     pending::{self, Output, Take},
     wasi_http::{HttpRequest, HttpResponse},
 };
-use pyo3::{PyRefMut, pyclass, pymethods};
+use pyo3::{PyResult, pyclass, pymethods};
 
 #[pyclass]
 #[derive(Default)]
 pub struct PyPollable {
-    deadline: Deadline,
+    state: PollableState,
+}
+
+#[derive(Clone, Copy, Default)]
+enum PollableState {
+    #[default]
+    Ready,
+    Operation(u32),
 }
 
 impl PyPollable {
-    pub fn sleep(duration: Duration) -> Self {
+    pub fn sleep(deadline: Deadline) -> Self {
+        if deadline.ready_at().is_none() {
+            Self::default()
+        } else {
+            Self::operation(pending::register_sleep(deadline))
+        }
+    }
+
+    pub(crate) const fn operation(handle: u32) -> Self {
         Self {
-            deadline: Deadline::after(duration),
+            state: PollableState::Operation(handle),
         }
     }
 
     pub fn is_ready(&self) -> bool {
-        self.deadline.is_ready()
-    }
-
-    pub fn wait_until_ready(&self) {
-        self.deadline.wait();
-    }
-
-    pub const fn ready_at(&self) -> Option<Instant> {
-        self.deadline.ready_at()
+        match self.state {
+            PollableState::Ready => true,
+            PollableState::Operation(handle) => pending::is_ready(handle),
+        }
     }
 }
 
 #[pymethods]
 impl PyPollable {
-    fn subscribe(mut slf: PyRefMut<'_, Self>) -> Option<PyRefMut<'_, Self>> {
-        if slf.is_ready() {
-            slf.deadline.clear();
+    fn subscribe(&self) -> Option<Self> {
+        if self.is_ready() {
             None
         } else {
-            Some(slf)
+            Some(Self { state: self.state })
         }
     }
 
-    const fn get(&self) {
-        let _ = self;
+    fn get(&self) -> PyResult<()> {
+        match self.state {
+            PollableState::Ready => Ok(()),
+            PollableState::Operation(handle) => match pending::take(handle) {
+                Ok(Take::Ready(Output::Sleep)) => Ok(()),
+                Ok(Take::Ready(Output::Host(_) | Output::Http { .. })) => {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "operation result must be read from its owner",
+                    ))
+                }
+                Ok(Take::Pending) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "operation is not ready",
+                )),
+                Err(error) => Err(pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),
+            },
+        }
     }
 
-    const fn release(&mut self) {
-        self.deadline.clear();
+    fn release(&self) {
+        if let PollableState::Operation(handle) = self.state {
+            pending::release(handle);
+        }
     }
 
-    fn wait(&mut self) {
-        self.wait_until_ready();
-        self.deadline.clear();
+    fn wait(&self) -> PyResult<()> {
+        match self.state {
+            PollableState::Ready => Ok(()),
+            PollableState::Operation(handle) => match pending::drive_one(handle) {
+                Ok(Output::Sleep) => Ok(()),
+                Ok(Output::Host(_) | Output::Http { .. }) => {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "operation result must be read from its owner",
+                    ))
+                }
+                Err(error) => Err(pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),
+            },
+        }
     }
 }
 
@@ -67,13 +100,9 @@ pub fn register_http(request: HttpRequest) -> u32 {
     pending::register_http(request)
 }
 
-/// Execute every registered host call that has not been driven yet, **all
-/// concurrently** in a single `block_on`. Awaited-together calls (e.g.
-/// `asyncio.gather`) are all registered before the `PollLoop` drives them, so
-/// their host round-trips overlap. Sequential `await`s register one call at a
-/// time and therefore still run serially.
-pub fn drive_pending_calls() {
-    let _ = pending::drive_pending();
+/// Start deferred operations and wait until the first operation is ready.
+pub fn drive_pending_calls(step: impl FnMut() -> pending::Drive) -> bool {
+    pending::drive_pending(step)
 }
 
 /// Consume a driven call's result (async path: the `PollLoop` has already run
@@ -129,8 +158,9 @@ macro_rules! create_future {
             fn wait(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
                 crate::wasm::future::drive_one_http(slf.handle).try_into()
             }
-            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
-                Some(crate::wasm::future::PyPollable::default())
+            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                let pollable = crate::wasm::future::PyPollable::operation(slf.handle);
+                (!pollable.is_ready()).then_some(pollable)
             }
             fn get(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
                 crate::wasm::future::take_http_result(slf.handle).try_into()
@@ -158,8 +188,9 @@ macro_rules! create_future {
                 crate::wasm::future::drive_one(slf.handle).try_into()
             }
 
-            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
-                Some(crate::wasm::future::PyPollable::default())
+            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                let pollable = crate::wasm::future::PyPollable::operation(slf.handle);
+                (!pollable.is_ready()).then_some(pollable)
             }
 
             fn get(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
@@ -190,8 +221,9 @@ macro_rules! create_future {
                 $convert(py, crate::wasm::future::drive_one(slf.handle))
             }
 
-            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
-                Some(crate::wasm::future::PyPollable::default())
+            fn subscribe(slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                let pollable = crate::wasm::future::PyPollable::operation(slf.handle);
+                (!pollable.is_ready()).then_some(pollable)
             }
 
             fn get(slf: ::pyo3::PyRef<'_, Self>) -> $type {

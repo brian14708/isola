@@ -29,6 +29,7 @@ pub enum EmitValue {
     Continuation(Bytes),
     PartialResult(Bytes),
     End(Bytes),
+    Abort,
 }
 
 pub trait HostView: Send {

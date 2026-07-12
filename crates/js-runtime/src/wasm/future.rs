@@ -1,6 +1,5 @@
-use std::time::{Duration, Instant};
-
 use isola_runtime::{
+    Deadline,
     pending::{self, InvalidHandle, Output, Take},
     wasi_http::HttpRequest,
 };
@@ -24,17 +23,14 @@ fn invalid_handle_error(error: InvalidHandle) -> rquickjs::Error {
     )
 }
 
-pub fn poll_all() -> Vec<u32> {
-    pending::ready_handles()
+pub fn drive_pending(mut step: impl FnMut(&[u32]) -> Drive) -> bool {
+    pending::drive_pending(|| {
+        let ready = pending::ready_handles();
+        step(&ready)
+    })
 }
 
-pub fn next_deadline() -> Option<Instant> {
-    pending::next_deadline()
-}
-
-pub fn drive_pending() -> bool {
-    pending::drive_pending()
-}
+pub use isola_runtime::pending::Drive;
 
 pub fn resolve_ready(ctx: &Ctx<'_>, ready_handles: &[u32]) -> rquickjs::Result<()> {
     let arr = Array::new(ctx.clone())?;
@@ -51,6 +47,28 @@ pub fn resolve_ready(ctx: &Ctx<'_>, ready_handles: &[u32]) -> rquickjs::Result<(
 
 pub fn has_pending() -> bool {
     pending::has_pending()
+}
+
+pub fn cancel_all(ctx: &Ctx<'_>) -> rquickjs::Result<usize> {
+    let globals = ctx.globals();
+    let async_obj: Object<'_> = globals.get("_isola_async")?;
+    let cancel_fn: Function<'_> = async_obj.get("_cancel_all")?;
+    cancel_fn.call(())
+}
+
+pub fn discard_all(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    let globals = ctx.globals();
+    let async_obj: Object<'_> = globals.get("_isola_async")?;
+    let discard_fn: Function<'_> = async_obj.get("_discard_all")?;
+    discard_fn.call(())
+}
+
+pub fn release(handle: u32) {
+    pending::release(handle);
+}
+
+pub fn clear() {
+    pending::clear();
 }
 
 pub fn recv_http<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Object<'js>> {
@@ -114,13 +132,17 @@ pub fn register_js(ctx: &Ctx<'_>) {
         rquickjs::Function::new(ctx.clone(), finish_sleep).unwrap(),
     )
     .unwrap();
+
+    sys.set(
+        "_release",
+        rquickjs::Function::new(ctx.clone(), release).unwrap(),
+    )
+    .unwrap();
 }
 
-pub fn register_sleep(duration: f64) -> u32 {
-    let duration = if duration.is_finite() && duration > 0.0 {
-        Duration::try_from_secs_f64(duration).ok()
-    } else {
-        None
-    };
-    pending::register_sleep(duration)
+pub fn register_sleep(duration: f64) -> rquickjs::Result<u32> {
+    let deadline = Deadline::after_secs_f64(duration).map_err(|_| {
+        rquickjs::Error::new_from_js_message("sleep", "duration", "sleep duration is out of range")
+    })?;
+    Ok(pending::register_sleep(deadline))
 }

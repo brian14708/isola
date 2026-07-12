@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use isola::{
@@ -651,6 +651,74 @@ async function main(url) {
         .to_serde()
         .context("failed to decode abort result")?;
     assert_eq!(value, "AbortError");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_abort_after_dispatch_rejects_promptly() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/slow"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(1))
+                .set_body_string("too late"),
+        )
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+async function main(url) {
+    const controller = new AbortController();
+    setTimeout(function () {
+        controller.abort("stop");
+    }, 10);
+    try {
+        await fetch(url + "/slow", {signal: controller.signal});
+        return "expected-abort";
+    } catch (error) {
+        return String(error.name || error);
+    }
+}
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate post-dispatch abort script")?;
+
+    let started = Instant::now();
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(2),
+    )
+    .await
+    .context("post-dispatch abort did not settle")?;
+    let elapsed = started.elapsed();
+    let value: String = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode post-dispatch abort result")?;
+
+    assert_eq!(value, "AbortError");
+    assert!(
+        elapsed < Duration::from_millis(400),
+        "abort waited for the HTTP response: {elapsed:?}"
+    );
 
     Ok(())
 }

@@ -18,6 +18,16 @@ impl Serialize for Bytes<'_> {
 
 const MAX_DEPTH: usize = 128;
 
+pub fn array_buffer_from_value(value: Value<'_>) -> Option<rquickjs::ArrayBuffer<'_>> {
+    let ctx = value.ctx().clone();
+    let had_exception = ctx.has_exception();
+    let buffer = rquickjs::ArrayBuffer::from_value(value);
+    if buffer.is_none() && !had_exception && ctx.has_exception() {
+        let _ = ctx.catch();
+    }
+    buffer
+}
+
 struct JsValue<'js>(Value<'js>);
 
 impl<'js> JsValue<'js> {
@@ -311,8 +321,8 @@ impl Serialize for JsValue<'_> {
                     serializer.serialize_str(&s)
                 } else if v.is_object() && !v.is_array() {
                     // Check if it's an ArrayBuffer
-                    if let Some(obj) = v.as_object() {
-                        if let Some(buf) = obj.as_array_buffer()
+                    if v.as_object().is_some() {
+                        if let Some(buf) = array_buffer_from_value(v.clone())
                             && let Some(bytes) = buf.as_bytes()
                         {
                             return serializer.serialize_bytes(bytes);
@@ -405,7 +415,7 @@ impl<'de> Deserializer<'de> for JsValue<'_> {
             self.deserialize_seq(visitor)
         } else if v.is_object() {
             // Check ArrayBuffer first
-            if let Some(buf) = rquickjs::ArrayBuffer::from_value(v.clone())
+            if let Some(buf) = array_buffer_from_value(v.clone())
                 && let Some(bytes) = buf.as_bytes()
             {
                 return visitor.visit_bytes(bytes);
@@ -718,10 +728,13 @@ where
     F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
     let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
-    let mut serializer = minicbor_serde::Serializer::new(&mut writer);
-    JsValue::new(val)
-        .serialize(serializer.serialize_unit_as_null(true))
-        .map_err(|e| e.to_string())?;
+    {
+        let mut serializer = minicbor_serde::Serializer::new(&mut writer);
+        JsValue::new(val)
+            .serialize(serializer.serialize_unit_as_null(true))
+            .map_err(|e| e.to_string())?;
+    }
+    writer.finish();
     Ok(())
 }
 
@@ -832,6 +845,40 @@ mod typed_array_tests {
             let roundtrip = cbor_to_js(&ctx, &encoded).unwrap();
             let array = rquickjs::TypedArray::<f32>::from_value(roundtrip).unwrap();
             assert_eq!(array.as_bytes().unwrap(), &[0, 0, 192, 63, 0, 0, 16, 192]);
+        });
+    }
+
+    #[test]
+    fn failed_js_to_cbor_emit_does_not_finalize() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            let value: Value<'_> = ctx
+                .eval(r#"["x".repeat(2048), Symbol("unsupported")]"#)
+                .unwrap();
+            let mut emissions = Vec::new();
+            let result = js_to_cbor_emit(
+                value,
+                crate::wasm::isola::script::host::EmitType::End,
+                |emit_type, bytes| emissions.push((emit_type, bytes.to_vec())),
+            );
+
+            assert!(result.is_err());
+            assert!(!emissions.is_empty(), "expected at least one full chunk");
+            assert_eq!(
+                emissions.last(),
+                Some(&(
+                    crate::wasm::isola::script::host::EmitType::Abort,
+                    Vec::new()
+                ))
+            );
+            assert!(
+                emissions[..emissions.len() - 1]
+                    .iter()
+                    .all(|(emit_type, _)| {
+                        *emit_type == crate::wasm::isola::script::host::EmitType::Continuation
+                    })
+            );
         });
     }
 }

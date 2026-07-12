@@ -16,5 +16,6 @@ pub fn reset_preinitialized_state() {
         reset_adapter_state();
         wasilibc_reset_preopens();
     }
+    crate::pending::clear();
     crate::time::reset_monotonic();
 }

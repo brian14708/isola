@@ -65,6 +65,44 @@ async fn integration_js_eval_and_call_roundtrip() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_sync_return_runs_microtask_checkpoint() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "function main() {\n\
+                 const result = { checkpointed: false };\n\
+                 Promise.resolve().then(function () { result.checkpointed = true; });\n\
+                 return result;\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate microtask checkpoint script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call microtask checkpoint function")?;
+    let value: serde_json::Value = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode microtask checkpoint result")?;
+
+    assert_eq!(value["checkpointed"], true);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_streaming_output() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -564,6 +602,46 @@ async function main() {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_oversized_sleep_is_rejected() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "function main() {\n\
+                 try {\n\
+                     _isola_sys.sleep(1e300);\n\
+                 } catch (_error) {\n\
+                     return true;\n\
+                 }\n\
+                 return false;\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate oversized sleep script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5))
+        .await
+        .context("failed to call oversized sleep function")?;
+    let rejected: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode oversized sleep result")?;
+    assert!(rejected, "oversized JavaScript sleep should throw");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_mixed_polling_resolves_ready_handles_incrementally() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -673,6 +751,52 @@ async function main() {
     assert_eq!(
         value["events"],
         serde_json::json!(["tick:0", "tick:1", "tick:2"]),
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_zero_delay_interval_does_not_starve_hostcall() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+async function main() {
+    let ticks = 0;
+    const timerId = setInterval(function () {
+        ticks += 1;
+    }, 0);
+    const value = await hostcall("delay", 20);
+    clearInterval(timerId);
+    return [value, ticks];
+}
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate zero-delay interval script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
+        .await
+        .context("zero-delay interval starved hostcall")?;
+    let value: (i64, i64) = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode zero-delay interval result")?;
+
+    assert_eq!(value.0, 20);
+    assert!(
+        value.1 > 0,
+        "expected the interval to run before completion"
     );
 
     Ok(())

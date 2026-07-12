@@ -14,7 +14,6 @@ use crate::{
 const MAX_HTTP_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 const HTTP_RESPONSE_BODY_CHUNK_BYTES: usize = 64 * 1024;
 
-#[derive(Clone)]
 pub struct HttpRequest {
     method: String,
     url: url::Url,

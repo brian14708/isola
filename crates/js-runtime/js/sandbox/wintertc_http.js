@@ -726,7 +726,7 @@
       return Promise.reject(err);
     }
 
-    return _isola_async._wait(handle, function () {
+    var pending = _isola_async._wait(handle, function () {
       var payload;
       var recvError;
       var hasRecvError = false;
@@ -748,6 +748,26 @@
 
       return Response._fromPayload(payload);
     });
+
+    function onAbort() {
+      _isola_async._cancel(handle, abortError(request.signal.reason));
+    }
+
+    request.signal.addEventListener("abort", onAbort);
+    if (request.signal.aborted) {
+      onAbort();
+    }
+
+    return pending.then(
+      function (response) {
+        request.signal.removeEventListener("abort", onAbort);
+        return response;
+      },
+      function (error) {
+        request.signal.removeEventListener("abort", onAbort);
+        throw error;
+      },
+    );
   }
 
   globalThis.Headers = Headers;

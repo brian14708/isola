@@ -612,10 +612,13 @@ where
         return Ok(());
     }
     let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
-    let mut serializer = minicbor_serde::Serializer::new(&mut writer);
-    PyValue::new(py_obj)
-        .serialize(serializer.serialize_unit_as_null(true))
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    {
+        let mut serializer = minicbor_serde::Serializer::new(&mut writer);
+        PyValue::new(py_obj)
+            .serialize(serializer.serialize_unit_as_null(true))
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    }
+    writer.finish();
     Ok(())
 }
 

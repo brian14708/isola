@@ -1,6 +1,15 @@
-use std::{borrow::Cow, path::Path};
+use std::{
+    borrow::Cow,
+    cell::RefCell,
+    collections::{HashMap, hash_map::DefaultHasher},
+    hash::{Hash, Hasher},
+    path::Path,
+    rc::Rc,
+};
 
-use rquickjs::{Array, Context, Ctx, Function, Object, Runtime, Value, function::Args};
+use rquickjs::{
+    Array, Context, Ctx, Function, Object, Runtime, Value, function::Args, promise::PromiseState,
+};
 
 use crate::{
     error::{Error, Result},
@@ -16,6 +25,56 @@ pub struct Scope {
     )]
     runtime: Runtime,
     context: Context,
+    rejections: Rc<RefCell<HashMap<u64, Rejection>>>,
+}
+
+#[derive(Clone)]
+struct Rejection {
+    cause: String,
+    stack: Option<String>,
+}
+
+impl Rejection {
+    fn from_value(value: &Value<'_>) -> Self {
+        value.as_exception().map_or_else(
+            || Self {
+                cause: value.as_string().map_or_else(
+                    || format!("{value:?}"),
+                    |value| {
+                        value
+                            .to_string()
+                            .unwrap_or_else(|_| "JavaScript error".to_string())
+                    },
+                ),
+                stack: None,
+            },
+            |exception| Self {
+                cause: exception
+                    .message()
+                    .unwrap_or_else(|| "Unhandled promise rejection".to_string()),
+                stack: exception.stack(),
+            },
+        )
+    }
+
+    fn into_error(self) -> Error {
+        Error::Js {
+            cause: self.cause,
+            stack: self.stack,
+        }
+    }
+}
+
+fn rejection_key(promise: &Value<'_>) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    promise.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn is_boundary_cancellation(reason: &Value<'_>) -> bool {
+    reason
+        .as_object()
+        .is_some_and(|reason| reason.get::<_, bool>("__isolaCancelled").unwrap_or(false))
 }
 
 pub enum InputValue<'a> {
@@ -53,9 +112,27 @@ impl Scope {
         let runtime = Runtime::new().expect("failed to create QuickJS runtime");
         runtime.set_max_stack_size(2 * 1024 * 1024); // 2MB stack
 
+        let rejections = Rc::new(RefCell::new(HashMap::new()));
+        let tracked_rejections = Rc::clone(&rejections);
+        runtime.set_host_promise_rejection_tracker(Some(Box::new(
+            move |_ctx, promise, reason, is_handled| {
+                let key = rejection_key(&promise);
+                let mut rejections = tracked_rejections.borrow_mut();
+                if is_handled || is_boundary_cancellation(&reason) {
+                    rejections.remove(&key);
+                } else {
+                    rejections.insert(key, Rejection::from_value(&reason));
+                }
+            },
+        )));
+
         let context = Context::full(&runtime).expect("failed to create QuickJS context");
 
-        Self { runtime, context }
+        Self {
+            runtime,
+            context,
+            rejections,
+        }
     }
 
     pub const fn context(&self) -> &Context {
@@ -63,21 +140,27 @@ impl Scope {
     }
 
     pub fn load_script(&self, code: &str) -> Result<()> {
+        self.begin_boundary();
         let code = Self::transpile(code, None)?;
-        self.context.with(|ctx| {
+        let result = self.context.with(|ctx| {
             ctx.eval::<(), _>(code.as_str())
-                .map_err(|_| Error::from_js_catch(&ctx))
-        })
+                .map_err(|_| Error::from_js_catch(&ctx))?;
+            self.checkpoint(&ctx)
+        });
+        self.finish_boundary(result)
     }
 
     pub fn load_file(&self, path: &str) -> Result<()> {
+        self.begin_boundary();
         let code = std::fs::read_to_string(path)
             .map_err(|_| Error::Unexpected("failed to read script"))?;
         let code = Self::transpile(&code, Some(Path::new(path)))?;
-        self.context.with(|ctx| {
+        let result = self.context.with(|ctx| {
             ctx.eval::<(), _>(code.as_str())
-                .map_err(|_| Error::from_js_catch(&ctx))
-        })
+                .map_err(|_| Error::from_js_catch(&ctx))?;
+            self.checkpoint(&ctx)
+        });
+        self.finish_boundary(result)
     }
 
     pub fn run<'a>(
@@ -87,7 +170,8 @@ impl Scope {
         named: impl IntoIterator<Item = (Cow<'a, str>, InputValue<'a>)>,
         mut callback: impl FnMut(EmitType, &[u8]),
     ) -> Result<()> {
-        self.context.with(|ctx| {
+        self.begin_boundary();
+        let result = self.context.with(|ctx| {
             let globals = ctx.globals();
             let val: Value<'_> = globals.get(name).map_err(|_| Error::from_js_catch(&ctx))?;
 
@@ -119,8 +203,59 @@ impl Scope {
                 val
             };
 
+            self.checkpoint(&ctx)?;
             self.emit_result(&ctx, obj, &mut callback)
-        })
+        });
+        self.finish_boundary(result)
+    }
+
+    fn begin_boundary(&self) {
+        self.rejections.borrow_mut().clear();
+    }
+
+    fn checkpoint(&self, ctx: &Ctx<'_>) -> Result<()> {
+        while ctx.execute_pending_job() {
+            if ctx.has_exception() {
+                return Err(Error::from_js_catch(ctx));
+            }
+        }
+        if ctx.has_exception() {
+            return Err(Error::from_js_catch(ctx));
+        }
+
+        let mut rejections = self.rejections.borrow_mut();
+        let rejection = rejections.values().next().cloned();
+        rejections.clear();
+        rejection.map_or(Ok(()), |rejection| Err(rejection.into_error()))
+    }
+
+    fn discard_jobs(&self, ctx: &Ctx<'_>) {
+        while ctx.execute_pending_job() {
+            if ctx.has_exception() {
+                let _ = ctx.catch();
+            }
+        }
+        if ctx.has_exception() {
+            let _ = ctx.catch();
+        }
+        self.rejections.borrow_mut().clear();
+    }
+
+    fn finish_boundary<T>(&self, result: Result<T>) -> Result<T> {
+        self.context.with(|ctx| {
+            for _ in 0..8 {
+                let cancelled = future::cancel_all(&ctx).unwrap_or_default();
+                future::clear();
+                self.discard_jobs(&ctx);
+                if cancelled == 0 && !future::has_pending() {
+                    break;
+                }
+            }
+            let _ = future::discard_all(&ctx);
+            future::clear();
+        });
+        self.rejections.borrow_mut().clear();
+        result
     }
 
     /// Drive a Promise to completion using the runtime async handle loop.
@@ -131,65 +266,53 @@ impl Scope {
     /// 3. Call JS `_isola_async._resolve(readyHandles)` to resolve
     ///    corresponding Promises
     /// 4. New microtasks are created → repeat
-    #[expect(clippy::unused_self)]
     fn drive_promise<'js>(
         &self,
         ctx: &Ctx<'js>,
         promise: &rquickjs::Promise<'js>,
+        suspend: bool,
     ) -> Result<Value<'js>> {
         loop {
-            // Check if promise already resolved/rejected
+            // Promise callbacks can settle an already-resolved chain or expose
+            // a detached rejection before any runtime operation is polled.
+            self.checkpoint(ctx)?;
+
             match promise.result::<Value<'js>>() {
                 Some(Ok(val)) => return Ok(val),
                 Some(Err(_)) => return Err(Error::from_js_catch(ctx)),
                 None => {}
             }
 
-            // Drive microtask queue until fully drained.
-            // Use ctx.execute_pending_job() (not runtime) to avoid RefCell double-borrow
-            // since we're inside context.with().
-            while ctx.execute_pending_job() {
-                // Re-check promise after each job
-                if promise.result::<Value<'js>>().is_some() {
-                    break;
-                }
-            }
-
-            // Re-check after draining all microtasks
-            if promise.result::<Value<'js>>().is_some() {
-                continue;
-            }
-
-            // No microtasks remaining — poll pending WASI I/O
             if !future::has_pending() {
                 return Err(Error::Unexpected("promise never resolved"));
             }
 
-            let ready_handles = future::poll_all();
-            if ready_handles.is_empty() {
-                // Execute any host calls that were submitted but not yet driven.
-                // They run concurrently, so awaited-together ops (Promise.all)
-                // overlap their host round-trips.
-                if future::drive_pending() {
-                    continue;
+            let mut drive_error = None;
+            let made_progress = future::drive_pending(|ready_handles| {
+                if !ready_handles.is_empty()
+                    && let Err(_error) = future::resolve_ready(ctx, ready_handles)
+                {
+                    drive_error = Some(Error::from_js_catch(ctx));
+                    return future::Drive::Stop;
                 }
-                // Only timed sleeps remain: wait until the nearest deadline.
-                match future::next_deadline() {
-                    Some(at) => {
-                        let now = std::time::Instant::now();
-                        if at > now {
-                            std::thread::sleep(at - now);
-                        }
-                    }
-                    // has_pending() was true but nothing is ready and nothing is
-                    // timed: unreachable today, but don't spin forever.
-                    None => return Err(Error::Unexpected("promise never resolved")),
+                if let Err(error) = self.checkpoint(ctx) {
+                    drive_error = Some(error);
+                    return future::Drive::Stop;
                 }
-                continue;
+                if promise.state() == PromiseState::Pending {
+                    future::Drive::Wait
+                } else if suspend {
+                    future::Drive::Suspend
+                } else {
+                    future::Drive::Stop
+                }
+            });
+            if let Some(error) = drive_error {
+                return Err(error);
             }
-
-            // Call JS _isola_async._resolve(readyHandles)
-            future::resolve_ready(ctx, &ready_handles).map_err(|_| Error::from_js_catch(ctx))?;
+            if !made_progress && promise.state() == PromiseState::Pending {
+                return Err(Error::Unexpected("promise never resolved"));
+            }
         }
     }
 
@@ -209,13 +332,14 @@ impl Scope {
             .call_arg(js_args)
             .map_err(|_| Error::from_js_catch(ctx))?;
 
-        // Check if result is a Promise
+        self.checkpoint(ctx)?;
+
         if result.is_promise() {
             let promise = result
                 .as_promise()
                 .ok_or(Error::Unexpected("expected promise"))?;
 
-            self.drive_promise(ctx, promise)
+            self.drive_promise(ctx, promise, false)
         } else {
             Ok(result)
         }
@@ -257,6 +381,7 @@ impl Scope {
                 let iter_result: Object<'_> = call_next
                     .call((gen_obj.clone(),))
                     .map_err(|_| Error::from_js_catch(ctx))?;
+                self.checkpoint(ctx)?;
                 let done: bool = iter_result.get("done").unwrap_or(false);
                 let value: Value<'_> = iter_result
                     .get("value")
@@ -308,6 +433,7 @@ impl Scope {
                     let iter_result: Object<'_> = call_next
                         .call((iter_val.clone(),))
                         .map_err(|_| Error::from_js_catch(ctx))?;
+                    self.checkpoint(ctx)?;
                     let done: bool = iter_result.get("done").unwrap_or(false);
                     if done {
                         callback(EmitType::End, &[]);
@@ -347,13 +473,14 @@ impl Scope {
             let next_result: Value<'_> = call_next
                 .call((iter.clone(),))
                 .map_err(|_| Error::from_js_catch(ctx))?;
+            self.checkpoint(ctx)?;
 
             // Drive the promise to completion
             let iter_result = if next_result.is_promise() {
                 let promise = next_result
                     .as_promise()
                     .ok_or(Error::Unexpected("expected promise from async generator"))?;
-                self.drive_promise(ctx, promise)?
+                self.drive_promise(ctx, promise, true)?
             } else {
                 next_result
             };

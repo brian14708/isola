@@ -60,7 +60,7 @@ fn build_all(sh: &Shell) -> Result<()> {
 fn wasm_rustflags(wasi_deps_dir: &str) -> String {
     format!(
         "-C relocation-model=pic -C link-arg=-shared -C link-arg=--allow-undefined \
-         -C link-arg=-L{wasi_deps_dir}/lib"
+         -Lnative={wasi_deps_dir}/lib"
     )
 }
 

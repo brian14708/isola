@@ -20,8 +20,6 @@ use crate::{
 #[pymodule]
 #[pyo3(name = "_isola_sys")]
 pub mod sys_module {
-    use std::time::{Duration, Instant};
-
     use pyo3::{
         Bound, PyAny, PyErr, PyRef, PyResult, Python, pyfunction,
         types::{PyAnyMethods, PyBytes, PyList, PyListMethods},
@@ -42,14 +40,28 @@ pub mod sys_module {
     }
     create_future!(PyFutureHostcall, cbor_convert -> PyResult<Bound<'_, PyAny>>);
 
+    fn item_pollable<'py>(item: &Bound<'py, PyAny>) -> Option<PyRef<'py, PyPollable>> {
+        item.get_item(0)
+            .ok()?
+            .extract::<PyRef<'_, PyPollable>>()
+            .ok()
+    }
+
+    fn ready_set(pollables: &Bound<'_, PyList>) -> Vec<u8> {
+        pollables
+            .iter()
+            .map(|item| item_pollable(&item).is_none_or(|pollable| pollable.is_ready()))
+            .map(u8::from)
+            .collect::<Vec<_>>()
+    }
+
     #[pyfunction]
     #[pyo3(signature = (duration))]
-    fn sleep(duration: f64) -> PyPollable {
-        if duration.is_finite() && duration > 0.0 {
-            PyPollable::sleep(Duration::from_secs_f64(duration))
-        } else {
-            PyPollable::default()
-        }
+    fn sleep(duration: f64) -> PyResult<PyPollable> {
+        let deadline = isola_runtime::Deadline::after_secs_f64(duration).map_err(|_| {
+            pyo3::exceptions::PyOverflowError::new_err("sleep duration is out of range")
+        })?;
+        Ok(PyPollable::sleep(deadline))
     }
 
     #[pyfunction]
@@ -72,40 +84,26 @@ pub mod sys_module {
     }
 
     #[pyfunction]
-    #[pyo3(signature = (poll))]
-    fn poll<'py>(poll: &Bound<'py, PyList>) -> Bound<'py, PyBytes> {
-        // Execute any host calls submitted but not yet driven. They run
-        // concurrently, so calls awaited together (e.g. `asyncio.gather`)
-        // overlap their host round-trips instead of serializing.
-        fn item_pollable<'py>(item: &Bound<'py, PyAny>) -> Option<PyRef<'py, PyPollable>> {
-            item.get_item(0)
-                .ok()?
-                .extract::<PyRef<'_, PyPollable>>()
-                .ok()
-        }
+    fn ready<'py>(poll: &Bound<'py, PyList>) -> Bound<'py, PyBytes> {
+        PyBytes::new(poll.py(), &ready_set(poll))
+    }
 
-        fn ready_set(pollables: &Bound<'_, PyList>) -> Vec<u8> {
-            pollables
-                .iter()
-                .map(|item| item_pollable(&item).is_none_or(|pollable| pollable.is_ready()))
-                .map(u8::from)
-                .collect::<Vec<_>>()
-        }
-
-        crate::wasm::future::drive_pending_calls();
-
-        let ready = ready_set(poll);
-        if ready.iter().all(|is_ready| *is_ready == 0) {
-            if let Some(ready_at) = poll
-                .iter()
-                .filter_map(|item| item_pollable(&item).and_then(|pollable| pollable.ready_at()))
-                .min()
-            {
-                std::thread::sleep(ready_at.saturating_duration_since(Instant::now()));
+    #[pyfunction]
+    #[pyo3(signature = (step, suspend = false))]
+    fn drive(step: &Bound<'_, PyAny>, suspend: bool) -> PyResult<()> {
+        let mut error = None;
+        let _ = crate::wasm::future::drive_pending_calls(|| {
+            match step.call0().and_then(|wait| wait.extract::<bool>()) {
+                Ok(true) => isola_runtime::pending::Drive::Wait,
+                Ok(false) if suspend => isola_runtime::pending::Drive::Suspend,
+                Ok(false) => isola_runtime::pending::Drive::Stop,
+                Err(cause) => {
+                    error = Some(cause);
+                    isola_runtime::pending::Drive::Stop
+                }
             }
-            return PyBytes::new(poll.py(), &ready_set(poll));
-        }
-        PyBytes::new(poll.py(), &ready)
+        });
+        error.map_or(Ok(()), Err)
     }
 }
 
@@ -133,6 +131,7 @@ impl runtime::Guest for Global {
                     v.load_script(&prelude).unwrap();
                     v.flush();
                 }
+                isola_runtime::pending::clear();
                 scope.replace(v);
             }
         });
@@ -156,6 +155,7 @@ impl runtime::Guest for Global {
                         .load_script(&script)
                         .map_err(Into::<runtime::Error>::into);
                     sandbox.flush();
+                    isola_runtime::pending::clear();
                     result
                 },
             )
@@ -175,6 +175,7 @@ impl runtime::Guest for Global {
                     .load_script(&script)
                     .map_err(Into::<runtime::Error>::into);
                 sandbox.flush();
+                isola_runtime::pending::clear();
                 result
             } else {
                 Err(Error::UnexpectedError("Sandbox not initialized").into())
@@ -211,6 +212,7 @@ impl runtime::Guest for Global {
                         })
                         .map_err(Into::<runtime::Error>::into);
                     sandbox.flush();
+                    isola_runtime::pending::clear();
                     ret
                 },
             )

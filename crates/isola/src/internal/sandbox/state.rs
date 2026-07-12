@@ -323,6 +323,10 @@ impl<H: Host> HostView for InstanceState<H> {
                     .await
                     .map_err(wasmtime::Error::from_boxed)
             }
+            EmitValue::Abort => {
+                self.output_buffer.reset();
+                Ok(())
+            }
         }
     }
 }

@@ -50,6 +50,43 @@ async fn integration_js_async_hostcall_echo() -> Result<()> {
     .await
 }
 
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_unobserved_raw_hostcall_does_not_block() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "async function main() {\n\
+                 _isola_sys.hostcall('delay', 0);\n\
+                 return await hostcall('delay', 20);\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate raw hostcall script")?;
+
+    let output = tokio::time::timeout(Duration::from_secs(2), sandbox.call("main", []))
+        .await
+        .context("raw hostcall without waiter blocked awaited call")?
+        .context("failed to call raw hostcall function")?;
+    let value: i64 = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode raw hostcall result")?;
+    assert_eq!(value, 20);
+
+    Ok(())
+}
+
 /// Concurrent host calls must overlap, not serialize. The script fires 8 host
 /// calls that each sleep 200ms host-side via `Promise.all`. Serialized that is
 /// ~1600ms; concurrently it is ~200ms. We assert the wall-clock is well under
@@ -107,6 +144,95 @@ async fn integration_js_concurrent_hostcalls_overlap() -> Result<()> {
     assert!(
         elapsed < serial / 2,
         "expected concurrent host calls to overlap (elapsed {elapsed:?}, serial would be {serial:?})"
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_async_generator_preserves_in_flight_hostcall() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "async function* main() {\n\
+                 const slow = hostcall('delay', 200);\n\
+                 const fast = await hostcall('delay', 10);\n\
+                 yield fast;\n\
+                 yield await slow;\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate async generator hostcall script")?;
+
+    let output = tokio::time::timeout(Duration::from_secs(5), sandbox.call("main", []))
+        .await
+        .context("async generator hostcall test timed out")?
+        .context("failed to call async generator hostcall function")?;
+    let values = output
+        .items
+        .iter()
+        .map(|item| item.to_serde::<i64>())
+        .collect::<Result<Vec<_>, _>>()
+        .context("failed to decode async generator hostcall outputs")?;
+    assert_eq!(values, vec![10, 200]);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_unawaited_hostcall_is_cancelled_at_call_boundary() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "let leaked = false;\n\
+             function start() {\n\
+                 hostcall('delay', 100).then(function () { leaked = true; });\n\
+                 return null;\n\
+             }\n\
+             async function observe() {\n\
+                 await _isola_sys.sleep(0.2);\n\
+                 return leaked;\n\
+             }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate boundary cleanup script")?;
+
+    tokio::time::timeout(Duration::from_secs(5), sandbox.call("start", []))
+        .await
+        .context("start call timed out")?
+        .context("failed to start detached hostcall")?;
+    let output = tokio::time::timeout(Duration::from_secs(5), sandbox.call("observe", []))
+        .await
+        .context("observe call timed out")?
+        .context("failed to observe detached hostcall")?;
+    let leaked: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode boundary cleanup result")?;
+
+    assert!(
+        !leaked,
+        "detached hostcall completed in a later sandbox call"
     );
 
     Ok(())

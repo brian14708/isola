@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import sys
+import weakref
 from collections import deque
 from typing import TYPE_CHECKING, Unpack, cast, overload, override
 
@@ -43,81 +45,160 @@ async def subscribe[T](
 
 
 class PollLoop(asyncio.AbstractEventLoop):
-    __slots__: tuple[str, ...] = ("closed", "handles", "running", "wakers")
+    __slots__: tuple[str, ...] = (
+        "_asyncgens",
+        "_finalizing_asyncgens",
+        "closed",
+        "handles",
+        "running",
+        "wakers",
+    )
 
     def __init__(self) -> None:
         self.wakers: list[
-            tuple[_isola_sys.Pollable[object], asyncio.Future[object] | asyncio.Handle]
-        ] = []
-        self.running: bool = False
-        self.closed: bool = False
-        self.handles: deque[asyncio.Handle] = deque()
-
-    def subscribe[T](self, pollable: _isola_sys.Pollable[T]) -> asyncio.Future[T]:
-        waker = self.create_future()
-        self.wakers.append((pollable, waker))
-        return cast("asyncio.Future[T]", waker)
-
-    @override
-    def run_until_complete[T](self, future: Awaitable[T]) -> T:
-        try:
-            self.running = True
-            asyncio.events._set_running_loop(self)  # noqa: SLF001
-            return self._run_until_complete(future)
-        finally:
-            self._cleanup()
-            self.running = False
-            asyncio.events._set_running_loop(None)  # noqa: SLF001
-
-    def run_async_generator[T](self, generator: AsyncGenerator[T]) -> Generator[T]:
-        it = aiter(generator)
-        try:
-            self.running = True
-            asyncio.events._set_running_loop(self)  # noqa: SLF001
-
-            while True:
-                try:
-                    yield self._run_until_complete(anext(it))
-                except StopAsyncIteration:
-                    break
-        finally:
-            self._cleanup()
-            self.running = False
-            asyncio.events._set_running_loop(None)  # noqa: SLF001
-
-    def _run_until_complete[T](self, future: Awaitable[T]) -> T:
-        future = asyncio.ensure_future(future, loop=self)
-        while self.running and (self.handles or self.wakers) and (not future.done()):
-            while self.handles:
-                handle = self.handles.popleft()
-                if not handle._cancelled:  # noqa: SLF001
-                    handle._run()  # noqa: SLF001
-
-            # `_isola_sys.poll` blocks internally until the nearest pending
-            # deadline and always returns a `bytes` of length `len(self.wakers)`,
-            # so it is truthy whenever there are wakers to dispatch.
-            if self.wakers and (readyset := _isola_sys.poll(self.wakers)):
-                self._dispatch_ready(readyset)
-
-        if not future.done() and self.running:
-            msg = "Deadlock detected"
-            raise RuntimeError(msg)
-        return future.result()
-
-    def _dispatch_ready(self, readyset: bytes) -> None:
-        new_wakers: list[
             tuple[
+                _isola_sys.Pollable[None],
                 _isola_sys.Pollable[object],
                 asyncio.Future[object] | asyncio.Handle,
             ]
         ] = []
-        for is_ready, (pollable, waker) in zip(readyset, self.wakers, strict=True):
+        self.running: bool = False
+        self.closed: bool = False
+        self.handles: deque[asyncio.Handle] = deque()
+        self._asyncgens: weakref.WeakSet[AsyncGenerator[object]] = weakref.WeakSet()
+        self._finalizing_asyncgens: set[AsyncGenerator[object]] = set()
+
+    def subscribe[T](self, pollable: _isola_sys.Pollable[T]) -> asyncio.Future[T]:
+        waker = self.create_future()
+        subscription = pollable.subscribe()
+        if subscription is None:
+            self._resume_future(pollable, waker)
+        else:
+            self.wakers.append((subscription, pollable, waker))
+        return cast("asyncio.Future[T]", waker)
+
+    @override
+    def run_until_complete[T](self, future: Awaitable[T]) -> T:
+        old_asyncgen_hooks = sys.get_asyncgen_hooks()
+        try:
+            self.running = True
+            asyncio.events._set_running_loop(self)  # noqa: SLF001
+            sys.set_asyncgen_hooks(
+                firstiter=self._asyncgen_firstiter_hook,
+                finalizer=self._asyncgen_finalizer_hook,
+            )
+            return self._run_until_complete(future)
+        finally:
+            self._cleanup()
+            self._retain_asyncgens_for_shutdown()
+            self.running = False
+            sys.set_asyncgen_hooks(
+                firstiter=old_asyncgen_hooks.firstiter,
+                finalizer=old_asyncgen_hooks.finalizer,
+            )
+            asyncio.events._set_running_loop(None)  # noqa: SLF001
+
+    def run_async_generator[T](self, generator: AsyncGenerator[T]) -> Generator[T]:
+        it = aiter(generator)
+        old_asyncgen_hooks = sys.get_asyncgen_hooks()
+        try:
+            self.running = True
+            asyncio.events._set_running_loop(self)  # noqa: SLF001
+            sys.set_asyncgen_hooks(
+                firstiter=self._asyncgen_firstiter_hook,
+                finalizer=self._asyncgen_finalizer_hook,
+            )
+
+            while True:
+                try:
+                    yield self._run_until_complete(anext(it), suspend=True)
+                except StopAsyncIteration:
+                    break
+        finally:
+            self._cleanup()
+            self._retain_asyncgens_for_shutdown()
+            self.running = False
+            sys.set_asyncgen_hooks(
+                firstiter=old_asyncgen_hooks.firstiter,
+                finalizer=old_asyncgen_hooks.finalizer,
+            )
+            asyncio.events._set_running_loop(None)  # noqa: SLF001
+
+    def _asyncgen_firstiter_hook(self, generator: AsyncGenerator[object]) -> None:
+        self._asyncgens.add(generator)
+
+    def _asyncgen_finalizer_hook(self, generator: AsyncGenerator[object]) -> None:
+        self._asyncgens.discard(generator)
+        if not self.closed:
+            self._finalizing_asyncgens.add(generator)
+            self.call_soon(self._finalize_asyncgen, generator)
+
+    def _finalize_asyncgen(self, generator: AsyncGenerator[object]) -> None:
+        self._finalizing_asyncgens.discard(generator)
+        _ = self.create_task(generator.aclose())
+
+    def _retain_asyncgens_for_shutdown(self) -> None:
+        # Keep active generators alive after their top-level loop turn so
+        # Runner.close() can deterministically pass them to shutdown_asyncgens().
+        self._finalizing_asyncgens.update(self._asyncgens)
+        self._asyncgens.clear()
+
+    def _run_until_complete[T](
+        self, future: Awaitable[T], *, suspend: bool = False
+    ) -> T:
+        task = cast("asyncio.Future[T]", asyncio.ensure_future(future, loop=self))
+
+        def step() -> bool:
+            while True:
+                servicing_ready = False
+                waiting_before_callbacks = False
+                if self.wakers:
+                    readyset = _isola_sys.ready(self.wakers)
+                    servicing_ready = any(readyset)
+                    self._dispatch_ready(readyset)
+                    waiting_before_callbacks = bool(self.wakers)
+                if task.done() or not self.running:
+                    return False
+                if not self.handles:
+                    break
+                for _ in range(len(self.handles)):
+                    handle = self.handles.popleft()
+                    if not handle._cancelled:  # noqa: SLF001
+                        handle._run()  # noqa: SLF001
+                if waiting_before_callbacks and not servicing_ready:
+                    break
+
+            if task.done() or not self.running:
+                return False
+            return bool(self.wakers)
+
+        _isola_sys.drive(step, suspend)
+
+        if not task.done() and self.running:
+            msg = "Deadlock detected"
+            raise RuntimeError(msg)
+        return task.result()
+
+    def _dispatch_ready(self, readyset: bytes) -> None:
+        new_wakers: list[
+            tuple[
+                _isola_sys.Pollable[None],
+                _isola_sys.Pollable[object],
+                asyncio.Future[object] | asyncio.Handle,
+            ]
+        ] = []
+        for is_ready, (subscription, pollable, waker) in zip(
+            readyset, self.wakers, strict=True
+        ):
             if not is_ready:
-                new_wakers.append((pollable, waker))
+                new_wakers.append((subscription, pollable, waker))
             elif isinstance(waker, asyncio.Handle):
+                pollable.release()
+                subscription.release()
                 self.handles.append(waker)
             else:
                 self._resume_future(pollable, waker)
+                subscription.release()
         self.wakers = new_wakers
 
     @staticmethod
@@ -138,16 +219,18 @@ class PollLoop(asyncio.AbstractEventLoop):
         pollable.release()
 
     def _cleanup(self) -> None:
-        while self.handles or self.wakers:
-            while self.handles:
-                handle = self.handles.popleft()
-                if not handle._cancelled:  # noqa: SLF001
-                    handle._run()  # noqa: SLF001
-
-            for pollable, waker in self.wakers:
-                _ = waker.cancel()
-                pollable.release()
-            self.wakers.clear()
+        while self.handles:
+            self.handles.popleft().cancel()
+        for subscription, pollable, waker in self.wakers:
+            waker.cancel()
+            pollable.release()
+            subscription.release()
+        self.wakers.clear()
+        # Cancelling futures may enqueue their done callbacks.
+        while self.handles:
+            handle = self.handles.popleft()
+            if not handle._cancelled:  # noqa: SLF001
+                handle._run()  # noqa: SLF001
 
     @override
     def is_running(self) -> bool:
@@ -202,7 +285,12 @@ class PollLoop(asyncio.AbstractEventLoop):
     ) -> asyncio.TimerHandle:
         handle = asyncio.TimerHandle(delay + self.time(), callback, args, self, context)
         fut = _isola_sys.sleep(delay)
-        self.wakers.append((fut, handle))
+        subscription = fut.subscribe()
+        if subscription is None:
+            fut.release()
+            self.handles.append(handle)
+        else:
+            self.wakers.append((subscription, fut, handle))
         return handle
 
     @override
@@ -219,9 +307,10 @@ class PollLoop(asyncio.AbstractEventLoop):
         w = self.wakers
         ln = len(w)
         for i in range(ln):
-            pollable, waker = w[i]
+            subscription, pollable, waker = w[i]
             if waker is handle:
                 pollable.release()
+                subscription.release()
                 w[i] = w[ln - 1]
                 _ = w.pop()
                 return
@@ -259,7 +348,23 @@ class PollLoop(asyncio.AbstractEventLoop):
 
     @override
     async def shutdown_asyncgens(self) -> None:
-        pass
+        generators = [*self._asyncgens, *self._finalizing_asyncgens]
+        self._asyncgens.clear()
+        self._finalizing_asyncgens.clear()
+        if not generators:
+            return
+
+        results = await asyncio.gather(
+            *(generator.aclose() for generator in generators),
+            return_exceptions=True,
+        )
+        for generator, result in zip(generators, results, strict=True):
+            if isinstance(result, BaseException):
+                self.call_exception_handler({
+                    "message": "error while closing async generator",
+                    "exception": result,
+                    "asyncgen": generator,
+                })
 
     @override
     async def shutdown_default_executor(self, timeout: float | None = None) -> None:

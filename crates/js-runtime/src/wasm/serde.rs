@@ -86,7 +86,7 @@ fn js_serde_loads<'js>(
                 .map_err(|e| rquickjs::Error::new_from_js_message("yaml", "value", &e))
         }
         "cbor" => {
-            if let Some(buf) = rquickjs::ArrayBuffer::from_value(data.clone())
+            if let Some(buf) = js_serde::array_buffer_from_value(data.clone())
                 && let Some(bytes) = buf.as_bytes()
             {
                 return js_serde::cbor_to_js(&ctx, bytes)

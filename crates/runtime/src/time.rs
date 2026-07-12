@@ -1,5 +1,6 @@
 use std::{
     cell::Cell,
+    fmt,
     time::{Duration, Instant},
 };
 
@@ -28,10 +29,47 @@ pub fn reset_monotonic() {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Deadline(Option<Instant>);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct DeadlineOverflow;
+
+impl fmt::Display for DeadlineOverflow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("sleep duration exceeds the monotonic clock range")
+    }
+}
+
+impl std::error::Error for DeadlineOverflow {}
+
 impl Deadline {
-    #[must_use]
-    pub fn after(duration: Duration) -> Self {
-        Self(Instant::now().checked_add(duration))
+    /// Create a deadline relative to the current instant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineOverflow`] when the duration cannot be represented by
+    /// the platform monotonic clock.
+    pub fn after(duration: Duration) -> Result<Self, DeadlineOverflow> {
+        Instant::now()
+            .checked_add(duration)
+            .map(|ready_at| Self(Some(ready_at)))
+            .ok_or(DeadlineOverflow)
+    }
+
+    /// Create a deadline from a duration in seconds.
+    ///
+    /// A non-finite or non-positive duration yields an immediately-ready
+    /// deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeadlineOverflow`] when the duration cannot be represented by
+    /// the platform monotonic clock.
+    pub fn after_secs_f64(secs: f64) -> Result<Self, DeadlineOverflow> {
+        if secs.is_finite() && secs > 0.0 {
+            let duration = Duration::try_from_secs_f64(secs).map_err(|_| DeadlineOverflow)?;
+            Self::after(duration)
+        } else {
+            Ok(Self::default())
+        }
     }
 
     #[must_use]
@@ -58,5 +96,15 @@ impl Deadline {
 
     pub const fn clear(&mut self) {
         self.0 = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    #[test]
+    fn rejects_deadlines_outside_the_clock_range() {
+        assert!(super::Deadline::after(Duration::MAX).is_err());
     }
 }

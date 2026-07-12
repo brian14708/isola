@@ -10,6 +10,7 @@ interface host {
         continuation,
         end,
         partial-result,
+        abort,
     }
 
     blocking-emit: func(%type: emit-type, %cbor: list<u8>);

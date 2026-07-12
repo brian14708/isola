@@ -10,6 +10,7 @@ where
     buffer: heapless::Vec<u8, N>,
     emit: &'a mut F,
     end_type: EmitType,
+    finished: bool,
 }
 
 impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
@@ -22,6 +23,7 @@ where
             buffer: heapless::Vec::new(),
             emit,
             end_type,
+            finished: false,
         }
     }
 
@@ -29,6 +31,23 @@ where
         if !self.buffer.is_empty() {
             (self.emit)(EmitType::Continuation, &self.buffer);
             self.buffer.clear();
+        }
+    }
+
+    /// Emit the buffered final chunk after serialization succeeds.
+    pub fn finish(mut self) {
+        (self.emit)(self.end_type, &self.buffer);
+        self.finished = true;
+    }
+}
+
+impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
+where
+    F: FnMut(EmitType, &[u8]),
+{
+    fn drop(&mut self) {
+        if !self.finished {
+            (self.emit)(EmitType::Abort, &[]);
         }
     }
 }
@@ -56,11 +75,44 @@ where
     }
 }
 
-impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
-where
-    F: FnMut(EmitType, &[u8]),
-{
-    fn drop(&mut self) {
-        (self.emit)(self.end_type, &self.buffer);
+#[cfg(test)]
+mod tests {
+    use minicbor::encode::Write as _;
+
+    use super::{CallbackWriter, EmitType};
+
+    #[test]
+    fn finish_emits_continuations_and_final_chunk() {
+        let mut emissions = Vec::new();
+        let mut emit = |emit_type, bytes: &[u8]| emissions.push((emit_type, bytes.to_vec()));
+        let mut writer: CallbackWriter<_, 4> = CallbackWriter::new(&mut emit, EmitType::End);
+        writer.write_all(b"abcdef").unwrap();
+        writer.finish();
+
+        assert_eq!(
+            emissions,
+            vec![
+                (EmitType::Continuation, b"abcd".to_vec()),
+                (EmitType::End, b"ef".to_vec()),
+            ]
+        );
+    }
+
+    #[test]
+    fn drop_aborts_partial_output() {
+        let mut emissions = Vec::new();
+        let mut emit = |emit_type, bytes: &[u8]| emissions.push((emit_type, bytes.to_vec()));
+        {
+            let mut writer: CallbackWriter<_, 4> = CallbackWriter::new(&mut emit, EmitType::End);
+            writer.write_all(b"abcdef").unwrap();
+        }
+
+        assert_eq!(
+            emissions,
+            vec![
+                (EmitType::Continuation, b"abcd".to_vec()),
+                (EmitType::Abort, Vec::new()),
+            ]
+        );
     }
 }
