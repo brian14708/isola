@@ -100,6 +100,96 @@ def main(url):
     Ok(())
 }
 
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_http_large_response_is_chunked_and_limited() -> Result<()> {
+    const LARGE_RESPONSE_BODY_BYTES: usize = 256 * 1024 + 7;
+    const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/large"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_bytes(
+                (0..LARGE_RESPONSE_BODY_BYTES)
+                    .map(|index| u8::try_from(index % 251).unwrap())
+                    .collect::<Vec<_>>(),
+            ),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/oversized"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_bytes(vec![b'x'; MAX_RESPONSE_BODY_BYTES + 1]),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    let script = r#"
+from sandbox.http import fetch
+
+def main(url):
+    with fetch("GET", f"{url}/large") as resp:
+        body = resp.read()
+
+    try:
+        with fetch("GET", f"{url}/oversized") as resp:
+            resp.read()
+        oversized_error = "expected response-size error"
+    except Exception as e:
+        oversized_error = str(e)
+
+    return (len(body), body[0], body[-1], oversized_error)
+"#;
+    sandbox
+        .eval_script(script, NoopOutputSink::shared())
+        .await
+        .context("failed to evaluate large-response script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(10),
+    )
+    .await
+    .context("failed to call large-response function")?;
+
+    let value: (i64, i64, i64, String) = output
+        .result
+        .as_ref()
+        .context("expected exactly one end output")?
+        .to_serde()
+        .context("failed to decode large-response result")?;
+    assert_eq!(value.0, i64::try_from(LARGE_RESPONSE_BODY_BYTES).unwrap());
+    assert_eq!(value.1, 0);
+    assert_eq!(
+        value.2,
+        i64::from(u8::try_from((LARGE_RESPONSE_BODY_BYTES - 1) % 251).unwrap())
+    );
+    let expected_error =
+        format!("HTTP response body exceeds maximum size of {MAX_RESPONSE_BODY_BYTES} bytes");
+    assert!(
+        value.3.contains(&expected_error),
+        "unexpected response-size error: {}",
+        value.3
+    );
+
+    Ok(())
+}
+
 /// A zero-length `read(0)` must return promptly (not spin on the always-ready
 /// pollable) and must leave the response readable for a subsequent full read.
 #[tokio::test]

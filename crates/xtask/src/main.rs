@@ -8,6 +8,10 @@ use std::{
 use anyhow::Result;
 use xshell::{Shell, cmd};
 
+use crate::async_shim::link_library;
+
+mod async_shim;
+
 fn main() -> Result<()> {
     let workspace_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -53,21 +57,40 @@ fn build_all(sh: &Shell) -> Result<()> {
     Ok(())
 }
 
+fn wasm_rustflags(wasi_deps_dir: &str) -> String {
+    format!(
+        "-C relocation-model=pic -C link-arg=-shared -C link-arg=--allow-undefined \
+         -C link-arg=-L{wasi_deps_dir}/lib"
+    )
+}
+
+fn component_inputs(runtime: String) -> Vec<String> {
+    vec![
+        runtime,
+        "crates/xtask/src/main.rs".to_string(),
+        "crates/xtask/src/async_shim.rs".to_string(),
+        "crates/xtask/Cargo.toml".to_string(),
+        "Cargo.toml".to_string(),
+        "Cargo.lock".to_string(),
+    ]
+}
+
 fn build_python(sh: &Shell) -> Result<()> {
     const TARGET: &str = "wasm32-wasip1";
 
     let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
+    let rustflags = wasm_rustflags(&wasi_deps_dir);
 
     cmd!(
         sh,
         "cargo b -Z build-std=std,panic_abort --release --target {TARGET} -p isola-python-runtime"
     )
     .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
-    .env("RUSTFLAGS", "-C relocation-model=pic")
+    .env("RUSTFLAGS", &rustflags)
     .run()?;
 
     run_if_changed(
-        vec![format!("target/{TARGET}/release/isola_python_runtime.wasm")],
+        component_inputs(format!("target/{TARGET}/release/isola_python_runtime.wasm")),
         "target/python.wasm",
         |inp, out| -> Result<()> {
             fn lib(
@@ -122,7 +145,8 @@ fn build_python(sh: &Shell) -> Result<()> {
             for lib in libs {
                 let lib_path = lib.1.to_str().unwrap().to_string();
                 let data = &std::fs::read(lib_path)?;
-                wasm = wasm.library(&lib.0, data, lib.2)?;
+                let shim = (lib.0 == "libisola_python.so").then_some("libisola_python_async.so");
+                wasm = link_library(wasm, &lib.0, data, lib.2, shim)?;
             }
             let wasm = wasm
                 .adapter(
@@ -143,15 +167,18 @@ fn build_python(sh: &Shell) -> Result<()> {
 fn build_js(sh: &Shell) -> Result<()> {
     const TARGET: &str = "wasm32-wasip1";
 
+    let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
+    let rustflags = wasm_rustflags(&wasi_deps_dir);
+
     cmd!(
         sh,
         "cargo b -Z build-std=std,panic_abort --release --target {TARGET} -p isola-js-runtime"
     )
-    .env("RUSTFLAGS", "-C relocation-model=pic")
+    .env("RUSTFLAGS", &rustflags)
     .run()?;
 
     run_if_changed(
-        vec![format!("target/{TARGET}/release/isola_js_runtime.wasm")],
+        component_inputs(format!("target/{TARGET}/release/isola_js_runtime.wasm")),
         "target/js.wasm",
         |inp, out| -> Result<()> {
             fn lib(
@@ -163,8 +190,6 @@ fn build_js(sh: &Shell) -> Result<()> {
             }
 
             // JS runtime needs libc and the WASI emulated libs (same as Python)
-            let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
-
             let libs = vec![
                 lib("libisola_js.so", &inp[0], false),
                 lib("libc.so", format!("{wasi_deps_dir}/lib/libc.so"), false),
@@ -192,7 +217,8 @@ fn build_js(sh: &Shell) -> Result<()> {
             for lib in libs {
                 let lib_path = lib.1.to_str().unwrap().to_string();
                 let data = &std::fs::read(lib_path)?;
-                wasm = wasm.library(&lib.0, data, lib.2)?;
+                let shim = (lib.0 == "libisola_js.so").then_some("libisola_js_async.so");
+                wasm = link_library(wasm, &lib.0, data, lib.2, shim)?;
             }
             let wasm = wasm
                 .adapter(

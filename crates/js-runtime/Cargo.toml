@@ -14,6 +14,7 @@ crate-type = ["cdylib"]
 [dependencies]
 futures = { workspace = true }
 heapless = { workspace = true }
+isola-runtime = { workspace = true }
 minicbor = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
 oxc = { workspace = true, features = ["codegen", "semantic", "transformer"] }
@@ -23,7 +24,6 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-wit-bindgen = { workspace = true, features = ["async", "inter-task-wakeup", "macros"] }
 
 [lints]
 workspace = true

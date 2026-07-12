@@ -1,13 +1,11 @@
 use std::time::Duration;
 
+use isola_runtime::wasi_http::{HttpRequest, HttpResponse};
 use rquickjs::{Array, Ctx, Function, Object, Value, object::Filter};
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 use super::future;
 use crate::serde as js_serde;
-
-const MAX_INCOMING_HTTP_BODY_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn register(ctx: &Ctx<'_>) {
     let globals = ctx.globals();
@@ -149,34 +147,13 @@ fn send_impl(
         None
     };
 
-    let mut payload_obj = serde_json::json!({
-        "method": method,
-        "url": u.to_string(),
-        "headers": header_fields,
-        "body": body,
-    });
-    if let Some(timeout_ms) = timeout_ms {
-        payload_obj["timeout_ms"] = serde_json::json!(timeout_ms);
-    }
-    let payload = serde_to_cbor(&payload_obj)?;
-    Ok(future::register(future::http(payload, u.to_string())))
-}
-
-/// Decode a CBOR-transported byte array (serialized as a sequence of integers)
-/// back into raw bytes.
-fn decode_byte_array(arr: &[serde_json::Value]) -> Vec<u8> {
-    arr.iter()
-        .filter_map(serde_json::Value::as_u64)
-        .filter_map(|b| u8::try_from(b).ok())
-        .collect()
-}
-
-fn serde_to_cbor(value: &impl Serialize) -> Result<Vec<u8>, String> {
-    let mut out = Vec::new();
-    value
-        .serialize(&mut minicbor_serde::Serializer::new(&mut out))
-        .map_err(|e| e.to_string())?;
-    Ok(out)
+    Ok(future::register(future::http(HttpRequest::new(
+        method.to_string(),
+        u,
+        header_fields,
+        body,
+        timeout_ms,
+    ))))
 }
 
 fn timeout_ms_from_value(timeout: &Value<'_>) -> Option<u64> {
@@ -194,20 +171,13 @@ fn timeout_ms_from_value(timeout: &Value<'_>) -> Option<u64> {
 
 pub fn build_response_object<'js>(
     ctx: &Ctx<'js>,
-    response: &[u8],
+    response: HttpResponse,
     url: &str,
 ) -> Result<Object<'js>, String> {
-    let response: serde_json::Value = {
-        let mut deserializer = minicbor_serde::Deserializer::new(response);
-        serde_json::Value::deserialize(&mut deserializer).map_err(|e| e.to_string())?
-    };
     let resp_obj = Object::new(ctx.clone()).map_err(|e| e.to_string())?;
 
     // status metadata
-    let status = response
-        .get("status")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| "missing HTTP status".to_string())?;
+    let status = response.status;
     resp_obj.set("status", status).map_err(|e| e.to_string())?;
     resp_obj.set("statusText", "").map_err(|e| e.to_string())?;
     resp_obj.set("url", url).map_err(|e| e.to_string())?;
@@ -215,21 +185,8 @@ pub fn build_response_object<'js>(
     // headersList: Array<[name, value]>, preserving duplicates/order
     let hdr_list = Array::new(ctx.clone()).map_err(|e| e.to_string())?;
     let mut header_index = 0;
-    if let Some(headers) = response
-        .get("headers")
-        .and_then(serde_json::Value::as_array)
     {
-        for header in headers {
-            let Some(pair) = header.as_array() else {
-                continue;
-            };
-            let Some(k) = pair.first().and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            let Some(v) = pair.get(1).and_then(serde_json::Value::as_array) else {
-                continue;
-            };
-            let v = decode_byte_array(v);
+        for (k, v) in response.headers {
             if let Ok(v_str) = std::str::from_utf8(&v) {
                 let pair = Array::new(ctx.clone()).map_err(|e| e.to_string())?;
                 pair.set(0, k).map_err(|e| e.to_string())?;
@@ -245,17 +202,7 @@ pub fn build_response_object<'js>(
         .set("headersList", hdr_list)
         .map_err(|e| e.to_string())?;
 
-    let buf = decode_byte_array(
-        response
-            .get("body")
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| "missing HTTP body".to_string())?,
-    );
-    if buf.len() > MAX_INCOMING_HTTP_BODY_BYTES {
-        return Err(format!(
-            "response body exceeds maximum size of {MAX_INCOMING_HTTP_BODY_BYTES} bytes"
-        ));
-    }
+    let buf = response.body;
 
     // bodyBytes as ArrayBuffer
     let ab = rquickjs::ArrayBuffer::new(ctx.clone(), buf.clone()).map_err(|e| e.to_string())?;

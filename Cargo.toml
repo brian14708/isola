@@ -33,6 +33,7 @@ http-body-util = "0.1"
 hyper = "1.4"
 isola = { path = "crates/isola" }
 isola-c-api = { path = "crates/c-api" }
+isola-runtime = { path = "crates/runtime" }
 minicbor = "2.0"
 minicbor-serde = "0.7"
 napi = { version = "3.10", default-features = false }
@@ -45,6 +46,7 @@ pyo3-async-runtimes = "0.29"
 pyo3-build-config = "0.29"
 reqwest = { version = "0.13", default-features = false }
 rquickjs = "0.12"
+rustc-demangle = "0.1"
 serde = "1.0"
 serde-transcode = "1.1"
 serde_json = "1.0"
@@ -65,6 +67,9 @@ wasmtime-wizer = { version = "46.0", default-features = false }
 wiremock = "0.6"
 wit-bindgen = { version = "0.59", default-features = false }
 wit-component = "0.253"
+wasm-encoder = "0.253"
+wasmparser = { version = "0.253", default-features = false }
+wit-parser = "0.253"
 xshell = "0.2"
 
 [profile.release]

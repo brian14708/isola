@@ -4,8 +4,11 @@ use std::{
 };
 
 use futures::future::join_all;
+use isola_runtime::{
+    block_on,
+    wasi_http::{self, HttpRequest, HttpResponse},
+};
 use pyo3::{PyRefMut, pyclass, pymethods};
-use wit_bindgen::block_on;
 
 use crate::wasm::isola::script::host;
 
@@ -90,10 +93,16 @@ impl PyPollable {
 /// other pending calls by [`drive_pending_calls`] (the async path, invoked from
 /// the `PollLoop`) or synchronously on its own by [`drive_one`] (the blocking
 /// path).
-struct DeferredCall {
-    call_type: String,
-    payload: Vec<u8>,
-    result: Option<Result<Vec<u8>, String>>,
+enum DeferredCall {
+    Host {
+        call_type: String,
+        payload: Vec<u8>,
+        result: Option<Result<Vec<u8>, String>>,
+    },
+    Http {
+        request: HttpRequest,
+        result: Option<Result<HttpResponse, String>>,
+    },
 }
 
 thread_local! {
@@ -105,7 +114,7 @@ thread_local! {
 pub fn register_call(call_type: String, payload: Vec<u8>) -> u32 {
     CALLS.with(|c| {
         let mut c = c.borrow_mut();
-        let op = DeferredCall {
+        let op = DeferredCall::Host {
             call_type,
             payload,
             result: None,
@@ -122,22 +131,52 @@ pub fn register_call(call_type: String, payload: Vec<u8>) -> u32 {
     })
 }
 
+pub fn register_http(request: HttpRequest) -> u32 {
+    CALLS.with(|c| {
+        let mut c = c.borrow_mut();
+        let op = DeferredCall::Http {
+            request,
+            result: None,
+        };
+        if let Some((i, slot)) = c.iter_mut().enumerate().find(|(_, s)| s.is_none()) {
+            *slot = Some(op);
+            u32::try_from(i).expect("deferred call index exceeds u32")
+        } else {
+            let i = c.len();
+            c.push(Some(op));
+            u32::try_from(i).expect("deferred call index exceeds u32")
+        }
+    })
+}
+
 /// Execute every registered host call that has not been driven yet, **all
 /// concurrently** in a single `block_on`. Awaited-together calls (e.g.
 /// `asyncio.gather`) are all registered before the `PollLoop` drives them, so
 /// their host round-trips overlap. Sequential `await`s register one call at a
 /// time and therefore still run serially.
 pub fn drive_pending_calls() {
-    let reqs: Vec<(usize, String, Vec<u8>)> = CALLS.with(|c| {
+    enum Req {
+        Host(String, Vec<u8>),
+        Http(HttpRequest),
+    }
+    enum Res {
+        Host(Result<Vec<u8>, String>),
+        Http(Result<HttpResponse, String>),
+    }
+    let reqs: Vec<(usize, Req)> = CALLS.with(|c| {
         c.borrow()
             .iter()
             .enumerate()
             .filter_map(|(i, slot)| match slot {
-                Some(DeferredCall {
+                Some(DeferredCall::Host {
                     call_type,
                     payload,
                     result: None,
-                }) => Some((i, call_type.clone(), payload.clone())),
+                }) => Some((i, Req::Host(call_type.clone(), payload.clone()))),
+                Some(DeferredCall::Http {
+                    request,
+                    result: None,
+                }) => Some((i, Req::Http(request.clone()))),
                 _ => None,
             })
             .collect()
@@ -146,15 +185,25 @@ pub fn drive_pending_calls() {
         return;
     }
 
-    let results = block_on(join_all(reqs.into_iter().map(
-        |(i, call_type, payload)| async move { (i, host::hostcall(call_type, payload).await) },
-    )));
+    let results = block_on(join_all(reqs.into_iter().map(|(i, req)| async move {
+        (
+            i,
+            match req {
+                Req::Host(call_type, payload) => {
+                    Res::Host(host::hostcall(call_type, payload).await)
+                }
+                Req::Http(request) => Res::Http(wasi_http::send(request).await),
+            },
+        )
+    })));
 
     CALLS.with(|c| {
         let mut c = c.borrow_mut();
         for (i, res) in results {
-            if let Some(Some(call)) = c.get_mut(i) {
-                call.result = Some(res);
+            match (c.get_mut(i), res) {
+                (Some(Some(DeferredCall::Host { result, .. })), Res::Host(v)) => *result = Some(v),
+                (Some(Some(DeferredCall::Http { result, .. })), Res::Http(v)) => *result = Some(v),
+                _ => {}
             }
         }
     });
@@ -173,7 +222,7 @@ fn take_call(handle: u32) -> Option<DeferredCall> {
 /// `drive_pending_calls`).
 pub fn take_result(handle: u32) -> Result<Vec<u8>, String> {
     match take_call(handle) {
-        Some(DeferredCall {
+        Some(DeferredCall::Host {
             result: Some(result),
             ..
         }) => result,
@@ -185,14 +234,35 @@ pub fn take_result(handle: u32) -> Result<Vec<u8>, String> {
 /// path). If it was already driven, returns the cached result.
 pub fn drive_one(handle: u32) -> Result<Vec<u8>, String> {
     match take_call(handle) {
-        Some(DeferredCall {
+        Some(DeferredCall::Host {
             result: Some(result),
             ..
         }) => result,
-        Some(DeferredCall {
+        Some(DeferredCall::Host {
             call_type, payload, ..
         }) => block_on(host::hostcall(call_type, payload)),
-        None => Err("invalid call handle".to_string()),
+        _ => Err("invalid call handle".to_string()),
+    }
+}
+
+pub fn take_http_result(handle: u32) -> Result<HttpResponse, String> {
+    match take_call(handle) {
+        Some(DeferredCall::Http {
+            result: Some(result),
+            ..
+        }) => result,
+        _ => Err("invalid or undriven HTTP handle".to_string()),
+    }
+}
+
+pub fn drive_one_http(handle: u32) -> Result<HttpResponse, String> {
+    match take_call(handle) {
+        Some(DeferredCall::Http {
+            result: Some(result),
+            ..
+        }) => result,
+        Some(DeferredCall::Http { request, .. }) => block_on(wasi_http::send(request)),
+        _ => Err("invalid HTTP handle".to_string()),
     }
 }
 
@@ -206,6 +276,32 @@ pub fn release_call(handle: u32) {
 }
 
 macro_rules! create_future {
+    ($name:ident, http -> $type:ty) => {
+        #[::pyo3::prelude::pyclass]
+        struct $name {
+            handle: u32,
+        }
+        impl $name {
+            const fn new(handle: u32) -> Self {
+                Self { handle }
+            }
+        }
+        #[::pyo3::prelude::pymethods]
+        impl $name {
+            fn wait(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
+                crate::wasm::future::drive_one_http(slf.handle).try_into()
+            }
+            fn subscribe(_slf: ::pyo3::PyRef<'_, Self>) -> Option<crate::wasm::future::PyPollable> {
+                Some(crate::wasm::future::PyPollable::default())
+            }
+            fn get(slf: ::pyo3::PyRef<'_, Self>) -> PyResult<$type> {
+                crate::wasm::future::take_http_result(slf.handle).try_into()
+            }
+            fn release(slf: ::pyo3::PyRef<'_, Self>) {
+                crate::wasm::future::release_call(slf.handle);
+            }
+        }
+    };
     ($name:ident, $type:ty) => {
         #[::pyo3::prelude::pyclass]
         struct $name {

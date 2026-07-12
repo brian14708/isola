@@ -1,5 +1,3 @@
-#![expect(clippy::same_length_and_capacity)]
-
 mod body_buffer;
 mod future;
 mod http;
@@ -8,6 +6,7 @@ mod serde;
 
 use std::{cell::RefCell, time::Instant};
 
+pub use isola_runtime::{exports, isola, wasi};
 use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
 
 use self::{exports::isola::script::runtime, isola::script::host};
@@ -17,12 +16,6 @@ use crate::{
     serde::cbor_to_python,
     wasm::future::PyPollable,
 };
-
-wit_bindgen::generate!({
-    world: "sandbox",
-    path: "../isola/wit",
-    generate_all,
-});
 
 #[pymodule]
 #[pyo3(name = "_isola_sys")]
@@ -122,7 +115,7 @@ pub mod sys_module {
 }
 
 #[cfg(target_arch = "wasm32")]
-export!(Global);
+isola_runtime::export!(Global with_types_in isola_runtime);
 
 pub struct Global;
 
@@ -267,7 +260,7 @@ impl ArgIter {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
-        match wit_bindgen::block_on(self.iter.read()) {
+        match isola_runtime::block_on(self.iter.read()) {
             Some(c) => Ok(Some(
                 cbor_to_python(py, &c)
                     .map_err(|_| PyErr::new::<pyo3::exceptions::PyTypeError, _>("serde error"))?
@@ -285,7 +278,7 @@ impl ArgIter {
     }
 
     fn read(&self, py: Python<'_>) -> PyResult<(bool, Option<Py<PyAny>>, Option<PyPollable>)> {
-        match wit_bindgen::block_on(self.iter.read()) {
+        match isola_runtime::block_on(self.iter.read()) {
             Some(c) => Ok((
                 true,
                 Some(

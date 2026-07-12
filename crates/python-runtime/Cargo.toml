@@ -17,6 +17,7 @@ base64 = { workspace = true }
 eventsource = { workspace = true }
 futures = { workspace = true }
 heapless = { workspace = true }
+isola-runtime = { workspace = true }
 minicbor = { workspace = true }
 minicbor-serde = { workspace = true, features = ["alloc"] }
 pyo3 = { workspace = true, features = ["abi3"] }
@@ -25,7 +26,6 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 thiserror = { workspace = true }
 url = { workspace = true }
-wit-bindgen = { workspace = true, features = ["async", "inter-task-wakeup", "macros"] }
 
 [build-dependencies]
 pyo3-build-config = { workspace = true, features = ["resolve-config"] }

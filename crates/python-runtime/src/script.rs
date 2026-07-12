@@ -237,7 +237,7 @@ mod tests {
         Python::attach(|py| {
             let Ok(np) = py.import("numpy") else { return };
             let array = np.call_method1("array", (vec![1.5, -2.25], "<f4")).unwrap();
-            assert!(Script::is_serializable(&array));
+            assert!(Scope::is_serializable(&array));
         });
     }
 

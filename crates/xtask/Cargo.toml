@@ -11,6 +11,10 @@ repository.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 glob = { workspace = true }
+rustc-demangle = { workspace = true }
 wasi-preview1-component-adapter-provider = { workspace = true }
+wasm-encoder = { workspace = true }
+wasmparser = { workspace = true }
 wit-component = { workspace = true }
+wit-parser = { workspace = true }
 xshell = { workspace = true }

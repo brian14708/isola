@@ -4,23 +4,27 @@ use std::{
 };
 
 use futures::future::join_all;
+use isola_runtime::{
+    block_on,
+    wasi_http::{self, HttpRequest, HttpResponse},
+};
 use rquickjs::{Array, Ctx, Function, Object, Value};
-use wit_bindgen::block_on;
 
 use super::isola::script::host;
 use crate::serde as js_serde;
 
 pub enum PendingOp {
-    /// A host call (a plain `hostcall` or an HTTP request, which is itself a
-    /// `hostcall`) that has been submitted by the guest. `result` stays `None`
-    /// until the poll loop drives it in `drive_pending`; multiple un-driven
-    /// host calls are then issued concurrently. `url` is `Some` for HTTP
-    /// requests and is used to build the response object.
+    /// A host call submitted by the guest. `result` stays `None` until the poll
+    /// loop drives it in `drive_pending`; multiple un-driven calls are then
+    /// issued concurrently.
     HostCall {
         call_type: String,
         payload: Vec<u8>,
-        url: Option<String>,
         result: Option<Result<Vec<u8>, String>>,
+    },
+    Http {
+        request: HttpRequest,
+        result: Option<Result<HttpResponse, String>>,
     },
     Sleep(Option<Instant>),
 }
@@ -29,6 +33,7 @@ impl PendingOp {
     fn is_ready(&self) -> bool {
         match self {
             Self::HostCall { result, .. } => result.is_some(),
+            Self::Http { result, .. } => result.is_some(),
             Self::Sleep(None) => true,
             Self::Sleep(Some(ready_at)) => Instant::now() >= *ready_at,
         }
@@ -40,17 +45,14 @@ pub const fn hostcall(call_type: String, payload: Vec<u8>) -> PendingOp {
     PendingOp::HostCall {
         call_type,
         payload,
-        url: None,
         result: None,
     }
 }
 
 /// Build a deferred HTTP request op. `url` is retained to build the response.
-pub fn http(payload: Vec<u8>, url: String) -> PendingOp {
-    PendingOp::HostCall {
-        call_type: "__isola_http".to_string(),
-        payload,
-        url: Some(url),
+pub const fn http(request: HttpRequest) -> PendingOp {
+    PendingOp::Http {
+        request,
         result: None,
     }
 }
@@ -132,7 +134,15 @@ pub fn next_deadline() -> Option<Instant> {
 /// Returns `true` if at least one host call was driven (the caller should
 /// re-poll for readiness), `false` if there was nothing to drive.
 pub fn drive_pending() -> bool {
-    let reqs: Vec<(usize, String, Vec<u8>)> = PENDING.with(|p| {
+    enum Req {
+        Host(String, Vec<u8>),
+        Http(HttpRequest),
+    }
+    enum Res {
+        Host(Result<Vec<u8>, String>),
+        Http(Result<HttpResponse, String>),
+    }
+    let reqs: Vec<(usize, Req)> = PENDING.with(|p| {
         p.borrow()
             .iter()
             .enumerate()
@@ -142,7 +152,11 @@ pub fn drive_pending() -> bool {
                     payload,
                     result: None,
                     ..
-                }) => Some((i, call_type.clone(), payload.clone())),
+                }) => Some((i, Req::Host(call_type.clone(), payload.clone()))),
+                Some(PendingOp::Http {
+                    request,
+                    result: None,
+                }) => Some((i, Req::Http(request.clone()))),
                 _ => None,
             })
             .collect()
@@ -151,15 +165,29 @@ pub fn drive_pending() -> bool {
         return false;
     }
 
-    let results = block_on(join_all(reqs.into_iter().map(
-        |(i, call_type, payload)| async move { (i, host::hostcall(call_type, payload).await) },
-    )));
+    let results = block_on(join_all(reqs.into_iter().map(|(i, req)| async move {
+        (
+            i,
+            match req {
+                Req::Host(call_type, payload) => {
+                    Res::Host(host::hostcall(call_type, payload).await)
+                }
+                Req::Http(request) => Res::Http(wasi_http::send(request).await),
+            },
+        )
+    })));
 
     PENDING.with(|p| {
         let mut p = p.borrow_mut();
         for (i, res) in results {
-            if let Some(Some(PendingOp::HostCall { result, .. })) = p.get_mut(i) {
-                *result = Some(res);
+            match (p.get_mut(i), res) {
+                (Some(Some(PendingOp::HostCall { result, .. })), Res::Host(value)) => {
+                    *result = Some(value);
+                }
+                (Some(Some(PendingOp::Http { result, .. })), Res::Http(value)) => {
+                    *result = Some(value);
+                }
+                _ => {}
             }
         }
     });
@@ -186,14 +214,14 @@ pub fn has_pending() -> bool {
 pub fn recv_http<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Object<'js>> {
     let op = take(handle)?;
     match op {
-        PendingOp::HostCall {
+        PendingOp::Http {
             result: Some(response),
-            url: Some(url),
+            request,
             ..
         } => {
             let response =
                 response.map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))?;
-            super::http::build_response_object(ctx, &response, &url)
+            super::http::build_response_object(ctx, response, request.url().as_str())
                 .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))
         }
         _ => Err(rquickjs::Error::new_from_js_message(
@@ -209,7 +237,6 @@ pub fn finish_hostcall<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Val
     match op {
         PendingOp::HostCall {
             result: Some(result),
-            url: None,
             ..
         } => {
             let cbor_result = result

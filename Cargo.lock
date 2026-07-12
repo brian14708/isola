@@ -1637,6 +1637,7 @@ version = "0.5.0"
 dependencies = [
  "futures",
  "heapless",
+ "isola-runtime",
  "minicbor",
  "minicbor-serde",
  "oxc",
@@ -1646,7 +1647,6 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "url",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -1678,6 +1678,7 @@ dependencies = [
  "eventsource",
  "futures",
  "heapless",
+ "isola-runtime",
  "minicbor",
  "minicbor-serde",
  "pyo3",
@@ -1687,7 +1688,6 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "url",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -1709,6 +1709,15 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "isola-runtime"
+version = "0.5.0"
+dependencies = [
+ "futures",
+ "url",
+ "wit-bindgen",
 ]
 
 [[package]]
@@ -4822,8 +4831,12 @@ version = "0.5.0"
 dependencies = [
  "anyhow",
  "glob",
+ "rustc-demangle",
  "wasi-preview1-component-adapter-provider",
+ "wasm-encoder 0.253.0",
+ "wasmparser 0.253.0",
  "wit-component",
+ "wit-parser 0.253.0",
  "xshell",
 ]
 

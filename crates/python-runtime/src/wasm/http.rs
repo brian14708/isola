@@ -1,11 +1,11 @@
 #[pyo3::pymodule]
 #[pyo3(name = "_isola_http")]
 pub mod http_module {
+    use isola_runtime::wasi_http::{HttpRequest, HttpResponse};
     use pyo3::{
         prelude::*,
         types::{PyBytes, PyDict},
     };
-    use serde::{Deserialize as _, Serialize as _};
     use url::Url;
 
     use crate::{
@@ -85,26 +85,12 @@ pub mod http_module {
             }
         };
 
-        let mut request = serde_json::json!({
-            "method": method,
-            "url": u.to_string(),
-            "headers": header_fields,
-            "body": body,
-        });
-        if let Some(timeout_ms) = timeout_ms {
-            request["timeout_ms"] = serde_json::json!(timeout_ms);
-        }
-        let mut payload = Vec::new();
-        request
-            .serialize(&mut minicbor_serde::Serializer::new(&mut payload))
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
-        Ok(PyFutureResponse::new(crate::wasm::future::register_call(
-            "__isola_http".to_string(),
-            payload,
+        Ok(PyFutureResponse::new(crate::wasm::future::register_http(
+            HttpRequest::new(method.to_string(), u, header_fields, body, timeout_ms),
         )))
     }
 
-    create_future!(PyFutureResponse, PyResponse);
+    create_future!(PyFutureResponse, http -> PyResponse);
 
     #[pyclass]
     struct PyResponse {
@@ -116,51 +102,19 @@ pub mod http_module {
         closed: bool,
     }
 
-    impl TryFrom<Result<Vec<u8>, String>> for PyResponse {
+    impl TryFrom<Result<HttpResponse, String>> for PyResponse {
         type Error = PyErr;
 
-        fn try_from(value: Result<Vec<u8>, String>) -> Result<Self, Self::Error> {
+        fn try_from(value: Result<HttpResponse, String>) -> Result<Self, Self::Error> {
             match value {
-                Ok(response) => {
-                    let mut deserializer = minicbor_serde::Deserializer::new(&response);
-                    let response =
-                        serde_json::Value::deserialize(&mut deserializer).map_err(|e| {
-                            PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string())
-                        })?;
-                    let headers = response
-                        .get("headers")
-                        .and_then(serde_json::Value::as_array)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|header| {
-                            let pair = header.as_array()?;
-                            let name = pair.first()?.as_str()?.to_string();
-                            let value = decode_byte_array(pair.get(1)?.as_array()?);
-                            Some((name, value))
-                        })
-                        .collect();
-                    let body = response
-                        .get("body")
-                        .and_then(serde_json::Value::as_array)
-                        .map(|arr| decode_byte_array(arr))
-                        .unwrap_or_default();
-                    Ok(Self {
-                        status: response
-                            .get("status")
-                            .and_then(serde_json::Value::as_u64)
-                            .and_then(|s| u16::try_from(s).ok())
-                            .ok_or_else(|| {
-                                PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-                                    "missing HTTP status",
-                                )
-                            })?,
-                        headers,
-                        body,
-                        cursor: 0,
-                        consumed: false,
-                        closed: false,
-                    })
-                }
+                Ok(response) => Ok(Self {
+                    status: response.status,
+                    headers: response.headers,
+                    body: response.body,
+                    cursor: 0,
+                    consumed: false,
+                    closed: false,
+                }),
                 Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)),
             }
         }
@@ -238,13 +192,6 @@ pub mod http_module {
 
     /// Decode a CBOR-transported byte array (serialized as a sequence of
     /// integers) back into raw bytes.
-    fn decode_byte_array(arr: &[serde_json::Value]) -> Vec<u8> {
-        arr.iter()
-            .filter_map(serde_json::Value::as_u64)
-            .filter_map(|b| u8::try_from(b).ok())
-            .collect()
-    }
-
     fn read_into(
         slf: &mut PyResponse,
         buf: &mut impl BodyBuffer,

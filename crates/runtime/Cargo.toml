@@ -1,0 +1,17 @@
+[package]
+name = "isola-runtime"
+version.workspace = true
+edition.workspace = true
+publish = false
+license.workspace = true
+documentation.workspace = true
+homepage.workspace = true
+repository.workspace = true
+
+[dependencies]
+futures = { workspace = true }
+url = { workspace = true }
+wit-bindgen = { workspace = true, features = ["async", "inter-task-wakeup", "macros"] }
+
+[lints]
+workspace = true
