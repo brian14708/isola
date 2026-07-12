@@ -1,3 +1,4 @@
+use isola_runtime::CallbackWriter;
 use rquickjs::{Ctx, IntoJs, Value};
 use serde::{
     Deserializer, Serialize,
@@ -722,76 +723,6 @@ where
         .serialize(serializer.serialize_unit_as_null(true))
         .map_err(|e| e.to_string())?;
     Ok(())
-}
-
-pub struct CallbackWriter<'a, F, const N: usize = 1024>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    buffer: heapless::Vec<u8, N>,
-    emit_fn: &'a mut F,
-    end_type: crate::wasm::isola::script::host::EmitType,
-}
-
-impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    pub const fn new(
-        emit_fn: &'a mut F,
-        end_type: crate::wasm::isola::script::host::EmitType,
-    ) -> Self {
-        Self {
-            emit_fn,
-            buffer: heapless::Vec::new(),
-            end_type,
-        }
-    }
-
-    fn flush(&mut self) {
-        if !self.buffer.is_empty() {
-            (self.emit_fn)(
-                crate::wasm::isola::script::host::EmitType::Continuation,
-                &self.buffer,
-            );
-            self.buffer.clear();
-        }
-    }
-}
-
-impl<F, const N: usize> minicbor::encode::Write for CallbackWriter<'_, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    type Error = std::convert::Infallible;
-
-    fn write_all(&mut self, buf: &[u8]) -> std::result::Result<(), Self::Error> {
-        let mut remaining = buf;
-
-        while !remaining.is_empty() {
-            let available_space = N - self.buffer.len();
-            if available_space == 0 {
-                self.flush();
-                continue;
-            }
-
-            let to_write = remaining.len().min(available_space);
-            let (chunk, rest) = remaining.split_at(to_write);
-            self.buffer.extend_from_slice(chunk).ok();
-            remaining = rest;
-        }
-
-        Ok(())
-    }
-}
-
-impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    fn drop(&mut self) {
-        (self.emit_fn)(self.end_type, &self.buffer);
-    }
 }
 
 pub fn cbor_to_js<'js>(ctx: &Ctx<'js>, cbor: &[u8]) -> Result<Value<'js>, String> {

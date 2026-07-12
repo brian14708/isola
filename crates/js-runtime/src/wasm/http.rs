@@ -147,13 +147,13 @@ fn send_impl(
         None
     };
 
-    Ok(future::register(future::http(HttpRequest::new(
+    Ok(future::register_http(HttpRequest::new(
         method.to_string(),
         u,
         header_fields,
         body,
         timeout_ms,
-    ))))
+    )))
 }
 
 fn timeout_ms_from_value(timeout: &Value<'_>) -> Option<u64> {

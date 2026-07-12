@@ -10,6 +10,8 @@ repository.workspace = true
 
 [dependencies]
 futures = { workspace = true }
+heapless = { workspace = true }
+minicbor = { workspace = true }
 url = { workspace = true }
 wit-bindgen = { workspace = true, features = ["async", "inter-task-wakeup", "macros"] }
 

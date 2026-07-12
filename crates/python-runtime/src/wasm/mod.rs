@@ -4,7 +4,7 @@ mod http;
 mod logging;
 mod serde;
 
-use std::{cell::RefCell, time::Instant};
+use std::cell::RefCell;
 
 pub use isola_runtime::{exports, isola, wasi};
 use pyo3::{append_to_inittab, prelude::*, sync::PyOnceLock};
@@ -54,12 +54,7 @@ pub mod sys_module {
 
     #[pyfunction]
     fn monotonic() -> f64 {
-        super::MONOTONIC_BASE.with(|base| {
-            base.borrow_mut()
-                .get_or_insert_with(Instant::now)
-                .elapsed()
-                .as_secs_f64()
-        })
+        isola_runtime::monotonic()
     }
 
     #[pyfunction]
@@ -144,32 +139,7 @@ impl runtime::Guest for Global {
 
         // https://github.com/bytecodealliance/componentize-py/blob/72348e0ebd74ef1027c52528409a289765ed5c4c/runtime/src/lib.rs#L377
         if preinit {
-            #[link(wasm_import_module = "wasi_snapshot_preview1")]
-            unsafe extern "C" {
-                #[cfg_attr(target_arch = "wasm32", link_name = "reset_adapter_state")]
-                fn reset_adapter_state();
-            }
-
-            // This tells wasi-libc to reset its preopen state, forcing re-initialization at
-            // runtime.
-            #[link(wasm_import_module = "env")]
-            unsafe extern "C" {
-                #[cfg_attr(target_arch = "wasm32", link_name = "__wasilibc_reset_preopens")]
-                fn wasilibc_reset_preopens();
-            }
-
-            unsafe {
-                reset_adapter_state();
-                wasilibc_reset_preopens();
-            }
-
-            // A monotonic base captured during initialize() (snapshot/build
-            // time) would be frozen into the Wizer snapshot and is meaningless
-            // at runtime, so clear it here; `monotonic()` lazily establishes the
-            // base on its first runtime call instead (see MONOTONIC_BASE).
-            MONOTONIC_BASE.with(|base| {
-                base.borrow_mut().take();
-            });
+            isola_runtime::lifecycle::reset_preinitialized_state();
         }
     }
 
@@ -297,5 +267,4 @@ impl ArgIter {
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
-    static MONOTONIC_BASE: RefCell<Option<Instant>> = const { RefCell::new(None) };
 }

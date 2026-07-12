@@ -3,7 +3,7 @@ pub mod http;
 mod logging;
 mod serde;
 
-use std::{cell::RefCell, time::Instant};
+use std::cell::RefCell;
 
 pub use isola_runtime::{exports, isola, wasi};
 
@@ -57,30 +57,7 @@ impl runtime::Guest for Global {
         });
 
         if preinit {
-            #[link(wasm_import_module = "wasi_snapshot_preview1")]
-            unsafe extern "C" {
-                #[cfg_attr(target_arch = "wasm32", link_name = "reset_adapter_state")]
-                fn reset_adapter_state();
-            }
-
-            #[link(wasm_import_module = "env")]
-            unsafe extern "C" {
-                #[cfg_attr(target_arch = "wasm32", link_name = "__wasilibc_reset_preopens")]
-                fn wasilibc_reset_preopens();
-            }
-
-            unsafe {
-                reset_adapter_state();
-                wasilibc_reset_preopens();
-            }
-
-            // A monotonic base captured during initialize() (snapshot/build
-            // time) would be frozen into the Wizer snapshot and is meaningless
-            // at runtime, so clear it here; `monotonic()` lazily establishes the
-            // base on its first runtime call instead (see MONOTONIC_BASE).
-            MONOTONIC_BASE.with(|base| {
-                base.borrow_mut().take();
-            });
+            isola_runtime::lifecycle::reset_preinitialized_state();
         }
     }
 
@@ -194,15 +171,7 @@ fn register_sys_module(ctx: &rquickjs::Ctx<'_>) {
     // _isola_sys.monotonic() - monotonic clock in seconds
     sys.set(
         "monotonic",
-        rquickjs::Function::new(ctx.clone(), || -> f64 {
-            MONOTONIC_BASE.with(|base| {
-                base.borrow_mut()
-                    .get_or_insert_with(Instant::now)
-                    .elapsed()
-                    .as_secs_f64()
-            })
-        })
-        .unwrap(),
+        rquickjs::Function::new(ctx.clone(), isola_runtime::monotonic).unwrap(),
     )
     .unwrap();
 
@@ -210,10 +179,7 @@ fn register_sys_module(ctx: &rquickjs::Ctx<'_>) {
     // Returns a pollable handle. Use with _isola_async._wait().
     sys.set(
         "sleep",
-        rquickjs::Function::new(ctx.clone(), |duration: f64| -> u32 {
-            future::register(future::sleep(duration))
-        })
-        .unwrap(),
+        rquickjs::Function::new(ctx.clone(), future::register_sleep).unwrap(),
     )
     .unwrap();
 
@@ -239,7 +205,7 @@ fn js_sys_hostcall(
 ) -> rquickjs::Result<u32> {
     let cbor_payload = js_serde::js_to_cbor(payload)
         .map_err(|e| rquickjs::Error::new_from_js_message("value", "cbor", &e))?;
-    Ok(future::register(future::hostcall(call_type, cbor_payload)))
+    Ok(future::register_hostcall(call_type, cbor_payload))
 }
 
 /// Retrieve the result of a completed hostcall.
@@ -253,5 +219,4 @@ fn js_sys_finish_hostcall(
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
-    static MONOTONIC_BASE: RefCell<Option<Instant>> = const { RefCell::new(None) };
 }

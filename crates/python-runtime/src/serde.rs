@@ -1,5 +1,6 @@
 use std::io::{self, Write};
 
+use isola_runtime::CallbackWriter;
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
     types::{
@@ -616,83 +617,6 @@ where
         .serialize(serializer.serialize_unit_as_null(true))
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(())
-}
-
-/// A buffered writer that emits CBOR data through a callback with streaming
-/// control
-pub struct CallbackWriter<'a, F, const N: usize = 1024>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    buffer: heapless::Vec<u8, N>,
-    emit_fn: &'a mut F,
-    end_type: crate::wasm::isola::script::host::EmitType,
-}
-
-impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    /// Creates a new `CallbackWriter` with the given callback and end type
-    pub const fn new(
-        emit_fn: &'a mut F,
-        end_type: crate::wasm::isola::script::host::EmitType,
-    ) -> Self {
-        Self {
-            emit_fn,
-            buffer: heapless::Vec::new(),
-            end_type,
-        }
-    }
-
-    /// Flushes any buffered data as a continuation
-    fn flush(&mut self) {
-        if !self.buffer.is_empty() {
-            (self.emit_fn)(
-                crate::wasm::isola::script::host::EmitType::Continuation,
-                &self.buffer,
-            );
-            self.buffer.clear();
-        }
-    }
-}
-
-impl<F, const N: usize> minicbor::encode::Write for CallbackWriter<'_, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    type Error = std::convert::Infallible;
-
-    fn write_all(&mut self, buf: &[u8]) -> std::result::Result<(), Self::Error> {
-        let mut remaining = buf;
-
-        while !remaining.is_empty() {
-            let available_space = N - self.buffer.len();
-            if available_space == 0 {
-                // Buffer is full, flush it
-                self.flush();
-                continue;
-            }
-
-            let to_write = remaining.len().min(available_space);
-            let (chunk, rest) = remaining.split_at(to_write);
-
-            // This should never fail because we checked available space
-            self.buffer.extend_from_slice(chunk).ok();
-            remaining = rest;
-        }
-
-        Ok(())
-    }
-}
-
-impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
-where
-    F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-{
-    fn drop(&mut self) {
-        (self.emit_fn)(self.end_type, &self.buffer);
-    }
 }
 
 pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, PyAny>> {
