@@ -307,8 +307,7 @@ impl<H: Host> HostView for InstanceState<H> {
                 Ok(())
             }
             EmitValue::End(new_data) => {
-                self.output_buffer.append(new_data.as_ref())?;
-                let output = self.output_buffer.take();
+                let output = self.output_buffer.finish(new_data)?;
                 let output = if output.is_empty() {
                     None
                 } else {
@@ -319,8 +318,7 @@ impl<H: Host> HostView for InstanceState<H> {
                     .map_err(wasmtime::Error::from_boxed)
             }
             EmitValue::PartialResult(new_data) => {
-                self.output_buffer.append(new_data.as_ref())?;
-                let output = self.output_buffer.take();
+                let output = self.output_buffer.finish(new_data)?;
                 sink.on_item(Value::from(output))
                     .await
                     .map_err(wasmtime::Error::from_boxed)
@@ -387,6 +385,21 @@ impl OutputBuffer {
         }
         self.0.extend_from_slice(data);
         Ok(())
+    }
+
+    #[inline]
+    fn finish(&mut self, data: Bytes) -> wasmtime::Result<Bytes> {
+        if self.0.is_empty() {
+            if data.len() > MAX_BUFFERED_OUTPUT_BYTES {
+                return Err(wasmtime::Error::msg(format!(
+                    "output buffer exceeded hard limit ({MAX_BUFFERED_OUTPUT_BYTES} bytes)"
+                )));
+            }
+            return Ok(data);
+        }
+
+        self.append(data.as_ref())?;
+        Ok(self.take())
     }
 
     #[inline]
@@ -603,6 +616,26 @@ mod tests {
         buf.append(b"hello").expect("append within limit");
         assert_eq!(&buf.take()[..], b"hello");
         assert!(buf.take().is_empty());
+    }
+
+    #[test]
+    fn output_buffer_finish_reuses_single_chunk() {
+        let mut buf = OutputBuffer::new();
+        let chunk = Bytes::from(vec![1_u8, 2, 3]);
+        let chunk_ptr = chunk.as_ptr();
+        let output = buf.finish(chunk).expect("finish within limit");
+        assert_eq!(output.as_ptr(), chunk_ptr);
+        assert_eq!(&output[..], &[1, 2, 3]);
+    }
+
+    #[test]
+    fn output_buffer_finish_combines_continuations() {
+        let mut buf = OutputBuffer::new();
+        buf.append(b"hello ").expect("append within limit");
+        let output = buf
+            .finish(Bytes::from_static(b"world"))
+            .expect("finish within limit");
+        assert_eq!(&output[..], b"hello world");
     }
 
     #[test]

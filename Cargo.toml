@@ -68,5 +68,5 @@ wit-component = "0.253"
 xshell = "0.2"
 
 [profile.release]
-lto = true
+lto = "thin"
 strip = true

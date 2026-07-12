@@ -17,15 +17,20 @@
 mod args_macro;
 
 use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
 };
 
-use futures::{Stream, stream};
+use futures::Stream;
 use parking_lot::Mutex;
 use smallvec::SmallVec;
-use wasmtime::{Engine, Store, component::Component};
+use wasmtime::{
+    Engine, Store,
+    component::{Component, InstancePre},
+};
 pub use wasmtime_wasi::{DirPerms, FilePerms};
 
 #[cfg(feature = "serde")]
@@ -162,6 +167,7 @@ pub struct SandboxTemplate {
     pub(crate) engine: Engine,
     pub(crate) component: Component,
     pub(crate) ticker: Arc<EpochTickerRegistration>,
+    pre_instances: Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
 /// Live guest instance with mutable execution state.
@@ -348,6 +354,7 @@ impl SandboxTemplateBuilder {
             engine,
             component,
             ticker,
+            pre_instances: Mutex::new(HashMap::new()),
         })
     }
 }
@@ -385,10 +392,29 @@ impl SandboxTemplate {
         .map_err(Error::Wasm)?;
         store.epoch_deadline_async_yield_and_update(1);
 
-        let linker = InstanceState::<H>::new_linker(&self.engine).map_err(Error::Wasm)?;
-        let pre = linker
-            .instantiate_pre(&self.component)
-            .map_err(Error::Wasm)?;
+        let pre = {
+            let mut cached = self.pre_instances.lock();
+            let host_type = TypeId::of::<H>();
+            if let std::collections::hash_map::Entry::Vacant(entry) = cached.entry(host_type) {
+                let linker = InstanceState::<H>::new_linker(&self.engine).map_err(Error::Wasm)?;
+                let pre = linker
+                    .instantiate_pre(&self.component)
+                    .map_err(Error::Wasm)?;
+                entry.insert(Box::new(pre));
+            }
+            cached
+                .get(&host_type)
+                .and_then(|pre| pre.downcast_ref::<InstancePre<InstanceState<H>>>())
+                .ok_or_else(|| {
+                    Error::Other(
+                        std::io::Error::other(
+                            "pre-instantiation cache type did not match its TypeId key",
+                        )
+                        .into(),
+                    )
+                })?
+                .clone()
+        };
         let bindings = SandboxPre::new(pre)
             .map_err(Error::Wasm)?
             .instantiate_async(&mut store)
@@ -486,25 +512,23 @@ impl<H: Host> Sandbox<H> {
     where
         I: IntoIterator<Item = Arg>,
     {
-        let mut args: SmallVec<[Arg; 2]> = args.into_iter().collect();
         let mut store = CallCleanup::new(&mut self.store);
         let internal_args = args
-            .iter_mut()
+            .into_iter()
             .map(|arg| match arg {
                 Arg::Positional(value) => Ok(RawArgument {
                     name: None,
-                    value: WasmValue::Cbor(value.as_cbor().to_vec()),
+                    value: WasmValue::Cbor(value.into_cbor().into()),
                 }),
                 Arg::Named(name, value) => Ok(RawArgument {
-                    name: Some(name.clone()),
-                    value: WasmValue::Cbor(value.as_cbor().to_vec()),
+                    name: Some(name),
+                    value: WasmValue::Cbor(value.into_cbor().into()),
                 }),
                 Arg::PositionalStream(stream_arg) => {
-                    let stream = std::mem::replace(stream_arg, Box::pin(stream::empty()));
                     let iter = store
                         .data_mut()
                         .table()
-                        .push(ValueIterator::new(stream))
+                        .push(ValueIterator::new(stream_arg))
                         .map_err(|e| Error::Other(e.into()))?;
                     Ok(RawArgument {
                         name: None,
@@ -512,14 +536,13 @@ impl<H: Host> Sandbox<H> {
                     })
                 }
                 Arg::NamedStream(name, stream_arg) => {
-                    let stream = std::mem::replace(stream_arg, Box::pin(stream::empty()));
                     let iter = store
                         .data_mut()
                         .table()
-                        .push(ValueIterator::new(stream))
+                        .push(ValueIterator::new(stream_arg))
                         .map_err(|e| Error::Other(e.into()))?;
                     Ok(RawArgument {
-                        name: Some(name.clone()),
+                        name: Some(name),
                         value: WasmValue::CborIterator(iter),
                     })
                 }

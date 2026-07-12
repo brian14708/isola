@@ -90,7 +90,7 @@ impl<T: HostView + 'static> HostValueIteratorWithStore<T> for LinkerHost<T> {
                 Box::pin(futures::stream::empty()),
             ))
         })?;
-        let value = stream.next().await.map(|v| v.into_cbor().to_vec());
+        let value = stream.next().await.map(|v| v.into_cbor().into());
         accessor.with(|mut access| -> wasmtime::Result<()> {
             access.get().0.table().get_mut(&resource)?.stream = stream;
             Ok(())
@@ -115,7 +115,7 @@ impl<T: HostView + 'static> HostWithStore<T> for LinkerHost<T> {
                 let payload = Value::from_cbor(payload);
                 host.hostcall(&call_type, payload)
                     .await
-                    .map(|v| v.into_cbor().to_vec())
+                    .map(|v| v.into_cbor().into())
                     .map_err(|e| e.to_string())
             }
             .in_current_span(),
@@ -183,10 +183,10 @@ async fn http_hostcall<H: crate::host::Host>(
             .iter()
             .map(|(name, value)| (name.as_str().to_string(), value.as_bytes().to_vec()))
             .collect(),
-        body: body.freeze().to_vec(),
+        body: body.freeze().into(),
     };
     Value::from_serde(&response)
-        .map(|v| v.into_cbor().to_vec())
+        .map(|v| v.into_cbor().into())
         .map_err(|e| e.to_string())
 }
 
