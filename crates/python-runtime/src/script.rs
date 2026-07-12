@@ -122,6 +122,11 @@ impl Scope {
             || PyBytes::is_exact_type_of(pyobject)
             || PyByteArray::is_exact_type_of(pyobject)
             || PyMemoryView::is_exact_type_of(pyobject)
+            || (pyobject
+                .get_type()
+                .module()
+                .is_ok_and(|module| module.to_str().is_ok_and(|module| module == "numpy"))
+                && pyobject.hasattr("dtype").unwrap_or_default())
     }
 
     pub fn run<'a, U>(
@@ -225,6 +230,16 @@ impl Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn numpy_arrays_are_serializable_results() {
+        Python::initialize();
+        Python::attach(|py| {
+            let Ok(np) = py.import("numpy") else { return };
+            let array = np.call_method1("array", (vec![1.5, -2.25], "<f4")).unwrap();
+            assert!(Script::is_serializable(&array));
+        });
+    }
 
     #[test]
     fn test_python_to_cbor_emit() {

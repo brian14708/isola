@@ -1,7 +1,10 @@
 use isola::value::Value;
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
-    types::{PyAnyMethods, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyTuple},
+    types::{
+        PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyStringMethods,
+        PyTuple, PyTypeMethods,
+    },
 };
 use serde::{
     Serialize,
@@ -567,6 +570,9 @@ pub fn py_to_serde<T: serde::de::DeserializeOwned>(obj: &Bound<'_, PyAny>) -> Re
 
 /// Convert a Python object to an isola `Value` (stored as CBOR internally).
 pub fn py_to_value(obj: &Bound<'_, PyAny>) -> Result<Value> {
+    if let Some(encoded) = numpy_to_cbor(obj).map_err(|e| Error::InvalidArgument(e.to_string()))? {
+        return Ok(Value::from_cbor(encoded));
+    }
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
     PyValue::new(obj.clone())
         .serialize(serializer.serialize_unit_as_null(true))
@@ -574,8 +580,95 @@ pub fn py_to_value(obj: &Bound<'_, PyAny>) -> Result<Value> {
     Ok(Value::from_cbor(serializer.into_encoder().into_writer()))
 }
 
+fn numpy_to_cbor(obj: &Bound<'_, PyAny>) -> PyResult<Option<Vec<u8>>> {
+    if obj.get_type().module()?.to_str()? != "numpy" || !obj.hasattr("dtype")? {
+        return Ok(None);
+    }
+    if obj.getattr("ndim")?.extract::<usize>()? != 1 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "only flat NumPy arrays are supported",
+        ));
+    }
+    let dtype = obj.getattr("dtype")?.getattr("str")?.extract::<String>()?;
+    let tag = match dtype.as_str() {
+        "|u1" => 64,
+        "|i1" => 73,
+        "<u2" => 69,
+        ">u2" => 65,
+        "<i2" => 77,
+        ">i2" => 74,
+        "<u4" => 70,
+        ">u4" => 66,
+        "<i4" => 78,
+        ">i4" => 75,
+        "<u8" => 71,
+        ">u8" => 67,
+        "<i8" => 79,
+        ">i8" => 76,
+        "<f4" => 84,
+        ">f4" => 81,
+        "<f8" => 85,
+        ">f8" => 82,
+        _ => {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "unsupported NumPy dtype {dtype}"
+            )));
+        }
+    };
+    let raw = obj.call_method0("tobytes")?.extract::<Vec<u8>>()?;
+    let mut out = Vec::with_capacity(raw.len() + 12);
+    minicbor::Encoder::new(&mut out)
+        .tag(minicbor::data::Tag::new(tag))
+        .and_then(|e| e.bytes(&raw))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Some(out))
+}
+
 /// Convert an isola `Value` (CBOR) to a Python object.
 pub fn value_to_py(py: Python<'_>, value: &Value) -> PyResult<pyo3::Py<PyAny>> {
+    let mut decoder = minicbor::Decoder::new(value.as_cbor());
+    if decoder
+        .datatype()
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        == minicbor::data::Type::Tag
+    {
+        let tag = decoder
+            .tag()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+            .as_u64();
+        let dtype = match tag {
+            64 | 72 => "u1",
+            73 => "i1",
+            65 => ">u2",
+            69 => "<u2",
+            74 => ">i2",
+            77 => "<i2",
+            66 => ">u4",
+            70 => "<u4",
+            75 => ">i4",
+            78 => "<i4",
+            67 => ">u8",
+            71 => "<u8",
+            76 => ">i8",
+            79 => "<i8",
+            81 => ">f4",
+            84 => "<f4",
+            82 => ">f8",
+            85 => "<f8",
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported CBOR typed array tag {tag}"
+                )));
+            }
+        };
+        let bytes = decoder
+            .bytes()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        return py
+            .import("numpy")?
+            .call_method1("frombuffer", (PyBytes::new(py, bytes), dtype))
+            .map(Bound::unbind);
+    }
     let mut deserializer = minicbor_serde::Deserializer::new(value.as_cbor());
     PyValue::deserialize(py, &mut deserializer)
         .map(Bound::unbind)

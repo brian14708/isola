@@ -8,6 +8,13 @@ use serde::{
     ser::{SerializeMap, SerializeSeq},
 };
 
+struct Bytes<'a>(&'a [u8]);
+impl Serialize for Bytes<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_bytes(self.0)
+    }
+}
+
 const MAX_DEPTH: usize = 128;
 
 struct JsValue<'js>(Value<'js>);
@@ -254,6 +261,10 @@ impl<'de, 'js> DeserializeSeed<'de> for JsDeserializer<'js> {
 }
 
 impl Serialize for JsValue<'_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the recursive serializer keeps JavaScript type dispatch in one place"
+    )]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -305,12 +316,30 @@ impl Serialize for JsValue<'_> {
                         {
                             return serializer.serialize_bytes(bytes);
                         }
-                        // Check if it's a TypedArray (Uint8Array, etc.)
-                        if let Some(ta) = obj.as_typed_array::<u8>()
-                            && let Some(bytes) = ta.as_bytes()
-                        {
-                            return serializer.serialize_bytes(bytes);
+                        macro_rules! typed {
+                            ($ty:ty, $tag:expr) => {
+                                if let Ok(array) =
+                                    rquickjs::TypedArray::<$ty>::from_value(v.clone())
+                                    && let Some(bytes) = array.as_bytes()
+                                {
+                                    return minicbor_serde::tag::Any::tagged(
+                                        minicbor::data::Tag::new($tag),
+                                        Bytes(bytes),
+                                    )
+                                    .serialize(serializer);
+                                }
+                            };
                         }
+                        typed!(u8, 64);
+                        typed!(i8, 73);
+                        typed!(u16, 69);
+                        typed!(i16, 77);
+                        typed!(u32, 70);
+                        typed!(i32, 78);
+                        typed!(u64, 71);
+                        typed!(i64, 79);
+                        typed!(f32, 84);
+                        typed!(f64, 85);
                     }
                     // Fall through to object serialization below
                     let obj = v
@@ -766,6 +795,64 @@ where
 }
 
 pub fn cbor_to_js<'js>(ctx: &Ctx<'js>, cbor: &[u8]) -> Result<Value<'js>, String> {
+    let mut decoder = minicbor::Decoder::new(cbor);
+    if decoder.datatype().map_err(|e| e.to_string())? == minicbor::data::Type::Tag {
+        let tag = decoder.tag().map_err(|e| e.to_string())?.as_u64();
+        let bytes = decoder.bytes().map_err(|e| e.to_string())?;
+        macro_rules! array {
+            ($ty:ty, $width:expr, $little:expr) => {{
+                if bytes.len() % $width != 0 {
+                    return Err("typed array byte length is invalid".into());
+                }
+                let values = bytes
+                    .chunks_exact($width)
+                    .map(|b| {
+                        let a: [u8; $width] = b.try_into().expect("chunk width");
+                        if $little {
+                            <$ty>::from_le_bytes(a)
+                        } else {
+                            <$ty>::from_be_bytes(a)
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                return rquickjs::TypedArray::<$ty>::new(ctx.clone(), values)
+                    .map(rquickjs::TypedArray::into_value)
+                    .map_err(|e| e.to_string());
+            }};
+        }
+        match tag {
+            64 | 72 => {
+                return rquickjs::TypedArray::<u8>::new(ctx.clone(), bytes.to_vec())
+                    .map(rquickjs::TypedArray::into_value)
+                    .map_err(|e| e.to_string());
+            }
+            73 => {
+                return rquickjs::TypedArray::<i8>::new(
+                    ctx.clone(),
+                    bytes.iter().map(|v| v.cast_signed()).collect::<Vec<_>>(),
+                )
+                .map(rquickjs::TypedArray::into_value)
+                .map_err(|e| e.to_string());
+            }
+            65 => array!(u16, 2, false),
+            69 => array!(u16, 2, true),
+            74 => array!(i16, 2, false),
+            77 => array!(i16, 2, true),
+            66 => array!(u32, 4, false),
+            70 => array!(u32, 4, true),
+            75 => array!(i32, 4, false),
+            78 => array!(i32, 4, true),
+            67 => array!(u64, 8, false),
+            71 => array!(u64, 8, true),
+            76 => array!(i64, 8, false),
+            79 => array!(i64, 8, true),
+            81 => array!(f32, 4, false),
+            84 => array!(f32, 4, true),
+            82 => array!(f64, 8, false),
+            85 => array!(f64, 8, true),
+            _ => return Err(format!("unsupported CBOR typed array tag {tag}")),
+        }
+    }
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
     JsValue::deserialize_into(ctx, &mut deserializer).map_err(|e| e.to_string())
 }
@@ -794,4 +881,26 @@ pub fn js_to_yaml(val: Value<'_>) -> Result<String, String> {
 pub fn yaml_to_js<'js>(ctx: &Ctx<'js>, yaml: &str) -> Result<Value<'js>, String> {
     let deserializer = serde_yaml::Deserializer::from_str(yaml);
     JsValue::deserialize_into(ctx, deserializer).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod typed_array_tests {
+    use super::*;
+
+    #[test]
+    fn float32_uses_rfc_8746_little_endian_tag() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            let value: Value<'_> = ctx.eval("new Float32Array([1.5, -2.25])").unwrap();
+            let encoded = js_to_cbor(value).unwrap();
+            let mut decoder = minicbor::Decoder::new(&encoded);
+            assert_eq!(decoder.tag().unwrap().as_u64(), 84);
+            assert_eq!(decoder.bytes().unwrap(), &[0, 0, 192, 63, 0, 0, 16, 192]);
+
+            let roundtrip = cbor_to_js(&ctx, &encoded).unwrap();
+            let array = rquickjs::TypedArray::<f32>::from_value(roundtrip).unwrap();
+            assert_eq!(array.as_bytes().unwrap(), &[0, 0, 192, 63, 0, 0, 16, 192]);
+        });
+    }
 }

@@ -1700,6 +1700,7 @@ dependencies = [
  "http",
  "http-body",
  "isola",
+ "minicbor",
  "minicbor-serde",
  "parking_lot",
  "pyo3",

@@ -310,6 +310,30 @@ async fn integration_python_argument_cbor_path() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_numpy_typed_array_cbor_path() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    sandbox
+        .eval_script(
+            "def main():\n\timport numpy as np\n\treturn np.array([1.5, -2.25], dtype='<f4')",
+            NoopOutputSink::shared(),
+        )
+        .await?;
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5)).await?;
+    let value = output.result.context("expected typed-array result")?;
+    let mut decoder = minicbor::Decoder::new(value.as_cbor());
+    assert_eq!(decoder.tag()?.as_u64(), 84);
+    assert_eq!(decoder.bytes()?, &[0, 0, 192, 63, 0, 0, 16, 192]);
+    assert_eq!(value.to_json_str()?, r#""AADAPwAAEMA=""#);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_reinstantiate_smoke() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -470,7 +494,7 @@ async fn integration_python_asyncio_sleep_respects_delay() -> Result<()> {
         .await
         .context("failed to instantiate sandbox")?;
 
-    let script = r#"
+    let script = r"
 import asyncio
 import sandbox.asyncio
 
@@ -481,7 +505,7 @@ async def main():
     loop.call_later(0.05, fut.set_result, None)
     await fut
     return loop.time() - start
-"#;
+";
     sandbox
         .eval_script(script, NoopOutputSink::shared())
         .await

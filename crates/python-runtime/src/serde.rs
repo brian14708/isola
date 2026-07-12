@@ -2,7 +2,10 @@ use std::io::{self, Write};
 
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
-    types::{PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyTuple},
+    types::{
+        PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyStringMethods,
+        PyTuple, PyTypeMethods,
+    },
 };
 use serde::{
     Deserializer, Serialize,
@@ -541,11 +544,58 @@ impl<'de> Deserializer<'de> for PyValue<'_> {
 }
 
 pub fn python_to_cbor(py_obj: Bound<'_, PyAny>) -> PyResult<Vec<u8>> {
+    if let Some(encoded) = numpy_to_cbor(&py_obj)? {
+        return Ok(encoded);
+    }
     let mut serializer = minicbor_serde::Serializer::new(vec![]);
     PyValue::new(py_obj)
         .serialize(serializer.serialize_unit_as_null(true))
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
     Ok(serializer.into_encoder().into_writer())
+}
+
+fn numpy_to_cbor(obj: &Bound<'_, PyAny>) -> PyResult<Option<Vec<u8>>> {
+    if obj.get_type().module()?.to_str()? != "numpy" || !obj.hasattr("dtype")? {
+        return Ok(None);
+    }
+    if obj.getattr("ndim")?.extract::<usize>()? != 1 {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "only flat NumPy arrays are supported",
+        ));
+    }
+    let dtype = obj.getattr("dtype")?.getattr("str")?.extract::<String>()?;
+    let tag = match dtype.as_str() {
+        "|u1" => 64,
+        "|i1" => 73,
+        "<u2" => 69,
+        ">u2" => 65,
+        "<i2" => 77,
+        ">i2" => 74,
+        "<u4" => 70,
+        ">u4" => 66,
+        "<i4" => 78,
+        ">i4" => 75,
+        "<u8" => 71,
+        ">u8" => 67,
+        "<i8" => 79,
+        ">i8" => 76,
+        "<f4" => 84,
+        ">f4" => 81,
+        "<f8" => 85,
+        ">f8" => 82,
+        _ => {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "unsupported NumPy dtype {dtype}"
+            )));
+        }
+    };
+    let raw = obj.call_method0("tobytes")?.extract::<Vec<u8>>()?;
+    let mut out = Vec::with_capacity(raw.len() + 12);
+    minicbor::Encoder::new(&mut out)
+        .tag(minicbor::data::Tag::new(tag))
+        .and_then(|e| e.bytes(&raw))
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    Ok(Some(out))
 }
 
 pub fn python_to_cbor_emit<F>(
@@ -556,6 +606,10 @@ pub fn python_to_cbor_emit<F>(
 where
     F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
+    if let Some(encoded) = numpy_to_cbor(&py_obj)? {
+        emit_fn(emit_type, &encoded);
+        return Ok(());
+    }
     let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
     let mut serializer = minicbor_serde::Serializer::new(&mut writer);
     PyValue::new(py_obj)
@@ -642,6 +696,47 @@ where
 }
 
 pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+    let mut decoder = minicbor::Decoder::new(cbor);
+    if decoder
+        .datatype()
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+        == minicbor::data::Type::Tag
+    {
+        let tag = decoder
+            .tag()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?
+            .as_u64();
+        let dtype = match tag {
+            64 | 72 => "u1",
+            73 => "i1",
+            65 => ">u2",
+            69 => "<u2",
+            74 => ">i2",
+            77 => "<i2",
+            66 => ">u4",
+            70 => "<u4",
+            75 => ">i4",
+            78 => "<i4",
+            67 => ">u8",
+            71 => "<u8",
+            76 => ">i8",
+            79 => "<i8",
+            81 => ">f4",
+            84 => "<f4",
+            82 => ">f8",
+            85 => "<f8",
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                    "unsupported CBOR typed array tag {tag}"
+                )));
+            }
+        };
+        let bytes = decoder
+            .bytes()
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        let numpy = py.import("numpy")?;
+        return numpy.call_method1("frombuffer", (PyBytes::new(py, bytes), dtype));
+    }
     let mut deserializer = minicbor_serde::Deserializer::new(cbor);
     PyValue::deserialize(py, &mut deserializer)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
@@ -703,6 +798,39 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn test_numpy_typed_array_roundtrip() {
+        Python::initialize();
+        Python::attach(|py| {
+            let Ok(np) = py.import("numpy") else { return };
+            let array = np.call_method1("array", (vec![1.5, -2.25], "<f4")).unwrap();
+            let encoded = python_to_cbor(array).unwrap();
+            let mut decoder = minicbor::Decoder::new(&encoded);
+            assert_eq!(decoder.tag().unwrap().as_u64(), 84);
+            assert_eq!(decoder.bytes().unwrap(), &[0, 0, 192, 63, 0, 0, 16, 192]);
+            let roundtrip = cbor_to_python(py, &encoded).unwrap();
+            assert_eq!(
+                roundtrip
+                    .getattr("dtype")
+                    .unwrap()
+                    .getattr("str")
+                    .unwrap()
+                    .extract::<String>()
+                    .unwrap(),
+                "<f4"
+            );
+            assert!(
+                roundtrip
+                    .call_method1("__eq__", (vec![1.5, -2.25],))
+                    .unwrap()
+                    .call_method0("all")
+                    .unwrap()
+                    .is_truthy()
+                    .unwrap()
+            );
+        });
+    }
 
     #[test]
     fn test_pyobject_serializer() {

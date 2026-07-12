@@ -250,6 +250,29 @@ async fn integration_js_argument_cbor_path() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_typed_array_cbor_path() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    sandbox
+        .eval_script(
+            "function main() { return new Float32Array([1.5, -2.25]); }",
+            NoopOutputSink::shared(),
+        )
+        .await?;
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5)).await?;
+    let value = output.result.context("expected typed-array result")?;
+    let mut decoder = minicbor::Decoder::new(value.as_cbor());
+    assert_eq!(decoder.tag()?.as_u64(), 84);
+    assert_eq!(decoder.bytes()?, &[0, 0, 192, 63, 0, 0, 16, 192]);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_return_object() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -508,13 +531,13 @@ async fn integration_js_sleep_respects_delay() -> Result<()> {
         .await
         .context("failed to instantiate sandbox")?;
 
-    let script = r#"
+    let script = r"
 async function main() {
     const start = _isola_sys.monotonic();
     await _isola_sys.sleep(0.05);
     return _isola_sys.monotonic() - start;
 }
-"#;
+";
     sandbox
         .eval_script(script, NoopOutputSink::shared())
         .await
