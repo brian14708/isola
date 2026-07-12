@@ -733,50 +733,67 @@ pub unsafe extern "C" fn isola_sandbox_run(
     args_len: usize,
     timeout_in_ms: u64,
 ) -> ErrorCode {
-    let args = if args_len == 0 {
-        vec![]
-    } else {
-        {
-            let mut parsed_args = Vec::new();
-            for arg in unsafe { std::slice::from_raw_parts(args, args_len) } {
-                let name = if arg.name.is_null() {
-                    None
-                } else {
-                    let name = unsafe { CStr::from_ptr(arg.name) };
-                    match name.to_str() {
-                        Ok(s) => Some(s.to_string()),
-                        Err(_) => return ErrorCode::InvalidArgument,
-                    }
-                };
-
-                let parsed_arg = match arg.r#type {
-                    ArgumentType::Json => {
-                        let json_data = unsafe { arg.value.data };
-                        let value =
-                            unsafe { std::slice::from_raw_parts(json_data.data, json_data.len) };
-                        RawArgument::Json(name, value.to_vec())
-                    }
-                    ArgumentType::JsonStream => {
-                        let stream_ptr = unsafe { arg.value.stream };
-                        let stream_handle = unsafe { &*stream_ptr };
-                        let Ok(receiver) = stream_handle.take_receiver() else {
-                            return ErrorCode::InvalidArgument;
-                        };
-                        RawArgument::JsonStream(name, receiver)
-                    }
-                };
-                parsed_args.push(parsed_arg);
-            }
-            parsed_args
-        }
-    };
-
     let func = unsafe { CStr::from_ptr(func) };
     let Ok(func) = func.to_str() else {
         return ErrorCode::InvalidArgument;
     };
 
-    c_try!(sandbox.run(func, args, timeout_in_ms));
+    let mut validated_args = Vec::with_capacity(args_len);
+    let mut stream_ptrs = std::collections::HashSet::new();
+    if args_len != 0 {
+        for arg in unsafe { std::slice::from_raw_parts(args, args_len) } {
+            let name = if arg.name.is_null() {
+                None
+            } else {
+                let name = unsafe { CStr::from_ptr(arg.name) };
+                match name.to_str() {
+                    Ok(s) => Some(s.to_string()),
+                    Err(_) => return ErrorCode::InvalidArgument,
+                }
+            };
+
+            let validated_arg = match arg.r#type {
+                ArgumentType::Json => {
+                    let json_data = unsafe { arg.value.data };
+                    let value =
+                        unsafe { std::slice::from_raw_parts(json_data.data, json_data.len) };
+                    ValidatedArgument::Json(name, value.to_vec())
+                }
+                ArgumentType::JsonStream => {
+                    let stream_ptr = unsafe { arg.value.stream };
+                    if !stream_ptrs.insert(stream_ptr) {
+                        return ErrorCode::InvalidArgument;
+                    }
+                    ValidatedArgument::JsonStream(name, stream_ptr)
+                }
+            };
+            validated_args.push(validated_arg);
+        }
+    }
+
+    let Ok(mut receivers) = take_stream_receivers(stream_ptrs) else {
+        return ErrorCode::InvalidArgument;
+    };
+
+    let mut parsed_args = Vec::with_capacity(validated_args.len());
+    for arg in validated_args {
+        let parsed = match arg {
+            ValidatedArgument::Json(name, value) => RawArgument::Json(name, value),
+            ValidatedArgument::JsonStream(name, stream_ptr) => {
+                let Some(index) = receivers.iter().position(|(ptr, _)| *ptr == stream_ptr) else {
+                    crate::error::set_last_error(Error::Internal(
+                        "validated stream receiver was not acquired".to_string(),
+                    ));
+                    return ErrorCode::Internal;
+                };
+                let (_, receiver) = receivers.swap_remove(index);
+                RawArgument::JsonStream(name, receiver)
+            }
+        };
+        parsed_args.push(parsed);
+    }
+
+    c_try!(sandbox.run(func, parsed_args, timeout_in_ms));
     ErrorCode::Ok
 }
 
@@ -828,11 +845,40 @@ impl StreamHandle {
             .take()
             .ok_or(Error::InvalidArgument("Stream receiver already taken"))
     }
+
+    fn restore_receiver(&self, receiver: tokio::sync::mpsc::Receiver<Value>) {
+        let mut slot = self.receiver.lock().unwrap();
+        debug_assert!(slot.is_none());
+        *slot = Some(receiver);
+    }
 }
 
 enum RawArgument {
     Json(Option<String>, Vec<u8>),
     JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
+}
+
+enum ValidatedArgument {
+    Json(Option<String>, Vec<u8>),
+    JsonStream(Option<String>, *const StreamHandle),
+}
+
+fn take_stream_receivers(
+    stream_ptrs: std::collections::HashSet<*const StreamHandle>,
+) -> Result<Vec<(*const StreamHandle, tokio::sync::mpsc::Receiver<Value>)>> {
+    let mut receivers: Vec<(*const StreamHandle, tokio::sync::mpsc::Receiver<Value>)> =
+        Vec::with_capacity(stream_ptrs.len());
+    for stream_ptr in stream_ptrs {
+        let stream = unsafe { &*stream_ptr };
+        let Ok(receiver) = stream.take_receiver() else {
+            for (acquired_ptr, receiver) in receivers {
+                unsafe { &*acquired_ptr }.restore_receiver(receiver);
+            }
+            return Err(Error::InvalidArgument("Stream receiver already taken"));
+        };
+        receivers.push((stream_ptr, receiver));
+    }
+    Ok(receivers)
 }
 
 /// Creates a new stream handle for streaming arguments.
@@ -1088,4 +1134,32 @@ pub unsafe extern "C" fn isola_hostcall_response_reject(
         return ErrorCode::Internal;
     }
     ErrorCode::Ok
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_stream_acquisition_restores_other_receivers() {
+        let (first_sender, first_receiver) = tokio::sync::mpsc::channel(1);
+        let first = StreamHandle {
+            sender: std::sync::Mutex::new(Some(first_sender)),
+            receiver: std::sync::Mutex::new(Some(first_receiver)),
+        };
+        let (second_sender, second_receiver) = tokio::sync::mpsc::channel(1);
+        let second = StreamHandle {
+            sender: std::sync::Mutex::new(Some(second_sender)),
+            receiver: std::sync::Mutex::new(Some(second_receiver)),
+        };
+        let held_receiver = second.take_receiver().expect("take second receiver");
+        let streams = std::collections::HashSet::from([
+            std::ptr::from_ref(&first),
+            std::ptr::from_ref(&second),
+        ]);
+
+        assert!(take_stream_receivers(streams).is_err());
+        assert!(first.take_receiver().is_ok());
+        drop(held_receiver);
+    }
 }
