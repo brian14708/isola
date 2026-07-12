@@ -126,9 +126,8 @@ struct http_test_context {
   std::string captured_url;
 };
 
-static isola_error_code mock_http_handler(const isola_http_request *request,
-                                          isola_http_response_body *body,
-                                          void *user_data) {
+static void mock_http_handler(const isola_http_request *request,
+                              isola_http_response_body *body, void *user_data) {
   auto *tc = reinterpret_cast<http_test_context *>(user_data);
 
   // Capture the request details for later assertions.
@@ -158,8 +157,6 @@ static isola_error_code mock_http_handler(const isola_http_request *request,
 
     isola_http_response_body_close(body);
   }).detach();
-
-  return ISOLA_ERROR_CODE_OK;
 }
 
 static void mock_on_event(isola_callback_event event, const uint8_t *data,
@@ -218,11 +215,10 @@ struct hostcall_test_context {
   std::string captured_payload;
 };
 
-static isola_error_code mock_hostcall_handler(const char *type,
-                                              const uint8_t *payload,
-                                              size_t payload_len,
-                                              isola_hostcall_response *response,
-                                              void *user_data) {
+static void mock_hostcall_handler(const char *type, const uint8_t *payload,
+                                  size_t payload_len,
+                                  isola_hostcall_response *response,
+                                  void *user_data) {
   auto *tc = reinterpret_cast<hostcall_test_context *>(user_data);
 
   // Capture the request details for later assertions.
@@ -236,8 +232,6 @@ static isola_error_code mock_hostcall_handler(const char *type,
         response, reinterpret_cast<const uint8_t *>(result_payload.data()),
         result_payload.size());
   }).detach();
-
-  return ISOLA_ERROR_CODE_OK;
 }
 
 static void hostcall_on_event(isola_callback_event event, const uint8_t *data,

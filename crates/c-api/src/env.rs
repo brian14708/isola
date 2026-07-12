@@ -12,8 +12,6 @@ use isola::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::error::ErrorCode;
-
 /// C-compatible HTTP header.
 #[repr(C)]
 pub struct HttpHeader {
@@ -57,7 +55,7 @@ impl HttpResponseBody {
     pub fn start(&self, head: HttpResponseHead) -> Result<(), ()> {
         self.head
             .lock()
-            .unwrap()
+            .map_err(|_| ())?
             .take()
             .ok_or(())?
             .send(head)
@@ -89,7 +87,7 @@ impl HostcallResponse {
     pub fn resolve(self, value: Value) -> Result<(), ()> {
         self.sender
             .into_inner()
-            .unwrap()
+            .map_err(|_| ())?
             .ok_or(())?
             .send(Ok(value))
             .map_err(|_| ())
@@ -99,7 +97,7 @@ impl HostcallResponse {
     pub fn reject(self, error: String) -> Result<(), ()> {
         self.sender
             .into_inner()
-            .unwrap()
+            .map_err(|_| ())?
             .ok_or(())?
             .send(Err(Box::new(std::io::Error::other(error))))
             .map_err(|_| ())
@@ -153,20 +151,13 @@ impl Host for Env {
                 sender: Mutex::new(Some(tx)),
             }));
 
-            let code = hostcall_fn(
+            hostcall_fn(
                 call_type_c.as_ptr(),
                 payload_json.as_ptr(),
                 payload_json.len(),
                 response,
                 handler.user_data,
             );
-
-            if code != ErrorCode::Ok {
-                drop(unsafe { Box::from_raw(response) });
-                return Err(Box::new(std::io::Error::other(
-                    "hostcall handler callback failed",
-                )));
-            }
         }
 
         // Await response from C side
@@ -248,14 +239,7 @@ impl Host for Env {
                 body: body_tx,
             }));
 
-            let code = http_request_fn(&raw const c_request, response_body, handler.user_data);
-
-            if code != ErrorCode::Ok {
-                drop(unsafe { Box::from_raw(response_body) });
-                return Err(Box::new(std::io::Error::other(
-                    "HTTP handler callback failed",
-                )));
-            }
+            http_request_fn(&raw const c_request, response_body, handler.user_data);
         }
 
         // Await status + headers from C side (non-blocking on the async runtime).

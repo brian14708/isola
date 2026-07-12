@@ -90,6 +90,10 @@ typedef struct isola_http_request {
  *
  * - `on_event` is required.
  * - `http_request` is optional (NULL to disable HTTP).
+ *
+ * Callbacks may run on runtime worker threads. The callback functions and
+ * `user_data` must remain valid until the sandbox is destroyed and must be
+ * safe to access concurrently.
  */
 typedef struct isola_sandbox_handler_vtable {
   /**
@@ -109,9 +113,9 @@ typedef struct isola_sandbox_handler_vtable {
    * 3. `isola_http_response_body_close(response_body)` — to signal EOF and
    *    free the handle.
    */
-  enum isola_error_code (*http_request)(const struct isola_http_request *request,
-                                        struct isola_http_response_body *response_body,
-                                        void *user_data);
+  void (*http_request)(const struct isola_http_request *request,
+                       struct isola_http_response_body *response_body,
+                       void *user_data);
   /**
    * Called to handle a hostcall from guest code.
    *
@@ -121,13 +125,14 @@ typedef struct isola_sandbox_handler_vtable {
    * - `isola_hostcall_response_resolve(response, data, len)` — on success
    * - `isola_hostcall_response_reject(response, error_message)` — on failure
    *
-   * Exactly one of resolve/reject must be called. The call frees the handle.
+   * Exactly one of resolve/reject/cancel must be called. The call frees the
+   * handle.
    */
-  enum isola_error_code (*hostcall)(const char *call_type,
-                                    const uint8_t *payload,
-                                    size_t payload_len,
-                                    struct isola_hostcall_response *response,
-                                    void *user_data);
+  void (*hostcall)(const char *call_type,
+                   const uint8_t *payload,
+                   size_t payload_len,
+                   struct isola_hostcall_response *response,
+                   void *user_data);
 } isola_sandbox_handler_vtable;
 
 typedef struct isola_blob {
@@ -409,6 +414,18 @@ enum isola_error_code isola_hostcall_response_resolve(struct isola_hostcall_resp
  */
 enum isola_error_code isola_hostcall_response_reject(struct isola_hostcall_response *response,
                                                      const char *error_message);
+
+/**
+ * Cancels a hostcall without a result, consuming the handle.
+ *
+ * Use this when external work is abandoned. The waiting guest call fails and
+ * the response allocation is released.
+ *
+ * # Safety
+ *
+ * `response` must be a live handle obtained from a `hostcall` callback.
+ */
+void isola_hostcall_response_cancel(struct isola_hostcall_response *response);
 
 const char *isola_last_error(void);
 

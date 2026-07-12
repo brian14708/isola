@@ -43,6 +43,10 @@ macro_rules! c_try {
 ///
 /// - `on_event` is required.
 /// - `http_request` is optional (NULL to disable HTTP).
+///
+/// Callbacks may run on runtime worker threads. The callback functions and
+/// `user_data` must remain valid until the sandbox is destroyed and must be
+/// safe to access concurrently.
 #[repr(C)]
 pub struct SandboxHandlerVtable {
     /// Called for output events (results, logs, stdout/stderr).
@@ -64,7 +68,7 @@ pub struct SandboxHandlerVtable {
             request: *const crate::env::HttpRequestInfo,
             response_body: *mut crate::env::HttpResponseBody,
             user_data: *mut c_void,
-        ) -> ErrorCode,
+        ),
     >,
 
     /// Called to handle a hostcall from guest code.
@@ -75,7 +79,8 @@ pub struct SandboxHandlerVtable {
     /// - `isola_hostcall_response_resolve(response, data, len)` — on success
     /// - `isola_hostcall_response_reject(response, error_message)` — on failure
     ///
-    /// Exactly one of resolve/reject must be called. The call frees the handle.
+    /// Exactly one of resolve/reject/cancel must be called. The call frees the
+    /// handle.
     pub hostcall: Option<
         extern "C" fn(
             call_type: *const c_char,
@@ -83,7 +88,7 @@ pub struct SandboxHandlerVtable {
             payload_len: usize,
             response: *mut crate::env::HostcallResponse,
             user_data: *mut c_void,
-        ) -> ErrorCode,
+        ),
     >,
 }
 
@@ -197,14 +202,14 @@ struct ContextConfig {
     mounts: Vec<MountConfig>,
 }
 
-pub struct ContextHandle {
+struct ContextCore {
     rt: Runtime,
     module: Option<SandboxTemplate>,
     config: ContextConfig,
 }
 
-impl ContextHandle {
-    fn new(nr_thread: i32) -> Result<Box<Self>> {
+impl ContextCore {
+    fn create_handle(nr_thread: i32) -> Result<Box<ContextHandle>> {
         let rt = match nr_thread {
             0 => Builder::new_current_thread()
                 .enable_all()
@@ -227,11 +232,11 @@ impl ContextHandle {
                 .build()
                 .map_err(|e| Error::Internal(format!("failed to build runtime: {e}")))?,
         };
-        Ok(Box::new(Self {
+        Ok(Box::new(ContextHandle(Arc::new(Self {
             rt,
             module: None,
             config: ContextConfig::default(),
-        }))
+        }))))
     }
 
     fn set_config(&mut self, key: &CStr, value: &CStr) -> Result<()> {
@@ -338,12 +343,12 @@ impl ContextHandle {
         })
     }
 
-    fn new_sandbox(&self) -> Result<SandboxHandle<'_>> {
+    fn new_sandbox(self: &Arc<Self>) -> Result<SandboxHandle> {
         if self.module.is_none() {
             return Err(Error::InvalidArgument("Runtime not loaded"));
         }
         Ok(SandboxHandle {
-            ctx: self,
+            ctx: self.clone(),
             handler_slot: Arc::new(OnceLock::new()),
             inner: SandboxInner::Pending {
                 options: SandboxOptions::default(),
@@ -351,6 +356,8 @@ impl ContextHandle {
         })
     }
 }
+
+pub struct ContextHandle(Arc<ContextCore>);
 
 /// Creates a new isola context with the specified number of threads.
 ///
@@ -363,7 +370,7 @@ pub unsafe extern "C" fn isola_context_create(
     nr_thread: c_int,
     out_context: *mut Box<ContextHandle>,
 ) -> ErrorCode {
-    let ctx = c_try!(ContextHandle::new(nr_thread));
+    let ctx = c_try!(ContextCore::create_handle(nr_thread));
     unsafe { out_context.write(ctx) };
     ErrorCode::Ok
 }
@@ -378,6 +385,9 @@ pub unsafe extern "C" fn isola_context_initialize(
     ctx: &mut ContextHandle,
     path: *const c_char,
 ) -> ErrorCode {
+    let Some(ctx) = Arc::get_mut(&mut ctx.0) else {
+        return ErrorCode::InvalidArgument;
+    };
     let path = unsafe { CStr::from_ptr(path) };
     let path = c_try!(
         path.to_str()
@@ -416,6 +426,9 @@ pub unsafe extern "C" fn isola_context_config_set(
     key: *const c_char,
     value: *const c_char,
 ) -> ErrorCode {
+    let Some(ctx) = Arc::get_mut(&mut ctx.0) else {
+        return ErrorCode::InvalidArgument;
+    };
     let key = unsafe { CStr::from_ptr(key) };
     let value = unsafe { CStr::from_ptr(value) };
     c_try!(ctx.set_config(key, value));
@@ -440,13 +453,13 @@ enum SandboxInner {
     },
 }
 
-pub struct SandboxHandle<'a> {
-    ctx: &'a ContextHandle,
+pub struct SandboxHandle {
+    ctx: Arc<ContextCore>,
     handler_slot: Arc<OnceLock<Arc<SandboxHandler>>>,
     inner: SandboxInner,
 }
 
-impl SandboxHandle<'_> {
+impl SandboxHandle {
     fn set_config(&mut self, key: &CStr, value: &CStr) -> Result<()> {
         let SandboxInner::Pending { options } = &mut self.inner else {
             return Err(Error::InvalidArgument("Cannot set config after start"));
@@ -509,8 +522,16 @@ impl SandboxHandle<'_> {
                 let sandbox = self
                     .ctx
                     .rt
-                    .block_on(async { module.instantiate(env, options).await })
-                    .map_err(|e| Error::Internal(format!("Failed to create instance: {e}")))?;
+                    .block_on(async { module.instantiate(env, options.clone()).await });
+                let sandbox = match sandbox {
+                    Ok(sandbox) => sandbox,
+                    Err(error) => {
+                        self.inner = SandboxInner::Pending { options };
+                        return Err(Error::Internal(format!(
+                            "Failed to create instance: {error}"
+                        )));
+                    }
+                };
 
                 self.inner = SandboxInner::Running { sandbox, handler };
                 Ok(())
@@ -620,17 +641,17 @@ impl SandboxHandle<'_> {
 /// The caller must ensure that `out_sandbox` is a valid pointer to an
 /// uninitialized `Box<SandboxHandle>`.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn isola_sandbox_create<'a>(
-    ctx: &'a ContextHandle,
-    out_sandbox: *mut Box<SandboxHandle<'a>>,
+pub unsafe extern "C" fn isola_sandbox_create(
+    ctx: &ContextHandle,
+    out_sandbox: *mut Box<SandboxHandle>,
 ) -> ErrorCode {
-    let sandbox = c_try!(ctx.new_sandbox());
+    let sandbox = c_try!(ctx.0.new_sandbox());
     unsafe { out_sandbox.write(Box::new(sandbox)) };
     ErrorCode::Ok
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle<'_>>) {}
+pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle>) {}
 
 /// Sets a per-sandbox configuration value, overriding context-level defaults.
 ///
@@ -656,7 +677,7 @@ pub extern "C" fn isola_sandbox_destroy(_sandbox: Box<SandboxHandle<'_>>) {}
 /// null-terminated C strings.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_set_config(
-    sandbox: &mut SandboxHandle<'_>,
+    sandbox: &mut SandboxHandle,
     key: *const c_char,
     value: *const c_char,
 ) -> ErrorCode {
@@ -686,7 +707,7 @@ pub enum CallbackEvent {
 /// `vtable` must point to a valid `SandboxHandlerVtable`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_set_handler(
-    sandbox: &mut SandboxHandle<'_>,
+    sandbox: &mut SandboxHandle,
     vtable: *const SandboxHandlerVtable,
     user_data: *mut c_void,
 ) -> ErrorCode {
@@ -697,7 +718,7 @@ pub unsafe extern "C" fn isola_sandbox_set_handler(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn isola_sandbox_start(sandbox: &mut SandboxHandle<'_>) -> ErrorCode {
+pub extern "C" fn isola_sandbox_start(sandbox: &mut SandboxHandle) -> ErrorCode {
     c_try!(sandbox.start());
     ErrorCode::Ok
 }
@@ -709,7 +730,7 @@ pub extern "C" fn isola_sandbox_start(sandbox: &mut SandboxHandle<'_>) -> ErrorC
 /// The caller must ensure that `input` is a valid, null-terminated C string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_load_script(
-    sandbox: &mut SandboxHandle<'_>,
+    sandbox: &mut SandboxHandle,
     input: *const c_char,
     timeout_in_ms: u64,
 ) -> ErrorCode {
@@ -734,7 +755,7 @@ pub unsafe extern "C" fn isola_sandbox_load_script(
 /// - Each `Argument` in the array has valid pointers and data
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn isola_sandbox_run(
-    sandbox: &mut SandboxHandle<'_>,
+    sandbox: &mut SandboxHandle,
     func: *const c_char,
     args: *const Argument,
     args_len: usize,
@@ -748,6 +769,9 @@ pub unsafe extern "C" fn isola_sandbox_run(
     let mut validated_args = Vec::with_capacity(args_len);
     let mut stream_ptrs = std::collections::HashSet::new();
     if args_len != 0 {
+        if args.is_null() {
+            return ErrorCode::InvalidArgument;
+        }
         for arg in unsafe { std::slice::from_raw_parts(args, args_len) } {
             let name = if arg.name.is_null() {
                 None
@@ -883,7 +907,9 @@ impl StreamHandle {
     }
 
     fn restore_receiver(&self, receiver: tokio::sync::mpsc::Receiver<Value>) {
-        let mut slot = self.receiver.lock().unwrap();
+        let Ok(mut slot) = self.receiver.lock() else {
+            return;
+        };
         debug_assert!(slot.is_none());
         *slot = Some(receiver);
     }
@@ -995,7 +1021,12 @@ pub unsafe extern "C" fn isola_stream_push(
 
 fn send_stream_value(stream: &StreamHandle, value: Value, blocking: c_int) -> ErrorCode {
     // Clone the sender so we don't hold the lock during blocking_send.
-    let sender = stream.sender.lock().unwrap().as_ref().cloned();
+    let sender = if let Ok(sender) = stream.sender.lock() {
+        sender.as_ref().cloned()
+    } else {
+        crate::error::set_last_error(Error::Internal("Stream mutex poisoned".to_string()));
+        return ErrorCode::Internal;
+    };
     let Some(sender) = sender else {
         let err = Error::StreamClosed;
         crate::error::set_last_error(err);
@@ -1063,17 +1094,34 @@ pub unsafe extern "C" fn isola_http_response_body_start(
     headers: *const crate::env::HttpHeader,
     headers_len: usize,
 ) -> ErrorCode {
-    let owned_headers = if headers_len == 0 || headers.is_null() {
+    let owned_headers = if headers_len == 0 {
         Vec::new()
     } else {
-        unsafe { std::slice::from_raw_parts(headers, headers_len) }
+        if headers.is_null() {
+            return ErrorCode::InvalidArgument;
+        }
+        let Some(headers) = (unsafe { std::slice::from_raw_parts(headers, headers_len) })
             .iter()
-            .map(|h| {
-                let name = unsafe { std::slice::from_raw_parts(h.name, h.name_len) }.to_vec();
-                let value = unsafe { std::slice::from_raw_parts(h.value, h.value_len) }.to_vec();
-                (name, value)
+            .map(|h| unsafe {
+                Some((
+                    blob_as_slice(Blob {
+                        data: h.name,
+                        len: h.name_len,
+                    })?
+                    .to_vec(),
+                    blob_as_slice(Blob {
+                        data: h.value,
+                        len: h.value_len,
+                    })?
+                    .to_vec(),
+                ))
             })
-            .collect()
+            .collect::<Option<Vec<_>>>()
+        else {
+            crate::error::set_last_error(Error::InvalidArgument("Invalid HTTP header buffer"));
+            return ErrorCode::InvalidArgument;
+        };
+        headers
     };
 
     let head = crate::env::HttpResponseHead {
@@ -1103,7 +1151,10 @@ pub unsafe extern "C" fn isola_http_response_body_push(
     data: *const u8,
     len: usize,
 ) -> ErrorCode {
-    let chunk = bytes::Bytes::copy_from_slice(unsafe { std::slice::from_raw_parts(data, len) });
+    let Some(data) = (unsafe { blob_as_slice(Blob { data, len }) }) else {
+        return ErrorCode::InvalidArgument;
+    };
+    let chunk = bytes::Bytes::copy_from_slice(data);
     if body.send(chunk).is_err() {
         let err = Error::StreamClosed;
         crate::error::set_last_error(err);
@@ -1150,7 +1201,9 @@ pub unsafe extern "C" fn isola_hostcall_response_resolve(
     len: usize,
 ) -> ErrorCode {
     // Validate before consuming so the handle survives parse errors.
-    let json = unsafe { std::slice::from_raw_parts(data, len) };
+    let Some(json) = (unsafe { blob_as_slice(Blob { data, len }) }) else {
+        return ErrorCode::InvalidArgument;
+    };
     let Ok(json_str) = std::str::from_utf8(json) else {
         crate::error::set_last_error(Error::InvalidArgument("Invalid UTF-8 in hostcall response"));
         return ErrorCode::InvalidArgument;
@@ -1184,12 +1237,12 @@ pub unsafe extern "C" fn isola_hostcall_response_reject(
     response: *mut crate::env::HostcallResponse,
     error_message: *const c_char,
 ) -> ErrorCode {
-    let response = unsafe { Box::from_raw(response) };
     let msg = unsafe { CStr::from_ptr(error_message) };
     let Ok(msg_str) = msg.to_str() else {
         crate::error::set_last_error(Error::InvalidArgument("Invalid UTF-8 in error message"));
         return ErrorCode::InvalidArgument;
     };
+    let response = unsafe { Box::from_raw(response) };
     if response.reject(msg_str.to_string()).is_err() {
         crate::error::set_last_error(Error::Internal(
             "hostcall response already completed or receiver dropped".to_string(),
@@ -1197,6 +1250,21 @@ pub unsafe extern "C" fn isola_hostcall_response_reject(
         return ErrorCode::Internal;
     }
     ErrorCode::Ok
+}
+
+/// Cancels a hostcall without a result, consuming the handle.
+///
+/// Use this when external work is abandoned. The waiting guest call fails and
+/// the response allocation is released.
+///
+/// # Safety
+///
+/// `response` must be a live handle obtained from a `hostcall` callback.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn isola_hostcall_response_cancel(
+    response: *mut crate::env::HostcallResponse,
+) {
+    drop(unsafe { Box::from_raw(response) });
 }
 
 #[cfg(test)]
@@ -1207,11 +1275,13 @@ mod tests {
     fn failed_stream_acquisition_restores_other_receivers() {
         let (first_sender, first_receiver) = tokio::sync::mpsc::channel(1);
         let first = StreamHandle {
+            format: ArgumentType::Json,
             sender: std::sync::Mutex::new(Some(first_sender)),
             receiver: std::sync::Mutex::new(Some(first_receiver)),
         };
         let (second_sender, second_receiver) = tokio::sync::mpsc::channel(1);
         let second = StreamHandle {
+            format: ArgumentType::Json,
             sender: std::sync::Mutex::new(Some(second_sender)),
             receiver: std::sync::Mutex::new(Some(second_receiver)),
         };
