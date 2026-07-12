@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import os
+import tarfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,6 +42,41 @@ def test_strip_first_path_component_flattens_bundle_root() -> None:
         == "bin/python.wasm"
     )
     assert strip_first_path_component("isola-python-runtime") is None
+
+
+@pytest.mark.asyncio
+async def test_runtime_extraction_rejects_escaping_symlink(tmp_path: Path) -> None:
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tf:
+        link = tarfile.TarInfo("isola-python-runtime/lib/escape")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "../../../outside"
+        tf.addfile(link)
+
+    with pytest.raises(RuntimeError, match="symlink target escapes archive"):
+        await runtime_module._extract_tarball(  # noqa: SLF001
+            archive.getvalue(), tmp_path / "runtime"
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_extraction_rejects_member_below_symlink(tmp_path: Path) -> None:
+    archive = io.BytesIO()
+    with tarfile.open(fileobj=archive, mode="w:gz") as tf:
+        link = tarfile.TarInfo("isola-python-runtime/lib/link")
+        link.type = tarfile.SYMTYPE
+        link.linkname = "target"
+        tf.addfile(link)
+
+        payload = b"payload"
+        member = tarfile.TarInfo("isola-python-runtime/lib/link/payload")
+        member.size = len(payload)
+        tf.addfile(member, io.BytesIO(payload))
+
+    with pytest.raises(RuntimeError, match="archive entry traverses symlink"):
+        await runtime_module._extract_tarball(  # noqa: SLF001
+            archive.getvalue(), tmp_path / "runtime"
+        )
 
 
 def _resolve_runtime_paths() -> tuple[Path, Path]:

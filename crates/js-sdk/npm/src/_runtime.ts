@@ -188,6 +188,7 @@ async function parseTar(data: Buffer, dest: string): Promise<void> {
   let offset = 0;
   let pendingPath: string | null = null;
   let pendingLinkName: string | null = null;
+  const symlinkPaths = new Set<string>();
 
   while (offset + BLOCK <= data.length) {
     const hdr = data.subarray(offset, offset + BLOCK);
@@ -232,6 +233,13 @@ async function parseTar(data: Buffer, dest: string): Promise<void> {
     const stripped = stripFirstComponent(fullName);
     if (!stripped) continue;
 
+    const archivePath = stripped.split(path.sep).join("/");
+    for (const symlinkPath of symlinkPaths) {
+      if (archivePath.startsWith(`${symlinkPath}/`)) {
+        throw new Error(`archive entry traverses symlink: ${fullName}`);
+      }
+    }
+
     const outPath = path.join(dest, stripped);
     if (!outPath.startsWith(dest + path.sep)) {
       throw new Error(`path traversal in archive: ${fullName}`);
@@ -240,16 +248,39 @@ async function parseTar(data: Buffer, dest: string): Promise<void> {
     if (typeFlag === "5" || (typeFlag === "\0" && name.endsWith("/"))) {
       await fsp.mkdir(outPath, { recursive: true });
     } else if (typeFlag === "2") {
+      validateSymlinkTarget(archivePath, linkName, fullName);
       await fsp.mkdir(path.dirname(outPath), { recursive: true });
       try {
         await fsp.unlink(outPath);
       } catch {}
       await fsp.symlink(linkName, outPath);
+      symlinkPaths.add(archivePath);
     } else if (typeFlag === "0" || typeFlag === "\0") {
       await fsp.mkdir(path.dirname(outPath), { recursive: true });
       await fsp.writeFile(outPath, fileData);
       if (modeStr) await fsp.chmod(outPath, parseInt(modeStr, 8) & 0o7777);
     }
+  }
+}
+
+function validateSymlinkTarget(
+  archivePath: string,
+  linkName: string,
+  fullName: string,
+): void {
+  const normalizedTarget = linkName.replace(/\\/g, "/");
+  if (
+    path.posix.isAbsolute(normalizedTarget) ||
+    /^[A-Za-z]:\//.test(normalizedTarget)
+  ) {
+    throw new Error(`symlink target escapes archive: ${fullName}`);
+  }
+
+  const resolved = path.posix.normalize(
+    path.posix.join(path.posix.dirname(archivePath), normalizedTarget),
+  );
+  if (resolved === ".." || resolved.startsWith("../")) {
+    throw new Error(`symlink target escapes archive: ${fullName}`);
   }
 }
 

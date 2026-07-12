@@ -132,10 +132,13 @@ async def _extract_tarball(data: bytes, dest: Path) -> None:
         tmp_dir = tempfile.mkdtemp(dir=dest.parent, prefix=f".{dest.name}-")
         try:
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tf:
+                symlink_paths: set[PurePosixPath] = set()
                 for member in tf.getmembers():
                     stripped_name = _strip_first_path_component(member.name)
                     if stripped_name is None:
                         continue
+
+                    _validate_tar_member(member, stripped_name, symlink_paths)
 
                     extracted_member = copy.copy(member)
                     extracted_member.name = stripped_name
@@ -151,6 +154,47 @@ async def _extract_tarball(data: bytes, dest: Path) -> None:
             raise
 
     await asyncio.to_thread(_do_extract)
+
+
+def _validate_symlink_target(
+    member_path: PurePosixPath, link_name: str, member_name: str
+) -> None:
+    normalized_link = link_name.replace("\\", "/")
+    link_path = PurePosixPath(normalized_link)
+    if link_path.is_absolute() or (
+        len(normalized_link) >= 3
+        and normalized_link[0].isalpha()
+        and normalized_link[1:3] == ":/"
+    ):
+        msg = f"symlink target escapes archive: {member_name!r}"
+        raise RuntimeError(msg)
+
+    depth = len(member_path.parent.parts)
+    for part in link_path.parts:
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            depth -= 1
+            if depth < 0:
+                msg = f"symlink target escapes archive: {member_name!r}"
+                raise RuntimeError(msg)
+        else:
+            depth += 1
+
+
+def _validate_tar_member(
+    member: tarfile.TarInfo, stripped_name: str, symlink_paths: set[PurePosixPath]
+) -> None:
+    member_path = PurePosixPath(stripped_name)
+    if any(parent in symlink_paths for parent in member_path.parents):
+        msg = f"archive entry traverses symlink: {member.name!r}"
+        raise RuntimeError(msg)
+    if member.islnk():
+        msg = f"archive hard links are not supported: {member.name!r}"
+        raise RuntimeError(msg)
+    if member.issym():
+        _validate_symlink_target(member_path, member.linkname, member.name)
+        symlink_paths.add(member_path)
 
 
 def _strip_first_path_component(path: str) -> str | None:

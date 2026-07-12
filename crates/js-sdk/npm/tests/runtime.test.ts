@@ -75,6 +75,46 @@ describe("resolveRuntime", () => {
       await fs.rm(cacheRoot, { recursive: true, force: true });
     }
   });
+
+  it("rejects symlinks that escape the extraction directory", async () => {
+    const cacheRoot = await fs.mkdtemp(path.join(os.tmpdir(), "isola-cache-"));
+    process.env.XDG_CACHE_HOME = cacheRoot;
+
+    const tarball = zlib.gzipSync(
+      Buffer.concat([
+        tarFile("isola-python-runtime/bin/python.wasm", Buffer.from("wasm")),
+        tarSymlink("isola-python-runtime/lib/escape", "../../../outside"),
+        Buffer.alloc(1024, 0),
+      ]),
+    );
+    const digest = `sha256:${crypto.createHash("sha256").update(tarball).digest("hex")}`;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url.includes("/repos/brian14708/isola/releases/tags/v9.9.8")) {
+          return new Response(
+            JSON.stringify({
+              assets: [{ name: "isola-python-runtime.tar.gz", digest }],
+            }),
+            { status: 200 },
+          );
+        }
+        if (url.includes("/releases/download/v9.9.8/")) {
+          return new Response(tarball, { status: 200 });
+        }
+        throw new Error(`unexpected fetch url: ${url}`);
+      }),
+    );
+
+    try {
+      await expect(resolveRuntime("python", "9.9.8")).rejects.toThrow(
+        "symlink target escapes archive",
+      );
+    } finally {
+      await fs.rm(cacheRoot, { recursive: true, force: true });
+    }
+  });
 });
 
 function tarLongFile(name: string, data: Buffer): Buffer {
@@ -88,15 +128,29 @@ function tarFile(name: string, data: Buffer): Buffer {
   return tarEntry(name, data, "0");
 }
 
-function tarEntry(name: string, data: Buffer, typeFlag: string): Buffer {
+function tarSymlink(name: string, target: string): Buffer {
+  return tarEntry(name, Buffer.alloc(0), "2", target);
+}
+
+function tarEntry(
+  name: string,
+  data: Buffer,
+  typeFlag: string,
+  linkName = "",
+): Buffer {
   const bodySize = typeFlag === "5" ? 0 : data.length;
-  const header = tarHeader(name, bodySize, typeFlag);
+  const header = tarHeader(name, bodySize, typeFlag, linkName);
   const body = typeFlag === "5" ? Buffer.alloc(0) : data;
   const padding = Buffer.alloc((512 - (body.length % 512)) % 512, 0);
   return Buffer.concat([header, body, padding]);
 }
 
-function tarHeader(name: string, size: number, typeFlag: string): Buffer {
+function tarHeader(
+  name: string,
+  size: number,
+  typeFlag: string,
+  linkName: string,
+): Buffer {
   const header = Buffer.alloc(512, 0);
 
   writeString(header, name, 0, 100);
@@ -107,6 +161,7 @@ function tarHeader(name: string, size: number, typeFlag: string): Buffer {
   writeOctal(header, 0, 136, 12);
   header.fill(0x20, 148, 156);
   header[156] = typeFlag.charCodeAt(0);
+  writeString(header, linkName, 157, 100);
   writeString(header, "ustar", 257, 6);
   writeString(header, "00", 263, 2);
 
