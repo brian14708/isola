@@ -116,7 +116,6 @@ use `await template.instantiate(**sandbox_config)` instead.
 - `hostcalls`: `dict[str, async callable]` used for guest `sandbox.asyncio.hostcall(...)`
 - `http`: `None` to disable guest HTTP, `True` to use the built-in `httpx`
   bridge, or an async callable for a custom outbound HTTP policy
-- `http_handler`: legacy alias for `http`
 
 ### `Sandbox`
 
@@ -179,6 +178,9 @@ Available constructors:
 
 - `StreamArg.from_iterable(values, *, name=None, capacity=1024)`
 - `StreamArg.from_async_iterable(values, *, name=None, capacity=1024)`
+
+`Arg` and the public name on `StreamArg` are immutable. Passing either through
+`**kwargs` creates a named wrapper without modifying the caller's object.
 
 ## Hostcalls
 
@@ -304,7 +306,7 @@ async with template.create(http=http) as sandbox:
 Request and response models:
 
 - `HttpRequest(method, url, headers, body)`
-- `HttpResponse(status, headers=None, body=None)`
+- `HttpResponse(status, headers={}, body=None)`
 
 `HttpResponse.body` may be:
 

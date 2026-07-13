@@ -4,6 +4,7 @@ import {
   buildTemplate,
   Sandbox,
   type SandboxTemplate,
+  StreamArg,
 } from "../src/index.js";
 import type { Event } from "../src/types.js";
 
@@ -150,15 +151,19 @@ describeIfRuntime("isola js-sdk", () => {
     sandbox.close();
   });
 
-  it("should emit error event on exception", async () => {
+  it("should emit an error event and reject on exception", async () => {
     const sandbox = await template.create();
     await sandbox.start();
     await sandbox.loadScript("def fail(): raise RuntimeError('oops')");
 
     const events: Event[] = [];
-    for await (const event of sandbox.runStream("fail")) {
-      events.push(event);
-    }
+    const consume = async (): Promise<void> => {
+      for await (const event of sandbox.runStream("fail")) {
+        events.push(event);
+      }
+    };
+
+    await expect(consume()).rejects.toThrow("oops");
 
     const errorEvents = events.filter((e) => e.type === "error");
     expect(errorEvents.length).toBeGreaterThan(0);
@@ -176,6 +181,31 @@ describeIfRuntime("isola js-sdk", () => {
       new Arg("Hi", "greeting"),
     ]);
     expect(result).toBe("Hi, World!");
+    sandbox.close();
+  });
+
+  it("should support positional and named stream arguments", async () => {
+    const sandbox = await template.create();
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "async def total(left, right):",
+        "    result = 0",
+        "    async for value in left:",
+        "        result += value",
+        "    async for value in right:",
+        "        result += value",
+        "    return result",
+      ].join("\n"),
+    );
+
+    const right = new StreamArg([3, 4]);
+    const result = await sandbox.run("total", [new StreamArg([1, 2])], {
+      right,
+    });
+
+    expect(result).toBe(10);
+    expect(right.name).toBeUndefined();
     sandbox.close();
   });
 
@@ -271,13 +301,18 @@ describeIfRuntime("isola js-sdk", () => {
     vi.unstubAllGlobals();
   });
 
-  it("should reject conflicting http keys", async () => {
+  it("should reject invalid http configuration", async () => {
     await expect(
       template.create({
-        http: async () => ({ status: 200 }),
-        httpHandler: async () => ({ status: 200 }),
+        http: false as never,
       }),
-    ).rejects.toThrow("pass only one of http or httpHandler");
+    ).rejects.toThrow("http must be a function, true, or undefined");
+
+    await expect(
+      template.create({
+        httpHandler: async () => ({ status: 200 }),
+      } as never),
+    ).rejects.toThrow("unexpected sandbox option(s): 'httpHandler'");
   });
 });
 
@@ -301,6 +336,40 @@ describe("Arg", () => {
     const a = new Arg({ x: 1 }, "opts");
     expect(a.value).toEqual({ x: 1 });
     expect(a.name).toBe("opts");
+  });
+});
+
+describe("StreamArg", () => {
+  it("should validate capacity", () => {
+    expect(() => new StreamArg([], undefined, 0)).toThrow(
+      "stream capacity must be a positive safe integer",
+    );
+  });
+
+  it("should propagate stream producer failures", async () => {
+    async function* values(): AsyncGenerator<number> {
+      yield 1;
+      throw new Error("producer failed");
+    }
+
+    const runWithStreams = vi.fn(async () => ({
+      resultJson: [],
+      finalJson: undefined,
+      stdout: [],
+      stderr: [],
+      logs: [],
+      errors: [],
+    }));
+    const sandbox = new Sandbox({
+      runWithStreams,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("consume", [new StreamArg(values())]),
+    ).rejects.toThrow("producer failed");
+    expect(runWithStreams).toHaveBeenCalledOnce();
   });
 });
 

@@ -1,23 +1,9 @@
 import { resolveRuntime } from "./_runtime.js";
 // @ts-expect-error - napi bindings are generated at build time
-import { ContextCore, type SandboxCore } from "./isola.js";
+import { ContextCore, type SandboxCore, StreamHandle } from "./isola.js";
 import type {
   Event,
-  HttpHandler,
-  HttpHandlerConfig,
-  HttpRequest,
-  HttpResponse,
-  JsonValue,
-  RunArg,
-  RunKwargs,
-  RuntimeName,
-  SandboxOptions,
-  TemplateOptions,
-} from "./types.js";
-import { Arg } from "./types.js";
-
-export type {
-  Event,
+  Hostcalls,
   HttpHandler,
   HttpHandlerConfig,
   HttpRequest,
@@ -28,16 +14,42 @@ export type {
   RunKwargs,
   RuntimeName,
   SandboxOptions,
+  StreamSource,
+  TemplateOptions,
+} from "./types.js";
+import { Arg, StreamArg } from "./types.js";
+
+export type {
+  Event,
+  HostcallHandler,
+  Hostcalls,
+  HttpHandler,
+  HttpHandlerConfig,
+  HttpRequest,
+  HttpResponse,
+  JsonValue,
+  MountConfig,
+  RunArg,
+  RunKwargs,
+  RuntimeName,
+  SandboxOptions,
+  StreamSource,
   TemplateOptions,
 } from "./types.js";
 
-export { Arg } from "./types.js";
+export { Arg, StreamArg } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Wire format helpers
 // ---------------------------------------------------------------------------
 
 type WireArgument = [string, string | null, unknown];
+type WireMountConfig = {
+  host: string;
+  guest: string;
+  dir_perms?: "read" | "write" | "read-write";
+  file_perms?: "read" | "write" | "read-write";
+};
 type NativeCallbackArgs = [string, string | null];
 type NativeHostcallArgs = [string, string];
 type NativeHttpArgs = [string, string, string, Buffer | null];
@@ -55,18 +67,105 @@ type NativeRunResult = {
   errors: string[];
 };
 
-function encodeArgs(args?: RunArg[]): WireArgument[] {
-  if (!args) return [];
-  return args.map((arg): WireArgument => {
-    if (arg instanceof Arg) {
-      const a = arg as { value: unknown; name?: string };
-      return ["json", a.name ?? null, a.value];
-    }
-    return ["json", null, arg];
-  });
+type NativeStreamHandle = InstanceType<typeof StreamHandle>;
+
+interface EncodedRunArguments {
+  wire: WireArgument[];
+  streams: NativeStreamHandle[];
+  producers: Promise<void>[];
 }
 
-function normalizeKeywordArg(name: string, value: RunArg): Arg {
+const TEMPLATE_OPTION_KEYS = new Set([
+  "runtimePath",
+  "version",
+  "cacheDir",
+  "maxMemory",
+  "prelude",
+  "runtimeLibDir",
+  "mounts",
+  "env",
+]);
+const SANDBOX_OPTION_KEYS = new Set([
+  "maxMemory",
+  "mounts",
+  "env",
+  "hostcalls",
+  "http",
+]);
+
+function validateOptionKeys(
+  options: object | undefined,
+  allowed: ReadonlySet<string>,
+  kind: string,
+): void {
+  if (options === undefined) return;
+  if (options === null || Array.isArray(options)) {
+    throw new TypeError(`${kind} options must be an object`);
+  }
+  const unexpected = Object.keys(options)
+    .filter((key) => !allowed.has(key))
+    .sort();
+  if (unexpected.length > 0) {
+    throw new TypeError(
+      `unexpected ${kind} option(s): ${unexpected.map((key) => `'${key}'`).join(", ")}`,
+    );
+  }
+}
+
+function encodeMounts(
+  mounts: MountConfig[] | undefined,
+): WireMountConfig[] | undefined {
+  return mounts?.map((mount) => ({
+    host: mount.host,
+    guest: mount.guest,
+    dir_perms: mount.dirPerms,
+    file_perms: mount.filePerms,
+  }));
+}
+
+async function pumpStream(
+  source: StreamSource,
+  stream: NativeStreamHandle,
+): Promise<void> {
+  try {
+    for await (const value of source) {
+      await stream.pushAsync(value);
+    }
+  } finally {
+    stream.end();
+  }
+}
+
+function encodeArgs(args?: readonly RunArg[]): EncodedRunArguments {
+  const wire: WireArgument[] = [];
+  const streams: NativeStreamHandle[] = [];
+  const producers: Promise<void>[] = [];
+
+  try {
+    for (const arg of args ?? []) {
+      if (arg instanceof Arg) {
+        wire.push(["json", arg.name ?? null, arg.value]);
+        continue;
+      }
+      if (arg instanceof StreamArg) {
+        const stream = new StreamHandle(arg.capacity);
+        const index = streams.push(stream) - 1;
+        wire.push(["stream", arg.name ?? null, index]);
+        producers.push(pumpStream(arg.values, stream));
+        continue;
+      }
+      wire.push(["json", null, arg]);
+    }
+  } catch (error) {
+    for (const stream of streams) stream.end();
+    void Promise.allSettled(producers);
+    throw error;
+  }
+
+  return { wire, streams, producers };
+}
+
+function normalizeKeywordArg(name: string, value: RunArg): RunArg {
   if (value instanceof Arg) {
     if (value.name !== undefined && value.name !== name) {
       throw new TypeError(
@@ -75,23 +174,64 @@ function normalizeKeywordArg(name: string, value: RunArg): Arg {
     }
     return new Arg(value.value, name);
   }
+  if (value instanceof StreamArg) {
+    if (value.name !== undefined && value.name !== name) {
+      throw new TypeError(
+        `keyword argument '${name}' conflicts with explicit argument name '${value.name}'`,
+      );
+    }
+    return new StreamArg(value.values, name, value.capacity);
+  }
   return new Arg(value, name);
 }
 
-function mergeRunArgs(args?: RunArg[], kwargs?: RunKwargs): RunArg[] {
+function mergeRunArgs(args?: RunArg[], kwargs?: RunKwargs): readonly RunArg[] {
   if (args !== undefined && !Array.isArray(args)) {
     throw new TypeError(
       "sandbox args must be an array; pass kwargs as the third argument",
     );
   }
 
-  if (!kwargs) return args ? [...args] : [];
+  if (!kwargs) return args ?? [];
 
-  return (args ? [...args] : []).concat(
-    Object.entries(kwargs).map(([name, value]) =>
-      normalizeKeywordArg(name, value),
-    ),
-  );
+  const merged = args ? [...args] : [];
+  for (const [name, value] of Object.entries(kwargs)) {
+    merged.push(normalizeKeywordArg(name, value));
+  }
+  return merged;
+}
+
+async function executeRun(
+  core: InstanceType<typeof SandboxCore>,
+  name: string,
+  encoded: EncodedRunArguments,
+): Promise<NativeRunResult> {
+  const operation: Promise<NativeRunResult> =
+    encoded.streams.length > 0
+      ? core.runWithStreams(name, encoded.wire, encoded.streams)
+      : core.run(name, encoded.wire);
+
+  if (encoded.producers.length === 0) return operation;
+
+  try {
+    const results = await Promise.all([operation, ...encoded.producers]);
+    return results[0] as NativeRunResult;
+  } catch (error) {
+    for (const stream of encoded.streams) stream.end();
+    await Promise.allSettled([operation, ...encoded.producers]);
+    throw error;
+  }
+}
+
+function validateHostcalls(hostcalls: Hostcalls): void {
+  for (const [name, handler] of Object.entries(hostcalls)) {
+    if (name.length === 0) {
+      throw new TypeError("hostcall names must not be empty");
+    }
+    if (typeof handler !== "function") {
+      throw new TypeError(`hostcall handler for '${name}' must be a function`);
+    }
+  }
 }
 
 function unpackTuple<T extends unknown[]>(raw: unknown[]): T {
@@ -187,11 +327,47 @@ async function defaultHttpHandler(request: HttpRequest): Promise<HttpResponse> {
   };
 }
 
+function normalizeHttpResponse(response: HttpResponse): NativeHttpResponse {
+  if (response === null || typeof response !== "object") {
+    throw new TypeError("http handler must return an HttpResponse object");
+  }
+  if (
+    !Number.isInteger(response.status) ||
+    response.status < 100 ||
+    response.status > 999
+  ) {
+    throw new RangeError(
+      "http response status must be an integer from 100 to 999",
+    );
+  }
+  if (response.headers !== undefined) {
+    for (const [name, value] of Object.entries(response.headers)) {
+      if (typeof value !== "string") {
+        throw new TypeError(`http response header '${name}' must be a string`);
+      }
+    }
+  }
+  if (response.body != null && !Buffer.isBuffer(response.body)) {
+    throw new TypeError(
+      "http response body must be a Buffer, null, or undefined",
+    );
+  }
+  return {
+    status: response.status,
+    headers: response.headers,
+    body: response.body ?? null,
+  };
+}
+
 function resolveHttpHandler(
   http: HttpHandlerConfig | undefined,
 ): HttpHandler | undefined {
   if (http === undefined) return undefined;
-  return http === true ? defaultHttpHandler : http;
+  if (http === true) return defaultHttpHandler;
+  if (typeof http !== "function") {
+    throw new TypeError("http must be a function, true, or undefined");
+  }
+  return http;
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +397,7 @@ export class SandboxContext {
     runtime: RuntimeName,
     options?: TemplateOptions,
   ): Promise<SandboxTemplate> {
+    validateOptionKeys(options, TEMPLATE_OPTION_KEYS, "template");
     let runtimePath = options?.runtimePath;
     let runtimeLibDir = options?.runtimeLibDir;
     if (!runtimePath) {
@@ -234,7 +411,8 @@ export class SandboxContext {
     if (options?.maxMemory !== undefined) patch.max_memory = options.maxMemory;
     if (options?.prelude !== undefined) patch.prelude = options.prelude;
     if (runtimeLibDir !== undefined) patch.runtime_lib_dir = runtimeLibDir;
-    if (options?.mounts !== undefined) patch.mounts = options.mounts;
+    if (options?.mounts !== undefined)
+      patch.mounts = encodeMounts(options.mounts);
     if (options?.env !== undefined) patch.env = options.env;
 
     if (Object.keys(patch).length > 0) {
@@ -259,6 +437,7 @@ export class SandboxTemplate {
   constructor(private _core: InstanceType<typeof ContextCore>) {}
 
   async create(options?: SandboxOptions): Promise<Sandbox> {
+    validateOptionKeys(options, SANDBOX_OPTION_KEYS, "sandbox");
     const core: InstanceType<typeof SandboxCore> =
       await this._core.instantiate();
     const sandbox = new Sandbox(core);
@@ -266,19 +445,18 @@ export class SandboxTemplate {
     const configPatch: Record<string, unknown> = {};
     if (options?.maxMemory !== undefined)
       configPatch.max_memory = options.maxMemory;
-    if (options?.mounts !== undefined) configPatch.mounts = options.mounts;
+    if (options?.mounts !== undefined)
+      configPatch.mounts = encodeMounts(options.mounts);
     if (options?.env !== undefined) configPatch.env = options.env;
     if (Object.keys(configPatch).length > 0) {
       core.configure(configPatch);
     }
 
     if (options?.hostcalls) {
+      validateHostcalls(options.hostcalls);
       sandbox._setHostcalls(options.hostcalls);
     }
-    if (options?.http !== undefined && options?.httpHandler !== undefined) {
-      throw new TypeError("pass only one of http or httpHandler");
-    }
-    const http = resolveHttpHandler(options?.http ?? options?.httpHandler);
+    const http = resolveHttpHandler(options?.http);
     if (http) {
       sandbox._setHttpHandler(http);
     }
@@ -293,16 +471,24 @@ export class SandboxTemplate {
 
 export class Sandbox {
   private _core: InstanceType<typeof SandboxCore>;
+  private _busy = false;
 
   /** @internal */
   constructor(core: InstanceType<typeof SandboxCore>) {
     this._core = core;
   }
 
+  private _beginOperation(): void {
+    if (this._busy) throw new Error("sandbox is busy");
+    this._busy = true;
+  }
+
+  private _endOperation(): void {
+    this._busy = false;
+  }
+
   /** @internal */
-  _setHostcalls(
-    hostcalls: Record<string, (payload: JsonValue) => Promise<unknown>>,
-  ): void {
+  _setHostcalls(hostcalls: Hostcalls): void {
     this._core.setHostcallHandler(
       async (...raw: unknown[]): Promise<string> => {
         const [callType, payloadJson] = unpackTuple<NativeHostcallArgs>(raw);
@@ -310,7 +496,13 @@ export class Sandbox {
         if (!handler) throw new Error(`unsupported hostcall: ${callType}`);
         const payload = JSON.parse(payloadJson) as JsonValue;
         const result = await handler(payload);
-        return JSON.stringify(result);
+        const encoded = JSON.stringify(result);
+        if (encoded === undefined) {
+          throw new TypeError(
+            `hostcall '${callType}' returned a non-JSON value`,
+          );
+        }
+        return encoded;
       },
     );
   }
@@ -324,11 +516,7 @@ export class Sandbox {
         const headers = JSON.parse(headersJson) as Record<string, string>;
         const req: HttpRequest = { method, url, headers, body };
         const resp = await handler(req);
-        return {
-          status: resp.status,
-          headers: resp.headers,
-          body: resp.body ?? null,
-        };
+        return normalizeHttpResponse(resp);
       },
     );
   }
@@ -338,7 +526,12 @@ export class Sandbox {
   }
 
   async loadScript(code: string): Promise<void> {
-    await this._core.loadScript(code);
+    this._beginOperation();
+    try {
+      await this._core.loadScript(code);
+    } finally {
+      this._endOperation();
+    }
   }
 
   async run(
@@ -346,11 +539,16 @@ export class Sandbox {
     args?: RunArg[],
     kwargs?: RunKwargs,
   ): Promise<JsonValue | null> {
-    const encoded = encodeArgs(mergeRunArgs(args, kwargs));
-    const result = await this._core.run(name, encoded);
-    return result.finalJson
-      ? (JSON.parse(result.finalJson) as JsonValue)
-      : null;
+    this._beginOperation();
+    try {
+      const encoded = encodeArgs(mergeRunArgs(args, kwargs));
+      const result = await executeRun(this._core, name, encoded);
+      return result.finalJson !== undefined
+        ? (JSON.parse(result.finalJson) as JsonValue)
+        : null;
+    } finally {
+      this._endOperation();
+    }
   }
 
   async *runStream(
@@ -358,13 +556,16 @@ export class Sandbox {
     args?: RunArg[],
     kwargs?: RunKwargs,
   ): AsyncGenerator<Event, void, undefined> {
+    this._beginOperation();
     const queue: Event[] = [];
+    let queueHead = 0;
     const emitted = new Map<string, number>();
     let resolve: (() => void) | null = null;
     let done = false;
-    let sawErrorEvent = false;
+    let acceptingEvents = true;
     let runResult: NativeRunResult | null = null;
     let runError: unknown = null;
+    const activeStreams: NativeStreamHandle[] = [];
 
     const wake = (): void => {
       if (resolve) {
@@ -375,24 +576,22 @@ export class Sandbox {
 
     const pushEvent = (event: Event): void => {
       queue.push(event);
-      emitted.set(eventKey(event), (emitted.get(eventKey(event)) ?? 0) + 1);
-      if (event.type === "error") {
-        sawErrorEvent = true;
-      }
+      const key = eventKey(event);
+      emitted.set(key, (emitted.get(key) ?? 0) + 1);
       wake();
     };
 
-    this._core.setCallback((...raw: unknown[]) => {
-      const [kind, data] = unpackTuple<NativeCallbackArgs>(raw);
-      const event = parseEvent(kind, data);
-      if (event) {
-        pushEvent(event);
-      }
-    });
-
-    const encoded = encodeArgs(mergeRunArgs(args, kwargs));
-    const runPromise = this._core
-      .run(name, encoded)
+    const runPromise = Promise.resolve()
+      .then(() => {
+        const encoded = encodeArgs(mergeRunArgs(args, kwargs));
+        activeStreams.push(...encoded.streams);
+        this._core.setCallback((...raw: unknown[]) => {
+          const [kind, data] = unpackTuple<NativeCallbackArgs>(raw);
+          const event = parseEvent(kind, data);
+          if (acceptingEvents && event) pushEvent(event);
+        });
+        return executeRun(this._core, name, encoded);
+      })
       .then((result: NativeRunResult) => {
         runResult = result;
       })
@@ -408,9 +607,13 @@ export class Sandbox {
 
     try {
       while (true) {
-        while (queue.length > 0) {
-          // biome-ignore lint/style/noNonNullAssertion: length checked above
-          yield queue.shift()!;
+        while (queueHead < queue.length) {
+          // biome-ignore lint/style/noNonNullAssertion: bounds checked above
+          yield queue[queueHead++]!;
+        }
+        if (queueHead > 0) {
+          queue.length = 0;
+          queueHead = 0;
         }
         if (done) break;
         await new Promise<void>((r) => {
@@ -430,11 +633,19 @@ export class Sandbox {
           yield event;
         }
       }
-      if (runError && !sawErrorEvent) {
-        throw runError;
-      }
+      if (runError) throw runError;
     } finally {
-      this._core.setCallback(null);
+      acceptingEvents = false;
+      for (const stream of activeStreams) stream.end();
+      try {
+        this._core.setCallback(null);
+      } finally {
+        if (done) {
+          this._endOperation();
+        } else {
+          void runPromise.then(() => this._endOperation());
+        }
+      }
     }
   }
 

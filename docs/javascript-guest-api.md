@@ -53,7 +53,7 @@ Payloads and results should be JSON-like values.
 ## HTTP Globals
 
 Guest HTTP is only available when the host enables outbound requests with
-`http=`. Legacy aliases `http_handler=` and `httpHandler=` are also accepted.
+`http=`.
 See [Python Host API](python-api.md) and
 [Node.js Host API](nodejs-api.md).
 

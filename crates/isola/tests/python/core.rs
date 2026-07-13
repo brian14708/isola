@@ -872,7 +872,7 @@ async fn integration_python_writable_directory_mapping_filesystem_roundtrip() ->
         return Ok(());
     };
     let mut options = SandboxOptions::default();
-    options.mount(
+    options = options.mount(
         &mapped_dir,
         "/fs",
         DirPerms::READ | DirPerms::MUTATE,

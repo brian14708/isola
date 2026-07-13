@@ -93,10 +93,10 @@ impl PendingSandboxConfig {
     pub(crate) fn to_options(&self) -> SandboxOptions {
         let mut options = SandboxOptions::default();
         if let Some(max_memory) = self.max_memory {
-            options.max_memory(max_memory);
+            options = options.max_memory(max_memory);
         }
         for mapping in &self.mounts {
-            options.mount(
+            options = options.mount(
                 &mapping.host,
                 &mapping.guest,
                 mapping.dir_perms,
@@ -104,7 +104,7 @@ impl PendingSandboxConfig {
             );
         }
         for (k, v) in &self.env {
-            options.env(k, v);
+            options = options.env(k, v);
         }
         options
     }
@@ -330,7 +330,7 @@ impl ContextInner {
         }
 
         for (k, v) in &config.env {
-            let _ = builder.env(k, v);
+            builder = builder.env(k, v);
         }
 
         let template = builder

@@ -146,11 +146,11 @@ impl PendingSandboxConfig {
     fn to_options(&self) -> SandboxOptions {
         let mut options = SandboxOptions::default();
         if let Some(max_memory) = self.max_memory {
-            options.max_memory(max_memory);
+            options = options.max_memory(max_memory);
         }
 
         for mapping in &self.mounts {
-            options.mount(
+            options = options.mount(
                 &mapping.host,
                 &mapping.guest,
                 mapping.dir_perms,
@@ -159,7 +159,7 @@ impl PendingSandboxConfig {
         }
 
         for (k, v) in &self.env {
-            options.env(k, v);
+            options = options.env(k, v);
         }
 
         options
@@ -266,7 +266,7 @@ impl ContextInner {
         }
 
         for (k, v) in &config.env {
-            let _ = builder.env(k, v);
+            builder = builder.env(k, v);
         }
 
         let template = builder
@@ -792,7 +792,7 @@ impl CallbackEvent {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 struct OutputData {
     result_json: Vec<String>,
     final_json: Option<String>,
@@ -836,7 +836,7 @@ impl OutputCollector {
     }
 
     fn into_result(self) -> PyRunResult {
-        let data = self.data.lock().clone();
+        let data = std::mem::take(&mut *self.data.lock());
         PyRunResult {
             result_json: data.result_json,
             final_json: data.final_json,
@@ -1378,6 +1378,18 @@ impl StreamHandle {
             .ok_or_else(|| invalid_argument("stream receiver already taken"))
     }
 
+    fn try_send(&self, value: Value) -> Result<()> {
+        let sender_guard = self.sender.lock();
+        let sender = sender_guard.as_ref().ok_or(Error::StreamClosed)?;
+        let result = sender.try_send(value);
+        drop(sender_guard);
+        match result {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Err(Error::StreamFull),
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Err(Error::StreamClosed),
+        }
+    }
+
     fn close_sender(&self) {
         self.sender.lock().take();
     }
@@ -1404,24 +1416,16 @@ impl StreamHandle {
     #[pyo3(signature = (value, blocking = false))]
     fn push(&self, py: Python<'_>, value: &Bound<'_, PyAny>, blocking: bool) -> PyResult<()> {
         let value = py_to_value(value).map_err(to_py_err)?;
-        let sender = self.sender().map_err(to_py_err)?;
 
         if blocking {
+            let sender = self.sender().map_err(to_py_err)?;
             let result = py.detach(move || sender.blocking_send(value));
             match result {
                 Ok(()) => Ok(()),
                 Err(_) => Err(to_py_err(Error::StreamClosed)),
             }
         } else {
-            match sender.try_send(value) {
-                Ok(()) => Ok(()),
-                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                    Err(to_py_err(Error::StreamFull))
-                }
-                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                    Err(to_py_err(Error::StreamClosed))
-                }
-            }
+            self.try_send(value).map_err(to_py_err)
         }
     }
 

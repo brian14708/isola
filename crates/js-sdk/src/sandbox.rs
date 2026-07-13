@@ -69,7 +69,7 @@ impl CallbackEvent {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 struct OutputData {
     result_json: Vec<String>,
     final_json: Option<String>,
@@ -116,7 +116,7 @@ impl OutputCollector {
     }
 
     fn into_result(self) -> RunResult {
-        let data = self.data.lock().clone();
+        let data = std::mem::take(&mut *self.data.lock());
         RunResult {
             result_json: data.result_json,
             final_json: data.final_json,
@@ -240,8 +240,11 @@ type WireArgument = (String, Option<String>, serde_json::Value);
 
 enum RawArgument {
     Json(Option<String>, Value),
-    #[expect(dead_code)]
-    JsonStream(Option<String>, tokio::sync::mpsc::Receiver<Value>),
+}
+
+enum ParsedArgument {
+    Json(Option<String>, Value),
+    JsonStream(Option<String>, usize),
 }
 
 fn parse_run_args(args: Vec<WireArgument>) -> crate::error::Result<Vec<RawArgument>> {
@@ -266,6 +269,68 @@ fn parse_run_args(args: Vec<WireArgument>) -> crate::error::Result<Vec<RawArgume
         }
     }
     Ok(parsed)
+}
+
+fn parse_stream_run_args(
+    args: Vec<WireArgument>,
+    stream_count: usize,
+) -> crate::error::Result<Vec<ParsedArgument>> {
+    let mut parsed = Vec::with_capacity(args.len());
+    let mut used_streams = vec![false; stream_count];
+
+    for (kind, name, payload) in args {
+        match kind.as_str() {
+            "json" => {
+                let value = Value::from_serde(&payload)
+                    .map_err(|e| invalid_argument(format!("invalid argument value: {e}")))?;
+                parsed.push(ParsedArgument::Json(name, value));
+            }
+            "stream" => {
+                let index = payload
+                    .as_u64()
+                    .and_then(|index| usize::try_from(index).ok())
+                    .ok_or_else(|| invalid_argument("stream argument index must be an integer"))?;
+                let Some(used) = used_streams.get_mut(index) else {
+                    return Err(invalid_argument("stream argument index is out of bounds"));
+                };
+                if std::mem::replace(used, true) {
+                    return Err(invalid_argument("stream argument is used more than once"));
+                }
+                parsed.push(ParsedArgument::JsonStream(name, index));
+            }
+            _ => {
+                return Err(invalid_argument(format!(
+                    "unsupported argument kind: {kind}"
+                )));
+            }
+        }
+    }
+
+    if used_streams.iter().any(|used| !used) {
+        return Err(invalid_argument("unreferenced stream argument handle"));
+    }
+
+    Ok(parsed)
+}
+
+fn take_stream_receivers(
+    handles: &[&StreamHandle],
+) -> crate::error::Result<Vec<Option<tokio::sync::mpsc::Receiver<Value>>>> {
+    let mut receivers = Vec::with_capacity(handles.len());
+    for handle in handles {
+        match handle.take_receiver() {
+            Ok(receiver) => receivers.push(Some(receiver)),
+            Err(error) => {
+                for (handle, receiver) in handles.iter().zip(receivers).rev() {
+                    if let Some(receiver) = receiver {
+                        handle.restore_receiver(receiver);
+                    }
+                }
+                return Err(error);
+            }
+        }
+    }
+    Ok(receivers)
 }
 
 // ---------------------------------------------------------------------------
@@ -510,13 +575,6 @@ impl SandboxCore {
                     Some(name) => Arg::Named(name, value),
                     None => Arg::Positional(value),
                 }),
-                RawArgument::JsonStream(name, receiver) => {
-                    let stream = Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-                    Ok(match name {
-                        Some(name) => Arg::NamedStream(name, stream),
-                        None => Arg::PositionalStream(stream),
-                    })
-                }
             })
             .collect::<crate::error::Result<Vec<_>>>()
             .map_err(napi::Error::from)?;
@@ -534,36 +592,39 @@ impl SandboxCore {
         Ok(collector.into_result())
     }
 
-    /// Run a function with a `StreamHandle` argument.
+    /// Run a function with one or more `StreamHandle` arguments.
     #[napi]
-    pub async fn run_with_stream(
+    pub async fn run_with_streams(
         &self,
         func: String,
-        json_args: Vec<(Option<String>, serde_json::Value)>,
-        stream_arg: &StreamHandle,
-        stream_name: Option<String>,
+        args: Vec<WireArgument>,
+        stream_args: Vec<&StreamHandle>,
     ) -> napi::Result<RunResult> {
         let inner = Arc::clone(&self.inner);
         let (mut lease, callback) = take_running_lease(&inner)?;
 
-        let mut isola_args: Vec<Arg> = Vec::new();
-
-        for (name, value) in json_args {
-            let v = Value::from_serde(&value).map_err(|e| {
-                napi::Error::from(invalid_argument(format!("invalid argument: {e}")))
-            })?;
-            isola_args.push(match name {
-                Some(n) => Arg::Named(n, v),
-                None => Arg::Positional(v),
-            });
-        }
-
-        let receiver = stream_arg.take_receiver().map_err(napi::Error::from)?;
-        let stream = Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
-        isola_args.push(match stream_name {
-            Some(n) => Arg::NamedStream(n, stream),
-            None => Arg::PositionalStream(stream),
-        });
+        let parsed = parse_stream_run_args(args, stream_args.len()).map_err(napi::Error::from)?;
+        let mut receivers = take_stream_receivers(&stream_args).map_err(napi::Error::from)?;
+        let isola_args = parsed
+            .into_iter()
+            .map(|arg| match arg {
+                ParsedArgument::Json(name, value) => Ok(match name {
+                    Some(name) => Arg::Named(name, value),
+                    None => Arg::Positional(value),
+                }),
+                ParsedArgument::JsonStream(name, index) => {
+                    let receiver = receivers[index].take().ok_or_else(|| {
+                        invalid_argument("stream argument receiver was already consumed")
+                    })?;
+                    let stream = Box::pin(tokio_stream::wrappers::ReceiverStream::new(receiver));
+                    Ok(match name {
+                        Some(name) => Arg::NamedStream(name, stream),
+                        None => Arg::PositionalStream(stream),
+                    })
+                }
+            })
+            .collect::<crate::error::Result<Vec<_>>>()
+            .map_err(napi::Error::from)?;
 
         let collector = OutputCollector::new(callback);
         let sink = Arc::new(collector.clone());
@@ -585,5 +646,33 @@ impl SandboxCore {
     pub fn close(&self) {
         let mut guard = self.inner.lock();
         *guard = SandboxInner::Uninitialized;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_argument_indexes_must_be_unique_and_complete() {
+        let duplicate = vec![
+            ("stream".to_string(), None, serde_json::json!(0)),
+            ("stream".to_string(), None, serde_json::json!(0)),
+        ];
+        assert!(parse_stream_run_args(duplicate, 1).is_err());
+
+        let incomplete = vec![("stream".to_string(), None, serde_json::json!(0))];
+        assert!(parse_stream_run_args(incomplete, 2).is_err());
+    }
+
+    #[test]
+    fn failed_stream_acquisition_restores_prior_receivers() {
+        let first = StreamHandle::with_capacity(1);
+        let second = StreamHandle::with_capacity(1);
+        let held = second.take_receiver().expect("take second receiver");
+
+        assert!(take_stream_receivers(&[&first, &second]).is_err());
+        assert!(first.take_receiver().is_ok());
+        drop(held);
     }
 }

@@ -26,7 +26,6 @@ use std::{
 
 use futures::Stream;
 use parking_lot::Mutex;
-use smallvec::SmallVec;
 use wasmtime::{
     Engine, Store,
     component::{Component, InstancePre},
@@ -193,7 +192,8 @@ pub struct SandboxOptions {
 
 impl SandboxOptions {
     /// Override the memory hard limit for this sandbox.
-    pub const fn max_memory(&mut self, max_memory: usize) -> &mut Self {
+    #[must_use]
+    pub const fn max_memory(mut self, max_memory: usize) -> Self {
         self.max_memory = Some(max_memory);
         self
     }
@@ -202,13 +202,14 @@ impl SandboxOptions {
     ///
     /// If a guest path duplicates a module-level mount, this mount replaces it
     /// for that instance.
+    #[must_use]
     pub fn mount(
-        &mut self,
+        mut self,
         host_path: impl AsRef<Path>,
         guest_path: impl AsRef<str>,
         dir_perms: DirPerms,
         file_perms: FilePerms,
-    ) -> &mut Self {
+    ) -> Self {
         self.directory_mappings.push(
             DirectoryMapping::new(host_path.as_ref(), guest_path.as_ref())
                 .with_permissions(dir_perms, file_perms),
@@ -219,7 +220,8 @@ impl SandboxOptions {
     /// Add an environment variable for this sandbox instance.
     ///
     /// If the same key is set multiple times, the last value wins.
-    pub fn env(&mut self, k: impl AsRef<str>, v: impl AsRef<str>) -> &mut Self {
+    #[must_use]
+    pub fn env(mut self, k: impl AsRef<str>, v: impl AsRef<str>) -> Self {
         self.env
             .push((k.as_ref().to_string(), v.as_ref().to_string()));
         self
@@ -233,29 +235,33 @@ impl SandboxOptions {
     /// - `env`: override values replace by matching key.
     #[must_use]
     pub fn merged_with(&self, overrides: &Self) -> Self {
+        self.merged_with_owned(overrides.clone())
+    }
+
+    fn merged_with_owned(&self, overrides: Self) -> Self {
         let mut merged = self.clone();
 
         if let Some(max_memory) = overrides.max_memory {
             merged.max_memory = Some(max_memory);
         }
 
-        for mapping in &overrides.directory_mappings {
+        for mapping in overrides.directory_mappings {
             if let Some(existing) = merged
                 .directory_mappings
                 .iter_mut()
                 .find(|m| m.guest == mapping.guest)
             {
-                *existing = mapping.clone();
+                *existing = mapping;
             } else {
-                merged.directory_mappings.push(mapping.clone());
+                merged.directory_mappings.push(mapping);
             }
         }
 
-        for (key, value) in &overrides.env {
-            if let Some(existing) = merged.env.iter_mut().find(|(k, _)| k == key) {
-                existing.1.clone_from(value);
+        for (key, value) in overrides.env {
+            if let Some(existing) = merged.env.iter_mut().find(|(k, _)| k == &key) {
+                existing.1 = value;
             } else {
-                merged.env.push((key.clone(), value.clone()));
+                merged.env.push((key, value));
             }
         }
 
@@ -305,7 +311,8 @@ impl SandboxTemplateBuilder {
         dir_perms: DirPerms,
         file_perms: FilePerms,
     ) -> Self {
-        self.base_options
+        self.base_options = self
+            .base_options
             .mount(host_path, guest_path, dir_perms, file_perms);
         self
     }
@@ -313,8 +320,9 @@ impl SandboxTemplateBuilder {
     /// Add an environment variable that will be present in sandbox WASI env.
     ///
     /// If the same key is set multiple times, the last value wins.
-    pub fn env(&mut self, k: impl AsRef<str>, v: impl AsRef<str>) -> &mut Self {
-        self.base_options.env(k, v);
+    #[must_use]
+    pub fn env(mut self, k: impl AsRef<str>, v: impl AsRef<str>) -> Self {
+        self.base_options = self.base_options.env(k, v);
         self
     }
 
@@ -380,7 +388,7 @@ impl SandboxTemplate {
         options: SandboxOptions,
     ) -> Result<Sandbox<H>> {
         let ticker = Arc::clone(&self.ticker);
-        let merged = self.base_options.merged_with(&options);
+        let merged = self.base_options.merged_with_owned(options);
 
         let mut store = InstanceState::new(
             &self.engine,
@@ -547,14 +555,14 @@ impl<H: Host> Sandbox<H> {
                     })
                 }
             })
-            .collect::<Result<SmallVec<[RawArgument; 2]>>>()?;
+            .collect::<Result<Vec<RawArgument>>>()?;
 
         store.set_sink(sink);
         let result = self
             .bindings
             .isola_script_runtime()
             .func_call_func()
-            .call_async(&mut store, (function.to_string(), internal_args.into_vec()))
+            .call_async(&mut store, (function.to_string(), internal_args))
             .await;
         let flush_result = store.data_mut().flush_logs().await.map_err(Error::Wasm);
         result.map_err(Error::Wasm)?.0?;
@@ -565,5 +573,27 @@ impl<H: Host> Sandbox<H> {
     #[must_use]
     pub fn memory_usage(&self) -> usize {
         self.store.data().limiter.current()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_configuration_is_fluent() {
+        let options = SandboxOptions::default()
+            .max_memory(1024)
+            .mount("/host", "/guest", DirPerms::READ, FilePerms::READ)
+            .env("KEY", "value");
+
+        assert_eq!(options.max_memory, Some(1024));
+        assert_eq!(options.directory_mappings.len(), 1);
+        assert_eq!(options.env, [("KEY".to_string(), "value".to_string())]);
+
+        let _builder = SandboxTemplate::builder()
+            .max_memory(1024)
+            .mount("/host", "/guest", DirPerms::READ, FilePerms::READ)
+            .env("KEY", "value");
     }
 }

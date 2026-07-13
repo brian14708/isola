@@ -18,7 +18,7 @@
     ]
   },
   "scripts": {
-    "build": "pnpm run tsc && napi build --release --platform --js isola.js --manifest-path ../Cargo.toml --output-dir dist",
+    "build": "pnpm run tsc && napi build --release --platform --js isola.js --dts isola.d.ts --manifest-path ../Cargo.toml --output-dir dist",
     "lint": "biome check src tests && tsc --noEmit -p tsconfig.json",
     "tsc": "tsc -p tsconfig.json",
     "test": "vitest run",

@@ -104,7 +104,6 @@ const sandbox = await template.create(options);
 - `hostcalls`: `Record<string, (payload: JsonValue) => Promise<unknown>>`
 - `http`: `true` to use the built-in `fetch` bridge, or
   `(req: HttpRequest) => Promise<HttpResponse>` for a custom outbound HTTP policy
-- `httpHandler`: legacy alias for `http`
 
 ### `Sandbox`
 
@@ -153,6 +152,17 @@ const result = await sandbox.run("greet", [
   new Arg("World", "name"),
   new Arg("Hi", "greeting"),
 ]);
+```
+
+Use `StreamArg` to pass an iterable or async iterable as a guest stream. Multiple
+stream arguments may be mixed with ordinary positional and named arguments:
+
+```typescript
+import { StreamArg } from "isola-core";
+
+const result = await sandbox.run("merge", [new StreamArg([1, 2, 3])], {
+  right: new StreamArg(asyncValues),
+});
 ```
 
 The second argument must always be the positional args array. If you need to
@@ -249,12 +259,12 @@ Use `MountConfig` to mount host paths into the guest:
 const mount = {
   host: "./data",
   guest: "/workspace",
-  dir_perms: "read",
-  file_perms: "read",
+  dirPerms: "read",
+  filePerms: "read",
 };
 ```
 
-`dir_perms` and `file_perms` accept:
+`dirPerms` and `filePerms` accept:
 
 - `"read"`
 - `"write"`
@@ -305,6 +315,6 @@ Request and response shapes:
 `buildTemplate(...)`, `start()`, `loadScript(...)`, and `run(...)` reject when
 runtime setup or execution fails.
 
-`runStream(...)` yields `{ type: "error", data: string }` events for sandbox
-execution failures, and may still throw for setup or transport failures that do
-not surface as stream events.
+`runStream(...)` yields `{ type: "error", data: string }` before rejecting for
+sandbox execution failures. Consumers can observe streamed diagnostics without
+losing the operation's failure signal.

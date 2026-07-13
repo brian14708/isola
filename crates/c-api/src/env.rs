@@ -22,6 +22,9 @@ pub struct HttpHeader {
 }
 
 /// C-compatible HTTP request passed to the handler callback.
+///
+/// All referenced request data is valid only for the duration of the callback.
+/// Copy any values needed by asynchronous work.
 #[repr(C)]
 pub struct HttpRequestInfo {
     pub method: *const c_char,
@@ -65,6 +68,9 @@ impl HttpResponseBody {
     /// Push a body data frame. Blocks the calling thread if the channel is
     /// full. Returns `Err` if the receiver has been dropped.
     pub fn send(&self, data: Bytes) -> Result<(), ()> {
+        if self.head.lock().map_err(|_| ())?.is_some() {
+            return Err(());
+        }
         self.body
             .blocking_send(Ok(Frame::data(data)))
             .map_err(|_| ())
@@ -258,5 +264,30 @@ impl Host for Env {
             .map_err(|e| -> BoxError { Box::new(e) })?;
 
         Ok(response)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn http_body_rejects_data_before_response_head() {
+        let (head_tx, _head_rx) = tokio::sync::oneshot::channel();
+        let (body_tx, _body_rx) = tokio::sync::mpsc::channel(1);
+        let body = HttpResponseBody {
+            head: Mutex::new(Some(head_tx)),
+            body: body_tx,
+        };
+
+        assert!(body.send(Bytes::from_static(b"early")).is_err());
+        assert!(
+            body.start(HttpResponseHead {
+                status: 200,
+                headers: Vec::new(),
+            })
+            .is_ok()
+        );
+        assert!(body.send(Bytes::from_static(b"ready")).is_ok());
     }
 }

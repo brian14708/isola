@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterable, Awaitable, Callable
 from dataclasses import dataclass, field
 from itertools import starmap
+from json import loads
 from os import PathLike, fspath
 from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 from typing_extensions import Self, TypedDict, Unpack
@@ -17,44 +18,44 @@ from isola._isola import _ContextCore, _StreamCore
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Iterable, Sequence
 
-    from isola._isola import _SandboxCore
+    from isola._isola import _RunResultCore, _SandboxCore
 
 JsonScalar = bool | int | float | str | None
 JsonValue = JsonScalar | list["JsonValue"] | dict[str, "JsonValue"]
 RuntimeName = Literal["python", "js"]
 BytesLike = bytes | bytearray | memoryview
 Pathish = str | PathLike[str]
-HttpBodyOut = BytesLike | AsyncIterable[BytesLike] | None
+HttpBody = BytesLike | AsyncIterable[BytesLike] | None
 HostcallHandler = Callable[[JsonValue], Awaitable[object]]
 Hostcalls = dict[str, HostcallHandler]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ResultEvent:
     data: JsonValue
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class EndEvent:
     data: JsonValue | None
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class StdoutEvent:
     data: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class StderrEvent:
     data: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ErrorEvent:
     data: str
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class LogEvent:
     data: str
 
@@ -62,7 +63,7 @@ class LogEvent:
 Event = ResultEvent | EndEvent | StdoutEvent | StderrEvent | ErrorEvent | LogEvent
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class HttpRequest:
     method: str
     url: str
@@ -74,12 +75,12 @@ class HttpRequest:
 class HttpResponse:
     status: int
     headers: dict[str, str] = field(default_factory=dict)
-    body: HttpBodyOut = None
+    body: HttpBody = None
 
 
 HttpHandler: TypeAlias = Callable[[HttpRequest], Awaitable[object]]
 HttpHandlerConfig: TypeAlias = HttpHandler | Literal[True] | None
-_MISSING = object()
+_SANDBOX_CONFIG_KEYS = frozenset({"max_memory", "mounts", "env", "http", "hostcalls"})
 
 
 async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
@@ -106,7 +107,7 @@ async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
     )
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class MountConfig:
     host: Pathish
     guest: str
@@ -137,14 +138,20 @@ class SandboxConfig(TypedDict, total=False):
     mounts: list[MountConfig] | None
     env: dict[str, str]
     http: HttpHandlerConfig
-    http_handler: HttpHandlerConfig
     hostcalls: Hostcalls | None
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class Arg:
     value: object
     name: str | None = None
+
+
+@dataclass(slots=True)
+class _StreamArgState:
+    core: _StreamCore
+    source: AsyncIterable[object] | None
+    producer_task: asyncio.Task[None] | None
 
 
 class StreamArg:
@@ -155,36 +162,42 @@ class StreamArg:
         name: str | None = None,
         source: AsyncIterable[object] | None = None,
         producer_task: asyncio.Task[None] | None = None,
+        _state: _StreamArgState | None = None,
     ) -> None:
-        self._core = core
-        self.name = name
-        self._source = source
-        self._producer_task = producer_task
+        self._state = _state or _StreamArgState(core, source, producer_task)
+        self._name = name
+
+    @property
+    def name(self) -> str | None:
+        return self._name
 
     @property
     def stream_core(self) -> _StreamCore:
-        return self._core
+        return self._state.core
 
     @property
     def producer_task(self) -> asyncio.Task[None] | None:
-        return self._producer_task
+        return self._state.producer_task
 
     def start_producer(self) -> asyncio.Task[None] | None:
-        if self._producer_task is not None or self._source is None:
-            return self._producer_task
+        if self._state.producer_task is not None or self._state.source is None:
+            return self._state.producer_task
 
-        source = self._source
-        self._source = None
+        source = self._state.source
+        self._state.source = None
 
         async def _produce() -> None:
             try:
                 async for item in source:
-                    await self._core.push_async(item)
+                    await self._state.core.push_async(item)
             finally:
-                self._core.end()
+                self._state.core.end()
 
-        self._producer_task = asyncio.create_task(_produce())
-        return self._producer_task
+        self._state.producer_task = asyncio.create_task(_produce())
+        return self._state.producer_task
+
+    def _with_name(self, name: str) -> StreamArg:
+        return StreamArg(self._state.core, name=name, _state=self._state)
 
     @classmethod
     def from_async_iterable(
@@ -212,8 +225,8 @@ class StreamArg:
             return cls(core, name=name)
 
         async def _iterate() -> AsyncIterable[object]:
+            await asyncio.sleep(0)
             for item in values:
-                await asyncio.sleep(0)
                 yield item
 
         return cls.from_async_iterable(_iterate(), name=name, capacity=capacity)
@@ -277,7 +290,10 @@ def _resolve_http_handler(handler: object) -> HttpHandler | None:
     if handler is True:
         return _default_httpx_handler
     if isinstance(handler, bool):
-        msg = "http/http_handler must be an async callable, True, or None"
+        msg = "http must be an async callable, True, or None"
+        raise TypeError(msg)
+    if not callable(handler):
+        msg = "http must be an async callable, True, or None"
         raise TypeError(msg)
     return cast("HttpHandler", handler)
 
@@ -359,6 +375,12 @@ class SandboxTemplate:
         return _SandboxContext(self, kwargs)
 
     async def instantiate(self, **kwargs: Unpack[SandboxConfig]) -> Sandbox:
+        unexpected = sorted(set(kwargs).difference(_SANDBOX_CONFIG_KEYS))
+        if unexpected:
+            names = ", ".join(repr(name) for name in unexpected)
+            msg = f"unexpected sandbox option(s): {names}"
+            raise TypeError(msg)
+
         core = await self._core.instantiate()
         sandbox = Sandbox(core)
 
@@ -372,17 +394,7 @@ class SandboxTemplate:
         _configure_core(sandbox._core, patch)  # noqa: SLF001
 
         hostcalls = kwargs.get("hostcalls")
-        http_config = kwargs.get("http", _MISSING)
-        legacy_http_config = kwargs.get("http_handler", _MISSING)
-        if http_config is not _MISSING and legacy_http_config is not _MISSING:
-            msg = "pass only one of http or http_handler"
-            raise TypeError(msg)
-        selected_http_config = (
-            http_config if http_config is not _MISSING else legacy_http_config
-        )
-        http_handler = _resolve_http_handler(
-            None if selected_http_config is _MISSING else selected_http_config
-        )
+        http_handler = _resolve_http_handler(kwargs.get("http"))
         sandbox._set_hostcalls(hostcalls)  # noqa: SLF001
         sandbox._set_http_handler(http_handler)  # noqa: SLF001
         return sandbox
@@ -434,6 +446,9 @@ class Sandbox:
         if not self._stream_dispatches:
             self._core.set_callback(None)
             return
+        if len(self._stream_dispatches) == 1:
+            self._core.set_callback(next(iter(self._stream_dispatches.values())))
+            return
 
         def _dispatch(kind: str, data: object) -> None:
             # Stream listeners can change while events are emitted.
@@ -450,7 +465,16 @@ class Sandbox:
             return
 
         loop = asyncio.get_running_loop()
-        dispatch_hostcalls = dict(hostcalls)
+        raw_hostcalls = cast("dict[object, object]", dict(hostcalls))
+        dispatch_hostcalls: Hostcalls = {}
+        for call_type, handler in raw_hostcalls.items():
+            if not isinstance(call_type, str) or not call_type:
+                msg = "hostcall names must be non-empty strings"
+                raise TypeError(msg)
+            if not callable(handler):
+                msg = f"hostcall handler for {call_type!r} must be an async callable"
+                raise TypeError(msg)
+            dispatch_hostcalls[call_type] = cast("HostcallHandler", handler)
 
         async def _dispatch(call_type: str, payload: object) -> object:
             handler = dispatch_hostcalls.get(call_type)
@@ -475,15 +499,29 @@ class Sandbox:
         async def _dispatch(
             method: str, url: str, headers: dict[str, str], body: bytes | None
         ) -> tuple[int, dict[str, str], str, object]:
-            request = HttpRequest(
-                method=method, url=url, headers=dict(headers), body=body
-            )
+            request = HttpRequest(method=method, url=url, headers=headers, body=body)
             response: object = await handler(request)
             if not isinstance(response, HttpResponse):
                 msg = "http handler must return HttpResponse"
                 raise TypeError(msg)
+            status = cast("object", response.status)
+            if (
+                isinstance(status, bool)
+                or not isinstance(status, int)
+                or not 100 <= status <= 999
+            ):
+                msg = "http response status must be an integer from 100 to 999"
+                raise ValueError(msg)
+            raw_headers = cast("dict[object, object]", response.headers)
+            if not all(
+                isinstance(name, str) and isinstance(value, str)
+                for name, value in raw_headers.items()
+            ):
+                msg = "http response headers must map strings to strings"
+                raise TypeError(msg)
+            headers = cast("dict[str, str]", raw_headers)
             body_mode, body_payload = _normalize_http_response_body(response.body)
-            return (response.status, dict(response.headers), body_mode, body_payload)
+            return (status, dict(headers), body_mode, body_payload)
 
         self._http_handler_dispatch = _dispatch
         self._core.set_http_handler(_dispatch, loop)
@@ -495,20 +533,19 @@ class Sandbox:
         self, name: str, /, *args: RunArg, **kwargs: RunArg
     ) -> JsonValue | None:
         final_args = _merge_run_args(args, kwargs)
-        final: JsonValue | None = None
-        async for event in self.run_stream(name, *final_args):
-            if isinstance(event, EndEvent):
-                final = event.data
-        return final
+        result = await self._run_operation(name, final_args)
+        if result.final_json is None:
+            return None
+        return cast("JsonValue", loads(result.final_json))
 
     async def _run_operation(
         self, name: str, args: Sequence[RunArg] | None = None
-    ) -> None:
+    ) -> _RunResultCore:
         encoded_args, producers = _encode_args(args)
         operation = self._core.run(name, encoded_args)
 
         try:
-            await operation
+            result = await operation
         except BaseException:
             for producer in producers:
                 producer.cancel()
@@ -518,27 +555,34 @@ class Sandbox:
 
         if producers:
             await asyncio.gather(*producers)
+        return result
 
     async def run_stream(
         self, name: str, /, *args: RunArg, **kwargs: RunArg
     ) -> AsyncIterator[Event]:
         final_args = _merge_run_args(args, kwargs)
-        queue: asyncio.Queue[Event] = asyncio.Queue()
+        completion = object()
+        queue: asyncio.Queue[object] = asyncio.Queue()
         loop = asyncio.get_running_loop()
         pending_dispatches = 0
         operation_finished = False
-        dispatches_drained: asyncio.Future[None] = loop.create_future()
+        completion_enqueued = False
+
+        def _finish_if_drained() -> None:
+            nonlocal completion_enqueued
+            if (
+                operation_finished
+                and pending_dispatches == 0
+                and not completion_enqueued
+            ):
+                completion_enqueued = True
+                queue.put_nowait(completion)
 
         def _enqueue(event: Event) -> None:
             nonlocal pending_dispatches
             queue.put_nowait(event)
             pending_dispatches -= 1
-            if (
-                operation_finished
-                and pending_dispatches == 0
-                and not dispatches_drained.done()
-            ):
-                dispatches_drained.set_result(None)
+            _finish_if_drained()
 
         def _dispatch(kind: str, data: object) -> None:
             nonlocal pending_dispatches
@@ -574,31 +618,24 @@ class Sandbox:
         self._next_stream_dispatch_id += 1
         self._stream_dispatches[stream_dispatch_id] = _dispatch
         self._refresh_core_callback()
-        run_task = asyncio.create_task(self._run_operation(name, final_args))
+
+        async def _run_and_finish() -> _RunResultCore:
+            nonlocal operation_finished
+            try:
+                return await self._run_operation(name, final_args)
+            finally:
+                operation_finished = True
+                _finish_if_drained()
+
+        run_task = asyncio.create_task(_run_and_finish())
 
         try:
             while True:
-                get_event_task: asyncio.Task[Event] = asyncio.create_task(queue.get())
-                done, _ = await asyncio.wait(
-                    {run_task, get_event_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-
-                if get_event_task in done:
-                    yield get_event_task.result()
-                    continue
-
-                get_event_task.cancel()
-                await asyncio.gather(get_event_task, return_exceptions=True)
-
-                operation_finished = True
-                if pending_dispatches > 0:
-                    await asyncio.shield(dispatches_drained)
-
-                while not queue.empty():
-                    yield queue.get_nowait()
-
-                await run_task
-                break
+                event = await queue.get()
+                if event is completion:
+                    await run_task
+                    break
+                yield cast("Event", event)
         finally:
             self._stream_dispatches.pop(stream_dispatch_id, None)
             self._refresh_core_callback()
@@ -677,8 +714,7 @@ def _normalize_keyword_arg(name: str, value: RunArg) -> RunArg:
                 f"{value.name!r}"
             )
             raise TypeError(msg)
-        value.name = name
-        return value
+        return Arg(value.value, name=name)
 
     if isinstance(value, StreamArg):
         if value.name is not None and value.name != name:
@@ -687,8 +723,7 @@ def _normalize_keyword_arg(name: str, value: RunArg) -> RunArg:
                 f"{value.name!r}"
             )
             raise TypeError(msg)
-        value.name = name
-        return value
+        return value._with_name(name)  # noqa: SLF001
 
     return Arg(value, name=name)
 

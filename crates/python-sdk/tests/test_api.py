@@ -5,6 +5,7 @@ import io
 import os
 import tarfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -298,6 +299,13 @@ async def test_template_create_hostcalls_json_roundtrip() -> None:
     assert empty_core.hostcall_handler is None
     assert empty_core.hostcall_loop is None
 
+    invalid_core = _FakeCore()
+    invalid_template = isola.SandboxTemplate(
+        cast("Any", _FakeContextCore(invalid_core))
+    )
+    with pytest.raises(TypeError, match="hostcall handler for 'lookup' must"):
+        await invalid_template.instantiate(hostcalls=cast("Any", {"lookup": object()}))
+
 
 @pytest.mark.asyncio
 async def test_run_stream_flushes_trailing_scheduled_events() -> None:
@@ -384,12 +392,10 @@ async def test_run_treats_python_list_as_single_json_argument() -> None:
 
         async def run(
             self, func: str, args: list[tuple[str, str | None, object]]
-        ) -> None:
+        ) -> SimpleNamespace:
             _ = func
             self.args = args
-            callback = self.callback
-            assert callback is not None
-            callback("end", args[0][2])
+            return SimpleNamespace(final_json="[1, 2, 3]")
 
         def close(self) -> None:
             pass
@@ -401,6 +407,7 @@ async def test_run_treats_python_list_as_single_json_argument() -> None:
 
     assert result == [1, 2, 3]
     assert core.args == [("json", None, [1, 2, 3])]
+    assert core.callback is None
 
 
 @pytest.mark.asyncio
@@ -435,12 +442,10 @@ async def test_run_maps_kwargs_to_named_arguments() -> None:
 
         async def run(
             self, func: str, args: list[tuple[str, str | None, object]]
-        ) -> None:
+        ) -> SimpleNamespace:
             _ = func
             self.args = args
-            callback = self.callback
-            assert callback is not None
-            callback("end", None)
+            return SimpleNamespace(final_json=None)
 
         def close(self) -> None:
             pass
@@ -448,9 +453,17 @@ async def test_run_maps_kwargs_to_named_arguments() -> None:
     core = _FakeCore()
     sandbox = isola.Sandbox(cast("Any", core))
 
-    await sandbox.run("echo", 1, second=2, third=3)
+    second = isola.Arg(2)
+    await sandbox.run("echo", 1, second=second, third=3)
 
     assert core.args == [("json", None, 1), ("json", "second", 2), ("json", "third", 3)]
+    assert second.name is None
+
+    values = isola.StreamArg.from_iterable([1, 2])
+    await sandbox.run("echo", values=values)
+    assert core.args is not None
+    assert core.args[0][:2] == ("stream", "values")
+    assert values.name is None
 
 
 @pytest.mark.asyncio
@@ -513,6 +526,35 @@ async def test_invalid_later_arg_does_not_start_stream_producer() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_propagates_stream_producer_failure() -> None:
+    class _FakeCore:
+        @staticmethod
+        async def run(
+            func: str, args: list[tuple[str, str | None, object]]
+        ) -> SimpleNamespace:
+            _ = func
+            _ = args
+            await asyncio.sleep(0)
+            return SimpleNamespace(final_json=None)
+
+        @staticmethod
+        def close() -> None:
+            pass
+
+    async def values() -> AsyncIterator[int]:
+        await asyncio.sleep(0)
+        yield 1
+        message = "producer failed"
+        raise RuntimeError(message)
+
+    sandbox = isola.Sandbox(cast("Any", _FakeCore()))
+    stream_arg = isola.StreamArg.from_async_iterable(values())
+
+    with pytest.raises(RuntimeError, match="producer failed"):
+        await sandbox.run("consume", stream_arg)
+
+
+@pytest.mark.asyncio
 async def test_two_sandboxes_can_run_concurrently() -> None:
     runtime_dir, lib_dir = _resolve_runtime_paths()
     template = await isola.build_template(
@@ -544,7 +586,7 @@ async def test_two_sandboxes_can_run_concurrently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_create_accepts_http_alias() -> None:
+async def test_template_create_configures_http_handler() -> None:
     class _FakeCore:
         def __init__(self) -> None:
             self.callback: Callable[[str, object], None] | None = None
@@ -608,7 +650,7 @@ async def test_template_create_accepts_http_alias() -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_create_rejects_conflicting_http_keys() -> None:
+async def test_template_create_rejects_invalid_http_handler() -> None:
     class _FakeCore:
         def configure(self, _: object) -> None:
             pass
@@ -646,12 +688,13 @@ async def test_template_create_rejects_conflicting_http_keys() -> None:
 
     template = isola.SandboxTemplate(cast("Any", _FakeContextCore()))
 
-    async def http(_: HttpRequest) -> HttpResponse:
-        await asyncio.sleep(0)
-        return cast("HttpResponse", isola.HttpResponse(status=200))
+    invalid_http: Any = False
+    with pytest.raises(TypeError, match="http must be an async callable"):
+        await template.instantiate(http=invalid_http)
 
-    with pytest.raises(TypeError, match="pass only one of http or http_handler"):
-        await template.instantiate(http=http, http_handler=http)
+    legacy_options: Any = {"http_handler": object()}
+    with pytest.raises(TypeError, match=r"unexpected sandbox option.*http_handler"):
+        await template.instantiate(**legacy_options)
 
 
 @pytest.mark.asyncio

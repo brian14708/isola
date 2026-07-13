@@ -8,6 +8,11 @@ thread_local! {
     static LAST_ERROR: RefCell<Option<Error>> = const { RefCell::new(None) };
 }
 
+/// Return the most recent error message produced on the calling thread.
+///
+/// The returned pointer is `NULL` until an error occurs. Otherwise it remains
+/// valid until the next failing Isola call on the same thread. Successful calls
+/// do not clear the stored error.
 #[unsafe(no_mangle)]
 pub extern "C" fn isola_last_error() -> *const c_char {
     LAST_ERROR.with(|slot| {

@@ -13,11 +13,25 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
+    pub(crate) fn with_capacity(capacity: usize) -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
+        Self {
+            sender: Mutex::new(Some(sender)),
+            receiver: Mutex::new(Some(receiver)),
+        }
+    }
+
     pub(crate) fn take_receiver(&self) -> crate::error::Result<tokio::sync::mpsc::Receiver<Value>> {
         self.receiver
             .lock()
             .take()
             .ok_or_else(|| invalid_argument("stream receiver already taken"))
+    }
+
+    pub(crate) fn restore_receiver(&self, receiver: tokio::sync::mpsc::Receiver<Value>) {
+        let mut slot = self.receiver.lock();
+        debug_assert!(slot.is_none());
+        *slot = Some(receiver);
     }
 
     fn sender(&self) -> crate::error::Result<tokio::sync::mpsc::Sender<Value>> {
@@ -26,6 +40,18 @@ impl StreamHandle {
             .as_ref()
             .cloned()
             .ok_or(Error::StreamClosed)
+    }
+
+    fn try_send(&self, value: Value) -> crate::error::Result<()> {
+        let sender_guard = self.sender.lock();
+        let sender = sender_guard.as_ref().ok_or(Error::StreamClosed)?;
+        let result = sender.try_send(value);
+        drop(sender_guard);
+        match result {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => Err(Error::StreamFull),
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => Err(Error::StreamClosed),
+        }
     }
 }
 
@@ -40,11 +66,7 @@ impl StreamHandle {
             )));
         }
 
-        let (sender, receiver) = tokio::sync::mpsc::channel(capacity);
-        Ok(Self {
-            sender: Mutex::new(Some(sender)),
-            receiver: Mutex::new(Some(receiver)),
-        })
+        Ok(Self::with_capacity(capacity))
     }
 
     #[napi]
@@ -54,17 +76,7 @@ impl StreamHandle {
             Value::from_serde(&json)
                 .map_err(|e| napi::Error::from(invalid_argument(format!("invalid value: {e}"))))?
         };
-        let sender = self.sender().map_err(napi::Error::from)?;
-
-        match sender.try_send(value) {
-            Ok(()) => Ok(()),
-            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
-                Err(napi::Error::from(Error::StreamFull))
-            }
-            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
-                Err(napi::Error::from(Error::StreamClosed))
-            }
-        }
+        self.try_send(value).map_err(napi::Error::from)
     }
 
     #[napi]

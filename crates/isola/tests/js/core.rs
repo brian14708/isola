@@ -1020,7 +1020,7 @@ async fn integration_js_typescript_eval_file_roundtrip() -> Result<()> {
     .context("failed to write typescript guest file")?;
 
     let mut options = SandboxOptions::default();
-    options.mount(
+    options = options.mount(
         fixture_dir.path(),
         "/workspace",
         DirPerms::READ,
