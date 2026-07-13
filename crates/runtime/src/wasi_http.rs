@@ -41,7 +41,7 @@ impl HttpRequest {
     }
 
     #[must_use]
-    pub const fn url(&self) -> &url::Url {
+    pub(crate) const fn url(&self) -> &url::Url {
         &self.url
     }
 }
@@ -58,7 +58,7 @@ pub struct HttpResponse {
 ///
 /// Returns an error when the request is invalid, the WASI HTTP exchange fails,
 /// or the response body exceeds the configured limit.
-pub async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
+pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
     let HttpRequest {
         method,
         url,

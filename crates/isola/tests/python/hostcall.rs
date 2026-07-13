@@ -293,3 +293,54 @@ async fn integration_python_timeout_cancels_slow_hostcall_promptly() -> Result<(
 
     Ok(())
 }
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_cancelled_waiter_releases_hostcall() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import asyncio\n\
+             import _isola_sys\n\
+             async def main():\n\
+             \toperation = _isola_sys.hostcall('delay', 800)\n\
+             \twaiter = asyncio.get_running_loop().subscribe(operation)\n\
+             \twaiter.cancel()\n\
+             \tawait asyncio.sleep(0)\n\
+             \ttry:\n\
+             \t\toperation.wait()\n\
+             \texcept TypeError:\n\
+             \t\treturn True\n\
+             \treturn False",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate waiter cancellation script")?;
+
+    let started = Instant::now();
+    let output = tokio::time::timeout(Duration::from_secs(2), sandbox.call("main", []))
+        .await
+        .context("cancelled waiter test timed out")?
+        .context("failed to call waiter cancellation function")?;
+    let released: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode waiter cancellation result")?;
+
+    assert!(released, "cancelled waiter retained its hostcall handle");
+    assert!(
+        started.elapsed() < Duration::from_millis(400),
+        "cancelled waiter drove the released hostcall"
+    );
+
+    Ok(())
+}

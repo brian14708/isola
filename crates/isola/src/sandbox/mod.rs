@@ -80,7 +80,7 @@ impl From<exports::Error> for Error {
         let exports::Error { code, message } = value;
         match code {
             exports::ErrorCode::Aborted => Self::UserCode { message },
-            exports::ErrorCode::Unknown | exports::ErrorCode::Internal => {
+            exports::ErrorCode::Internal => {
                 Self::Other(std::io::Error::other(format!("[{code:?}] {message}")).into())
             }
         }

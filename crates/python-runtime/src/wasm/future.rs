@@ -20,7 +20,7 @@ enum PollableState {
 
 impl PyPollable {
     pub fn sleep(deadline: Deadline) -> Self {
-        if deadline.ready_at().is_none() {
+        if deadline.is_ready() {
             Self::default()
         } else {
             Self::operation(pending::register_sleep(deadline))

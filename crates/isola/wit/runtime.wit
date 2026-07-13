@@ -1,7 +1,6 @@
 interface runtime {
     use host.{value};
     enum error-code {
-        unknown,
         internal,
         aborted,
     }

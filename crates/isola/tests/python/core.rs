@@ -107,6 +107,49 @@ async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_final_turn_callbacks_run() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import asyncio\n\
+             seen = []\n\
+             async def main():\n\
+             \tasyncio.get_running_loop().call_soon(seen.append, 'ran')\n\
+             \treturn 'done'\n\
+             def observe():\n\
+             \treturn seen",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate final-turn callback script")?;
+
+    call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
+        .await
+        .context("failed to run final-turn callback function")?;
+    let output = call_with_timeout(&mut sandbox, "observe", [], Duration::from_secs(2))
+        .await
+        .context("failed to observe final-turn callback")?;
+    let seen: Vec<String> = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode final-turn callbacks")?;
+
+    assert_eq!(seen, vec!["ran"]);
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_self_rescheduling_callback_does_not_starve_timer() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -620,6 +663,46 @@ async def main():
         elapsed >= 0.045 || host_elapsed >= Duration::from_millis(45),
         "sleep resolved too early, guest_elapsed={elapsed}, host_elapsed={host_elapsed:?}"
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_infinite_sleep_remains_pending() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "import asyncio\n\
+             async def main():\n\
+             \ttry:\n\
+             \t\tawait asyncio.wait_for(asyncio.sleep(float('inf')), 0.02)\n\
+             \texcept TimeoutError:\n\
+             \t\treturn True\n\
+             \treturn False",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate infinite sleep script")?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2))
+        .await
+        .context("infinite sleep did not respect the finite timeout")?;
+    let timed_out: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode infinite sleep result")?;
+
+    assert!(timed_out, "positive-infinite sleep completed immediately");
 
     Ok(())
 }

@@ -25,9 +25,17 @@ pub fn reset_monotonic() {
     MONOTONIC_BASE.with(|base| base.set(None));
 }
 
-/// A monotonic deadline, or an immediately-ready state when no deadline exists.
+/// A monotonic deadline that is ready now, at a finite instant, or never.
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Deadline(Option<Instant>);
+pub struct Deadline(DeadlineState);
+
+#[derive(Clone, Copy, Debug, Default)]
+enum DeadlineState {
+    #[default]
+    Ready,
+    At(Instant),
+    Never,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct DeadlineOverflow;
@@ -47,24 +55,26 @@ impl Deadline {
     ///
     /// Returns [`DeadlineOverflow`] when the duration cannot be represented by
     /// the platform monotonic clock.
-    pub fn after(duration: Duration) -> Result<Self, DeadlineOverflow> {
+    pub(crate) fn after(duration: Duration) -> Result<Self, DeadlineOverflow> {
         Instant::now()
             .checked_add(duration)
-            .map(|ready_at| Self(Some(ready_at)))
+            .map(|ready_at| Self(DeadlineState::At(ready_at)))
             .ok_or(DeadlineOverflow)
     }
 
     /// Create a deadline from a duration in seconds.
     ///
-    /// A non-finite or non-positive duration yields an immediately-ready
-    /// deadline.
+    /// Positive infinity yields a never-ready deadline. Other non-finite and
+    /// non-positive durations yield an immediately-ready deadline.
     ///
     /// # Errors
     ///
     /// Returns [`DeadlineOverflow`] when the duration cannot be represented by
     /// the platform monotonic clock.
     pub fn after_secs_f64(secs: f64) -> Result<Self, DeadlineOverflow> {
-        if secs.is_finite() && secs > 0.0 {
+        if secs == f64::INFINITY {
+            Ok(Self(DeadlineState::Never))
+        } else if secs.is_finite() && secs > 0.0 {
             let duration = Duration::try_from_secs_f64(secs).map_err(|_| DeadlineOverflow)?;
             Self::after(duration)
         } else {
@@ -78,24 +88,38 @@ impl Deadline {
     }
 
     pub(crate) fn is_ready_at(self, now: Instant) -> bool {
-        self.0.is_none_or(|ready_at| now >= ready_at)
+        match self.0 {
+            DeadlineState::Ready => true,
+            DeadlineState::At(ready_at) => now >= ready_at,
+            DeadlineState::Never => false,
+        }
     }
 
-    pub fn wait(self) {
-        if let Some(ready_at) = self.0
-            && let Some(remaining) = ready_at.checked_duration_since(Instant::now())
-        {
-            std::thread::sleep(remaining);
+    pub(crate) fn wait(self) {
+        match self.0 {
+            DeadlineState::Ready => {}
+            DeadlineState::At(ready_at) => {
+                if let Some(remaining) = ready_at.checked_duration_since(Instant::now()) {
+                    std::thread::sleep(remaining);
+                }
+            }
+            DeadlineState::Never => loop {
+                std::thread::sleep(Duration::from_hours(24));
+            },
         }
     }
 
     #[must_use]
-    pub const fn ready_at(self) -> Option<Instant> {
-        self.0
+    pub(crate) const fn ready_at(self) -> Option<Instant> {
+        match self.0 {
+            DeadlineState::At(ready_at) => Some(ready_at),
+            DeadlineState::Ready | DeadlineState::Never => None,
+        }
     }
 
-    pub const fn clear(&mut self) {
-        self.0 = None;
+    #[must_use]
+    pub(crate) const fn is_never(self) -> bool {
+        matches!(self.0, DeadlineState::Never)
     }
 }
 
@@ -106,5 +130,13 @@ mod tests {
     #[test]
     fn rejects_deadlines_outside_the_clock_range() {
         assert!(super::Deadline::after(Duration::MAX).is_err());
+    }
+
+    #[test]
+    fn positive_infinity_is_never_ready() {
+        let deadline = super::Deadline::after_secs_f64(f64::INFINITY).unwrap();
+        assert!(!deadline.is_ready());
+        assert!(deadline.is_never());
+        assert_eq!(deadline.ready_at(), None);
     }
 }

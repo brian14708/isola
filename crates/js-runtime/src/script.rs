@@ -506,13 +506,29 @@ impl Scope {
                 return Ok(());
             }
 
-            js_to_cbor_emit(value, EmitType::PartialResult, &mut *callback).map_err(|e| {
-                Error::Js {
-                    cause: e,
-                    stack: None,
-                }
-            })?;
+            if let Err(cause) = js_to_cbor_emit(value, EmitType::PartialResult, &mut *callback) {
+                let _ = self.close_async_iterator(ctx, iter);
+                return Err(Error::Js { cause, stack: None });
+            }
         }
+    }
+
+    fn close_async_iterator<'js>(&self, ctx: &Ctx<'js>, iter: &Value<'js>) -> Result<()> {
+        let close: Function<'_> = ctx
+            .eval(
+                "(function(g) { return typeof g.return === 'function' ? g.return.call(g) : undefined; })",
+            )
+            .map_err(|_| Error::from_js_catch(ctx))?;
+        let result: Value<'_> = close
+            .call((iter.clone(),))
+            .map_err(|_| Error::from_js_catch(ctx))?;
+
+        if let Some(promise) = result.as_promise() {
+            let _ = self.drive_promise(ctx, promise, false)?;
+        } else {
+            self.checkpoint(ctx)?;
+        }
+        Ok(())
     }
 
     fn is_serializable(val: &Value<'_>) -> bool {

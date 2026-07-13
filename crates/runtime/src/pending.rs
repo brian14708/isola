@@ -182,7 +182,7 @@ impl Registry {
                 self.next_sequence = self.next_sequence.wrapping_add(1);
                 self.deadlines.push(Reverse((ready_at, sequence, handle)));
                 self.refresh_deadlines(Instant::now());
-            } else {
+            } else if deadline.is_ready() {
                 self.mark_ready(handle);
             }
         }
@@ -273,6 +273,12 @@ impl Registry {
         self.deadlines
             .peek()
             .map(|Reverse((ready_at, _, _))| *ready_at)
+    }
+
+    fn has_never_deadline(&self) -> bool {
+        self.operations
+            .values()
+            .any(|operation| matches!(operation, Operation::Sleep(deadline) if deadline.is_never()))
     }
 
     fn complete(&mut self, handle: u32, response: Response) {
@@ -448,9 +454,12 @@ pub fn drive_pending(mut step: impl FnMut() -> Drive) -> bool {
                 let has_running =
                     OPERATIONS.with(|operations| !operations.borrow().abort_handles.is_empty());
                 if has_running
-                    && let Some(completion) =
-                        wait_for_completion(&mut in_flight, Some(Instant::now() + FAIRNESS_YIELD))
-                            .await
+                    && let Some(completion) = wait_for_completion(
+                        &mut in_flight,
+                        Some(Instant::now() + FAIRNESS_YIELD),
+                        false,
+                    )
+                    .await
                 {
                     made_progress |= complete(completion);
                     made_progress |= drain_completed(&mut in_flight);
@@ -458,13 +467,20 @@ pub fn drive_pending(mut step: impl FnMut() -> Drive) -> bool {
                 continue;
             }
 
-            let deadline =
-                OPERATIONS.with(|operations| operations.borrow_mut().next_deadline(Instant::now()));
-            if in_flight.is_empty() && deadline.is_none() {
+            let (deadline, has_never_deadline) = OPERATIONS.with(|operations| {
+                let mut operations = operations.borrow_mut();
+                (
+                    operations.next_deadline(Instant::now()),
+                    operations.has_never_deadline(),
+                )
+            });
+            if in_flight.is_empty() && deadline.is_none() && !has_never_deadline {
                 return made_progress;
             }
 
-            let Some(completion) = wait_for_completion(&mut in_flight, deadline).await else {
+            let Some(completion) =
+                wait_for_completion(&mut in_flight, deadline, has_never_deadline).await
+            else {
                 return made_progress;
             };
             made_progress |= complete(completion);
@@ -488,6 +504,7 @@ fn drain_completed(in_flight: &mut InFlightSet) -> bool {
 async fn wait_for_completion(
     in_flight: &mut InFlightSet,
     deadline: Option<Instant>,
+    wait_forever: bool,
 ) -> Option<Completion> {
     loop {
         let completion = if let Some(deadline) = deadline {
@@ -505,6 +522,9 @@ async fn wait_for_completion(
                 Either::Left((completion, _timer)) => completion?,
                 Either::Right(((), _operation)) => return Some(Completion::Deadline),
             }
+        } else if in_flight.is_empty() && wait_forever {
+            monotonic_clock::wait_for(u64::MAX).await;
+            return Some(Completion::Deadline);
         } else {
             in_flight.next().await?
         };

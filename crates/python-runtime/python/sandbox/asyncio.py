@@ -134,8 +134,27 @@ class PollLoop(asyncio.AbstractEventLoop):
             self.call_soon(self._finalize_asyncgen, generator)
 
     def _finalize_asyncgen(self, generator: AsyncGenerator[object]) -> None:
+        task = self.create_task(generator.aclose())
+
+        def closed(task: asyncio.Future[None]) -> None:
+            self._asyncgen_close_done(generator, task)
+
+        task.add_done_callback(closed)
+
+    def _asyncgen_close_done(
+        self,
+        generator: AsyncGenerator[object],
+        task: asyncio.Future[None],
+    ) -> None:
+        if task.cancelled():
+            return
         self._finalizing_asyncgens.discard(generator)
-        _ = self.create_task(generator.aclose())
+        if (exception := task.exception()) is not None:
+            self.call_exception_handler({
+                "message": "error while closing async generator",
+                "exception": exception,
+                "asyncgen": generator,
+            })
 
     def _retain_asyncgens_for_shutdown(self) -> None:
         # Keep active generators alive after their top-level loop turn so
@@ -150,6 +169,7 @@ class PollLoop(asyncio.AbstractEventLoop):
 
         def step() -> bool:
             while True:
+                self._release_cancelled_wakers()
                 servicing_ready = False
                 waiting_before_callbacks = False
                 if self.wakers:
@@ -157,7 +177,16 @@ class PollLoop(asyncio.AbstractEventLoop):
                     servicing_ready = any(readyset)
                     self._dispatch_ready(readyset)
                     waiting_before_callbacks = bool(self.wakers)
-                if task.done() or not self.running:
+                if not self.running:
+                    return False
+                if task.done():
+                    # Match asyncio.run_until_complete(): callbacks queued in the
+                    # task's final turn run once before the loop stops. Work they
+                    # enqueue is left for shutdown instead of extending the turn.
+                    for _ in range(len(self.handles)):
+                        handle = self.handles.popleft()
+                        if not handle._cancelled:  # noqa: SLF001
+                            handle._run()  # noqa: SLF001
                     return False
                 if not self.handles:
                     break
@@ -178,6 +207,22 @@ class PollLoop(asyncio.AbstractEventLoop):
             msg = "Deadlock detected"
             raise RuntimeError(msg)
         return task.result()
+
+    def _release_cancelled_wakers(self) -> None:
+        active: list[
+            tuple[
+                _isola_sys.Pollable[None],
+                _isola_sys.Pollable[object],
+                asyncio.Future[object] | asyncio.Handle,
+            ]
+        ] = []
+        for subscription, pollable, waker in self.wakers:
+            if waker.cancelled():
+                pollable.release()
+                subscription.release()
+            else:
+                active.append((subscription, pollable, waker))
+        self.wakers = active
 
     def _dispatch_ready(self, readyset: bytes) -> None:
         new_wakers: list[

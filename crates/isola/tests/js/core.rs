@@ -465,6 +465,51 @@ async fn integration_js_async_generator_streaming() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_async_generator_closes_after_serialization_error() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "let finalized = false;\n\
+             async function* invalid() {\n\
+             \ttry {\n\
+             \t\tyield Symbol('invalid');\n\
+             \t} finally {\n\
+             \t\tfinalized = true;\n\
+             \t}\n\
+             }\n\
+             function observe() { return finalized; }",
+            NoopOutputSink::shared(),
+        )
+        .await
+        .context("failed to evaluate async generator cleanup script")?;
+
+    call_with_timeout(&mut sandbox, "invalid", [], Duration::from_secs(2))
+        .await
+        .expect_err("non-serializable generator output should fail");
+    let output = call_with_timeout(&mut sandbox, "observe", [], Duration::from_secs(2))
+        .await
+        .context("failed to observe async generator cleanup")?;
+    let finalized: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode async generator cleanup state")?;
+
+    assert!(finalized, "async generator finally block did not run");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_promise_all_pure() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
