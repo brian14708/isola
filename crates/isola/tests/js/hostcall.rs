@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
+use isola::{host::OutputTarget, sandbox::SandboxOptions};
 
 use super::common::{TestHost, build_module};
 
@@ -15,7 +15,7 @@ async fn assert_echo_hostcall(script: &str) -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate hostcall script")?;
 
@@ -67,7 +67,7 @@ async fn integration_js_unobserved_raw_hostcall_does_not_block() -> Result<()> {
                  _isola_sys.hostcall('delay', 0);\n\
                  return await hostcall('delay', 20);\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate raw hostcall script")?;
@@ -116,7 +116,7 @@ async fn integration_js_concurrent_hostcalls_overlap() -> Result<()> {
     );
 
     sandbox
-        .eval_script(&script, NoopOutputSink::shared())
+        .eval_script(&script, OutputTarget::discard())
         .await
         .context("failed to evaluate concurrency script")?;
 
@@ -168,7 +168,7 @@ async fn integration_js_async_generator_preserves_in_flight_hostcall() -> Result
                  yield fast;\n\
                  yield await slow;\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async generator hostcall script")?;
@@ -210,7 +210,7 @@ async fn integration_js_unawaited_hostcall_is_cancelled_at_call_boundary() -> Re
                  await _isola_sys.sleep(0.2);\n\
                  return leaked;\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate boundary cleanup script")?;

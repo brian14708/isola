@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use http_body::Frame;
 use isola::{
@@ -121,7 +120,6 @@ impl Env {
     }
 }
 
-#[async_trait]
 impl Host for Env {
     async fn hostcall(&self, call_type: &str, payload: Value) -> Result<Value, BoxError> {
         let handler = self

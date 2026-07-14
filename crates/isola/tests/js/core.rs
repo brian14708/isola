@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use futures::stream;
 use isola::{
-    host::NoopOutputSink,
+    host::OutputTarget,
     sandbox::{
         Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
     },
@@ -43,7 +43,7 @@ async fn integration_js_eval_and_call_roundtrip() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("function main() { return 42; }", NoopOutputSink::shared())
+        .eval_script("function main() { return 42; }", OutputTarget::discard())
         .await
         .context("failed to evaluate script")?;
 
@@ -81,7 +81,7 @@ async fn integration_js_sync_return_runs_microtask_checkpoint() -> Result<()> {
                  Promise.resolve().then(function () { result.checkpointed = true; });\n\
                  return result;\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate microtask checkpoint script")?;
@@ -115,7 +115,7 @@ async fn integration_js_streaming_output() -> Result<()> {
     sandbox
         .eval_script(
             "function* main() { for (let i = 0; i < 3; i++) { yield i; } }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate streaming script")?;
@@ -154,7 +154,7 @@ async fn integration_js_reinstantiate_smoke() -> Result<()> {
         sandbox
             .eval_script(
                 &format!("function main() {{ return {expected}; }}"),
-                NoopOutputSink::shared(),
+                OutputTarget::discard(),
             )
             .await
             .context("failed to evaluate script")?;
@@ -188,7 +188,7 @@ async fn integration_js_guest_exception_surface() -> Result<()> {
     sandbox
         .eval_script(
             "function main() { throw new Error('boom'); }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate exception script")?;
@@ -221,7 +221,7 @@ async fn integration_js_state_persists_within_sandbox() -> Result<()> {
     sandbox
         .eval_script(
             "let counter = 0;\nfunction main() { counter += 1; return counter; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate stateful script")?;
@@ -265,7 +265,7 @@ async fn integration_js_argument_cbor_path() -> Result<()> {
     sandbox
         .eval_script(
             "function main(i, opts) { return [i + 1, opts.s.toUpperCase()]; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate argument script")?;
@@ -298,7 +298,7 @@ async fn integration_js_typed_array_cbor_path() -> Result<()> {
     sandbox
         .eval_script(
             "function main() { return new Float32Array([1.5, -2.25]); }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await?;
     let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5)).await?;
@@ -323,7 +323,7 @@ async fn integration_js_return_object() -> Result<()> {
     sandbox
         .eval_script(
             "function main() { return { name: 'isola', version: 1 }; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate object return script")?;
@@ -361,7 +361,7 @@ async fn integration_js_emit_partial_results() -> Result<()> {
                  _isola_sys.emit('partial-2');\n\
                  return 'final';\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate emit script")?;
@@ -405,7 +405,7 @@ async fn integration_js_async_function_basic() -> Result<()> {
     sandbox
         .eval_script(
             "async function main() { return 42; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async script")?;
@@ -443,7 +443,7 @@ async fn integration_js_async_generator_streaming() -> Result<()> {
                  yield 'b';\n\
                  yield 'c';\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async generator script")?;
@@ -485,7 +485,7 @@ async fn integration_js_async_generator_closes_after_serialization_error() -> Re
              \t}\n\
              }\n\
              function observe() { return finalized; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async generator cleanup script")?;
@@ -525,7 +525,7 @@ async fn integration_js_promise_all_pure() -> Result<()> {
             "async function main() {\n\
                  return await Promise.resolve(99);\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate promise.all script")?;
@@ -579,7 +579,7 @@ async function main() {
 "#;
 
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate timeout script")?;
 
@@ -622,7 +622,7 @@ async function main() {
 }
 ";
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate sleep script")?;
 
@@ -666,7 +666,7 @@ async fn integration_js_oversized_sleep_is_rejected() -> Result<()> {
                  }\n\
                  return false;\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate oversized sleep script")?;
@@ -713,7 +713,7 @@ async function main() {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate mixed polling script")?;
 
@@ -774,7 +774,7 @@ async function main() {
 "#;
 
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate interval script")?;
 
@@ -824,7 +824,7 @@ async function main() {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate zero-delay interval script")?;
 
@@ -869,7 +869,7 @@ function main(values) {
 ";
 
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate stream-arg script")?;
 
@@ -910,7 +910,7 @@ async fn integration_js_typescript_eval_and_call_roundtrip() -> Result<()> {
     sandbox
         .eval_script(
             "function main(value: number): number { return value + 1; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate typescript script")?;
@@ -945,7 +945,7 @@ async fn integration_js_typescript_async_hostcall_roundtrip() -> Result<()> {
             "async function main(name: string): Promise<{ name: string }> {\n\
                  return await hostcall(\"echo\", { name } as { name: string });\n\
              }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate hostcall typescript script")?;
@@ -986,7 +986,7 @@ async fn integration_js_typescript_prelude_executes() -> Result<()> {
     sandbox
         .eval_script(
             "function main() { return preludeValue; }",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate consumer script")?;
@@ -1033,7 +1033,7 @@ async fn integration_js_typescript_eval_file_roundtrip() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_file("/workspace/guest.ts", NoopOutputSink::shared())
+        .eval_file("/workspace/guest.ts", OutputTarget::discard())
         .await
         .context("failed to evaluate typescript guest file")?;
 

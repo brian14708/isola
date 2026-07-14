@@ -20,10 +20,10 @@ use wasmtime_wasi_http::{
 
 use super::bindings::{EmitValue, HostView, add_to_linker};
 use crate::{
-    host::{Host, HttpRequest, LogContext, LogLevel, OutputSink},
+    host::{Host, HttpRequest, LogContext, LogLevel, OutputTarget},
     internal::{
         resource::MemoryLimiter,
-        trace_output::{LogSinkStore, TraceOutput, new_log_sink_store, set_log_sink},
+        trace_output::{LogTargetStore, TraceOutput, new_log_target_store, set_log_target},
         wasm,
     },
     sandbox::DirectoryMapping,
@@ -38,8 +38,8 @@ pub struct InstanceState<H: Host> {
     host: Arc<H>,
     http_hooks: InstanceHttpHooks<H>,
 
-    sink: Option<Arc<dyn OutputSink>>,
-    log_sink_store: LogSinkStore,
+    output_target: Option<OutputTarget>,
+    log_target_store: LogTargetStore,
     output_buffer: OutputBuffer,
 }
 
@@ -119,7 +119,7 @@ impl<H: Host> InstanceState<H> {
         max_memory: usize,
         host: H,
     ) -> wasmtime::Result<Store<Self>> {
-        let log_sink_store = new_log_sink_store();
+        let log_target_store = new_log_target_store();
         let mut builder = WasiCtxBuilder::new();
 
         for mapping in directory_mappings {
@@ -147,12 +147,12 @@ impl<H: Host> InstanceState<H> {
             .stdout(TraceOutput::new(
                 LogLevel::Stdout,
                 LogContext::Stdout,
-                Arc::clone(&log_sink_store),
+                Arc::clone(&log_target_store),
             ))
             .stderr(TraceOutput::new(
                 LogLevel::Stderr,
                 LogContext::Stderr,
-                Arc::clone(&log_sink_store),
+                Arc::clone(&log_target_store),
             ))
             .build();
         let limiter = MemoryLimiter::new(max_memory);
@@ -167,8 +167,8 @@ impl<H: Host> InstanceState<H> {
                 table: ResourceTable::new(),
                 host: Arc::clone(&host),
                 http_hooks: InstanceHttpHooks { host },
-                sink: None,
-                log_sink_store,
+                output_target: None,
+                log_target_store,
                 output_buffer: OutputBuffer::new(),
             },
         );
@@ -176,12 +176,12 @@ impl<H: Host> InstanceState<H> {
         Ok(s)
     }
 
-    pub fn set_sink(&mut self, sink: Option<Arc<dyn OutputSink>>) {
+    pub fn set_output_target(&mut self, target: Option<OutputTarget>) {
         // Prevent cross-call output leakage and avoid retaining large buffers if
         // the call traps or is interrupted mid-output.
         self.output_buffer.reset();
-        set_log_sink(&self.log_sink_store, sink.clone());
-        self.sink = sink;
+        set_log_target(&self.log_target_store, target.clone());
+        self.output_target = target;
     }
 
     #[expect(
@@ -297,8 +297,8 @@ impl<H: Host> HostView for InstanceState<H> {
     }
 
     async fn emit(&mut self, data: EmitValue) -> wasmtime::Result<()> {
-        let Some(sink) = self.sink.as_ref() else {
-            return Err(wasmtime::Error::msg("output sink missing"));
+        let Some(target) = self.output_target.as_ref() else {
+            return Err(wasmtime::Error::msg("output target missing"));
         };
 
         match data {
@@ -313,13 +313,15 @@ impl<H: Host> HostView for InstanceState<H> {
                 } else {
                     Some(Value::from(output))
                 };
-                sink.on_complete(output)
+                target
+                    .on_complete(output)
                     .await
                     .map_err(wasmtime::Error::from_boxed)
             }
             EmitValue::PartialResult(new_data) => {
                 let output = self.output_buffer.finish(new_data)?;
-                sink.on_item(Value::from(output))
+                target
+                    .on_item(Value::from(output))
                     .await
                     .map_err(wasmtime::Error::from_boxed)
             }
@@ -338,7 +340,7 @@ impl<H: Host> wasm::logging::HostView for InstanceState<H> {
         context: &str,
         message: &str,
     ) -> wasmtime::Result<()> {
-        let sink_level = match log_level {
+        let base_level = match log_level {
             wasm::logging::bindings::logging::Level::Trace => LogLevel::Trace,
             wasm::logging::bindings::logging::Level::Debug => LogLevel::Debug,
             wasm::logging::bindings::logging::Level::Info => LogLevel::Info,
@@ -346,18 +348,19 @@ impl<H: Host> wasm::logging::HostView for InstanceState<H> {
             wasm::logging::bindings::logging::Level::Error => LogLevel::Error,
             wasm::logging::bindings::logging::Level::Critical => LogLevel::Critical,
         };
-        let sink_context = match context {
+        let output_context = match context {
             "stdout" => LogContext::Stdout,
             "stderr" => LogContext::Stderr,
             _ => LogContext::Other(context),
         };
-        let sink_level = match sink_context {
+        let output_level = match output_context {
             LogContext::Stdout => LogLevel::Stdout,
             LogContext::Stderr => LogLevel::Stderr,
-            LogContext::Other(_) => sink_level,
+            LogContext::Other(_) => base_level,
         };
-        if let Some(sink) = self.sink.clone() {
-            sink.on_log(sink_level, sink_context, message)
+        if let Some(target) = self.output_target.clone() {
+            target
+                .on_log(output_level, output_context, message)
                 .await
                 .map_err(wasmtime::Error::from_boxed)?;
         }
@@ -437,7 +440,10 @@ mod tests {
         Box::pin(futures::stream::empty::<Result<Frame<Bytes>, BoxError>>())
     }
 
-    #[async_trait::async_trait]
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the test host implements the asynchronous callback contract"
+    )]
     impl Host for ScriptedHost {
         async fn hostcall(
             &self,
@@ -486,8 +492,8 @@ mod tests {
             http_hooks: InstanceHttpHooks {
                 host: Arc::clone(&host),
             },
-            sink: None,
-            log_sink_store: Arc::new(Mutex::new(None)),
+            output_target: None,
+            log_target_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
         };
 
@@ -552,8 +558,8 @@ mod tests {
             http_hooks: InstanceHttpHooks {
                 host: Arc::clone(&host),
             },
-            sink: None,
-            log_sink_store: Arc::new(Mutex::new(None)),
+            output_target: None,
+            log_target_store: Arc::new(Mutex::new(None)),
             output_buffer: OutputBuffer::new(),
         };
 

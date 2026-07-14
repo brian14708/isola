@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
+use isola::{host::OutputTarget, sandbox::SandboxOptions};
 
 use super::common::{TestHost, build_module};
 
@@ -16,7 +16,7 @@ async fn run_case(method: &str, script: &str) -> Result<()> {
         .with_context(|| format!("failed to instantiate sandbox for `{method}`"))?;
 
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .with_context(|| format!("failed to evaluate third party script for `{method}`"))?;
 

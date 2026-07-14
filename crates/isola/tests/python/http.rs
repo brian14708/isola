@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use isola::{
-    host::NoopOutputSink,
+    host::OutputTarget,
     sandbox::{Arg, CallOutput, Sandbox, SandboxOptions, args},
 };
 use wiremock::{
@@ -73,7 +73,7 @@ def main(url):
         return resp.text()
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate http fetch script")?;
 
@@ -154,7 +154,7 @@ def main(url):
     return (len(body), body[0], body[-1], oversized_error)
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate large-response script")?;
 
@@ -221,7 +221,7 @@ def main(url):
         return resp.text()  # response still readable afterwards
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate zero-length read script")?;
 
@@ -287,7 +287,7 @@ def main(url):
     return (first_status, second_status)
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate status script")?;
 
@@ -358,7 +358,7 @@ def main(url):
         return resp.status
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate multipart script")?;
 
@@ -421,7 +421,7 @@ def main(url):
             return str(e)
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate read-twice script")?;
 
@@ -485,7 +485,7 @@ def main(url):
         return str(e)
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate timeout script")?;
 

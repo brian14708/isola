@@ -1,17 +1,12 @@
-use std::sync::Arc;
-
-use parking_lot::Mutex;
 use wasmtime::Store;
 
 use crate::{
-    host::{BoxError, Host, OutputSink},
+    host::{Host, OutputTarget},
     internal::sandbox::InstanceState,
-    sandbox::CallOutput,
-    value::Value as IsolaValue,
 };
 
-/// RAII guard that clears the output sink when dropped, even if the call panics
-/// or returns early.
+/// RAII guard that clears the output target when dropped, even if the call
+/// panics or returns early.
 pub struct CallCleanup<'a, H: Host> {
     pub store: &'a mut Store<InstanceState<H>>,
 }
@@ -21,15 +16,15 @@ impl<'a, H: Host> CallCleanup<'a, H> {
         Self { store }
     }
 
-    pub fn set_sink(&mut self, sink: Arc<dyn OutputSink>) {
-        self.store.data_mut().set_sink(Some(sink));
+    pub fn set_output_target(&mut self, target: OutputTarget) {
+        self.store.data_mut().set_output_target(Some(target));
     }
 }
 
 impl<H: Host> Drop for CallCleanup<'_, H> {
     fn drop(&mut self) {
         // Cleanup only; explicit flush is handled by call sites.
-        self.store.data_mut().set_sink(None);
+        self.store.data_mut().set_output_target(None);
     }
 }
 
@@ -58,18 +53,5 @@ impl<H: Host> wasmtime::AsContext for CallCleanup<'_, H> {
 impl<H: Host> wasmtime::AsContextMut for CallCleanup<'_, H> {
     fn as_context_mut(&mut self) -> wasmtime::StoreContextMut<'_, Self::Data> {
         wasmtime::AsContextMut::as_context_mut(&mut *self.store)
-    }
-}
-
-#[async_trait::async_trait]
-impl OutputSink for Mutex<CallOutput> {
-    async fn on_item(&self, value: IsolaValue) -> core::result::Result<(), BoxError> {
-        self.lock().items.push(value);
-        Ok(())
-    }
-
-    async fn on_complete(&self, value: Option<IsolaValue>) -> core::result::Result<(), BoxError> {
-        self.lock().result = value;
-        Ok(())
     }
 }

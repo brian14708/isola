@@ -9,21 +9,31 @@ use bytes::BytesMut;
 #[cfg(feature = "serde")]
 use serde::{Serialize, de::DeserializeOwned, ser::SerializeMap, ser::SerializeSeq};
 
-/// Opaque Isola runtime value represented as CBOR bytes.
+/// Opaque value exchanged with a guest as CBOR bytes.
+///
+/// Raw construction with [`Value::from_cbor`] does not validate the bytes.
+/// Use `Value::from_serde` or `Value::from_json_str` when the `serde` feature
+/// is enabled to construct validated values from Rust data.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Value(Bytes);
 
 impl Value {
+    /// Wrap CBOR bytes without parsing or validating them.
+    ///
+    /// Malformed data is accepted here and will fail when a consumer attempts
+    /// to decode it.
     #[must_use]
     pub fn from_cbor(value: impl Into<Bytes>) -> Self {
         Self(value.into())
     }
 
+    /// Borrow the encoded CBOR bytes.
     #[must_use]
     pub fn as_cbor(&self) -> &[u8] {
         self.0.as_ref()
     }
 
+    /// Consume this value and return its encoded CBOR bytes.
     #[must_use]
     pub fn into_cbor(self) -> Bytes {
         self.0
@@ -42,13 +52,15 @@ impl Value {
 
     /// Convert a runtime `Value` into a JSON value.
     ///
+    /// This uses the same CBOR-to-JSON mapping as [`Value::to_json_str`].
+    ///
     /// # Errors
     /// Returns an error if CBOR parsing or JSON parsing fails.
     pub fn to_json_value(&self) -> Result<serde_json::Value, Error> {
         serde_json::from_slice(&self.to_json_bytes()?).map_err(Error::from)
     }
 
-    /// Convert a JSON string into a runtime `Value`.
+    /// Alias for [`Value::from_json_str`].
     ///
     /// # Errors
     /// Returns an error if JSON parsing or CBOR serialization fails.
@@ -67,7 +79,7 @@ impl Value {
         Ok(Self(serializer.into_encoder().into_writer().freeze()))
     }
 
-    /// Convert a runtime `Value` into a JSON string.
+    /// Alias for [`Value::to_json_str`].
     ///
     /// # Errors
     /// Returns an error if CBOR parsing or JSON serialization fails.
@@ -76,6 +88,11 @@ impl Value {
     }
 
     /// Convert a runtime `Value` into a JSON string.
+    ///
+    /// CBOR byte strings and recognized CBOR typed arrays become base64-encoded
+    /// JSON strings. CBOR `undefined` becomes JSON `null`. Unsupported CBOR
+    /// tags, malformed or trailing data, and values nested more than 128 levels
+    /// return an error.
     ///
     /// # Errors
     /// Returns an error if CBOR parsing or JSON serialization fails.
@@ -394,18 +411,25 @@ impl Serialize for TaggedCborValue<'_, '_> {
 }
 
 #[cfg(feature = "serde")]
+/// Error converting a [`Value`] to or from serde and JSON representations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// JSON input could not be parsed or a JSON value could not be produced.
     #[error("JSON serialization error")]
     Json(#[from] serde_json::Error),
+    /// CBOR bytes could not be deserialized into the requested Rust type.
     #[error("CBOR decode error")]
     CborDecode(#[from] minicbor_serde::error::DecodeError),
+    /// A Rust value could not be serialized as CBOR.
     #[error("CBOR encode error")]
     CborEncode(#[from] minicbor_serde::error::EncodeError<std::convert::Infallible>),
+    /// CBOR could not be represented as JSON.
     #[error("CBOR to JSON transcoding error: {0}")]
     Transcode(String),
+    /// Generated JSON bytes were not valid UTF-8.
     #[error("UTF-8 encoding error")]
     Utf8(#[from] std::string::FromUtf8Error),
+    /// Writing the converted representation failed.
     #[error("I/O error")]
     Io(#[from] io::Error),
 }

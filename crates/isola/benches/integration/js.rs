@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion};
 use isola::{
-    host::NoopOutputSink,
+    host::OutputTarget,
     sandbox::{Arg, Sandbox, SandboxOptions},
     value::Value,
 };
@@ -46,7 +46,7 @@ pub fn bench(c: &mut Criterion, runtime: &Runtime) {
                      }\n\
                      function consume(payload) { return payload.length; }\n\
                      async function roundtrip(payload) { return await hostcall('echo', payload); }",
-                    NoopOutputSink::shared(),
+                    OutputTarget::discard(),
                 )
                 .await
                 .expect("failed to evaluate javascript script");

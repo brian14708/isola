@@ -1611,7 +1611,6 @@ name = "isola-c-api"
 version = "0.5.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "bytes",
  "cbindgen",
  "http",
@@ -1651,7 +1650,6 @@ dependencies = [
 name = "isola-js-sdk"
 version = "0.5.0"
 dependencies = [
- "async-trait",
  "bytes",
  "futures",
  "http",
@@ -1690,7 +1688,6 @@ dependencies = [
 name = "isola-python-sdk"
 version = "0.5.0"
 dependencies = [
- "async-trait",
  "bytes",
  "futures",
  "http",

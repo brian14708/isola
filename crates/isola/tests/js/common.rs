@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use async_trait::async_trait;
 use futures::TryStreamExt;
 use http::header::HOST;
 use isola::{
@@ -28,7 +27,6 @@ impl Default for TestHost {
     }
 }
 
-#[async_trait]
 impl Host for TestHost {
     async fn hostcall(
         &self,

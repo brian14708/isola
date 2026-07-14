@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use isola::{
-    host::{BoxError, LogContext, LogLevel, OutputSink},
+    host::{BoxError, LogLevel, OutputEvent, OutputTarget},
     sandbox::{Arg, Sandbox},
     value::Value,
 };
@@ -43,7 +42,7 @@ pub struct RunResult {
 }
 
 // ---------------------------------------------------------------------------
-// OutputCollector (implements OutputSink)
+// OutputCollector
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]
@@ -128,49 +127,46 @@ impl OutputCollector {
     }
 }
 
-#[async_trait]
-impl OutputSink for OutputCollector {
-    async fn on_item(&self, item: Value) -> std::result::Result<(), BoxError> {
-        let text = item.to_json_str().map_err(|e| -> BoxError {
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        })?;
-        self.emit(CallbackEvent::Result, Some(&text));
-        self.record(|data| data.result_json.push(text));
-        Ok(())
+impl OutputCollector {
+    fn target(&self) -> OutputTarget {
+        let collector = self.clone();
+        OutputTarget::synchronous(move |event| collector.handle_event(event))
     }
 
-    async fn on_complete(&self, item: Option<Value>) -> std::result::Result<(), BoxError> {
-        if let Some(item) = item {
-            let text = item.to_json_str().map_err(|e| -> BoxError {
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            })?;
-            self.emit(CallbackEvent::End, Some(&text));
-            self.record(|data| data.final_json = Some(text));
-        } else {
-            self.emit(CallbackEvent::End, None);
-        }
-        Ok(())
-    }
-
-    async fn on_log(
-        &self,
-        level: LogLevel,
-        _log_context: LogContext<'_>,
-        message: &str,
-    ) -> std::result::Result<(), BoxError> {
-        match level {
-            LogLevel::Stdout => {
-                self.record(|data| data.stdout.push(message.to_string()));
-                self.emit(CallbackEvent::Stdout, Some(message));
+    fn handle_event(&self, event: OutputEvent) -> std::result::Result<(), BoxError> {
+        match event {
+            OutputEvent::Item(item) => {
+                let text = item.to_json_str().map_err(|e| -> BoxError {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?;
+                self.emit(CallbackEvent::Result, Some(&text));
+                self.record(|data| data.result_json.push(text));
             }
-            LogLevel::Stderr => {
-                self.record(|data| data.stderr.push(message.to_string()));
-                self.emit(CallbackEvent::Stderr, Some(message));
+            OutputEvent::Complete(item) => {
+                if let Some(item) = item {
+                    let text = item.to_json_str().map_err(|e| -> BoxError {
+                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    })?;
+                    self.emit(CallbackEvent::End, Some(&text));
+                    self.record(|data| data.final_json = Some(text));
+                } else {
+                    self.emit(CallbackEvent::End, None);
+                }
             }
-            _ => {
-                self.record(|data| data.logs.push(message.to_string()));
-                self.emit(CallbackEvent::Log, Some(message));
+            OutputEvent::Log { level, message, .. } => {
+                let callback_event = match level {
+                    LogLevel::Stdout => CallbackEvent::Stdout,
+                    LogLevel::Stderr => CallbackEvent::Stderr,
+                    _ => CallbackEvent::Log,
+                };
+                self.emit(callback_event, Some(&message));
+                self.record(|data| match level {
+                    LogLevel::Stdout => data.stdout.push(message),
+                    LogLevel::Stderr => data.stderr.push(message),
+                    _ => data.logs.push(message),
+                });
             }
+            _ => {}
         }
         Ok(())
     }
@@ -549,7 +545,7 @@ impl SandboxCore {
         let (mut lease, callback) = take_running_lease(&inner)?;
 
         let collector = OutputCollector::new(callback);
-        let sink = Arc::new(collector.clone());
+        let sink = collector.target();
         let outcome = lease.sandbox_mut().eval_script(&code, sink).await;
         if let Err(err) = outcome {
             let message = format!("Script loading failed: {err}");
@@ -567,7 +563,7 @@ impl SandboxCore {
         let parsed_args = parse_run_args(args).map_err(napi::Error::from)?;
 
         let collector = OutputCollector::new(callback);
-        let sink = Arc::new(collector.clone());
+        let sink = collector.target();
         let isola_args = parsed_args
             .into_iter()
             .map(|arg| match arg {
@@ -627,7 +623,7 @@ impl SandboxCore {
             .map_err(napi::Error::from)?;
 
         let collector = OutputCollector::new(callback);
-        let sink = Arc::new(collector.clone());
+        let sink = collector.target();
 
         let outcome = lease
             .sandbox_mut()

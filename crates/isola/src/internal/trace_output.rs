@@ -15,24 +15,24 @@ use wasmtime_wasi::{
     p2::{OutputStream, Pollable, StreamError, StreamResult},
 };
 
-use crate::host::{LogContext, LogLevel, OutputSink};
+use crate::host::{LogContext, LogLevel, OutputTarget};
 
 pub struct TraceOutput {
     level: LogLevel,
     context: LogContext<'static>,
-    sink_store: LogSinkStore,
+    target_store: LogTargetStore,
 }
 
 impl TraceOutput {
     pub const fn new(
         level: LogLevel,
         context: LogContext<'static>,
-        sink_store: LogSinkStore,
+        target_store: LogTargetStore,
     ) -> Self {
         Self {
             level,
             context,
-            sink_store,
+            target_store,
         }
     }
 }
@@ -47,7 +47,7 @@ impl StdoutStream for TraceOutput {
         Box::new(TraceOutputStream {
             level: self.level,
             context: self.context,
-            sink_store: Arc::clone(&self.sink_store),
+            target_store: Arc::clone(&self.target_store),
             buffer: SmallVec::new(),
             in_flight: None,
             last_error: None,
@@ -64,7 +64,7 @@ impl IsTerminal for TraceOutput {
 pub struct TraceOutputStream {
     level: LogLevel,
     context: LogContext<'static>,
-    sink_store: LogSinkStore,
+    target_store: LogTargetStore,
     buffer: SmallVec<[u8; MAX_BUFFER + MAX_UTF8_BYTES]>,
     in_flight: Option<wasmtime_wasi::runtime::AbortOnDropJoinHandle<wasmtime::Result<()>>>,
     last_error: Option<wasmtime::Error>,
@@ -86,14 +86,15 @@ impl TraceOutputStream {
             return Ok(());
         }
 
-        let Some(sink) = self.sink_store.lock().clone() else {
+        let Some(target) = self.target_store.lock().clone() else {
             return Ok(());
         };
 
         let level = self.level;
         let context = self.context;
         let mut future = Box::pin(async move {
-            sink.on_log(level, context, &message)
+            target
+                .on_log(level, context, &message)
                 .await
                 .map_err(wasmtime::Error::from_boxed)
         });
@@ -219,16 +220,16 @@ impl OutputStream for TraceOutputStream {
     }
 }
 
-pub type LogSinkStore = Arc<Mutex<Option<Arc<dyn OutputSink>>>>;
+pub type LogTargetStore = Arc<Mutex<Option<OutputTarget>>>;
 
 #[must_use]
-pub fn new_log_sink_store() -> LogSinkStore {
+pub fn new_log_target_store() -> LogTargetStore {
     Arc::new(Mutex::new(None))
 }
 
-pub fn set_log_sink(store: &LogSinkStore, sink: Option<Arc<dyn OutputSink>>) {
+pub fn set_log_target(store: &LogTargetStore, target: Option<OutputTarget>) {
     let mut guard = store.lock();
-    *guard = sink;
+    *guard = target;
 }
 
 #[cfg(test)]
@@ -239,7 +240,7 @@ mod tests {
         TraceOutputStream {
             level: LogLevel::Info,
             context: LogContext::Other("test"),
-            sink_store: new_log_sink_store(),
+            target_store: new_log_target_store(),
             buffer: SmallVec::new(),
             in_flight: None,
             last_error: None,

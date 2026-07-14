@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, sync::Arc};
 
-use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream;
 use http_body::Frame;
@@ -174,7 +173,6 @@ impl Env {
     }
 }
 
-#[async_trait]
 impl Host for Env {
     async fn hostcall(
         &self,

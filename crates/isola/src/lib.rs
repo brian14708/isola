@@ -1,13 +1,38 @@
-//! Isola runtime embedding APIs.
+#![warn(missing_docs, rustdoc::all)]
+
+//! Embed Isola WebAssembly sandboxes in a Rust application.
 //!
-//! This crate exposes three public modules:
-//! - [`sandbox`]: build/load guest templates and run sandboxes.
-//! - [`host`]: host-side traits for hostcalls, HTTP, and output sinks.
-//! - [`value`]: opaque CBOR values exchanged across the host/guest boundary.
+//! Isola runs Python or JavaScript guest code from an Isola runtime bundle.
+//! The crate supplies the embedding API; the language runtime itself is a
+//! separate WebAssembly component. Host applications explicitly provide the
+//! capabilities available to a guest through [`host::Host`], filesystem
+//! mounts, and environment variables.
+//!
+//! # Lifecycle
+//!
+//! 1. Configure and compile a reusable [`sandbox::SandboxTemplate`].
+//! 2. Instantiate an isolated [`sandbox::Sandbox`] with a host implementation
+//!    and optional per-instance policy overrides.
+//! 3. Load guest source with [`sandbox::Sandbox::eval_script`] or
+//!    [`sandbox::Sandbox::eval_file`].
+//! 4. Invoke guest functions with [`sandbox::Sandbox::call`] or stream their
+//!    output through [`sandbox::Sandbox::call_with_sink`].
+//!
+//! Compiling a template is the expensive step. A template is immutable and can
+//! be reused to create many sandboxes, while each sandbox keeps independent
+//! guest state.
+//!
+//! The public API is grouped into three modules:
+//!
+//! - [`sandbox`] builds templates and manages guest execution.
+//! - [`host`] defines hostcalls, HTTP forwarding, and output delivery.
+//! - [`value`] converts the CBOR values exchanged at the host/guest boundary.
 //!
 //! # Quickstart
 //!
-//! Download and extract the Python runtime bundle first:
+//! This example uses the default `serde` feature. Download and extract the
+//! Python runtime bundle first:
+//!
 //! ```bash
 //! VERSION=v0.x.y
 //! curl -L -o isola-python-runtime.tar.gz "https://github.com/brian14708/isola/releases/download/${VERSION}/isola-python-runtime.tar.gz"
@@ -18,17 +43,20 @@
 //! `lib/`. Point `.build(...)` and `.mount(...)` at those extracted paths.
 //!
 //! ```no_run
+//! # #[cfg(feature = "serde")]
 //! use isola::{
-//!     host::{Host, NoopOutputSink},
+//!     host::{Host, OutputTarget},
 //!     sandbox::{DirPerms, FilePerms, SandboxOptions, SandboxTemplate, args},
 //! };
 //!
+//! # #[cfg(feature = "serde")]
 //! #[derive(Clone, Default)]
 //! struct MyHost;
 //!
-//! #[async_trait::async_trait]
+//! # #[cfg(feature = "serde")]
 //! impl Host for MyHost {}
 //!
+//! # #[cfg(feature = "serde")]
 //! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let template = SandboxTemplate::builder()
@@ -48,7 +76,7 @@
 //!         .await?;
 //!
 //!     sandbox
-//!         .eval_script("def add(a, b):\n\treturn a + b", NoopOutputSink::shared())
+//!         .eval_script("def add(a, b):\n\treturn a + b", OutputTarget::discard())
 //!         .await?;
 //!
 //!     let output = sandbox.call("add", args!(1_i64, 2_i64)?).await?;
@@ -60,7 +88,14 @@
 //!
 //!     Ok(())
 //! }
+//! # #[cfg(not(feature = "serde"))]
+//! # fn main() {}
 //! ```
+//!
+//! # Cargo features
+//!
+//! - **`serde`** (enabled by default): adds serde and JSON conversion methods
+//!   to [`value::Value`] and exports the `args!` macro.
 
 /// Host integration traits and transport types.
 pub mod host;

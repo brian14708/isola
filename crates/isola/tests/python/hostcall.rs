@@ -1,7 +1,7 @@
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use isola::{host::NoopOutputSink, sandbox::SandboxOptions};
+use isola::{host::OutputTarget, sandbox::SandboxOptions};
 
 use super::common::{TestHost, build_module};
 
@@ -21,7 +21,7 @@ async fn integration_python_async_hostcall_echo() -> Result<()> {
             "from sandbox.asyncio import hostcall\n\
              async def main():\n\
              \treturn await hostcall(\"echo\", [1, 2, 3])",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async hostcall script")?;
@@ -64,7 +64,7 @@ async fn integration_python_unobserved_raw_hostcall_does_not_block() -> Result<(
              async def main():\n\
              \t_isola_sys.hostcall('delay', 0)\n\
              \treturn await hostcall('delay', 20)",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate raw hostcall script")?;
@@ -104,7 +104,7 @@ async fn integration_python_stale_handle_cannot_release_replacement() -> Result<
              \tsecond = _isola_sys.hostcall(\"echo\", 2)\n\
              \tfirst.release()\n\
              \treturn second.wait()",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate stale handle script")?;
@@ -147,7 +147,7 @@ async fn integration_python_high_fanout_hostcalls_complete() -> Result<()> {
          \treturn [len(result), result[0], result[-1]]"
     );
     sandbox
-        .eval_script(&script, NoopOutputSink::shared())
+        .eval_script(&script, OutputTarget::discard())
         .await
         .context("failed to evaluate high-fanout hostcall script")?;
 
@@ -186,7 +186,7 @@ async fn integration_python_async_generator_preserves_in_flight_hostcall() -> Re
              \tfast = await hostcall('delay', 10)\n\
              \tyield fast\n\
              \tyield await slow",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate async generator hostcall script")?;
@@ -225,7 +225,7 @@ async fn integration_python_expired_timer_does_not_leave_ready_sleep() -> Result
              \tloop = asyncio.get_running_loop()\n\
              \tloop.call_later(1e-9, lambda: None)\n\
              \treturn await hostcall('echo', 42)",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate expired timer script")?;
@@ -267,7 +267,7 @@ async fn integration_python_timeout_cancels_slow_hostcall_promptly() -> Result<(
              \texcept TimeoutError:\n\
              \t\treturn asyncio.get_running_loop().time() - start\n\
              \treturn -1.0",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate hostcall timeout script")?;
@@ -319,7 +319,7 @@ async fn integration_python_cancelled_waiter_releases_hostcall() -> Result<()> {
              \texcept TypeError:\n\
              \t\treturn True\n\
              \treturn False",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate waiter cancellation script")?;

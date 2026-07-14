@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use isola::{
-    host::NoopOutputSink,
+    host::OutputTarget,
     sandbox::{Arg, CallOutput, Sandbox, SandboxOptions, args},
 };
 use wiremock::{
@@ -71,7 +71,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate http fetch script")?;
 
@@ -152,7 +152,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate large-response script")?;
 
@@ -227,7 +227,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate status script")?;
 
@@ -298,7 +298,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate concurrent fetch script")?;
 
@@ -361,7 +361,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate json body script")?;
 
@@ -434,7 +434,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate delayed concurrent script")?;
 
@@ -507,7 +507,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate headers/request script")?;
 
@@ -573,7 +573,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate bodyUsed script")?;
 
@@ -631,7 +631,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate abort script")?;
 
@@ -693,7 +693,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate post-dispatch abort script")?;
 
@@ -746,7 +746,7 @@ function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate GET body script")?;
 
@@ -809,7 +809,7 @@ async function main(url) {
 }
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate URLSearchParams script")?;
 

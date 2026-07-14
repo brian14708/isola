@@ -119,7 +119,10 @@ async fn compile_serialized_component(
 
 struct CompileHost;
 
-#[async_trait::async_trait]
+#[expect(
+    clippy::unused_async_trait_impl,
+    reason = "the host contract is asynchronous even when compilation rejects requests immediately"
+)]
 impl Host for CompileHost {
     async fn hostcall(
         &self,

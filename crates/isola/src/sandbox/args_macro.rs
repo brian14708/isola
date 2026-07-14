@@ -1,3 +1,38 @@
+/// Build guest function arguments from serde values and asynchronous streams.
+///
+/// The macro returns `Result<[Arg; N], value::Error>`, where `N` is the number
+/// of arguments. Regular values are encoded with
+/// [`Value::from_serde`](crate::value::Value::from_serde). Four forms are
+/// accepted:
+///
+/// - `value` for a positional value
+/// - `name = value` for a named value
+/// - `@stream(stream)` for a positional stream of
+///   [`Value`](crate::value::Value)
+/// - `name = @stream(stream)` for a named stream
+///
+/// # Examples
+///
+/// ```
+/// use futures::stream;
+/// use isola::{
+///     sandbox::{Arg, args},
+///     value::Value,
+/// };
+///
+/// let values = stream::iter([Value::from_serde(&1_i64)?]);
+/// let args = args![40_i64, increment = 2_i64, values = @stream(values)]?;
+///
+/// assert!(matches!(args[0], Arg::Positional(_)));
+/// assert!(matches!(args[1], Arg::Named(ref name, _) if name == "increment"));
+/// assert!(matches!(args[2], Arg::NamedStream(ref name, _) if name == "values"));
+/// # Ok::<(), isola::value::Error>(())
+/// ```
+///
+/// # Errors
+///
+/// Returns [`value::Error`](crate::value::Error) if a non-stream argument
+/// cannot be serialized to CBOR.
 #[macro_export]
 macro_rules! args {
     () => {

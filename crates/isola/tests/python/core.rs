@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use isola::{
-    host::{BoxError, LogContext, LogLevel, NoopOutputSink, OutputSink},
+    host::{OutputEvent, OutputTarget},
     sandbox::{
         Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
     },
@@ -24,31 +24,14 @@ impl CollectLogsSink {
     const fn new(logs: Arc<Mutex<Vec<(String, String)>>>) -> Self {
         Self { logs }
     }
-}
 
-#[async_trait::async_trait]
-impl OutputSink for CollectLogsSink {
-    async fn on_item(&self, _value: isola::value::Value) -> std::result::Result<(), BoxError> {
-        Ok(())
-    }
-
-    async fn on_complete(
-        &self,
-        _value: Option<isola::value::Value>,
-    ) -> std::result::Result<(), BoxError> {
-        Ok(())
-    }
-
-    async fn on_log(
-        &self,
-        level: LogLevel,
-        _log_context: LogContext<'_>,
-        message: &str,
-    ) -> std::result::Result<(), BoxError> {
-        self.logs
-            .lock()
-            .push((level.as_str().to_string(), message.to_string()));
-        Ok(())
+    fn into_target(self) -> OutputTarget {
+        OutputTarget::synchronous(move |event| {
+            if let OutputEvent::Log { level, message, .. } = event {
+                self.logs.lock().push((level.as_str().to_string(), message));
+            }
+            Ok(())
+        })
     }
 }
 
@@ -84,7 +67,7 @@ async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
     sandbox
         .eval_script(
             "def main():\n\tprint('trace-print')\n\treturn 42",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate script")?;
@@ -125,7 +108,7 @@ async fn integration_python_final_turn_callbacks_run() -> Result<()> {
              \treturn 'done'\n\
              def observe():\n\
              \treturn seen",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate final-turn callback script")?;
@@ -175,7 +158,7 @@ async fn integration_python_self_rescheduling_callback_does_not_starve_timer() -
              \tloop.call_later(0.05, done.set_result, None)\n\
              \tawait done\n\
              \treturn turns",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate callback fairness script")?;
@@ -197,7 +180,7 @@ async fn integration_python_self_rescheduling_callback_does_not_starve_timer() -
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
-async fn integration_python_call_with_sink_does_not_retain_refs() -> Result<()> {
+async fn integration_python_output_target_does_not_retain_refs() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
@@ -207,32 +190,81 @@ async fn integration_python_call_with_sink_does_not_retain_refs() -> Result<()> 
         .context("failed to instantiate sandbox")?;
 
     sandbox
-        .eval_script("def main():\n\treturn 42", NoopOutputSink::shared())
+        .eval_script("def main():\n\treturn 42", OutputTarget::discard())
         .await
         .context("failed to evaluate script")?;
 
-    let sink: Arc<dyn OutputSink> = Arc::new(NoopOutputSink);
-    let initial = Arc::strong_count(&sink);
-    assert_eq!(initial, 1, "unexpected initial sink refcount");
+    let marker = Arc::new(());
+    let initial = Arc::strong_count(&marker);
+    assert_eq!(initial, 1, "unexpected initial marker refcount");
+
+    let retained = Arc::clone(&marker);
+    let target = OutputTarget::synchronous(move |_event| {
+        let _count = Arc::strong_count(&retained);
+        Ok(())
+    });
 
     sandbox
-        .call_with_sink("main", [], Arc::clone(&sink))
+        .call_with_sink("main", [], target)
         .await
-        .context("failed to call function with sink")?;
+        .context("failed to call function with target")?;
     assert_eq!(
-        Arc::strong_count(&sink),
+        Arc::strong_count(&marker),
         initial,
-        "sink refcount changed after call_with_sink",
+        "target capture was retained after call_with_sink",
     );
 
+    let retained = Arc::clone(&marker);
+    let target = OutputTarget::synchronous(move |_event| {
+        let _count = Arc::strong_count(&retained);
+        Ok(())
+    });
     sandbox
-        .call_with_sink("main", [], Arc::clone(&sink))
+        .call_with_sink("main", [], target)
         .await
-        .context("failed to call function with sink on second call")?;
+        .context("failed to call function with target on second call")?;
     assert_eq!(
-        Arc::strong_count(&sink),
+        Arc::strong_count(&marker),
         initial,
-        "sink refcount changed after repeated call_with_sink",
+        "target capture was retained after repeated call_with_sink",
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_call_with_bounded_output_channel() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+
+    sandbox
+        .eval_script(
+            "def main():\n\tyield 1\n\treturn 2",
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate script")?;
+
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(2);
+    sandbox
+        .call_with_sink("main", [], sender)
+        .await
+        .context("failed to call function with channel target")?;
+
+    assert!(matches!(receiver.recv().await, Some(OutputEvent::Item(_))));
+    assert!(matches!(
+        receiver.recv().await,
+        Some(OutputEvent::Complete(_))
+    ));
+    assert!(
+        receiver.recv().await.is_none(),
+        "output target was retained"
     );
 
     Ok(())
@@ -252,7 +284,7 @@ async fn integration_python_streaming_output() -> Result<()> {
     sandbox
         .eval_script(
             "def main():\n\tfor i in range(3):\n\t\tyield i",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate streaming script")?;
@@ -297,7 +329,7 @@ async fn integration_python_failed_emit_does_not_corrupt_next_output() -> Result
              \t\tpass\n\
              \t_isola_sys.emit(\"valid\")\n\
              \treturn \"done\"",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate failed emit script")?;
@@ -338,7 +370,7 @@ async fn integration_python_eval_script_logs_to_sink() -> Result<()> {
         Duration::from_secs(2),
         sandbox.eval_script(
             "print('eval-stdout')\nimport sandbox.logging\nsandbox.logging.info('eval-log')",
-            Arc::new(sink),
+            sink.into_target(),
         ),
     )
     .await
@@ -388,7 +420,7 @@ async fn integration_python_large_stdout_output_is_not_truncated() -> Result<()>
                  \tprint(payload, end='')\n\
                  \treturn len(payload)"
             ),
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate large stdout script")?;
@@ -422,7 +454,7 @@ async fn integration_python_argument_cbor_path() -> Result<()> {
     sandbox
         .eval_script(
             "def main(i, s):\n\treturn (i + 1, s.upper())",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate argument script")?;
@@ -455,7 +487,7 @@ async fn integration_python_numpy_typed_array_cbor_path() -> Result<()> {
     sandbox
         .eval_script(
             "def main():\n\timport numpy as np\n\treturn np.array([1.5, -2.25], dtype='<f4')",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await?;
     let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(5)).await?;
@@ -483,7 +515,7 @@ async fn integration_python_reinstantiate_smoke() -> Result<()> {
         sandbox
             .eval_script(
                 format!("def main():\n\treturn {expected}"),
-                NoopOutputSink::shared(),
+                OutputTarget::discard(),
             )
             .await
             .context("failed to evaluate script")?;
@@ -517,7 +549,7 @@ async fn integration_python_guest_exception_surface() -> Result<()> {
     sandbox
         .eval_script(
             "def main():\n\traise RuntimeError(\"boom\")",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate exception script")?;
@@ -554,7 +586,7 @@ async fn integration_python_state_persists_within_sandbox() -> Result<()> {
              \tglobal counter\n\
              \tcounter += 1\n\
              \treturn counter",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate stateful script")?;
@@ -598,7 +630,7 @@ async fn integration_python_call_timeout() -> Result<()> {
     sandbox
         .eval_script(
             "def main():\n\twhile True:\n\t\tpass",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate timeout script")?;
@@ -642,7 +674,7 @@ async def main():
     return loop.time() - start
 ";
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate asyncio sleep script")?;
 
@@ -687,7 +719,7 @@ async fn integration_python_infinite_sleep_remains_pending() -> Result<()> {
              \texcept TimeoutError:\n\
              \t\treturn True\n\
              \treturn False",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate infinite sleep script")?;
@@ -739,7 +771,7 @@ def observe():
     return sorted(finalized)
 "#;
     sandbox
-        .eval_script(script, NoopOutputSink::shared())
+        .eval_script(script, OutputTarget::discard())
         .await
         .context("failed to evaluate async-generator finalization script")?;
 
@@ -781,7 +813,7 @@ async fn integration_python_oversized_sleep_is_rejected() -> Result<()> {
              \texcept OverflowError:\n\
              \t\treturn True\n\
              \treturn False",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate oversized sleep script")?;
@@ -821,7 +853,7 @@ async fn integration_python_memory_limiter_is_enforced() -> Result<()> {
              \tfor _ in range(1024):\n\
              \t\tchunks.append(bytes(1024 * 1024))\n\
              \treturn len(chunks)",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate memory pressure script")?;
@@ -891,7 +923,7 @@ async fn integration_python_writable_directory_mapping_filesystem_roundtrip() ->
              \t\tfh.write(text)\n\
              \twith open(path, 'r', encoding='utf-8') as fh:\n\
              \t\treturn fh.read()",
-            NoopOutputSink::shared(),
+            OutputTarget::discard(),
         )
         .await
         .context("failed to evaluate filesystem script")?;

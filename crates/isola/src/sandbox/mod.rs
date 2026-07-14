@@ -1,17 +1,19 @@
-//! Runtime module lifecycle APIs.
+//! Template construction and sandbox lifecycle APIs.
 //!
 //! Typical flow:
 //! 1. Build a [`SandboxTemplate`](crate::sandbox::SandboxTemplate) with
 //!    [`SandboxTemplateBuilder`](crate::sandbox::SandboxTemplateBuilder).
 //! 2. Instantiate a [`Sandbox`](crate::sandbox::Sandbox) from that template and
-//!    host implementation.
+//!    a [`Host`](crate::host::Host) implementation.
 //! 3. Evaluate scripts or call guest functions with
 //!    [`Arg`](crate::sandbox::Arg) inputs.
 //!
 //! [`SandboxOptions`](crate::sandbox::SandboxOptions) controls
 //! per-instantiation options (for example mount/env overrides and per-sandbox
-//! memory cap), while template defaults are configured via
-//! [`SandboxTemplateBuilder`](crate::sandbox::SandboxTemplateBuilder).
+//! memory cap), while template defaults are configured through
+//! [`SandboxTemplateBuilder`](crate::sandbox::SandboxTemplateBuilder). Source
+//! loaded into a sandbox and guest globals created by calls remain available
+//! for that sandbox's lifetime.
 
 #[cfg(feature = "serde")]
 mod args_macro;
@@ -35,7 +37,7 @@ pub use wasmtime_wasi::{DirPerms, FilePerms};
 #[cfg(feature = "serde")]
 pub use crate::args;
 use crate::{
-    host::{BoxError, Host, OutputSink},
+    host::{BoxError, Host, OutputTarget},
     internal::{
         module::{
             ModuleConfig as InternalModuleConfig,
@@ -55,11 +57,15 @@ use crate::{
 /// Result type used by `isola::sandbox` APIs.
 pub type Result<T, E = Error> = core::result::Result<T, E>;
 
+/// Error produced while building or executing a sandbox.
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     /// Guest/user-code failure.
     #[error("{message}")]
-    UserCode { message: String },
+    UserCode {
+        /// Error text supplied by the guest language runtime.
+        message: String,
+    },
 
     /// Failure from Wasmtime APIs.
     #[error("wasm error: {0}")]
@@ -113,9 +119,13 @@ impl DirectoryMapping {
 
 /// Function argument passed to guest `call-func`.
 pub enum Arg {
+    /// Positional argument containing one encoded value.
     Positional(Value),
+    /// Named argument containing its guest-visible name and encoded value.
     Named(String, Value),
+    /// Positional argument read lazily from an asynchronous value stream.
     PositionalStream(Pin<Box<dyn Stream<Item = Value> + Send + 'static>>),
+    /// Named argument read lazily from an asynchronous value stream.
     NamedStream(String, Pin<Box<dyn Stream<Item = Value> + Send + 'static>>),
 }
 
@@ -181,8 +191,11 @@ pub struct Sandbox<H: Host> {
     pub(crate) _ticker: Arc<EpochTickerRegistration>,
 }
 
-/// Per-instantiation options when creating a
-/// [`Sandbox`] from a [`SandboxTemplate`]
+/// Per-instantiation policy overrides for a [`Sandbox`].
+///
+/// Default options inherit every setting from the [`SandboxTemplate`]. Values
+/// set here are merged with the template defaults during
+/// [`SandboxTemplate::instantiate`].
 #[derive(Clone, Debug, Default)]
 pub struct SandboxOptions {
     pub(crate) max_memory: Option<usize>,
@@ -273,7 +286,12 @@ impl SandboxOptions {
 /// [`Sandbox::call`](crate::sandbox::Sandbox::call).
 #[derive(Debug, Default)]
 pub struct CallOutput {
+    /// Values yielded or explicitly emitted by the guest, in emission order.
     pub items: Vec<Value>,
+    /// Final guest return value, or `None` when no final value was encoded.
+    ///
+    /// A guest-language `None` or `null` is an encoded CBOR value and is
+    /// therefore represented as `Some(Value)`.
     pub result: Option<Value>,
 }
 
@@ -327,14 +345,28 @@ impl SandboxTemplateBuilder {
     }
 
     /// Set optional guest prelude code executed during template initialization.
+    ///
+    /// Prelude state is captured in the compiled template and is therefore
+    /// present in every sandbox instantiated from it. `None` disables the
+    /// prelude.
     #[must_use]
     pub fn prelude(mut self, prelude: Option<String>) -> Self {
         self.prelude = prelude;
         self
     }
 
+    /// Compile and initialize a reusable template from an Isola runtime
+    /// component.
+    ///
+    /// `wasm` must identify a Python or JavaScript runtime component compatible
+    /// with this version of Isola. Configured mounts and environment variables
+    /// are available while the component is initialized and snapshotted.
+    ///
     /// # Errors
-    /// Returns an error if the template cannot be built or compiled.
+    ///
+    /// Returns an error if the path cannot be resolved or read, a mount cannot
+    /// be opened, the component is incompatible, initialization fails, or a
+    /// compiled artifact cannot be cached.
     pub async fn build(self, wasm: impl AsRef<Path>) -> Result<SandboxTemplate> {
         let wasm_path = std::fs::canonicalize(wasm.as_ref()).map_err(Error::from)?;
         let base_options = self.base_options;
@@ -438,16 +470,27 @@ impl SandboxTemplate {
 }
 
 impl<H: Host> Sandbox<H> {
+    /// Evaluate source code in this sandbox's persistent guest scope.
+    ///
+    /// Guest logs and any explicitly emitted values are delivered to `target`.
+    /// Definitions created by the script remain available to later calls on
+    /// this sandbox.
+    ///
     /// # Errors
-    /// Returns an error if the script evaluation fails.
+    ///
+    /// Returns an error if the guest rejects or fails while evaluating the
+    /// script, output delivery fails, or the WebAssembly runtime traps.
     pub async fn eval_script(
         &mut self,
         code: impl AsRef<str>,
-        sink: Arc<dyn OutputSink>,
+        target: impl Into<OutputTarget>,
     ) -> Result<()> {
-        let code = code.as_ref();
+        self.eval_script_impl(code.as_ref(), target.into()).await
+    }
+
+    async fn eval_script_impl(&mut self, code: &str, target: OutputTarget) -> Result<()> {
         let mut store = CallCleanup::new(&mut self.store);
-        store.set_sink(Arc::clone(&sink));
+        store.set_output_target(target);
         let result = self
             .bindings
             .isola_script_runtime()
@@ -462,11 +505,25 @@ impl<H: Host> Sandbox<H> {
 
     /// Evaluate a file using its exact guest-visible path string.
     ///
+    /// The file must be visible through a mount configured on the template or
+    /// this sandbox instance. Definitions created by the file remain available
+    /// to later calls.
+    ///
     /// # Errors
-    /// Returns an error if the file evaluation fails.
-    pub async fn eval_file(&mut self, guest_path: &str, sink: Arc<dyn OutputSink>) -> Result<()> {
+    ///
+    /// Returns an error if the file cannot be loaded by the guest, evaluation
+    /// fails, output delivery fails, or the WebAssembly runtime traps.
+    pub async fn eval_file(
+        &mut self,
+        guest_path: &str,
+        target: impl Into<OutputTarget>,
+    ) -> Result<()> {
+        self.eval_file_impl(guest_path, target.into()).await
+    }
+
+    async fn eval_file_impl(&mut self, guest_path: &str, target: OutputTarget) -> Result<()> {
         let mut store = CallCleanup::new(&mut self.store);
-        store.set_sink(Arc::clone(&sink));
+        store.set_output_target(target);
         let result = self
             .bindings
             .isola_script_runtime()
@@ -479,44 +536,49 @@ impl<H: Host> Sandbox<H> {
         Ok(())
     }
 
-    /// Call a guest function and deliver output incrementally to a sink.
+    /// Call a guest function and deliver output incrementally to a target.
+    ///
+    /// Values yielded or explicitly emitted by the guest are delivered as item
+    /// events. The final return value is delivered as a completion event.
     ///
     /// # Errors
-    /// Returns an error if the function execution fails.
+    ///
+    /// Returns an error if the function is missing, guest execution fails,
+    /// output delivery fails, or the WebAssembly runtime traps.
     pub async fn call_with_sink<I>(
         &mut self,
         function: &str,
         args: I,
-        sink: Arc<dyn OutputSink>,
+        target: impl Into<OutputTarget>,
     ) -> Result<()>
     where
         I: IntoIterator<Item = Arg>,
     {
-        self.call_impl(function, args, sink).await
+        self.call_impl(function, args, target.into()).await
     }
 
     /// Call a guest function and collect emitted items/final result.
     ///
+    /// This is the collecting counterpart to [`Sandbox::call_with_sink`]. See
+    /// [`CallOutput`] for how yielded and final values are represented.
+    ///
     /// # Errors
-    /// Returns an error if the function execution fails.
+    ///
+    /// Returns an error if the function is missing, guest execution fails, or
+    /// the WebAssembly runtime traps.
     pub async fn call<I>(&mut self, function: &str, args: I) -> Result<CallOutput>
     where
         I: IntoIterator<Item = Arg>,
     {
         let output = Arc::new(Mutex::new(CallOutput::default()));
-        let sink: Arc<dyn OutputSink> = output.clone();
-        self.call_impl(function, args, sink).await?;
+        let target = OutputTarget::capture(output.clone());
+        self.call_impl(function, args, target).await?;
 
         let mut output = output.lock();
         Ok(std::mem::take(&mut output))
     }
 
-    async fn call_impl<I>(
-        &mut self,
-        function: &str,
-        args: I,
-        sink: Arc<dyn OutputSink>,
-    ) -> Result<()>
+    async fn call_impl<I>(&mut self, function: &str, args: I, target: OutputTarget) -> Result<()>
     where
         I: IntoIterator<Item = Arg>,
     {
@@ -557,7 +619,7 @@ impl<H: Host> Sandbox<H> {
             })
             .collect::<Result<Vec<RawArgument>>>()?;
 
-        store.set_sink(sink);
+        store.set_output_target(target);
         let result = self
             .bindings
             .isola_script_runtime()
@@ -570,6 +632,10 @@ impl<H: Host> Sandbox<H> {
         Ok(())
     }
 
+    /// Return the current guest WebAssembly linear-memory allocation in bytes.
+    ///
+    /// This does not include host-side allocations such as streamed values or
+    /// cached components.
     #[must_use]
     pub fn memory_usage(&self) -> usize {
         self.store.data().limiter.current()

@@ -5,9 +5,8 @@ use std::{
     time::Duration,
 };
 
-use async_trait::async_trait;
 use isola::{
-    host::{BoxError, LogContext, LogLevel, OutputSink},
+    host::{BoxError, LogLevel, OutputEvent, OutputTarget},
     sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
     value::Value,
 };
@@ -128,50 +127,50 @@ pub struct SandboxHandler {
 unsafe impl Send for SandboxHandler {}
 unsafe impl Sync for SandboxHandler {}
 
-#[async_trait]
-impl OutputSink for SandboxHandler {
-    async fn on_item(&self, item: Value) -> std::result::Result<(), BoxError> {
-        let data = item.to_json_str().map_err(|e| -> BoxError {
-            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-        })?;
-        (self.on_event)(
-            CallbackEvent::ResultJson,
-            data.as_ptr(),
-            data.len(),
-            self.user_data,
-        );
-        Ok(())
+impl SandboxHandler {
+    fn output_target(self: &Arc<Self>) -> OutputTarget {
+        let handler = Arc::clone(self);
+        OutputTarget::synchronous(move |event| handler.handle_output(event))
     }
 
-    async fn on_complete(&self, item: Option<Value>) -> std::result::Result<(), BoxError> {
-        if let Some(item) = item {
-            let data = item.to_json_str().map_err(|e| -> BoxError {
-                Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-            })?;
-            (self.on_event)(
-                CallbackEvent::EndJson,
-                data.as_ptr(),
-                data.len(),
-                self.user_data,
-            );
-        } else {
-            (self.on_event)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
+    fn handle_output(&self, event: OutputEvent) -> std::result::Result<(), BoxError> {
+        match event {
+            OutputEvent::Item(item) => {
+                let data = item.to_json_str().map_err(|e| -> BoxError {
+                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                })?;
+                (self.on_event)(
+                    CallbackEvent::ResultJson,
+                    data.as_ptr(),
+                    data.len(),
+                    self.user_data,
+                );
+            }
+            OutputEvent::Complete(item) => {
+                if let Some(item) = item {
+                    let data = item.to_json_str().map_err(|e| -> BoxError {
+                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                    })?;
+                    (self.on_event)(
+                        CallbackEvent::EndJson,
+                        data.as_ptr(),
+                        data.len(),
+                        self.user_data,
+                    );
+                } else {
+                    (self.on_event)(CallbackEvent::EndJson, std::ptr::null(), 0, self.user_data);
+                }
+            }
+            OutputEvent::Log { level, message, .. } => {
+                let event = match level {
+                    LogLevel::Stdout => CallbackEvent::Stdout,
+                    LogLevel::Stderr => CallbackEvent::Stderr,
+                    _ => CallbackEvent::Log,
+                };
+                (self.on_event)(event, message.as_ptr(), message.len(), self.user_data);
+            }
+            _ => {}
         }
-        Ok(())
-    }
-
-    async fn on_log(
-        &self,
-        level: LogLevel,
-        _log_context: LogContext<'_>,
-        message: &str,
-    ) -> std::result::Result<(), BoxError> {
-        let event = match level {
-            LogLevel::Stdout => CallbackEvent::Stdout,
-            LogLevel::Stderr => CallbackEvent::Stderr,
-            _ => CallbackEvent::Log,
-        };
-        (self.on_event)(event, message.as_ptr(), message.len(), self.user_data);
         Ok(())
     }
 }
@@ -591,7 +590,7 @@ impl SandboxHandle {
                     .block_on(async {
                         tokio::time::timeout(
                             Duration::from_millis(timeout_in_ms),
-                            sandbox.eval_script(input, handler.clone()),
+                            sandbox.eval_script(input, handler.output_target()),
                         )
                         .await
                     })
@@ -631,7 +630,7 @@ impl SandboxHandle {
                 let result = self.ctx.rt.block_on(async {
                     tokio::time::timeout(
                         timeout,
-                        sandbox.call_with_sink(func, isola_args, handler.clone()),
+                        sandbox.call_with_sink(func, isola_args, handler.output_target()),
                     )
                     .await
                 });
