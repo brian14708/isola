@@ -18,3 +18,6 @@ wasmparser = { workspace = true }
 wit-component = { workspace = true }
 wit-parser = { workspace = true }
 xshell = { workspace = true }
+
+[lints]
+workspace = true

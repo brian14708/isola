@@ -21,7 +21,7 @@ test:
 lint: init-py lint-rust lint-python lint-js
 
 lint-rust:
-    cargo clippy --all-features -- --deny warnings
+    cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
 lint-python: init-py
     uv run ruff check --config crates/python-runtime/pyproject.toml crates/python-runtime/python

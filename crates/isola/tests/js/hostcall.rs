@@ -180,7 +180,7 @@ async fn integration_js_async_generator_preserves_in_flight_hostcall() -> Result
     let values = output
         .items
         .iter()
-        .map(|item| item.to_serde::<i64>())
+        .map(isola::value::Value::to_serde::<i64>)
         .collect::<Result<Vec<_>, _>>()
         .context("failed to decode async generator hostcall outputs")?;
     assert_eq!(values, vec![10, 200]);

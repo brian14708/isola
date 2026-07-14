@@ -27,7 +27,7 @@ jobs:
       - name: Run tests
         run: cargo test --all-features
       - name: Clippy
-        run: cargo clippy --all-features -- --deny warnings
+        run: cargo clippy --workspace --all-targets --all-features -- --deny warnings
   integration:
     runs-on: ubuntu-latest
     steps:

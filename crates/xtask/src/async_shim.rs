@@ -186,6 +186,10 @@ fn canonical_function_order(runtime: &[u8]) -> Result<HashMap<(String, String), 
 /// The component linker cannot infer that they are the same function. This
 /// module re-exports the canonical imports under the requested Rust symbol
 /// names.
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeping the shim's validation and Wasm assembly in one linear flow is clearer"
+)]
 fn async_import_shim(runtime: &[u8]) -> Result<Option<Vec<u8>>> {
     let mut canonical = BTreeMap::<AsyncType, Vec<CanonicalVtable>>::new();
     let mut symbols = BTreeMap::<(AsyncType, usize, AsyncOperation), String>::new();
@@ -320,7 +324,7 @@ fn async_import_shim(runtime: &[u8]) -> Result<Option<Vec<u8>>> {
     Ok(Some(module.finish()))
 }
 
-fn push_dylink_subsection(output: &mut Vec<u8>, id: u8, payload: Vec<u8>) {
+fn push_dylink_subsection(output: &mut Vec<u8>, id: u8, payload: &[u8]) {
     output.push(id);
     payload.encode(output);
 }
@@ -335,7 +339,7 @@ fn encode_needed(names: &[&str]) -> Vec<u8> {
 }
 
 fn dylink_with_needed(
-    section: wasmparser::CustomSectionReader<'_>,
+    section: &wasmparser::CustomSectionReader<'_>,
     library: &str,
 ) -> Result<Vec<u8>> {
     let KnownCustom::Dylink0(mut subsections) = section.as_known() else {
@@ -361,7 +365,7 @@ fn dylink_with_needed(
                 if !names.contains(&library) {
                     names.push(library);
                 }
-                push_dylink_subsection(&mut output, 2, encode_needed(&names));
+                push_dylink_subsection(&mut output, 2, &encode_needed(&names));
             }
             _ => {
                 output.extend_from_slice(&source[start..end]);
@@ -370,7 +374,7 @@ fn dylink_with_needed(
     }
 
     if !found_needed {
-        push_dylink_subsection(&mut output, 2, encode_needed(&[library]));
+        push_dylink_subsection(&mut output, 2, &encode_needed(&[library]));
     }
     Ok(output)
 }
@@ -388,7 +392,7 @@ fn add_needed_library(runtime: &[u8], library: &str) -> Result<Vec<u8>> {
                 found_dylink = true;
                 module.section(&CustomSection {
                     name: Cow::Borrowed("dylink.0"),
-                    data: Cow::Owned(dylink_with_needed(section, library)?),
+                    data: Cow::Owned(dylink_with_needed(&section, library)?),
                 });
             }
             Payload::Version { encoding, .. } if encoding != Encoding::Module => {
@@ -411,7 +415,7 @@ fn add_needed_library(runtime: &[u8], library: &str) -> Result<Vec<u8>> {
     Ok(module.finish())
 }
 
-pub(super) fn link_library(
+pub fn link_library(
     linker: wit_component::Linker,
     name: &str,
     data: &[u8],
@@ -454,8 +458,8 @@ mod tests {
             value.encode(&mut memory_info);
         }
         let mut dylink = Vec::new();
-        push_dylink_subsection(&mut dylink, 1, memory_info);
-        push_dylink_subsection(&mut dylink, 2, encode_needed(&["libc.so"]));
+        push_dylink_subsection(&mut dylink, 1, &memory_info);
+        push_dylink_subsection(&mut dylink, 2, &encode_needed(&["libc.so"]));
 
         let mut module = Module::new();
         module.section(&CustomSection {
