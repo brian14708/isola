@@ -39,7 +39,7 @@ minicbor-serde = "0.7"
 napi = { version = "3.10", default-features = false }
 napi-build = "2.3"
 napi-derive = "3.5"
-oxc = "0.139"
+oxc = "0.140"
 parking_lot = "0.12"
 pyo3 = "0.29"
 pyo3-async-runtimes = "0.29"
