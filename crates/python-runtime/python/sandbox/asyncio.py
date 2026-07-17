@@ -82,7 +82,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         old_asyncgen_hooks = sys.get_asyncgen_hooks()
         try:
             self.running = True
-            asyncio.events._set_running_loop(self)  # noqa: SLF001
+            asyncio.events._set_running_loop(self)  # ruff:ignore[private-member-access]
             sys.set_asyncgen_hooks(
                 firstiter=self._asyncgen_firstiter_hook,
                 finalizer=self._asyncgen_finalizer_hook,
@@ -96,14 +96,14 @@ class PollLoop(asyncio.AbstractEventLoop):
                 firstiter=old_asyncgen_hooks.firstiter,
                 finalizer=old_asyncgen_hooks.finalizer,
             )
-            asyncio.events._set_running_loop(None)  # noqa: SLF001
+            asyncio.events._set_running_loop(None)  # ruff:ignore[private-member-access]
 
     def run_async_generator[T](self, generator: AsyncGenerator[T]) -> Generator[T]:
         it = aiter(generator)
         old_asyncgen_hooks = sys.get_asyncgen_hooks()
         try:
             self.running = True
-            asyncio.events._set_running_loop(self)  # noqa: SLF001
+            asyncio.events._set_running_loop(self)  # ruff:ignore[private-member-access]
             sys.set_asyncgen_hooks(
                 firstiter=self._asyncgen_firstiter_hook,
                 finalizer=self._asyncgen_finalizer_hook,
@@ -122,7 +122,7 @@ class PollLoop(asyncio.AbstractEventLoop):
                 firstiter=old_asyncgen_hooks.firstiter,
                 finalizer=old_asyncgen_hooks.finalizer,
             )
-            asyncio.events._set_running_loop(None)  # noqa: SLF001
+            asyncio.events._set_running_loop(None)  # ruff:ignore[private-member-access]
 
     def _asyncgen_firstiter_hook(self, generator: AsyncGenerator[object]) -> None:
         self._asyncgens.add(generator)
@@ -185,15 +185,15 @@ class PollLoop(asyncio.AbstractEventLoop):
                     # enqueue is left for shutdown instead of extending the turn.
                     for _ in range(len(self.handles)):
                         handle = self.handles.popleft()
-                        if not handle._cancelled:  # noqa: SLF001
-                            handle._run()  # noqa: SLF001
+                        if not handle._cancelled:  # ruff:ignore[private-member-access]
+                            handle._run()  # ruff:ignore[private-member-access]
                     return False
                 if not self.handles:
                     break
                 for _ in range(len(self.handles)):
                     handle = self.handles.popleft()
-                    if not handle._cancelled:  # noqa: SLF001
-                        handle._run()  # noqa: SLF001
+                    if not handle._cancelled:  # ruff:ignore[private-member-access]
+                        handle._run()  # ruff:ignore[private-member-access]
                 if waiting_before_callbacks and not servicing_ready:
                     break
 
@@ -257,7 +257,7 @@ class PollLoop(asyncio.AbstractEventLoop):
         if not waker.cancelled():
             try:
                 waker.set_result(pollable.get())
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # ruff:ignore[blind-except]
                 waker.set_exception(exc)
         # Release regardless of cancellation so the host-side call slot is
         # always reclaimed.
@@ -274,8 +274,8 @@ class PollLoop(asyncio.AbstractEventLoop):
         # Cancelling futures may enqueue their done callbacks.
         while self.handles:
             handle = self.handles.popleft()
-            if not handle._cancelled:  # noqa: SLF001
-                handle._run()  # noqa: SLF001
+            if not handle._cancelled:  # ruff:ignore[private-member-access]
+                handle._run()  # ruff:ignore[private-member-access]
 
     @override
     def is_running(self) -> bool:

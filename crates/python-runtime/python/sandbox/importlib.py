@@ -127,7 +127,7 @@ class HttpImporter(
         fullname: str = module.__name__
         sys.modules[fullname] = module
         try:
-            exec(self.modules[fullname].content, module.__dict__)  # noqa: S102
+            exec(self.modules[fullname].content, module.__dict__)  # ruff:ignore[exec-builtin]
         except Exception:
             del sys.modules[fullname]
             raise
@@ -195,7 +195,7 @@ def _parse_dependency(dep: str) -> _ParsedDependency:
 
 
 def _initialize_pep723(meta: str) -> None:  # pyright: ignore[reportUnusedFunction]
-    import tomllib  # noqa: PLC0415
+    import tomllib  # ruff:ignore[import-outside-top-level]
 
     script = tomllib.loads(meta)
 
