@@ -266,7 +266,7 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
       - name: Install pnpm
@@ -305,7 +305,7 @@ jobs:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
