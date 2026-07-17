@@ -5,7 +5,7 @@
   nukeReferences,
 }:
 let
-  inherit (wasipkgs) sdk python;
+  inherit (wasipkgs) python;
   inherit (python.host) pythonVersion;
   pythonSitePackages = "lib/python${pythonVersion}/site-packages";
 
@@ -49,21 +49,12 @@ stdenv.mkDerivation {
   inherit (python) version;
   dontUnpack = true;
   dontStrip = true;
+  PYTHONHASHSEED = "0";
 
   nativeBuildInputs = [
     python.host
     nukeReferences
   ];
-  buildInputs = [
-    python
-    sdk
-  ];
-
-  outputs = [
-    "out"
-    "dev"
-  ];
-
   buildPhase = ''
     runHook preBuild
 
@@ -87,14 +78,6 @@ stdenv.mkDerivation {
     ''
       runHook preInstall
 
-      mkdir -p $dev
-      cp --no-preserve=mode -rL ${python}/lib ${python}/include $dev
-      for pkg in ${outPackagesList}; do
-        cp --no-preserve=mode -rL $pkg/${pythonSitePackages}/* $dev/${pythonSitePackages}/
-      done
-      cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so $dev/lib
-      cp --no-preserve=mode -rL ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/noeh/*.so $dev/lib
-
       mkdir -p $out/${pythonSitePackages} $out/lib/python${pythonVersion}/lib-dynload
       for pkg in ${outPackagesList}; do
         cp --no-preserve=mode -rL $pkg/${pythonSitePackages}/* $out/${pythonSitePackages}/
@@ -107,8 +90,8 @@ stdenv.mkDerivation {
       find $out/ -type d -name "__pycache__" -exec rm -rf {} +
       find $out/ -type d -name "*-info" -exec rm -rf {} +
 
-      ${python.host}/bin/python3 -m compileall $out/
-      find $out/ -type f -print -exec nuke-refs '{}' +
+      ${python.host}/bin/python3 -m compileall -q -j "$NIX_BUILD_CORES" $out/
+      find $out/ -type f -exec nuke-refs '{}' +
 
       runHook postInstall
     '';

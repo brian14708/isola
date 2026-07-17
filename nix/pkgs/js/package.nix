@@ -2,7 +2,6 @@
   lib,
   pkgs,
   crane,
-  writeShellScriptBin,
   wasipkgs,
   nukeReferences,
   python,
@@ -48,13 +47,10 @@ craneLib.buildPackage {
     EOF
         fi
   '';
-  nativeBuildInputs = [
-    (writeShellScriptBin "cargo-b" "exec cargo build \"$@\"")
-    nukeReferences
-  ];
+  nativeBuildInputs = [ nukeReferences ];
 
   env = {
-    WASI_PYTHON_DEV = python.bundle.dev;
+    WASI_PYTHON_DEV = python.linkerInputs;
     WASI_SDK = wasipkgs.sdk;
   };
 

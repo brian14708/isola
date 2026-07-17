@@ -4,7 +4,7 @@
   packages,
 }:
 let
-  inherit (packages.python) bundle;
+  inherit (packages.python) bundle linkerInputs;
   craneLib = (crane.mkLib pkgs).overrideToolchain (
     p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml
   );
@@ -23,7 +23,7 @@ craneLib.devShell {
 
   env = {
     WASI_SDK = pkgs.wasipkgs.sdk;
-    WASI_PYTHON_DEV = "${bundle.dev}";
+    WASI_PYTHON_DEV = "${linkerInputs}";
     WASI_PYTHON_RUNTIME = "${bundle}";
   };
 }
