@@ -38,18 +38,18 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-  "COM812", "S101", "CPY",
-  "D10", "D203", "D205", "D213",
-  "FIX", "TD002", "TD003",
-  "PLR09", "PLR2004", "C901",
-  "PLW0717",
+  "missing-trailing-comma", "assert", "CPY",
+  "D10", "incorrect-blank-line-before-class", "missing-blank-line-after-summary", "multi-line-summary-second-line",
+  "FIX", "missing-todo-author", "missing-todo-link",
+  "PLR09", "magic-value-comparison", "complex-structure",
+  "too-many-statements-in-try-clause",
 ]
-extend-safe-fixes = ["TC", "F401"]
+extend-safe-fixes = ["TC", "unused-import"]
 preview = true
 future-annotations = true
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S311", "PLC2701", "PLR2004", "RUF029"]
+"tests/**/*.py" = ["suspicious-non-cryptographic-random-usage", "import-private-name", "magic-value-comparison", "unused-async"]
 
 [tool.ruff.lint.isort]
 extra-standard-library = ["typing_extensions"]

@@ -36,7 +36,7 @@ def test_json_stream_from_iterable_roundtrip() -> None:
 
 
 def test_strip_first_path_component_flattens_bundle_root() -> None:
-    strip_first_path_component = runtime_module._strip_first_path_component  # noqa: SLF001
+    strip_first_path_component = runtime_module._strip_first_path_component  # ruff:ignore[private-member-access]
 
     assert (
         strip_first_path_component("isola-python-runtime/bin/python.wasm")
@@ -55,7 +55,7 @@ async def test_runtime_extraction_rejects_escaping_symlink(tmp_path: Path) -> No
         tf.addfile(link)
 
     with pytest.raises(RuntimeError, match="symlink target escapes archive"):
-        await runtime_module._extract_tarball(  # noqa: SLF001
+        await runtime_module._extract_tarball(  # ruff:ignore[private-member-access]
             archive.getvalue(), tmp_path / "runtime"
         )
 
@@ -75,7 +75,7 @@ async def test_runtime_extraction_rejects_member_below_symlink(tmp_path: Path) -
         tf.addfile(member, io.BytesIO(payload))
 
     with pytest.raises(RuntimeError, match="archive entry traverses symlink"):
-        await runtime_module._extract_tarball(  # noqa: SLF001
+        await runtime_module._extract_tarball(  # ruff:ignore[private-member-access]
             archive.getvalue(), tmp_path / "runtime"
         )
 
