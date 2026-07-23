@@ -42,7 +42,7 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time", "macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
-wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation", "component-model-async"] }
+wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compilation", "component-model-async", "anyhow"] }
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 wasmtime-wizer = { workspace = true, features = ["component-model", "wasmtime"] }
