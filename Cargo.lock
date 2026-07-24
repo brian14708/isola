@@ -4850,7 +4850,7 @@ dependencies = [
  "glob",
  "rustc-demangle",
  "wasi-preview1-component-adapter-provider",
- "wasm-encoder 0.253.0",
+ "wasm-encoder 0.254.0",
  "wasmparser 0.253.0",
  "wit-component 0.254.0",
  "wit-parser 0.254.0",

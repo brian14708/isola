@@ -60,7 +60,7 @@ tokio-stream = "0.1"
 tracing = "0.1"
 url = "2.5"
 wasi-preview1-component-adapter-provider = "46.0"
-wasm-encoder = "0.253"
+wasm-encoder = "0.254"
 wasmparser = { version = "0.253", default-features = false }
 wasmtime = { version = "47.0", default-features = false }
 wasmtime-wasi = "47.0"
