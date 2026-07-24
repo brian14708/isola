@@ -3924,9 +3924,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasi-preview1-component-adapter-provider"
-version = "46.0.1"
+version = "47.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b6c48003fe59c201c97a7786ff55feabe6b6f83b598aa9ff5bcc4f94d940bf3"
+checksum = "ffea5cc4926d42465ede05953cff22ad074e281709fc274033e7a09ff323c0f8"
 
 [[package]]
 name = "wasm-bindgen"
