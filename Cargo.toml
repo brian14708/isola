@@ -19,7 +19,7 @@ nursery = "warn"
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
-base64 = "0.22"
+base64 = "0.23"
 bytes = "1.10"
 cbindgen = "0.29"
 criterion = "0.8"
