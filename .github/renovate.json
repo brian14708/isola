@@ -5,6 +5,11 @@
   "minimumReleaseAge": "3 days",
   "packageRules": [
     {
+      "description": "Ignore Rust toolchain updates",
+      "matchManagers": ["rust-toolchain"],
+      "enabled": false
+    },
+    {
       "groupName": "wasmtime",
       "matchPackageNames": ["/^wasi-/", "/^wasmtime/"],
       "matchUpdateTypes": ["major"]
