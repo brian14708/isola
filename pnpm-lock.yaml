@@ -13,7 +13,7 @@ importers:
         version: 2.5.6
       '@napi-rs/cli':
         specifier: ^3.6.0
-        version: 3.8.1(@emnapi/runtime@1.11.2)(@types/node@25.9.5)
+        version: 3.8.2(@emnapi/runtime@1.11.2)(@types/node@25.9.5)
       '@types/node':
         specifier: ^25.5.0
         version: 25.9.5
@@ -244,8 +244,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@napi-rs/cli@3.8.1':
-    resolution: {integrity: sha512-XDtwn0o6XGLxzMoL7FrTDA7jz7t6UUAI+QreICK5QgDOqeZJODmLv0p77kzQNyfKbXVomAw1u2SC5Zzsr07gig==}
+  '@napi-rs/cli@3.8.2':
+    resolution: {integrity: sha512-iFmp3Lo/ipXoJI1I/6V/xU4hQV42bXS3A7j8C+Wt3LOtYY7HFCilkhyUkN1igLJFXWMICq95kNxhNcwzNRd+Kw==}
     engines: {node: ^20.17.0 || ^22.13.0 || >= 23.5.0}
     hasBin: true
     peerDependencies:
@@ -606,8 +606,8 @@ packages:
     resolution: {integrity: sha512-DcB0M3KFgr9ECI328lhBMVsyFT2DnmNucSBTqEN3exyNKUzkkpUSCHmTRcunF41Eou2TIQKW4seewri8ON9bSA==}
     engines: {node: '>= 20'}
 
-  '@octokit/endpoint@11.0.3':
-    resolution: {integrity: sha512-FWFlNxghg4HrXkD3ifYbS/IdL/mDHjh9QcsNyhQjN8dplUoZbejsdpmuqdA76nxj2xoWPs7p8uX2SNr9rYu0Ag==}
+  '@octokit/endpoint@11.0.4':
+    resolution: {integrity: sha512-f1cOWoHPmxryJFknxbtDdjODWfV8A9tc8Aae6ermXPNgHFZ/x91AtHIz4gicEjL8hkJiip+u21QHJORfBv/qiA==}
     engines: {node: '>= 20'}
 
   '@octokit/graphql@9.0.4':
@@ -1492,7 +1492,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@napi-rs/cli@3.8.1(@emnapi/runtime@1.11.2)(@types/node@25.9.5)':
+  '@napi-rs/cli@3.8.2(@emnapi/runtime@1.11.2)(@types/node@25.9.5)':
     dependencies:
       '@inquirer/prompts': 8.5.2(@types/node@25.9.5)
       '@napi-rs/cross-toolchain': 1.0.3
@@ -1770,9 +1770,9 @@ snapshots:
       before-after-hook: 4.0.0
       universal-user-agent: 7.0.3
 
-  '@octokit/endpoint@11.0.3':
+  '@octokit/endpoint@11.0.4':
     dependencies:
-      '@octokit/types': 16.0.0
+      '@octokit/types': 17.0.0
       universal-user-agent: 7.0.3
 
   '@octokit/graphql@9.0.4':
@@ -1805,7 +1805,7 @@ snapshots:
 
   '@octokit/request@10.0.13':
     dependencies:
-      '@octokit/endpoint': 11.0.3
+      '@octokit/endpoint': 11.0.4
       '@octokit/request-error': 7.1.1
       '@octokit/types': 17.0.0
       content-type: 2.0.0
