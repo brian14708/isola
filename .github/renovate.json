@@ -16,7 +16,7 @@
     },
     {
       "groupName": "wit",
-      "matchPackageNames": ["/^wit-/"],
+      "matchPackageNames": ["/^wit-/", "/^wasmparser$/", "/^wasm-/"],
       "matchUpdateTypes": ["minor"]
     },
     {
