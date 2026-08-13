@@ -13,7 +13,7 @@ importers:
         version: 2.5.7
       '@napi-rs/cli':
         specifier: ^3.6.0
-        version: 3.8.4(@emnapi/runtime@1.11.2)(@types/node@25.9.5)
+        version: 3.8.5(@emnapi/runtime@1.11.2)(@types/node@25.9.5)
       '@types/node':
         specifier: ^25.5.0
         version: 25.9.5
@@ -244,8 +244,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@napi-rs/cli@3.8.4':
-    resolution: {integrity: sha512-/uIzAUHXAMHzzye6+DWdVV6oc3lCRr7ck98UNeW5Gbs+KaxXRztWFmehbz46ufLdTtzjcyZGXOplDHEWh3qxew==}
+  '@napi-rs/cli@3.8.5':
+    resolution: {integrity: sha512-lOFzFYBeBpnFAajFiyu+RWCrh1j7/Ma7I5z87huUIGlUkyE8eYxIfNBuH8KOOxW3lkkUxP7CMcl5Hfq3EjgEkg==}
     engines: {node: ^20.17.0 || ^22.13.0 || >= 23.5.0}
     hasBin: true
     peerDependencies:
@@ -1492,7 +1492,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@napi-rs/cli@3.8.4(@emnapi/runtime@1.11.2)(@types/node@25.9.5)':
+  '@napi-rs/cli@3.8.5(@emnapi/runtime@1.11.2)(@types/node@25.9.5)':
     dependencies:
       '@inquirer/prompts': 8.5.2(@types/node@25.9.5)
       '@napi-rs/cross-toolchain': 1.0.3
