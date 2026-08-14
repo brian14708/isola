@@ -8,7 +8,7 @@ version = "0.5.1"
 description = "Async Python bindings for the Isola runtime"
 license = "Apache-2.0"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "httpx2>=2.12.0",
     "typing-extensions>=4.15.0",
@@ -17,11 +17,11 @@ classifiers = [
   "Programming Language :: Rust",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Programming Language :: Python :: 3.15",
 ]
 
 [project.urls]
@@ -33,7 +33,7 @@ python-source = "python"
 module-name = "isola._isola"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -75,7 +75,7 @@ skip-magic-trailing-comma = true
 [tool.mypy]
 files = ["crates/python-sdk/python", "crates/python-sdk/tests"]
 strict = true
-python_version = "3.10"
+python_version = "3.11"
 disable_error_code = [
   "decorated-any",
   "explicit-any",

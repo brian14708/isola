@@ -125,7 +125,7 @@ jobs:
           command: build
           target: ${{ matrix.settings.target }}
           manylinux: "2014"
-          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist -i python3.10
+          args: --release --manifest-path crates/python-sdk/Cargo.toml --out dist -i python3.11
       - name: Build host Python SDK wheel
         if: runner.os != 'Linux'
         uses: PyO3/maturin-action@v1

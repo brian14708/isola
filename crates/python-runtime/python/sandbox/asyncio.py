@@ -38,9 +38,9 @@ async def subscribe[T](
     fut: _isola_sys.Pollable[T],
 ) -> T:
     loop = asyncio.get_running_loop()
-    assert isinstance(loop, PollLoop), (
-        "subscribe() must be called from a PollLoop context"
-    )
+    if not isinstance(loop, PollLoop):
+        msg = "subscribe() must be called from a PollLoop context"
+        raise TypeError(msg)
     return await loop.subscribe(fut)
 
 

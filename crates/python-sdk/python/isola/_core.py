@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from itertools import starmap
 from json import loads
 from os import PathLike, fspath
-from typing import TYPE_CHECKING, Literal, TypeAlias, cast
-from typing_extensions import Self, TypedDict, Unpack
+from typing import TYPE_CHECKING, Literal, Self, TypeAlias, cast
+from typing_extensions import TypedDict, Unpack
 
 import httpx2
 

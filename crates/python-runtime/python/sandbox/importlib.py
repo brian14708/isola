@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, cast, override
 
-import httpx2
+lazy import httpx2
 
 if TYPE_CHECKING:
     import types
@@ -200,14 +200,14 @@ def _initialize_pep723(meta: str) -> None:  # pyright: ignore[reportUnusedFuncti
 
     script = tomllib.loads(meta)
 
-    blacklist = {
+    blacklist = frozenset({
         "xmltodict",
         "pydantic",
         "setuptools",
         "isola-py",
         "numpy",
         "pillow",
-    }
+    })
 
     importers: list[HttpImporter] = []
     for dep in cast("list[str]", script.get("dependencies", [])):
