@@ -381,9 +381,9 @@ impl Scope {
         obj: Value<'js>,
         callback: &mut impl FnMut(EmitType, &[u8]),
     ) -> Result<()> {
-        // Check if it's an async generator (has Symbol.asyncIterator) BEFORE sync
-        // generator check, because async generators also have .next() but
-        // return Promises.
+        // Check if it's an async generator (has Symbol.asyncIterator) BEFORE
+        // sync generator check, because async generators also have
+        // .next() but return Promises.
         if let Some(gen_obj) = obj.as_object() {
             let check_async_iter: std::result::Result<Function<'_>, _> =
                 ctx.globals().get("__isola_async_iterator");
@@ -418,7 +418,8 @@ impl Scope {
                     .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
 
                 if done {
-                    // Final value from generator - if not undefined, emit as end
+                    // Final value from generator - if not undefined, emit as
+                    // end
                     if value.is_undefined() {
                         callback(EmitType::End, &[]);
                     } else {
