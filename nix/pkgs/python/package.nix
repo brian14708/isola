@@ -102,7 +102,7 @@ let
     // {
       buildPhaseCargoCommand = ''
         cargo build --offline -p xtask
-        PYO3_CROSS_PYTHON_VERSION=3.14 \
+        PYO3_CROSS_PYTHON_VERSION=3.15 \
           RUSTFLAGS="-C relocation-model=pic -C link-arg=-shared -C link-arg=--allow-undefined -Lnative=${linkerInputs}/lib" \
           cargo build --offline -Z build-std=std,panic_abort --release \
             --target wasm32-wasip1 -p isola-python-runtime

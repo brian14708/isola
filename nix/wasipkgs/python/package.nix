@@ -1,26 +1,37 @@
 {
   stdenv,
-  python314,
+  python315,
   pkg-config,
+  wasmtime,
   wasipkgs,
 }:
 let
   inherit (wasipkgs) wasi-optimize-hook zlib sdk;
+  host = python315.override {
+    packageOverrides = _final: prev: {
+      # Pydantic's Nix test-only closure is not yet Python 3.15 compatible.
+      # Runtime dependency and import checks remain enabled.
+      pydantic = prev.pydantic.overridePythonAttrs (_old: {
+        doCheck = false;
+      });
+    };
+  };
 in
 stdenv.mkDerivation rec {
-  pname = "${python314.pname}-wasi";
-  inherit (python314) version src;
+  pname = "${host.pname}-wasi";
+  inherit (host) version src;
   dontStrip = true;
 
   buildInputs = [ zlib ];
 
   passthru = {
-    host = python314;
+    inherit host;
   };
 
   nativeBuildInputs = [
     pkg-config
-    python314
+    host
+    wasmtime
     wasi-optimize-hook
   ];
 
@@ -34,18 +45,20 @@ stdenv.mkDerivation rec {
 
   configureFlags = [
     "--prefix=/"
-    "--host=wasm32-wasi"
+    "--host=wasm32-wasip1"
     "--build=${buildArch}"
-    "--with-build-python=${python314}/bin/python3"
+    "--with-build-python=${host}/bin/python3"
     "--enable-shared"
     "--disable-test-modules"
-    "--with-tzpath=/lib/python3.14/site-packages/tzdata/zoneinfo"
+    "--without-system-libmpdec"
+    "--with-tzpath=/lib/python3.15/site-packages/tzdata/zoneinfo"
     "--enable-big-digits=30"
     "--with-pymalloc"
   ];
 
   preConfigure = ''
-    export CONFIG_SITE=$PWD/Tools/wasm/wasi/config.site-wasm32-wasi
+    export CONFIG_SITE=$PWD/Platforms/WASI/config.site-wasm32-wasi
+    export HOSTRUNNER="${wasmtime}/bin/wasmtime run --argv0 /python.wasm --dir $PWD::/ --config $PWD/Platforms/WASI/wasmtime.toml"
     export CFLAGS="$CFLAGS -fPIC"
     export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot"
     export CXX="${sdk}/bin/clang++ --sysroot=${sdk}/share/wasi-sysroot"
@@ -74,9 +87,9 @@ stdenv.mkDerivation rec {
       wasm_assets_script="$PWD/Tools/wasm/emscripten/wasm_assets.py"
     fi
 
-    ${python314}/bin/python3 "$wasm_assets_script" \
+    ${host}/bin/python3 "$wasm_assets_script" \
       --prefix $out \
-      --output $out/lib/python314.zip
+      --output $out/lib/python315.zip
 
     clang_rt_builtins="$(
       find ${sdk}/lib/clang -path '*/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a' -print -quit
@@ -85,9 +98,9 @@ stdenv.mkDerivation rec {
 
     touch $out/python-stub.c
     $CC $CFLAGS \
-      -shared -o $out/lib/libpython3.14.so \
+      -shared -o $out/lib/libpython3.15.so \
       $out/python-stub.c \
-      -Wl,--whole-archive $out/lib/libpython3.14.a -Wl,--no-whole-archive \
+      -Wl,--whole-archive $out/lib/libpython3.15.a -Wl,--no-whole-archive \
       $(pkg-config --libs zlib) \
       $PWD/Modules/_hacl/libHacl_Hash_SHA1.a \
       $PWD/Modules/_hacl/libHacl_Hash_SHA2.a \
@@ -103,15 +116,15 @@ stdenv.mkDerivation rec {
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-getpid.so \
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libdl.so \
       ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libc.so
-    rm $out/lib/libpython3.14.a $out/python-stub.c
+    rm $out/lib/libpython3.15.a $out/python-stub.c
 
     # CPython's WASI build-details.json is missing ABI suffix metadata that
     # maturin expects for cross-compilation.
-    ${python314}/bin/python3 - <<'PY'
+    ${host}/bin/python3 - <<'PY'
     import json
     from pathlib import Path
 
-    root = Path("${placeholder "out"}/lib/python3.14")
+    root = Path("${placeholder "out"}/lib/python3.15")
     build_details_path = root / "build-details.json"
     sysconfig_vars_path = root / "_sysconfig_vars__wasi_wasm32-wasi.json"
 
@@ -122,7 +135,7 @@ stdenv.mkDerivation rec {
 
     build_details.setdefault("abi", {})["extension_suffix"] = sysconfig_vars["EXT_SUFFIX"]
     build_details["abi"].setdefault("stable_abi_suffix", ".abi3.so")
-    build_details.setdefault("libpython", {})["dynamic"] = "//lib/libpython3.14.so"
+    build_details.setdefault("libpython", {})["dynamic"] = "//lib/libpython3.15.so"
     build_details["libpython"].setdefault("link_extensions", False)
 
     with build_details_path.open("w") as f:
@@ -131,7 +144,7 @@ stdenv.mkDerivation rec {
     PY
 
     rm -rf $out/bin/
-    rm -rf $out/lib/python3.14/config-3.14-wasm32-wasi/
+    rm -rf $out/lib/python3.15/config-3.15-wasm32-wasi/
     find $out/ -type f -name "*.a" -exec rm {} +
     find $out/ -type d -name "__pycache__" -exec rm -rf {} +
   '';

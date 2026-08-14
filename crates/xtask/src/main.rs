@@ -150,7 +150,7 @@ fn build_python(sh: &Shell) -> Result<()> {
         sh,
         "cargo build --locked -Z build-std=std,panic_abort --release --target {TARGET} -p isola-python-runtime"
     )
-    .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
+    .env("PYO3_CROSS_PYTHON_VERSION", "3.15")
     .env("RUSTFLAGS", &rustflags)
     .run()?;
 
@@ -210,14 +210,14 @@ fn python_libraries(wasi_deps_dir: &Path, runtime: &Path) -> Result<Vec<Componen
         ComponentLibrary::new("libc++.so", lib_dir.join("libc++.so"), false, None),
         ComponentLibrary::new("libc++abi.so", lib_dir.join("libc++abi.so"), false, None),
         ComponentLibrary::new(
-            "libpython3.14.so",
-            lib_dir.join("libpython3.14.so"),
+            "libpython3.15.so",
+            lib_dir.join("libpython3.15.so"),
             false,
             None,
         ),
     ];
 
-    let site_packages = lib_dir.join("python3.14/site-packages");
+    let site_packages = lib_dir.join("python3.15/site-packages");
     let pattern = site_packages.join("**/*.so");
     let pattern = pattern
         .to_str()
