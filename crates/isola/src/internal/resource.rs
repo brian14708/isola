@@ -8,8 +8,8 @@ pub struct MemoryLimiter {
 
 impl MemoryLimiter {
     pub fn new(max_memory_hard: usize) -> Self {
-        // The resource table stores host-side handles. Keep this bounded to avoid
-        // untrusted guests growing host memory without limit.
+        // The resource table stores host-side handles. Keep this bounded to
+        // avoid untrusted guests growing host memory without limit.
         const TABLE_ELEMENT_BUDGET_BYTES: usize = 64;
         const MIN_TABLE_ELEMENTS: usize = 1024;
         let max_table_elements_hard = core::cmp::max(

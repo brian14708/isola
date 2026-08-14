@@ -7,14 +7,14 @@ use std::{
     time::Duration,
 };
 
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use wasmtime::Engine;
 
 const EPOCH_TICK: Duration = Duration::from_millis(10);
 
 /// Shared global epoch ticker state.
 struct EpochTickerShared {
-    engines: Mutex<HashMap<u64, Engine>>,
+    engines: RwLock<HashMap<u64, Engine>>,
     next_id: AtomicU64,
 }
 
@@ -31,7 +31,7 @@ pub struct EpochTickerRegistration {
 impl GlobalEpochTicker {
     fn new() -> std::io::Result<Self> {
         let shared = Arc::new(EpochTickerShared {
-            engines: Mutex::new(HashMap::new()),
+            engines: RwLock::new(HashMap::new()),
             next_id: AtomicU64::new(1),
         });
 
@@ -43,8 +43,8 @@ impl GlobalEpochTicker {
                 // This avoids timeout starvation in current-thread runtimes.
                 loop {
                     std::thread::park_timeout(EPOCH_TICK);
-                    let engines: Vec<Engine> = shared_bg.engines.lock().values().cloned().collect();
-                    for engine in engines {
+                    let engines = shared_bg.engines.read();
+                    for engine in engines.values() {
                         engine.increment_epoch();
                     }
                 }
@@ -55,7 +55,7 @@ impl GlobalEpochTicker {
 
     pub fn register(&self, engine: Engine) -> Arc<EpochTickerRegistration> {
         let id = self.shared.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut engines = self.shared.engines.lock();
+        let mut engines = self.shared.engines.write();
         engines.insert(id, engine);
         drop(engines);
 
@@ -68,7 +68,7 @@ impl GlobalEpochTicker {
 
 impl Drop for EpochTickerRegistration {
     fn drop(&mut self) {
-        let mut engines = self.shared.engines.lock();
+        let mut engines = self.shared.engines.write();
         engines.remove(&self.id);
     }
 }
