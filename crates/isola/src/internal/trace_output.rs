@@ -39,7 +39,8 @@ impl TraceOutput {
 
 impl StdoutStream for TraceOutput {
     fn async_stream(&self) -> Box<dyn AsyncWrite + Send + Sync> {
-        // Preview2 uses `p2_stream` for stdout/stderr; this is a best-effort sink.
+        // Preview2 uses `p2_stream` for stdout/stderr; this is a best-effort
+        // sink.
         Box::new(tokio::io::sink())
     }
 
@@ -137,7 +138,8 @@ fn decode_utf8(buf: &[u8]) -> (Cow<'_, str>, SmallVec<[u8; MAX_UTF8_BYTES]>) {
                         Cow::Borrowed("")
                     } else {
                         // SAFETY: `valid` contains only bytes up to the first
-                        // encoding error, which `from_utf8` guarantees is valid.
+                        // encoding error, which `from_utf8` guarantees is
+                        // valid.
                         unsafe { std::str::from_utf8_unchecked(valid) }.into()
                     },
                     SmallVec::from_slice(rest),
@@ -265,7 +267,8 @@ mod tests {
     #[test]
     fn partial_utf8_retained() {
         let mut s = new_stream();
-        // Valid ASCII prefix + first byte of a 2-byte UTF-8 char (U+00FC = 0xC3 0xBC)
+        // Valid ASCII prefix + first byte of a 2-byte UTF-8 char (U+00FC = 0xC3
+        // 0xBC)
         let mut data = vec![b'a'; MIN_BUFFER];
         data.push(0xC3);
         s.write(Bytes::from(data)).unwrap();
@@ -316,8 +319,8 @@ mod tests {
     #[test]
     fn invalid_utf8_uses_lossy() {
         let mut s = new_stream();
-        // Invalid UTF-8: continuation bytes without start byte, enough to exceed
-        // MAX_UTF8_BYTES
+        // Invalid UTF-8: continuation bytes without start byte, enough to
+        // exceed MAX_UTF8_BYTES
         let data = vec![0xFF; MAX_UTF8_BYTES + MIN_BUFFER + 1];
         s.write(Bytes::from(data)).unwrap();
         assert!(s.buffer.is_empty());

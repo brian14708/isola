@@ -216,10 +216,11 @@ pub mod http_module {
                 )
             })?
         };
-        // A zero-length read makes no progress. Report completion immediately so
-        // callers that loop until `None` (e.g. `blocking_read`, `_aread`) don't
-        // spin forever on the always-ready pollable. The response is left
-        // unconsumed so subsequent reads still work.
+        // A zero-length read makes no progress. Report completion immediately
+        // so callers that loop until `None` (e.g. `blocking_read`,
+        // `_aread`) don't spin forever on the always-ready pollable.
+        // The response is left unconsumed so subsequent reads still
+        // work.
         if read_size == 0 && slf.cursor < slf.body.len() {
             return Ok(None);
         }

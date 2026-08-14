@@ -12,9 +12,10 @@ pub fn register(ctx: &Ctx<'_>) {
 
     let http = Object::new(ctx.clone()).unwrap();
 
-    // _isola_http._send(method, url, params, headers, body, timeout) -> handle: u32
-    // Sends the HTTP request (non-blocking) and returns a pollable handle.
-    // NOTE: params/timeout are legacy internal fields and may be undefined.
+    // _isola_http._send(method, url, params, headers, body, timeout) -> handle:
+    // u32 Sends the HTTP request (non-blocking) and returns a pollable
+    // handle. NOTE: params/timeout are legacy internal fields and may be
+    // undefined.
     http.set("_send", Function::new(ctx.clone(), js_send).unwrap())
         .unwrap();
 
@@ -111,7 +112,8 @@ fn send_impl(
     let mut header_fields = Vec::new();
     append_headers(&mut header_fields, &headers)?;
 
-    // If body is an object (not null/string/arraybuffer), set content-type to JSON
+    // If body is an object (not null/string/arraybuffer), set content-type to
+    // JSON
     let is_json_body = body.is_object()
         && !body.is_null()
         && body.as_string().is_none()

@@ -780,7 +780,8 @@ mod tests {
     fn test_pyvalue_minicbor_roundtrip() {
         Python::initialize();
         Python::attach(|py| {
-            // Test various Python types for round-trip serialization through minicbor
+            // Test various Python types for round-trip serialization through
+            // minicbor
             let mut test_cases = vec![
                 // Basic types
                 42i32.into_pyobject(py).unwrap().into_any(),

@@ -15,10 +15,10 @@ fn main() {
         return;
     }
 
-    // Workspace-wide feature unification can enable `pyo3/extension-module` through
-    // `isola-py-binding`, which suppresses PyO3's normal libpython link flags.
-    // Emit explicit link flags for `isola-python` so `cargo test --all-features`
-    // still links test binaries correctly.
+    // Workspace-wide feature unification can enable `pyo3/extension-module`
+    // through `isola-py-binding`, which suppresses PyO3's normal libpython
+    // link flags. Emit explicit link flags for `isola-python` so `cargo
+    // test --all-features` still links test binaries correctly.
     let py_cfg = pyo3_build_config::get();
     if let Some(lib_name) = py_cfg.lib_name() {
         let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();

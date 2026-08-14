@@ -171,8 +171,8 @@ impl<H: Host> InstanceState<H> {
     }
 
     pub fn set_output_target(&mut self, target: Option<OutputTarget>) {
-        // Prevent cross-call output leakage and avoid retaining large buffers if
-        // the call traps or is interrupted mid-output.
+        // Prevent cross-call output leakage and avoid retaining large buffers
+        // if the call traps or is interrupted mid-output.
         self.output_buffer.reset();
         set_log_target(&self.log_target_store, target.clone());
         self.output_target = target;
@@ -401,7 +401,8 @@ impl OutputBuffer {
     fn append(&mut self, data: &[u8]) -> wasmtime::Result<()> {
         let new_len = self.0.len().saturating_add(data.len());
         if new_len > MAX_BUFFERED_OUTPUT_BYTES {
-            // Drop any already-buffered data to avoid retaining attacker-controlled memory.
+            // Drop any already-buffered data to avoid retaining
+            // attacker-controlled memory.
             self.reset();
             return Err(wasmtime::Error::msg(format!(
                 "output buffer exceeded hard limit ({MAX_BUFFERED_OUTPUT_BYTES} bytes)"

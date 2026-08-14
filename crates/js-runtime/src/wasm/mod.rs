@@ -42,8 +42,9 @@ impl runtime::Guest for Global {
                 });
 
                 // Load JS-side async infrastructure and HTTP platform wrappers.
-                // async.js must come before wintertc_http.js (uses _isola_async._wait).
-                // async.js must come after register_sys_module because it
+                // async.js must come before wintertc_http.js (uses
+                // _isola_async._wait). async.js must come after
+                // register_sys_module because it
                 // reads _isola_sys and exposes top-level async helpers.
                 s.load_script(ASYNC_JS).unwrap();
                 s.load_script(WINTERTC_ABORT_JS).unwrap();

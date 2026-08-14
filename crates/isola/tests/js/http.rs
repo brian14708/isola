@@ -423,7 +423,8 @@ async fn integration_js_http_delayed_concurrent() -> Result<()> {
         .await
         .context("failed to instantiate sandbox")?;
 
-    // Both requests should complete via Promise.all with the poll-based event loop
+    // Both requests should complete via Promise.all with the poll-based event
+    // loop
     let script = r#"
 async function main(url) {
     let [slow, fast] = await Promise.all([

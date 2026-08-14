@@ -27,8 +27,9 @@ pub async fn load_or_compile_component(
     let Some(cache_dir) = &cfg.cache else {
         let bytes =
             compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
-        // SAFETY: bytes are produced by wasmtime for the same version/config; if
-        // incompatible, deserialization will fail and surface as an error.
+        // SAFETY: bytes are produced by wasmtime for the same version/config;
+        // if incompatible, deserialization will fail and surface as an
+        // error.
         let component = unsafe { Component::deserialize(engine, &bytes) }.map_err(Error::Wasm)?;
         return Ok(component);
     };
