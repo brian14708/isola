@@ -36,10 +36,10 @@ stdenv.mkDerivation rec {
   ];
 
   buildArch =
-    if stdenv.isDarwin then
-      if stdenv.isAarch64 then "arm64-apple-darwin" else "x86_64-apple-darwin"
-    else if stdenv.isLinux then
-      if stdenv.isAarch64 then "aarch64-unknown-linux-gnu" else "x86_64-unknown-linux-gnu"
+    if stdenv.hostPlatform.isDarwin then
+      if stdenv.hostPlatform.isAarch64 then "arm64-apple-darwin" else "x86_64-apple-darwin"
+    else if stdenv.hostPlatform.isLinux then
+      if stdenv.hostPlatform.isAarch64 then "aarch64-unknown-linux-gnu" else "x86_64-unknown-linux-gnu"
     else
       builtins.throw "Unsupported platform for Python WASI build";
 

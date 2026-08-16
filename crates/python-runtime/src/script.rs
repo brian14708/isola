@@ -266,7 +266,7 @@ mod tests {
         assert_eq!(emissions.len(), 1);
         assert_eq!(emissions[0].0, EmitType::End);
         // The exact content will be CBOR-encoded "test"
-        assert!(!emissions[0].1.is_empty());
+        assert_ne!(emissions[0].1, [] as [u8; 0]);
     }
 
     #[test]
