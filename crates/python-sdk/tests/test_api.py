@@ -20,12 +20,11 @@ isola = pytest.importorskip("isola")
 runtime_module = pytest.importorskip("isola._runtime")
 
 _FETCH_SCRIPT = (
-    "from sandbox.http import fetch\n"
+    "import httpx\n"
     "\n"
     "def main(url):\n"
-    "\twith fetch('GET', url) as resp:\n"
-    "\t\tdata = b''.join(resp.iter_bytes())\n"
-    "\t\treturn [resp.status, resp.headers.get('x-test'), data.decode()]\n"
+    "\tresp = httpx.get(url)\n"
+    "\treturn [resp.status_code, resp.headers.get('x-test'), resp.text]\n"
 )
 
 

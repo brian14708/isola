@@ -574,7 +574,6 @@ mod tests {
             .header(http::header::HOST, "a.example")
             .header(http::header::AUTHORIZATION, "Bearer secret")
             .header(http::header::COOKIE, "a=b")
-            .header("x-isola-proxy", "http://proxy")
             .header("x-other", "keep")
             .body(body)
             .expect("request build");

@@ -14,6 +14,29 @@ use crate::{
 const MAX_HTTP_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 const HTTP_RESPONSE_BODY_CHUNK_BYTES: usize = 64 * 1024;
 
+/// Headers that WASI HTTP forbids setting in `fields`. `host` is derived from
+/// the request authority and the rest are hop-by-hop; caller-supplied values
+/// are dropped so `fields.from-list` does not reject the request.
+const FORBIDDEN_HEADERS: &[&str] = &[
+    "connection",
+    "host",
+    "keep-alive",
+    "http2-settings",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "proxy-connection",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
+
+fn is_forbidden_header(name: &str) -> bool {
+    FORBIDDEN_HEADERS
+        .iter()
+        .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
+}
+
 pub struct HttpRequest {
     method: String,
     url: url::Url,
@@ -62,11 +85,22 @@ pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
     let HttpRequest {
         method,
         url,
-        headers,
+        mut headers,
         body,
         timeout_ms,
     } = request;
-    let fields = Fields::from_list(&headers).map_err(|e| format!("invalid HTTP headers: {e:?}"))?;
+    headers.retain(|(name, _)| !is_forbidden_header(name));
+    let fields = Fields::from_list(&headers).map_err(|error| {
+        let rejected = headers.iter().find_map(|(name, value)| {
+            Fields::from_list(&[(name.clone(), value.clone())])
+                .is_err()
+                .then_some(name)
+        });
+        rejected.map_or_else(
+            || format!("invalid HTTP headers: {error:?}"),
+            |name| format!("invalid HTTP header {name:?}: {error:?}"),
+        )
+    })?;
     let (body_writer, body_reader) = wit_stream::new::<u8>();
     let (trailers_writer, trailers_reader) = wit_future::new(|| Ok(None));
     drop(trailers_writer);

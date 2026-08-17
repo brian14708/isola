@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict, cast, override
 
-from sandbox.http import fetch
+import httpx
 
 if TYPE_CHECKING:
     import types
@@ -39,8 +39,8 @@ class HttpImporter(
         self.url: str = url
         self.modules: dict[str, ModuleInfo] = {}
         self.archive: zipfile.Path | None = None
-        with fetch("GET", url) as r:
-            body = r.read()
+        with httpx.Client() as client:
+            body = client.get(url).content
             if body.startswith(b"PK"):
                 try:
                     zip_ = zipfile.ZipFile(io.BytesIO(body))
@@ -76,11 +76,12 @@ class HttpImporter(
         for path_entry in paths:
             if self.archive is None:
                 url: str = self.url + "/" + path_entry
-                with fetch("GET", url) as resp:
-                    if resp.status >= 400:
+                with httpx.Client() as client:
+                    resp = client.get(url)
+                    if resp.status_code >= 400:
                         continue
                     self.modules[fullname] = ModuleInfo(
-                        content=resp.read().decode(),
+                        content=resp.text,
                         filepath=url,
                         package=path_entry.endswith("__init__.py"),
                     )

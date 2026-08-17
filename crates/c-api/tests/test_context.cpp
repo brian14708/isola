@@ -183,10 +183,10 @@ TEST_CASE("HTTP mock handler") {
 
   REQUIRE(isola_sandbox_load_script(
               sandbox,
-              "from sandbox.http import fetch\n"
+              "import httpx\n"
               "def main():\n"
-              "    with fetch('GET', 'http://mock.test/hello') as resp:\n"
-              "        return {'status': resp.status, 'body': resp.text()}\n",
+              "    resp = httpx.get('http://mock.test/hello')\n"
+              "    return {'status': resp.status_code, 'body': resp.text}\n",
               5000) == 0);
 
   REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 5000) == 0);

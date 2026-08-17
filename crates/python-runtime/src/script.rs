@@ -50,6 +50,15 @@ impl Scope {
                             let _ = path.insert(1, "/lib/bundle.zip");
                         }
                     }
+                    #[cfg(target_os = "wasi")]
+                    {
+                        PyModule::import(py, intern!(py, "sandbox._httpx"))
+                            .expect("failed to import HTTPX sandbox transport")
+                            .getattr(intern!(py, "install"))
+                            .expect("failed to find HTTPX sandbox transport installer")
+                            .call0()
+                            .expect("failed to install HTTPX sandbox transport");
+                    }
                     match (
                         sys.getattr(intern!(py, "stdout")).ok(),
                         sys.getattr(intern!(py, "stderr")).ok(),
