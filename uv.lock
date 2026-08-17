@@ -237,6 +237,7 @@ source = { editable = "crates/python-runtime" }
 dependencies = [
     { name = "cbor2" },
     { name = "duron" },
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
 ]
@@ -245,6 +246,7 @@ dependencies = [
 requires-dist = [
     { name = "cbor2", specifier = ">=5.6.0" },
     { name = "duron", specifier = ">=0.0.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.11.1" },
     { name = "pyyaml", specifier = ">=6.0.2" },
 ]

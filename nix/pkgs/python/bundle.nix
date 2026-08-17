@@ -19,9 +19,18 @@ let
         typing-inspection
         xmltodict
         pydantic
+        idna
       ]
     ))
     ++ (builtins.map toString [
+      (fetchPypi {
+        pname = "httpx";
+        version = "0.28.1";
+        format = "wheel";
+        python = "py3";
+        dist = "py3";
+        hash = "sha256-2Qn8zMEQ+Mf6+BTKgqmk2Ba8Wm2/6iXWWR1phbi6Wa0=";
+      })
       (fetchPypi {
         pname = "duron";
         version = "0.0.3";

@@ -6,8 +6,9 @@ This page shows the fastest host-side path from Python or Node.js.
 
 - Host code runs in your app and uses the `isola` or `isola-core` SDK to build
   templates, create sandboxes, and configure policy.
-- Guest code runs inside the sandbox and uses Python `sandbox.*` modules or
-  JavaScript globals like `hostcall(...)` and `fetch(...)`.
+- Guest code runs inside the sandbox and uses Python packages such as `httpx`
+  and `sandbox.asyncio`, or JavaScript globals like `hostcall(...)` and
+  `fetch(...)`.
 - For guest-side APIs, see [Python Guest API](python-guest-api.md) and
   [JavaScript Guest API](javascript-guest-api.md).
 

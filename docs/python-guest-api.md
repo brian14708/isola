@@ -78,15 +78,15 @@ def main(user_id):
 ### `await subscribe(pollable) -> object`
 
 Low-level helper for awaiting native guest pollables. Most guest code should use
-`hostcall(...)` or `sandbox.http.fetch(...)` instead of calling `subscribe(...)`
+`hostcall(...)` or `httpx.AsyncClient` instead of calling `subscribe(...)`
 directly.
 
-## `sandbox.http`
+## HTTPX
 
-Import the guest HTTP client with:
+HTTPX's request and response API is available in the guest:
 
 ```python
-from sandbox.http import fetch
+import httpx
 ```
 
 Guest HTTP is only available when the host enables outbound requests with
@@ -94,92 +94,55 @@ Guest HTTP is only available when the host enables outbound requests with
 See [Python Host API](python-api.md) and
 [Node.js Host API](nodejs-api.md).
 
-### `fetch(...) -> Request`
-
-```python
-fetch(
-    method,
-    url,
-    *,
-    params=None,
-    headers=None,
-    files=None,
-    body=None,
-    timeout=None,
-    proxy=None,
-)
-```
-
-Supported request features:
-
-- `params`: query-string mapping
-- `headers`: string header mapping
-- `body`: raw `bytes` or a JSON-serializable object
-- `files`: multipart form fields; each value may be raw bytes, a file object, or
-  `(filename, fileobj, content_type)`
-- `timeout`: first-byte timeout in seconds
-- `proxy`: sets the `x-isola-proxy` header for host policies that honor it
-
-If `body` is an object and `content-type` is not already set, the runtime uses
-`application/json`.
+Isola patches HTTPX's default sync and async transports so requests use the
+sandbox HTTP hostcall. HTTPX still handles request construction, query
+parameters, JSON and form encoding, multipart uploads, response decoding,
+redirects, cookies, and status errors using its normal API. Both top-level
+helpers such as `httpx.get(...)` and reusable clients work.
 
 ### Synchronous usage
 
 ```python
-from sandbox.http import fetch
+import httpx
 
 
 def main(url):
-    with fetch("GET", url, params={"q": "hello"}) as resp:
-        return {
-            "status": resp.status,
-            "headers": resp.headers,
-            "body": resp.text(),
-        }
+    resp = httpx.get(url, params={"q": "hello"})
+    return {
+        "status": resp.status_code,
+        "headers": dict(resp.headers),
+        "body": resp.text,
+    }
 ```
 
-`Response` exposes:
-
-- `status`
-- `headers`
-- `read(size=-1) -> bytes`
-- `text() -> str`
-- `json() -> object`
-- `iter_bytes()`
-- `iter_lines()`
-- `iter_sse()`
-- `close()`
+Use `httpx.Client` for cookies, redirects, shared headers, and multiple
+requests. Streaming responses are available through `httpx.stream(...)` or
+`Client.stream(...)`.
 
 ### Asynchronous usage
 
 ```python
-from sandbox.http import fetch
+import httpx
 
 
 async def main(url):
-    async with fetch("GET", url) as resp:
-        return await resp.atext()
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url)
+        return resp.text
 ```
 
-`AsyncResponse` exposes:
+The host owns the network connection, so transport-level HTTPX options such as
+TLS verification, certificates, connection limits, retries, HTTP version
+selection, Unix sockets, and socket options do not apply. A request timeout is
+forwarded to the host bridge as the exchange timeout.
 
-- `status`
-- `headers`
-- `aread(size=-1) -> bytes`
-- `atext() -> str`
-- `ajson() -> object`
-- `aiter_bytes()`
-- `aiter_lines()`
-- `aiter_sse()`
-- `close()`
+A proxy is an egress concern and the guest has no sockets, so proxy selection is
+host policy, not guest configuration: configure it once on the host (for example
+via the handler's HTTP client or `HTTPS_PROXY`) and it applies to every request.
 
-### Server-sent events
-
-`iter_sse()` and `aiter_sse()` yield `ServerSentEvent` values with:
-
-- `id`
-- `event`
-- `data`
+An explicit custom `transport=` still takes precedence and bypasses the Isola
+HTTP bridge. Guest HTTP remains subject to the host's configured policy and
+response-size limits.
 
 ## `sandbox.importlib`
 

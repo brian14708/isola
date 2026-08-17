@@ -233,12 +233,11 @@ describeIfRuntime("isola js-sdk", () => {
     await sandbox.start();
     await sandbox.loadScript(
       [
-        "from sandbox.http import fetch",
+        "import httpx",
         "",
         "def main(url):",
-        "    with fetch('GET', url) as resp:",
-        "        data = b''.join(resp.iter_bytes())",
-        "        return [resp.status, resp.headers.get('x-test'), data.decode()]",
+        "    resp = httpx.get(url)",
+        "    return [resp.status_code, resp.headers.get('x-test'), resp.text]",
       ].join("\n"),
     );
     const result = await sandbox.run("main", ["https://example.test/hello"]);
@@ -257,11 +256,10 @@ describeIfRuntime("isola js-sdk", () => {
     await sandbox.start();
     await sandbox.loadScript(
       [
-        "from sandbox.http import fetch",
+        "import httpx",
         "",
         "def main(url):",
-        "    with fetch('GET', url) as resp:",
-        "        return list(b''.join(resp.iter_bytes()))",
+        "    return list(httpx.get(url).content)",
       ].join("\n"),
     );
     const result = await sandbox.run("main", ["https://example.test/binary"]);
@@ -283,12 +281,11 @@ describeIfRuntime("isola js-sdk", () => {
     await sandbox.start();
     await sandbox.loadScript(
       [
-        "from sandbox.http import fetch",
+        "import httpx",
         "",
         "def main(url):",
-        "    with fetch('GET', url) as resp:",
-        "        data = b''.join(resp.iter_bytes())",
-        "        return [resp.status, resp.headers.get('x-test'), data.decode()]",
+        "    resp = httpx.get(url)",
+        "    return [resp.status_code, resp.headers.get('x-test'), resp.text]",
       ].join("\n"),
     );
     const result = await sandbox.run("main", ["https://example.test/builtin"]);

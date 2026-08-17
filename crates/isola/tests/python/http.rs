@@ -61,16 +61,12 @@ async fn integration_python_http_client_roundtrip() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
-def main(url):
-    with fetch(
-        "POST",
-        url,
-        headers={"content-type": "application/json"},
-        body=b'{"hello":"world"}',
-    ) as resp:
-        return resp.text()
+async def main(url):
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(url, json={"hello": "world"})
+        return resp.text
 "#;
     sandbox
         .eval_script(script, OutputTarget::discard())
@@ -138,15 +134,13 @@ async fn integration_python_http_large_response_is_chunked_and_limited() -> Resu
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
 def main(url):
-    with fetch("GET", f"{url}/large") as resp:
-        body = resp.read()
+    body = httpx.get(f"{url}/large").content
 
     try:
-        with fetch("GET", f"{url}/oversized") as resp:
-            resp.read()
+        httpx.get(f"{url}/oversized")
         oversized_error = "expected response-size error"
     except Exception as e:
         oversized_error = str(e)
@@ -190,11 +184,10 @@ def main(url):
     Ok(())
 }
 
-/// A zero-length `read(0)` must return promptly (not spin on the always-ready
-/// pollable) and must leave the response readable for a subsequent full read.
+/// HTTPX streaming should expose the native response body incrementally.
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
-async fn integration_python_http_zero_length_read_does_not_hang() -> Result<()> {
+async fn integration_python_http_streaming_response() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
@@ -213,12 +206,11 @@ async fn integration_python_http_zero_length_read_does_not_hang() -> Result<()> 
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
 def main(url):
-    with fetch("GET", url) as resp:
-        resp.read(0)        # must not hang
-        return resp.text()  # response still readable afterwards
+    with httpx.stream("GET", url) as resp:
+        return b"".join(resp.iter_bytes(chunk_size=4)).decode()
 "#;
     sandbox
         .eval_script(script, OutputTarget::discard())
@@ -275,14 +267,13 @@ async fn integration_python_http_status_errors_surface() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
 def main(url):
-    with fetch("GET", f"{url}/status/503") as first:
-        first_status = first.status
-
-    with fetch("POST", f"{url}/status/500", body={"value": "test"}) as second:
-        second_status = second.status
+    first_status = httpx.get(f"{url}/status/503").status_code
+    second_status = httpx.post(
+        f"{url}/status/500", json={"value": "test"}
+    ).status_code
 
     return (first_status, second_status)
 "#;
@@ -343,19 +334,17 @@ async fn integration_python_http_multipart_files() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-import io
-from sandbox.http import fetch
+import httpx
 
 def main(url):
-    with fetch(
-        "POST",
+    resp = httpx.post(
         f"{url}/multipart",
         files={
-            "file": b"test",
-            "file2": ("a.txt", io.BytesIO(b"test2"), "text/plain"),
+            "file": ("file", b"test"),
+            "file2": ("a.txt", b"test2", "text/plain"),
         },
-    ) as resp:
-        return resp.status
+    )
+    return resp.status_code
 "#;
     sandbox
         .eval_script(script, OutputTarget::discard())
@@ -386,7 +375,7 @@ def main(url):
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
-async fn integration_python_http_read_twice_errors() -> Result<()> {
+async fn integration_python_http_buffered_response_can_be_read_twice() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
     };
@@ -409,16 +398,11 @@ async fn integration_python_http_read_twice_errors() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
 def main(url):
-    with fetch("GET", f"{url}/read-twice") as resp:
-        _ = resp.json()
-        try:
-            _ = resp.json()
-            return "expected-second-read-error"
-        except Exception as e:
-            return str(e)
+    resp = httpx.get(f"{url}/read-twice")
+    return (resp.json(), resp.json())
 "#;
     sandbox
         .eval_script(script, OutputTarget::discard())
@@ -436,16 +420,14 @@ def main(url):
     .context("failed to call read-twice function")?;
 
     assert!(output.items.is_empty(), "expected no partial outputs");
-    let value: String = output
+    let value: (serde_json::Value, serde_json::Value) = output
         .result
         .as_ref()
         .context("expected exactly one end output")?
         .to_serde()
         .context("failed to decode read-twice result")?;
-    assert!(
-        value.contains("Response already read"),
-        "unexpected second-read error message: {value}"
-    );
+    assert_eq!(value.0, serde_json::json!({"ok": true}));
+    assert_eq!(value.1, value.0);
 
     Ok(())
 }
@@ -475,12 +457,11 @@ async fn integration_python_http_timeout_is_enforced() -> Result<()> {
         .context("failed to instantiate sandbox")?;
 
     let script = r#"
-from sandbox.http import fetch
+import httpx
 
 def main(url):
     try:
-        with fetch("GET", f"{url}/slow", timeout=0.05) as resp:
-            return resp.text()
+        return httpx.get(f"{url}/slow", timeout=0.05).text
     except Exception as e:
         return str(e)
 "#;

@@ -47,11 +47,12 @@ async def main() -> None:
 
     async with template.create(http=True) as sandbox:
         await sandbox.load_script(
-            "from sandbox.http import fetch\n"
+            "import httpx\n"
             "\n"
             "async def main(url):\n"
-            "    async with fetch('GET', url) as resp:\n"
-            "        return await resp.ajson()\n"
+            "    async with httpx.AsyncClient() as client:\n"
+            "        resp = await client.get(url)\n"
+            "        return resp.json()\n"
         )
         print(await sandbox.run("main", "https://httpbin.org/get"))
 
