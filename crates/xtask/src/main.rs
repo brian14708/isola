@@ -406,10 +406,9 @@ fn write_component_if_changed(
     }
 
     println!("Linking {}", output.display());
-    let mut linker = wit_component::Linker::default()
-        .validate(true)
-        .stack_size(stack_size)
-        .use_built_in_libdl(true);
+    let mut linker = wit_component::Linker::default();
+    linker.encoder().validate(true);
+    linker.stack_size(stack_size).use_built_in_libdl(true);
     for library in libraries {
         linker = link_library(
             linker,
@@ -419,12 +418,11 @@ fn write_component_if_changed(
             library.async_shim_name,
         )?;
     }
-    let component = linker
-        .adapter(
-            wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
-            wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
-        )?
-        .encode()?;
+    linker.encoder().adapter(
+        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
+        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
+    )?;
+    let component = linker.encode()?;
 
     std::fs::write(output, component)
         .with_context(|| format!("failed to write component {}", output.display()))?;

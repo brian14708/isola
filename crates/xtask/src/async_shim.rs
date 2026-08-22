@@ -351,11 +351,11 @@ fn dylink_with_needed(
     let mut found_needed = false;
 
     loop {
-        let start = subsections.original_position() - source_offset;
+        let start = usize::try_from(subsections.original_position() - source_offset)?;
         let Some(subsection) = subsections.next() else {
             break;
         };
-        let end = subsections.original_position() - source_offset;
+        let end = usize::try_from(subsections.original_position() - source_offset)?;
         match subsection? {
             Dylink0Subsection::Needed(mut names) => {
                 if found_needed {
@@ -400,9 +400,11 @@ fn add_needed_library(runtime: &[u8], library: &str) -> Result<Vec<u8>> {
             }
             payload => {
                 if let Some((id, range)) = payload.as_section() {
+                    let start = usize::try_from(range.start)?;
+                    let end = usize::try_from(range.end)?;
                     module.section(&RawSection {
                         id,
-                        data: &runtime[range],
+                        data: &runtime[start..end],
                     });
                 }
             }
@@ -416,23 +418,25 @@ fn add_needed_library(runtime: &[u8], library: &str) -> Result<Vec<u8>> {
 }
 
 pub fn link_library(
-    linker: wit_component::Linker,
+    mut linker: wit_component::Linker,
     name: &str,
     data: &[u8],
     dl_openable: bool,
     async_shim_name: Option<&str>,
 ) -> Result<wit_component::Linker> {
     let Some(shim_name) = async_shim_name else {
-        return linker.library(name, data, dl_openable);
+        linker.library(name, data, dl_openable)?;
+        return Ok(linker);
     };
     let Some(shim) = async_import_shim(data)? else {
-        return linker.library(name, data, dl_openable);
+        linker.library(name, data, dl_openable)?;
+        return Ok(linker);
     };
 
     let runtime = add_needed_library(data, shim_name)?;
-    linker
-        .library(name, &runtime, dl_openable)?
-        .library(shim_name, &shim, false)
+    linker.library(name, &runtime, dl_openable)?;
+    linker.library(shim_name, &shim, false)?;
+    Ok(linker)
 }
 
 #[cfg(test)]
