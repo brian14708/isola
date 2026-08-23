@@ -7,7 +7,7 @@ use std::{
 
 use isola::{
     host::{BoxError, LogLevel, OutputEvent, OutputTarget},
-    sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
+    sandbox::{Arg, FsPerms, Sandbox, SandboxOptions, SandboxTemplate},
     value::Value,
 };
 use serde::Deserialize;
@@ -197,19 +197,11 @@ struct MountConfig {
 }
 
 impl MountConfig {
-    fn dir_perms(&self) -> DirPerms {
+    const fn perms(&self) -> FsPerms {
         if self.writable {
-            DirPerms::READ | DirPerms::MUTATE
+            FsPerms::ReadWrite
         } else {
-            DirPerms::READ
-        }
-    }
-
-    fn file_perms(&self) -> FilePerms {
-        if self.writable {
-            FilePerms::READ | FilePerms::WRITE
-        } else {
-            FilePerms::READ
+            FsPerms::ReadOnly
         }
     }
 }
@@ -343,15 +335,10 @@ impl ContextCore {
                 .prelude(prelude)
                 .cache(Some(cache))
                 .max_memory(max_memory)
-                .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
+                .mount(&lib_dir, "/lib", FsPerms::ReadOnly);
 
             for mount in &self.config.mounts {
-                builder = builder.mount(
-                    &mount.host,
-                    &mount.guest,
-                    mount.dir_perms(),
-                    mount.file_perms(),
-                );
+                builder = builder.mount(&mount.host, &mount.guest, mount.perms());
             }
 
             for (k, v) in &self.config.env {
@@ -528,12 +515,7 @@ impl SandboxHandle {
             "mount" => {
                 let mount: MountConfig = serde_json::from_str(value)
                     .map_err(|_| Error::InvalidArgument("Invalid JSON for mount"))?;
-                *options = std::mem::take(options).mount(
-                    &mount.host,
-                    &mount.guest,
-                    mount.dir_perms(),
-                    mount.file_perms(),
-                );
+                *options = std::mem::take(options).mount(&mount.host, &mount.guest, mount.perms());
             }
             _ => return Err(Error::InvalidArgument("Unknown config key")),
         }

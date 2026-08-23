@@ -9,7 +9,7 @@ use futures::TryStreamExt;
 use http::header::HOST;
 use isola::{
     host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
-    sandbox::{DirPerms, FilePerms, SandboxTemplate},
+    sandbox::{FsPerms, SandboxTemplate},
     value::Value,
 };
 use reqwest::Client;
@@ -158,7 +158,7 @@ async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<Sa
     let mut builder = SandboxTemplate::builder()
         .prelude(Some("import sandbox.asyncio".to_string()))
         .cache(Some(cache_dir))
-        .mount(&lib_dir, "/lib", DirPerms::READ, FilePerms::READ);
+        .mount(&lib_dir, "/lib", FsPerms::ReadOnly);
     if let Some(max_memory) = max_memory {
         builder = builder.max_memory(max_memory);
     }

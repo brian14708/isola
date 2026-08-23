@@ -46,7 +46,7 @@
 //! # #[cfg(feature = "serde")]
 //! use isola::{
 //!     host::{Host, OutputTarget},
-//!     sandbox::{DirPerms, FilePerms, SandboxOptions, SandboxTemplate, args},
+//!     sandbox::{FsPerms, SandboxOptions, SandboxTemplate, args},
 //! };
 //!
 //! # #[cfg(feature = "serde")]
@@ -62,12 +62,7 @@
 //!     let template = SandboxTemplate::builder()
 //!         .cache(Some("./isola-python-runtime/cache".into()))
 //!         .max_memory(64 * 1024 * 1024)
-//!         .mount(
-//!             "./isola-python-runtime/lib",
-//!             "/lib",
-//!             DirPerms::READ,
-//!             FilePerms::READ,
-//!         )
+//!         .mount("./isola-python-runtime/lib", "/lib", FsPerms::ReadOnly)
 //!         .build("./isola-python-runtime/bin/python.wasm")
 //!         .await?;
 //!

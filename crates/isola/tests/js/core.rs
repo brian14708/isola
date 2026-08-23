@@ -4,9 +4,7 @@ use anyhow::{Context, Result};
 use futures::stream;
 use isola::{
     host::OutputTarget,
-    sandbox::{
-        Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
-    },
+    sandbox::{Arg, CallOutput, Error as IsolaError, FsPerms, Sandbox, SandboxOptions, args},
     value::Value,
 };
 use tempfile::tempdir;
@@ -1020,12 +1018,7 @@ async fn integration_js_typescript_eval_file_roundtrip() -> Result<()> {
     .context("failed to write typescript guest file")?;
 
     let mut options = SandboxOptions::default();
-    options = options.mount(
-        fixture_dir.path(),
-        "/workspace",
-        DirPerms::READ,
-        FilePerms::READ,
-    );
+    options = options.mount(fixture_dir.path(), "/workspace", FsPerms::ReadOnly);
 
     let mut sandbox = module
         .instantiate(TestHost::default(), options)

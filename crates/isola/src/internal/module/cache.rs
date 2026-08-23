@@ -35,8 +35,10 @@ pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Stri
         let host = mapping.host.to_string_lossy();
         h.update(host.as_bytes());
         h.update([0]);
-        h.update(mapping.dir_perms.bits().to_le_bytes());
-        h.update(mapping.file_perms.bits().to_le_bytes());
+        h.update([match mapping.perms {
+            wasmtime_wasi::FsPerms::ReadOnly => 0,
+            wasmtime_wasi::FsPerms::ReadWrite => 1,
+        }]);
     }
 
     h.update((cfg.env.len() as u64).to_le_bytes());

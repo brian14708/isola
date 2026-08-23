@@ -15,7 +15,7 @@ use isola::{
         BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, LogLevel, OutputEvent,
         OutputTarget,
     },
-    sandbox::{Arg, DirPerms, FilePerms, Sandbox, SandboxOptions, SandboxTemplate},
+    sandbox::{Arg, FsPerms, Sandbox, SandboxOptions, SandboxTemplate},
     value::Value,
 };
 use parking_lot::Mutex;
@@ -72,8 +72,7 @@ fn invalid_argument(msg: impl Into<String>) -> Error {
 struct ConfiguredMount {
     host: PathBuf,
     guest: String,
-    dir_perms: DirPerms,
-    file_perms: FilePerms,
+    perms: FsPerms,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -150,12 +149,7 @@ impl PendingSandboxConfig {
         }
 
         for mapping in &self.mounts {
-            options = options.mount(
-                &mapping.host,
-                &mapping.guest,
-                mapping.dir_perms,
-                mapping.file_perms,
-            );
+            options = options.mount(&mapping.host, &mapping.guest, mapping.perms);
         }
 
         for (k, v) in &self.env {
@@ -249,20 +243,14 @@ impl ContextInner {
                 ConfiguredMount {
                     host: resolve_runtime_lib_dir(&parent, config.runtime_lib_dir),
                     guest: "/lib".to_string(),
-                    dir_perms: DirPerms::READ,
-                    file_perms: FilePerms::READ,
+                    perms: FsPerms::ReadOnly,
                 },
             );
         }
         mounts = dedupe_mounts_by_guest(mounts);
 
         for mapping in &mounts {
-            builder = builder.mount(
-                &mapping.host,
-                &mapping.guest,
-                mapping.dir_perms,
-                mapping.file_perms,
-            );
+            builder = builder.mount(&mapping.host, &mapping.guest, mapping.perms);
         }
 
         for (k, v) in &config.env {
@@ -406,23 +394,22 @@ fn parse_mounts(mounts: Vec<MountConfigInput>) -> Result<Vec<ConfiguredMount>> {
             return Err(invalid_argument("mount guest path must not be empty"));
         }
 
-        let dir_perms = match mount.dir_perms.unwrap_or(PermissionConfig::Read) {
-            PermissionConfig::Read => DirPerms::READ,
-            PermissionConfig::Write => DirPerms::MUTATE,
-            PermissionConfig::ReadWrite => DirPerms::READ | DirPerms::MUTATE,
-        };
-
-        let file_perms = match mount.file_perms.unwrap_or(PermissionConfig::Read) {
-            PermissionConfig::Read => FilePerms::READ,
-            PermissionConfig::Write => FilePerms::WRITE,
-            PermissionConfig::ReadWrite => FilePerms::READ | FilePerms::WRITE,
+        let perms = if matches!(
+            mount.dir_perms,
+            Some(PermissionConfig::Write | PermissionConfig::ReadWrite)
+        ) || matches!(
+            mount.file_perms,
+            Some(PermissionConfig::Write | PermissionConfig::ReadWrite)
+        ) {
+            FsPerms::ReadWrite
+        } else {
+            FsPerms::ReadOnly
         };
 
         parsed.push(ConfiguredMount {
             host: PathBuf::from(mount.host),
             guest: mount.guest,
-            dir_perms,
-            file_perms,
+            perms,
         });
     }
 

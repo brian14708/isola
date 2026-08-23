@@ -32,7 +32,7 @@ use wasmtime::{
     Engine, Store,
     component::{Component, InstancePre},
 };
-pub use wasmtime_wasi::{DirPerms, FilePerms};
+pub use wasmtime_wasi::FsPerms;
 
 #[cfg(feature = "serde")]
 pub use crate::args;
@@ -96,8 +96,7 @@ impl From<exports::Error> for Error {
 pub(crate) struct DirectoryMapping {
     pub(crate) host: PathBuf,
     pub(crate) guest: String,
-    pub(crate) dir_perms: DirPerms,
-    pub(crate) file_perms: FilePerms,
+    pub(crate) perms: FsPerms,
 }
 
 impl DirectoryMapping {
@@ -105,14 +104,12 @@ impl DirectoryMapping {
         Self {
             host: host.into(),
             guest: guest.into(),
-            dir_perms: DirPerms::READ,
-            file_perms: FilePerms::READ,
+            perms: FsPerms::ReadOnly,
         }
     }
 
-    pub const fn with_permissions(mut self, dir_perms: DirPerms, file_perms: FilePerms) -> Self {
-        self.dir_perms = dir_perms;
-        self.file_perms = file_perms;
+    pub const fn with_permissions(mut self, perms: FsPerms) -> Self {
+        self.perms = perms;
         self
     }
 }
@@ -220,12 +217,10 @@ impl SandboxOptions {
         mut self,
         host_path: impl AsRef<Path>,
         guest_path: impl AsRef<str>,
-        dir_perms: DirPerms,
-        file_perms: FilePerms,
+        perms: FsPerms,
     ) -> Self {
         self.directory_mappings.push(
-            DirectoryMapping::new(host_path.as_ref(), guest_path.as_ref())
-                .with_permissions(dir_perms, file_perms),
+            DirectoryMapping::new(host_path.as_ref(), guest_path.as_ref()).with_permissions(perms),
         );
         self
     }
@@ -326,12 +321,9 @@ impl SandboxTemplateBuilder {
         mut self,
         host_path: impl AsRef<Path>,
         guest_path: impl AsRef<str>,
-        dir_perms: DirPerms,
-        file_perms: FilePerms,
+        perms: FsPerms,
     ) -> Self {
-        self.base_options = self
-            .base_options
-            .mount(host_path, guest_path, dir_perms, file_perms);
+        self.base_options = self.base_options.mount(host_path, guest_path, perms);
         self
     }
 
@@ -650,7 +642,7 @@ mod tests {
     fn sandbox_configuration_is_fluent() {
         let options = SandboxOptions::default()
             .max_memory(1024)
-            .mount("/host", "/guest", DirPerms::READ, FilePerms::READ)
+            .mount("/host", "/guest", FsPerms::ReadOnly)
             .env("KEY", "value");
 
         assert_eq!(options.max_memory, Some(1024));
@@ -659,7 +651,7 @@ mod tests {
 
         let _builder = SandboxTemplate::builder()
             .max_memory(1024)
-            .mount("/host", "/guest", DirPerms::READ, FilePerms::READ)
+            .mount("/host", "/guest", FsPerms::ReadOnly)
             .env("KEY", "value");
     }
 }
