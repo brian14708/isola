@@ -1,7 +1,6 @@
 use std::{future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
-use futures::StreamExt;
 use http_body_util::BodyExt as _;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -11,11 +10,8 @@ use wasmtime::{
 };
 use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 use wasmtime_wasi_http::{
-    WasiHttpCtx,
-    p3::{
-        RequestOptions, WasiHttpCtxView, WasiHttpHooks, WasiHttpView,
-        bindings::http::types::ErrorCode,
-    },
+    Error as HttpError, RequestOptions, WasiBody, WasiHttpCtx, WasiHttpCtxView, WasiHttpHooks,
+    WasiHttpView,
 };
 
 use super::bindings::{EmitValue, HostView, add_to_linker};
@@ -49,10 +45,10 @@ struct InstanceHttpHooks<H: Host> {
 
 type HttpSendResult = Result<
     (
-        http::Response<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
-        Box<dyn Future<Output = Result<(), ErrorCode>> + Send>,
+        http::Response<WasiBody>,
+        Box<dyn Future<Output = Result<(), HttpError>> + Send>,
     ),
-    wasmtime_wasi::TrappableError<ErrorCode>,
+    HttpError,
 >;
 
 const MAX_OUTGOING_HTTP_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -60,21 +56,21 @@ const MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT: std::time::Duration = std::time::Dura
 const MAX_BUFFERED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
 async fn collect_outgoing_http_body(
-    body: http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>,
+    body: WasiBody,
     max_bytes: usize,
     read_timeout: std::time::Duration,
-) -> Result<Option<Bytes>, ErrorCode> {
+) -> Result<Option<Bytes>, HttpError> {
     let mut body = body;
     let bytes = timeout(read_timeout, async {
         let mut buf = BytesMut::new();
         while let Some(frame) = http_body_util::BodyExt::frame(&mut body).await {
             let frame = frame.map_err(|e| {
-                ErrorCode::InternalError(Some(format!("request body read error: {e:?}")))
+                HttpError::InternalError(Some(format!("request body read error: {e:?}")))
             })?;
 
             if let Ok(data) = frame.into_data() {
                 if buf.len().saturating_add(data.len()) > max_bytes {
-                    return Err(ErrorCode::HttpRequestBodySize(Some(
+                    return Err(HttpError::HttpRequestBodySize(Some(
                         u64::try_from(max_bytes).unwrap_or(u64::MAX),
                     )));
                 }
@@ -82,10 +78,10 @@ async fn collect_outgoing_http_body(
             }
         }
 
-        Ok::<Bytes, ErrorCode>(buf.freeze())
+        Ok::<Bytes, HttpError>(buf.freeze())
     })
     .await
-    .map_err(|_e| ErrorCode::ConnectionWriteTimeout)??;
+    .map_err(|_e| HttpError::ConnectionWriteTimeout)??;
 
     Ok(if bytes.is_empty() { None } else { Some(bytes) })
 }
@@ -124,12 +120,7 @@ impl<H: Host> InstanceState<H> {
 
         for mapping in directory_mappings {
             builder
-                .preopened_dir(
-                    &mapping.host,
-                    &mapping.guest,
-                    mapping.dir_perms,
-                    mapping.file_perms,
-                )
+                .preopened_dir(&mapping.host, &mapping.guest, mapping.perms)
                 .map_err(|e| {
                     wasmtime::Error::msg(format!(
                         "Failed to add directory mapping '{}' -> '{}': {e}",
@@ -197,7 +188,7 @@ impl<H: Host> InstanceState<H> {
     #[cfg(test)]
     fn send_request(
         &mut self,
-        request: http::Request<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
+        request: http::Request<WasiBody>,
         options: Option<RequestOptions>,
     ) -> std::pin::Pin<Box<dyn Future<Output = HttpSendResult> + Send>> {
         Box::into_pin(
@@ -229,9 +220,9 @@ impl<H: Host> WasiHttpView for InstanceState<H> {
 impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
     fn send_request(
         &mut self,
-        request: http::Request<http_body_util::combinators::UnsyncBoxBody<Bytes, ErrorCode>>,
+        request: http::Request<WasiBody>,
         options: Option<RequestOptions>,
-        fut: Box<dyn Future<Output = Result<(), ErrorCode>> + Send>,
+        fut: Box<dyn Future<Output = Result<(), HttpError>> + Send>,
     ) -> Box<dyn Future<Output = HttpSendResult> + Send> {
         let host = Arc::clone(&self.host);
 
@@ -246,7 +237,7 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
                 {
                     let max = u64::try_from(MAX_OUTGOING_HTTP_BODY_BYTES).unwrap_or(u64::MAX);
                     if len > max {
-                        return Err(ErrorCode::HttpRequestBodySize(Some(max)).into());
+                        return Err(HttpError::HttpRequestBodySize(Some(max)));
                     }
                 }
 
@@ -268,13 +259,13 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
                     .unwrap_or(std::time::Duration::from_secs(600));
                 let resp = timeout(first_byte_timeout, host.http_request(req))
                     .await
-                    .map_err(|_e| ErrorCode::HttpResponseTimeout)?
-                    .map_err(|e| ErrorCode::InternalError(Some(format!("request error: {e}"))))?;
+                    .map_err(|_e| HttpError::HttpResponseTimeout)?
+                    .map_err(|e| HttpError::InternalError(Some(format!("request error: {e}"))))?;
 
                 let resp = resp.map(|b| {
-                    http_body_util::StreamBody::new(
-                        b.map(|e| e.map_err(|e| ErrorCode::InternalError(Some(e.to_string())))),
-                    )
+                    http_body_util::StreamBody::new(futures::StreamExt::map(b, |e| {
+                        e.map_err(|e| HttpError::InternalError(Some(e.to_string())))
+                    }))
                     .boxed_unsync()
                 });
 
@@ -499,7 +490,7 @@ mod tests {
 
         // A body that never completes.
         let body = http_body_util::StreamBody::new(futures::stream::pending::<
-            Result<Frame<Bytes>, ErrorCode>,
+            Result<Frame<Bytes>, HttpError>,
         >())
         .boxed_unsync();
 
@@ -522,26 +513,25 @@ mod tests {
         .await
         .expect("ready in time");
 
-        let err = match result {
-            Ok(_) => panic!("expected timeout"),
-            Err(e) => e.downcast().expect("downcast ErrorCode"),
+        let Err(err) = result else {
+            panic!("expected timeout");
         };
-        assert!(matches!(err, ErrorCode::ConnectionWriteTimeout));
+        assert!(matches!(err, HttpError::ConnectionWriteTimeout));
         assert!(host.calls().is_empty());
     }
 
     #[tokio::test]
     async fn outgoing_http_body_is_capped() {
         let body = http_body_util::StreamBody::new(futures::stream::iter([
-            Ok::<_, ErrorCode>(Frame::data(Bytes::from_static(b"abcd"))),
-            Ok::<_, ErrorCode>(Frame::data(Bytes::from_static(b"e"))),
+            Ok::<_, HttpError>(Frame::data(Bytes::from_static(b"abcd"))),
+            Ok::<_, HttpError>(Frame::data(Bytes::from_static(b"e"))),
         ]))
         .boxed_unsync();
 
         let err = collect_outgoing_http_body(body, 4, Duration::from_secs(1))
             .await
             .expect_err("expected cap error");
-        assert!(matches!(err, ErrorCode::HttpRequestBodySize(Some(4))));
+        assert!(matches!(err, HttpError::HttpRequestBodySize(Some(4))));
     }
 
     #[tokio::test]
@@ -564,7 +554,7 @@ mod tests {
         };
 
         let body = http_body_util::StreamBody::new(futures::stream::empty::<
-            Result<Frame<Bytes>, ErrorCode>,
+            Result<Frame<Bytes>, HttpError>,
         >())
         .boxed_unsync();
 

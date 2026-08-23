@@ -100,7 +100,7 @@ async fn compile_serialized_component(
 
             let data = wizer
                 .snapshot_component(
-                    cx,
+                    &cx,
                     &mut WasmtimeWizerComponent {
                         store: &mut store,
                         instance,

@@ -3,9 +3,7 @@ use std::{sync::Arc, time::Duration};
 use anyhow::{Context, Result};
 use isola::{
     host::{OutputEvent, OutputTarget},
-    sandbox::{
-        Arg, CallOutput, DirPerms, Error as IsolaError, FilePerms, Sandbox, SandboxOptions, args,
-    },
+    sandbox::{Arg, CallOutput, Error as IsolaError, FsPerms, Sandbox, SandboxOptions, args},
 };
 use parking_lot::Mutex;
 use tempfile::tempdir;
@@ -904,12 +902,7 @@ async fn integration_python_writable_directory_mapping_filesystem_roundtrip() ->
         return Ok(());
     };
     let mut options = SandboxOptions::default();
-    options = options.mount(
-        &mapped_dir,
-        "/fs",
-        DirPerms::READ | DirPerms::MUTATE,
-        FilePerms::READ | FilePerms::WRITE,
-    );
+    options = options.mount(&mapped_dir, "/fs", FsPerms::ReadWrite);
     let mut sandbox = module
         .instantiate(TestHost::default(), options)
         .await
