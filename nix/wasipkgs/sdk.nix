@@ -43,9 +43,9 @@ stdenv.mkDerivation (finalAttrs: rec {
     }
   );
 
-  nativeBuildInputs = [ binaryen ] ++ lib.optionals stdenv.isLinux [ autoPatchelfHook ];
+  nativeBuildInputs = [ binaryen ] ++ lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
 
-  buildInputs = lib.optionals stdenv.isLinux [
+  buildInputs = lib.optionals stdenv.hostPlatform.isLinux [
     stdenv.cc.cc
     ncurses
   ];
@@ -67,7 +67,7 @@ stdenv.mkDerivation (finalAttrs: rec {
     find "$out/share/wasi-sysroot/lib" -type f -name "*.so" -print0 | while IFS= read -r -d "" so_file; do
       echo "Optimizing: $so_file"
       temp_file="''${so_file}.tmp"
-      wasm-opt "$so_file" -all -O4 --strip-debug -o "$temp_file"
+      wasm-opt "$so_file" -all -O4 --strip-debug --disable-compact-imports -o "$temp_file"
       mv "$temp_file" "$so_file"
     done
     runHook postFixup
