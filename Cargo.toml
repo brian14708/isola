@@ -67,7 +67,7 @@ wasmtime-wasi = "48.0"
 wasmtime-wasi-http = { version = "48.0", default-features = false, features = ["p3"] }
 wasmtime-wizer = { version = "48.0", default-features = false }
 wiremock = "0.6"
-wit-bindgen = { version = "0.60", default-features = false }
+wit-bindgen = { version = "0.61", default-features = false }
 wit-component = "0.258"
 wit-parser = "0.258"
 xshell = "0.2"
