@@ -60,16 +60,16 @@ tokio-stream = "0.1"
 tracing = "0.1"
 url = "2.5"
 wasi-preview1-component-adapter-provider = "48.0"
-wasm-encoder = "0.257"
-wasmparser = { version = "0.257", default-features = false }
+wasm-encoder = "0.258"
+wasmparser = { version = "0.258", default-features = false }
 wasmtime = { version = "48.0", default-features = false }
 wasmtime-wasi = "48.0"
 wasmtime-wasi-http = { version = "48.0", default-features = false, features = ["p3"] }
 wasmtime-wizer = { version = "48.0", default-features = false }
 wiremock = "0.6"
 wit-bindgen = { version = "0.60", default-features = false }
-wit-component = "0.257"
-wit-parser = "0.257"
+wit-component = "0.258"
+wit-parser = "0.258"
 xshell = "0.2"
 
 [profile.release]
