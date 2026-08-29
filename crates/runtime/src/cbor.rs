@@ -2,25 +2,40 @@ use std::convert::Infallible;
 
 use crate::isola::script::host::EmitType;
 
+/// Default chunk size for streamed CBOR output.
+///
+/// Each full chunk crosses the host boundary as a separate `blocking-emit`
+/// call, so small chunks dominate large-value latency while large chunks
+/// delay when the first bytes reach the host.
+pub const DEFAULT_CHUNK_SIZE: usize = 64 * 1024;
+
 /// A bounded CBOR writer that streams full chunks and marks the final chunk.
-pub struct CallbackWriter<'a, F, const N: usize = 1024>
+pub struct CallbackWriter<'a, F>
 where
     F: FnMut(EmitType, &[u8]),
 {
-    buffer: heapless::Vec<u8, N>,
+    buffer: Vec<u8>,
+    chunk_size: usize,
     emit: &'a mut F,
     end_type: EmitType,
     finished: bool,
 }
 
-impl<'a, F, const N: usize> CallbackWriter<'a, F, N>
+impl<'a, F> CallbackWriter<'a, F>
 where
     F: FnMut(EmitType, &[u8]),
 {
     #[must_use]
-    pub const fn new(emit: &'a mut F, end_type: EmitType) -> Self {
+    pub fn new(emit: &'a mut F, end_type: EmitType) -> Self {
+        Self::with_chunk_size(emit, end_type, DEFAULT_CHUNK_SIZE)
+    }
+
+    #[must_use]
+    pub fn with_chunk_size(emit: &'a mut F, end_type: EmitType, chunk_size: usize) -> Self {
+        let chunk_size = chunk_size.max(1);
         Self {
-            buffer: heapless::Vec::new(),
+            buffer: Vec::with_capacity(chunk_size),
+            chunk_size,
             emit,
             end_type,
             finished: false,
@@ -41,7 +56,7 @@ where
     }
 }
 
-impl<F, const N: usize> Drop for CallbackWriter<'_, F, N>
+impl<F> Drop for CallbackWriter<'_, F>
 where
     F: FnMut(EmitType, &[u8]),
 {
@@ -52,7 +67,7 @@ where
     }
 }
 
-impl<F, const N: usize> minicbor::encode::Write for CallbackWriter<'_, F, N>
+impl<F> minicbor::encode::Write for CallbackWriter<'_, F>
 where
     F: FnMut(EmitType, &[u8]),
 {
@@ -60,7 +75,7 @@ where
 
     fn write_all(&mut self, mut bytes: &[u8]) -> Result<(), Self::Error> {
         while !bytes.is_empty() {
-            let available = N - self.buffer.len();
+            let available = self.chunk_size - self.buffer.len();
             if available == 0 {
                 self.flush();
                 continue;
@@ -68,7 +83,7 @@ where
 
             let written = bytes.len().min(available);
             let (chunk, remaining) = bytes.split_at(written);
-            self.buffer.extend_from_slice(chunk).ok();
+            self.buffer.extend_from_slice(chunk);
             bytes = remaining;
         }
         Ok(())
@@ -85,7 +100,7 @@ mod tests {
     fn finish_emits_continuations_and_final_chunk() {
         let mut emissions = Vec::new();
         let mut emit = |emit_type, bytes: &[u8]| emissions.push((emit_type, bytes.to_vec()));
-        let mut writer: CallbackWriter<_, 4> = CallbackWriter::new(&mut emit, EmitType::End);
+        let mut writer = CallbackWriter::with_chunk_size(&mut emit, EmitType::End, 4);
         writer.write_all(b"abcdef").unwrap();
         writer.finish();
 
@@ -103,7 +118,7 @@ mod tests {
         let mut emissions = Vec::new();
         let mut emit = |emit_type, bytes: &[u8]| emissions.push((emit_type, bytes.to_vec()));
         {
-            let mut writer: CallbackWriter<_, 4> = CallbackWriter::new(&mut emit, EmitType::End);
+            let mut writer = CallbackWriter::with_chunk_size(&mut emit, EmitType::End, 4);
             writer.write_all(b"abcdef").unwrap();
         }
 

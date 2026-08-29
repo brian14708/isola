@@ -74,8 +74,8 @@ stdenv.mkDerivation (finalAttrs: rec {
   '';
 
   passthru = {
-    target = "wasm32-wasip1";
-    cmakeToolchain = "${finalAttrs.finalPackage}/share/cmake/wasi-sdk-p1.cmake";
+    target = "wasm32-wasip2";
+    cmakeToolchain = "${finalAttrs.finalPackage}/share/cmake/wasi-sdk-p2.cmake";
   };
 
   meta = with lib; {

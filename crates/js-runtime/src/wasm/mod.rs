@@ -66,6 +66,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn eval_script(script: String) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::Unexpected("Sandbox not initialized").into()),
@@ -83,6 +84,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn eval_file(path: String) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::Unexpected("Sandbox not initialized").into()),
@@ -100,6 +102,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::Unexpected("Sandbox not initialized").into()),
@@ -137,6 +140,69 @@ fn collect_stream_arg(iter: &host::ValueIterator) -> Vec<Vec<u8>> {
         items.push(cbor);
     }
     items
+}
+
+unsafe extern "C" {
+    /// wasi-libc `getentropy`, backed by host-served WASI randomness and
+    /// therefore fresh per sandbox instance.
+    fn getentropy(buf: *mut u8, len: usize) -> i32;
+}
+
+/// Fresh per-instance entropy for `Math.random`.
+///
+/// `QuickJS` seeds its xorshift state from the *clock* at context creation, so
+/// the seed is baked into the wizer snapshot and every sandbox sharing a
+/// template would replay the same `Math.random()` sequence.
+fn fresh_random_f64() -> f64 {
+    static FALLBACK_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let mut buf = [0u8; 8];
+    let ok = unsafe { getentropy(buf.as_mut_ptr(), buf.len()) } == 0;
+    let bits = if ok {
+        u64::from_le_bytes(buf)
+    } else {
+        // getentropy cannot realistically fail for an 8-byte request; mix in a
+        // per-instance counter so a hypothetical failure still cannot replay
+        // the baked sequence.
+        FALLBACK_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    };
+    // Take the top 53 bits, as is conventional for IEEE-754 doubles in [0, 1).
+    #[expect(clippy::cast_precision_loss, reason = "intentional 53-bit truncation")]
+    let value = (bits >> 11) as f64 * (1.0 / 9_007_199_254_740_992.0);
+    value
+}
+
+/// Scrub state that was baked into the wizer snapshot during pre-init but must
+/// be fresh per sandbox instance. Runs once per instance on the first export
+/// call (mirrors componentize-py's lazy scrub on first export).
+///
+/// No export is invoked during pre-init, so the flag is always `false` in the
+/// snapshot and every instance scrubs exactly once.
+fn scrub_snapshot_state() {
+    thread_local! {
+        static SCRUBBED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if SCRUBBED.replace(true) {
+        return;
+    }
+
+    GLOBAL_SCOPE.with(|scope| {
+        if let Some(scope) = &*scope.borrow() {
+            scope
+                .context()
+                .with(|ctx| -> rquickjs::Result<()> {
+                    let math: rquickjs::Object = ctx.globals().get("Math")?;
+                    math.set(
+                        "random",
+                        rquickjs::Function::new(ctx.clone(), fresh_random_f64)?,
+                    )?;
+                    Ok(())
+                })
+                .unwrap_or_else(|error| {
+                    eprintln!("isola: failed to scrub snapshot state: {error}");
+                });
+        }
+    });
 }
 
 fn register_sys_module(ctx: &rquickjs::Ctx<'_>) {

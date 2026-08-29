@@ -611,7 +611,7 @@ where
         emit_fn(emit_type, &encoded);
         return Ok(());
     }
-    let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
+    let mut writer = CallbackWriter::new(&mut emit_fn, emit_type);
     {
         let mut serializer = minicbor_serde::Serializer::new(&mut writer);
         PyValue::new(py_obj)

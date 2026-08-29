@@ -95,7 +95,7 @@ fn resolve_lib_dir(root: &Path) -> PathBuf {
     env::var_os("WASI_PYTHON_RUNTIME").map_or_else(
         || {
             root.join("target")
-                .join("wasm32-wasip1")
+                .join("wasm32-wasip2")
                 .join("wasi-deps")
                 .join("usr")
                 .join("local")

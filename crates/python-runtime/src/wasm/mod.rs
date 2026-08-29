@@ -147,6 +147,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn eval_script(script: String) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
@@ -167,6 +168,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn eval_file(path: String) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             if let Some(sandbox) = sandbox.as_ref() {
                 let script = std::fs::read_to_string(std::path::Path::new(&path))
@@ -188,6 +190,7 @@ impl runtime::Guest for Global {
         reason = "WIT async export requires an async trait method"
     )]
     async fn call_func(func: String, args: Vec<runtime::Argument>) -> Result<(), runtime::Error> {
+        scrub_snapshot_state();
         GLOBAL_SCOPE.with_borrow(|sandbox| {
             sandbox.as_ref().map_or_else(
                 || Err(Error::UnexpectedError("Sandbox not initialized").into()),
@@ -269,4 +272,38 @@ impl ArgIter {
 
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
+}
+
+/// Scrub state that was baked into the wizer snapshot during pre-init but must
+/// be fresh per sandbox instance. Runs once per instance on the first export
+/// call (mirrors componentize-py's lazy scrub on first export).
+///
+/// No export is invoked during pre-init, so the flag is always `false` in the
+/// snapshot and every instance scrubs exactly once.
+fn scrub_snapshot_state() {
+    thread_local! {
+        static SCRUBBED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if SCRUBBED.replace(true) {
+        return;
+    }
+
+    let result = Python::attach(|py| -> PyResult<()> {
+        // `random` seeds its global generator at import time; if the pre-init
+        // prelude (or anything it pulls in) imported it, that seeded state is
+        // baked into the snapshot and every sandbox sharing this template would
+        // replay the same sequence. Re-seed from `os.urandom`, which the host
+        // serves fresh per instance. A `random` module first imported after
+        // pre-init seeds lazily and needs no scrub. This intentionally
+        // overrides a `random.seed()` in the prelude: seed in the evaluated
+        // script instead.
+        let modules = PyModule::import(py, "sys")?.getattr("modules")?;
+        if modules.contains("random")? {
+            PyModule::import(py, "random")?.call_method0("seed")?;
+        }
+        Ok(())
+    });
+    if let Err(error) = result {
+        Python::attach(|py| error.print(py));
+    }
 }

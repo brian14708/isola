@@ -727,7 +727,7 @@ pub fn js_to_cbor_emit<F>(
 where
     F: FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
 {
-    let mut writer: CallbackWriter<_, 1024> = CallbackWriter::new(&mut emit_fn, emit_type);
+    let mut writer = CallbackWriter::new(&mut emit_fn, emit_type);
     {
         let mut serializer = minicbor_serde::Serializer::new(&mut writer);
         JsValue::new(val)
@@ -854,7 +854,7 @@ mod typed_array_tests {
         let context = rquickjs::Context::full(&runtime).unwrap();
         context.with(|ctx| {
             let value: Value<'_> = ctx
-                .eval(r#"["x".repeat(2048), Symbol("unsupported")]"#)
+                .eval(r#"["x".repeat(128 * 1024), Symbol("unsupported")]"#)
                 .unwrap();
             let mut emissions = Vec::new();
             let result = js_to_cbor_emit(

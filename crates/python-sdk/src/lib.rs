@@ -438,7 +438,7 @@ fn resolve_runtime_lib_dir(template_parent: &Path, runtime_lib_dir: Option<PathB
     std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
         |_| {
             let mut lib_dir = template_parent.to_owned();
-            lib_dir.push("wasm32-wasip1");
+            lib_dir.push("wasm32-wasip2");
             lib_dir.push("wasi-deps");
             lib_dir.push("usr");
             lib_dir.push("local");
@@ -456,13 +456,6 @@ fn resolve_runtime_lib_dir(template_parent: &Path, runtime_lib_dir: Option<PathB
 struct PyCallback {
     callback: Py<PyAny>,
 }
-
-// SAFETY: callback invocation always reacquires the GIL before touching Python
-// objects.
-unsafe impl Send for PyCallback {}
-// SAFETY: callback invocation always reacquires the GIL before touching Python
-// objects.
-unsafe impl Sync for PyCallback {}
 
 impl PyCallback {
     fn emit(&self, event: CallbackEvent, data: Option<&str>) {
@@ -499,20 +492,10 @@ struct PyHttpHandler {
     event_loop: Py<PyAny>,
 }
 
-// SAFETY: Python objects are only touched while holding the GIL.
-unsafe impl Send for PyHttpHandler {}
-// SAFETY: Python objects are only touched while holding the GIL.
-unsafe impl Sync for PyHttpHandler {}
-
 struct PyHostcallHandler {
     callback: Py<PyAny>,
     event_loop: Py<PyAny>,
 }
-
-// SAFETY: Python objects are only touched while holding the GIL.
-unsafe impl Send for PyHostcallHandler {}
-// SAFETY: Python objects are only touched while holding the GIL.
-unsafe impl Sync for PyHostcallHandler {}
 
 enum HttpResponseBody {
     Empty,

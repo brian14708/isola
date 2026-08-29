@@ -46,9 +46,13 @@ stdenv.mkDerivation rec {
 
   preConfigure = ''
     export CONFIG_SITE=$PWD/Tools/wasm/wasi/config.site-wasm32-wasi
-    export CFLAGS="$CFLAGS -fPIC"
-    export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot"
-    export CXX="${sdk}/bin/clang++ --sysroot=${sdk}/share/wasi-sysroot"
+    # Keep --host=wasm32-wasi (so config.site and the sysconfigdata names stay
+    # put) and select preview2 purely through the compiler target, the same
+    # split componentize-py uses.
+    export CFLAGS="$CFLAGS --target=wasm32-wasip2 -fPIC"
+    export LDFLAGS="$LDFLAGS --target=wasm32-wasip2"
+    export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot --target=wasm32-wasip2"
+    export CXX="${sdk}/bin/clang++ --sysroot=${sdk}/share/wasi-sysroot --target=wasm32-wasip2"
     export AR=${sdk}/bin/llvm-ar
     export RANLIB=${sdk}/bin/ranlib
   '';
@@ -79,7 +83,7 @@ stdenv.mkDerivation rec {
       --output $out/lib/python314.zip
 
     clang_rt_builtins="$(
-      find ${sdk}/lib/clang -path '*/lib/wasm32-unknown-wasip1/libclang_rt.builtins.a' -print -quit
+      find ${sdk}/lib/clang -path '*/lib/wasm32-unknown-wasip2/libclang_rt.builtins.a' -print -quit
     )"
     test -n "$clang_rt_builtins"
 
@@ -98,11 +102,11 @@ stdenv.mkDerivation rec {
       $PWD/Modules/_decimal/libmpdec/libmpdec.a \
       $PWD/Modules/expat/libexpat.a \
       "$clang_rt_builtins" \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-signal.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-process-clocks.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libwasi-emulated-getpid.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libdl.so \
-      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip1/libc.so
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-signal.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-process-clocks.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libwasi-emulated-getpid.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libdl.so \
+      ${sdk}/share/wasi-sysroot/lib/wasm32-wasip2/libc.so
     rm $out/lib/libpython3.14.a $out/python-stub.c
 
     # CPython's WASI build-details.json is missing ABI suffix metadata that

@@ -284,7 +284,7 @@ mod tests {
 
         Python::initialize();
         Python::attach(|py| {
-            let long_string = PyString::new(py, &"x".repeat(2048)).into_any();
+            let long_string = PyString::new(py, &"x".repeat(128 * 1024)).into_any();
             let unsupported = py
                 .import("builtins")
                 .unwrap()

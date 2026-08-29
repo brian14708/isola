@@ -6,15 +6,15 @@ use std::{
     time::UNIX_EPOCH,
 };
 
-use anyhow::{Context, Result};
-use xshell::{Shell, cmd};
+use anyhow::{Context, Result, ensure};
+use wasmparser::{Parser, Payload};
+use xshell::{Cmd, Shell, cmd};
 
 use crate::async_shim::link_library;
 
 mod async_shim;
 
-const TARGET: &str = "wasm32-wasip1";
-const COMPONENT_FINGERPRINT_VERSION: &[u8] = b"isola-component-v1";
+const TARGET: &str = "wasm32-wasip2";
 const COMPONENT_BUILD_INPUTS: &[(&str, &[u8])] = &[
     ("crates/xtask/src/main.rs", include_bytes!("main.rs")),
     (
@@ -135,46 +135,130 @@ fn build_all(sh: &Shell) -> Result<()> {
     Ok(())
 }
 
+/// Rustflags for the guest runtime builds, mirroring componentize-py's
+/// `make_runtime`:
+///
+/// - `--cfg pyo3_disable_reference_pool`: the reference pool is a global mutex
+///   for deferring `Py_DECREF` from non-GIL threads; the guest is
+///   single-threaded with one interpreter, so the lock is pure overhead.
+/// - `-Wl,--skip-wit-component`: the `wasm32-wasip2` target normally emits a
+///   *component*; this stops the linker at the core module so
+///   `wit_component::Linker` can consume it as a shared library.
+/// - `-C link-self-contained=n`: resolve libc from the wasi-sdk sysroot
+///   (reached through the clang linker driver) instead of rust's bundled copy,
+///   so the runtime shares the dylink libc the other libraries use.
 fn wasm_rustflags(wasi_deps_dir: &str) -> String {
     format!(
-        "-C relocation-model=pic -C link-arg=-shared -C link-arg=--allow-undefined \
+        "--cfg pyo3_disable_reference_pool \
+         -C relocation-model=pic \
+         -C link-args=-Wl,--skip-wit-component \
+         -C link-arg=-shared -C link-args=-Wl,--allow-undefined \
+         -C link-self-contained=n \
          -Lnative={wasi_deps_dir}/lib"
     )
 }
 
-fn build_python(sh: &Shell) -> Result<()> {
-    let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
-    let rustflags = wasm_rustflags(&wasi_deps_dir);
+/// The `wasm32-wasip2` linker: the wasi-sdk clang driver (which locates the p2
+/// sysroot relative to its own binary), same as componentize-py.
+fn wasm_linker() -> String {
+    let wasi_sdk = env::var("WASI_SDK")
+        .expect("WASI_SDK must be set for wasm32 builds (run inside `nix develop`)");
+    format!("{wasi_sdk}/bin/clang")
+}
 
-    cmd!(
-        sh,
-        "cargo build --locked -Z build-std=std,panic_abort --release --target {TARGET} -p isola-python-runtime"
+/// The env var cargo reads the linker for `TARGET` from, e.g.
+/// `CARGO_TARGET_WASM32_WASIP2_LINKER`.
+fn linker_env_key() -> String {
+    format!(
+        "CARGO_TARGET_{}_LINKER",
+        TARGET.to_uppercase().replace('-', "_")
     )
-    .env("PYO3_CROSS_PYTHON_VERSION", "3.14")
-    .env("RUSTFLAGS", &rustflags)
-    .run()?;
+}
 
-    let runtime = PathBuf::from(format!("target/{TARGET}/release/isola_python_runtime.wasm"));
-    let libraries = python_libraries(Path::new(&wasi_deps_dir), &runtime)?;
-    write_component_if_changed(libraries, Path::new("target/python.wasm"), 8_388_608)?;
+/// Remove host cargo/rust configuration from the environment of the nested
+/// `cargo build` for the wasm guest. xtask is itself launched through cargo, so
+/// a stray `CARGO_ENCODED_RUSTFLAGS` in the environment would take precedence
+/// over the `RUSTFLAGS` we set for the child and silently drop the pic/shared
+/// link flags. `CARGO_HOME` is kept: the child needs it to find vendored
+/// dependencies (crane sets it in the Nix build). `CARGO_TARGET_DIR` is
+/// deliberately dropped so output always lands in the workspace `target/`
+/// directory the callers below read from.
+fn scrub_host_build_env(mut cmd: Cmd) -> Cmd {
+    for (key, _) in env::vars_os() {
+        if key == "CARGO_HOME" {
+            continue;
+        }
+        let key = key.to_string_lossy().into_owned();
+        if key.starts_with("RUST") || key.starts_with("CARGO") {
+            cmd = cmd.env_remove(key);
+        }
+    }
+    cmd
+}
 
-    Ok(())
+/// Encode rustflags for `CARGO_ENCODED_RUSTFLAGS` (unit-separator delimited).
+/// The encoded form takes precedence over every other rustflags source —
+/// `RUSTFLAGS`, `[build] rustflags`, and `target.<triple>.rustflags` — so host
+/// configuration cannot override the guest link flags.
+fn encode_rustflags(rustflags: &str) -> String {
+    rustflags
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
+}
+
+fn build_python(sh: &Shell) -> Result<()> {
+    build_guest(
+        sh,
+        "isola-python-runtime",
+        Some(("PYO3_CROSS_PYTHON_VERSION", "3.14")),
+        python_libraries,
+        Path::new("target/python.wasm"),
+        8_388_608,
+    )
 }
 
 fn build_js(sh: &Shell) -> Result<()> {
-    let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
-    let rustflags = wasm_rustflags(&wasi_deps_dir);
-
-    cmd!(
+    build_guest(
         sh,
-        "cargo build --locked -Z build-std=std,panic_abort --release --target {TARGET} -p isola-js-runtime"
+        "isola-js-runtime",
+        None,
+        |wasi_deps_dir, runtime| Ok(js_libraries(wasi_deps_dir, runtime)),
+        Path::new("target/js.wasm"),
+        2_097_152,
     )
-    .env("RUSTFLAGS", &rustflags)
-    .run()?;
+}
 
-    let runtime = PathBuf::from(format!("target/{TARGET}/release/isola_js_runtime.wasm"));
-    let libraries = js_libraries(Path::new(&wasi_deps_dir), &runtime);
-    write_component_if_changed(libraries, Path::new("target/js.wasm"), 2_097_152)?;
+fn build_guest(
+    sh: &Shell,
+    package: &str,
+    extra_env: Option<(&str, &str)>,
+    libraries: impl FnOnce(&Path, &Path) -> Result<Vec<ComponentLibrary>>,
+    output: &Path,
+    stack_size: u32,
+) -> Result<()> {
+    let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
+    let rustflags = encode_rustflags(&wasm_rustflags(&wasi_deps_dir));
+
+    let build = scrub_host_build_env(cmd!(
+        sh,
+        "cargo build --locked -Z build-std=std,panic_abort --release --target {TARGET} -p {package}"
+    ))
+    .env("CARGO_ENCODED_RUSTFLAGS", &rustflags)
+    .env(linker_env_key(), wasm_linker());
+    let build = match extra_env {
+        Some((key, value)) => build.env(key, value),
+        None => build,
+    };
+    build.run()?;
+
+    let runtime = PathBuf::from(format!(
+        "target/{TARGET}/release/{}.wasm",
+        package.replace('-', "_")
+    ));
+    assert_shared_pic_module(&runtime)?;
+    let libraries = libraries(Path::new(&wasi_deps_dir), &runtime)?;
+    write_component_if_changed(libraries, output, stack_size)?;
 
     Ok(())
 }
@@ -270,6 +354,32 @@ fn js_libraries(wasi_deps_dir: &Path, runtime: &Path) -> Vec<ComponentLibrary> {
     ]
 }
 
+/// The guest runtime is linked with `-C relocation-model=pic` and
+/// `-C link-arg=-shared`; such a module always carries a `dylink.0` custom
+/// section. Its absence means host configuration (e.g. a leaked
+/// `CARGO_ENCODED_RUSTFLAGS`) overrode our link flags and the runtime is not
+/// usable as a shared library — fail the build here rather than at link time.
+fn assert_shared_pic_module(path: &Path) -> Result<()> {
+    let module = std::fs::read(path)
+        .with_context(|| format!("failed to read guest runtime {}", path.display()))?;
+    let mut has_dylink = false;
+    for payload in Parser::new(0).parse_all(&module) {
+        if let Payload::CustomSection(section) = payload? {
+            has_dylink = section.name() == "dylink.0";
+            if has_dylink {
+                break;
+            }
+        }
+    }
+    ensure!(
+        has_dylink,
+        "{} has no dylink.0 section: it was not linked as a shared PIC module \
+         (check for host RUSTFLAGS/CARGO_ENCODED_RUSTFLAGS leaking into the guest build)",
+        path.display()
+    );
+    Ok(())
+}
+
 fn hash_field(hasher: &mut FingerprintHasher, name: &str, value: &[u8]) {
     hasher.write(&u64::try_from(name.len()).unwrap().to_le_bytes());
     hasher.write(name.as_bytes());
@@ -279,22 +389,7 @@ fn hash_field(hasher: &mut FingerprintHasher, name: &str, value: &[u8]) {
 
 fn component_hasher(stack_size: u32) -> FingerprintHasher {
     let mut hasher = FingerprintHasher::new();
-    hash_field(
-        &mut hasher,
-        "fingerprint-version",
-        COMPONENT_FINGERPRINT_VERSION,
-    );
     hash_field(&mut hasher, "stack-size", &stack_size.to_le_bytes());
-    hash_field(
-        &mut hasher,
-        "adapter-name",
-        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME.as_bytes(),
-    );
-    hash_field(
-        &mut hasher,
-        "adapter-module",
-        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
-    );
     for (name, contents) in COMPONENT_BUILD_INPUTS {
         hash_field(&mut hasher, name, contents);
     }
@@ -418,10 +513,10 @@ fn write_component_if_changed(
             library.async_shim_name,
         )?;
     }
-    linker.encoder().adapter(
-        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_ADAPTER_NAME,
-        wasi_preview1_component_adapter_provider::WASI_SNAPSHOT_PREVIEW1_REACTOR_ADAPTER,
-    )?;
+    // No preview1 adapter: every linked library is wasip2-native, so there are
+    // no `wasi_snapshot_preview1` imports left to satisfy (componentize-py
+    // keeps the adapter only because its runtime calls `reset_adapter_state`,
+    // which isola gates to p1 builds in `runtime::lifecycle`).
     let component = linker.encode()?;
 
     std::fs::write(output, component)

@@ -39,10 +39,6 @@ pub struct JsHostcallHandler {
     tsfn: HostcallTsfn,
 }
 
-// SAFETY: ThreadsafeFunction is designed for cross-thread use.
-unsafe impl Send for JsHostcallHandler {}
-unsafe impl Sync for JsHostcallHandler {}
-
 impl JsHostcallHandler {
     pub(crate) const fn new(tsfn: HostcallTsfn) -> Self {
         Self { tsfn }
@@ -87,10 +83,6 @@ type HttpTsfn = ThreadsafeFunction<
 pub struct JsHttpHandler {
     tsfn: HttpTsfn,
 }
-
-// SAFETY: ThreadsafeFunction is designed for cross-thread use.
-unsafe impl Send for JsHttpHandler {}
-unsafe impl Sync for JsHttpHandler {}
 
 impl JsHttpHandler {
     pub(crate) const fn new(tsfn: HttpTsfn) -> Self {

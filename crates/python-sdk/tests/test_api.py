@@ -91,7 +91,7 @@ def _resolve_runtime_paths() -> tuple[Path, Path]:
 
     wasi_runtime = os.environ.get("WASI_PYTHON_RUNTIME")
     if wasi_runtime is None:
-        lib_dir = runtime_dir / "wasm32-wasip1" / "wasi-deps" / "usr" / "local" / "lib"
+        lib_dir = runtime_dir / "wasm32-wasip2" / "wasi-deps" / "usr" / "local" / "lib"
     else:
         lib_dir = Path(wasi_runtime) / "lib"
 

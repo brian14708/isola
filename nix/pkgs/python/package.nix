@@ -26,8 +26,8 @@ let
 
       mkdir -p "$out/lib" "$out/${pythonSitePackages}"
       cp --no-preserve=mode -L ${wasipkgs.python}/lib/libpython*.so "$out/lib/"
-      cp --no-preserve=mode -L ${wasipkgs.sdk}/share/wasi-sysroot/lib/wasm32-wasip1/*.so "$out/lib/"
-      cp --no-preserve=mode -L ${wasipkgs.sdk}/share/wasi-sysroot/lib/wasm32-wasip1/noeh/*.so "$out/lib/"
+      cp --no-preserve=mode -L ${wasipkgs.sdk}/share/wasi-sysroot/lib/wasm32-wasip2/*.so "$out/lib/"
+      cp --no-preserve=mode -L ${wasipkgs.sdk}/share/wasi-sysroot/lib/wasm32-wasip2/noeh/*.so "$out/lib/"
 
       for package in ${builtins.concatStringsSep " " (builtins.map toString extensionPackages)}; do
         (
@@ -86,6 +86,7 @@ let
     env = {
       PYO3_PYTHON = "${wasipkgs.python.host}/bin/python3";
       WASI_PYTHON_DEV = linkerInputs;
+      WASI_SDK = wasipkgs.sdk;
     };
 
     doCheck = false;
@@ -103,9 +104,10 @@ let
       buildPhaseCargoCommand = ''
         cargo build --offline -p xtask
         PYO3_CROSS_PYTHON_VERSION=3.14 \
-          RUSTFLAGS="-C relocation-model=pic -C link-arg=-shared -C link-arg=--allow-undefined -Lnative=${linkerInputs}/lib" \
+          CARGO_TARGET_WASM32_WASIP2_LINKER="${wasipkgs.sdk}/bin/clang" \
+          RUSTFLAGS="--cfg pyo3_disable_reference_pool -C relocation-model=pic -C link-args=-Wl,--skip-wit-component -C link-arg=-shared -C link-args=-Wl,--allow-undefined -C link-self-contained=n -Lnative=${linkerInputs}/lib" \
           cargo build --offline -Z build-std=std,panic_abort --release \
-            --target wasm32-wasip1 -p isola-python-runtime
+            --target wasm32-wasip2 -p isola-python-runtime
       '';
     }
   );

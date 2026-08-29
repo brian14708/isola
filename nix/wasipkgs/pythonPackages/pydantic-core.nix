@@ -73,7 +73,7 @@ stdenv.mkDerivation rec {
       '    println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());' \
       '    println!("cargo:rustc-env=PROFILE={}", std::env::var("PROFILE").unwrap());
     println!("cargo:rustc-link-arg=-shared");
-    println!("cargo:rustc-link-arg=--allow-undefined");'
+    println!("cargo:rustc-link-arg=-Wl,--allow-undefined");'
   '';
 
   configurePhase = ''
@@ -84,14 +84,14 @@ stdenv.mkDerivation rec {
     export _PYTHON_HOST_PLATFORM=wasi-wasm32
     export PYO3_CROSS_LIB_DIR=${python}/lib
 
-    export CARGO_BUILD_TARGET=wasm32-wasip1
-    export CARGO_TARGET_WASM32_WASIP1_LINKER=${sdk}/bin/wasm-ld
+    export CARGO_BUILD_TARGET=wasm32-wasip2
+    export CARGO_TARGET_WASM32_WASIP2_LINKER=${sdk}/bin/clang
     export CC="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot"
     export AR="${sdk}/bin/llvm-ar"
     export RANLIB="${sdk}/bin/llvm-ranlib"
     export LDSHARED="${sdk}/bin/clang --sysroot=${sdk}/share/wasi-sysroot"
 
-    export RUSTFLAGS="-Clink-self-contained=no -Crelocation-model=pic -Clink-args=-L${python}/lib -Clink-args=-L${sdk}/share/wasi-sysroot/lib/wasm32-wasip1"
+    export RUSTFLAGS="-Clink-self-contained=no -Crelocation-model=pic -Clink-args=-Wl,--skip-wit-component -Clink-args=-L${python}/lib -Clink-args=-L${sdk}/share/wasi-sysroot/lib/wasm32-wasip2"
 
     runHook postConfigure
   '';
@@ -102,7 +102,7 @@ stdenv.mkDerivation rec {
     maturin build \
       -Z build-std=std,panic_abort \
       --release \
-      --target wasm32-wasip1 \
+      --target wasm32-wasip2 \
       -i python3.14 \
       --out dist
 

@@ -26,7 +26,6 @@ criterion = "0.8"
 eventsource = { version = "0.5", default-features = false }
 futures = "0.3"
 glob = "0.3"
-heapless = "0.9"
 http = "1.3"
 http-body = "1.0"
 http-body-util = "0.1"
@@ -59,7 +58,6 @@ tokio = "1.45"
 tokio-stream = "0.1"
 tracing = "0.1"
 url = "2.5"
-wasi-preview1-component-adapter-provider = "48.0"
 wasm-encoder = "0.258"
 wasmparser = { version = "0.258", default-features = false }
 wasmtime = { version = "48.0", default-features = false }
