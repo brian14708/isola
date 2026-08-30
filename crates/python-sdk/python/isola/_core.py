@@ -11,7 +11,7 @@ from os import PathLike, fspath
 from typing import TYPE_CHECKING, Literal, TypeAlias, cast
 from typing_extensions import Self, TypedDict, Unpack
 
-import httpx
+import httpx2
 
 from isola._isola import _ContextCore, _StreamCore
 
@@ -83,8 +83,8 @@ HttpHandlerConfig: TypeAlias = HttpHandler | Literal[True] | None
 _SANDBOX_CONFIG_KEYS = frozenset({"max_memory", "mounts", "env", "http", "hostcalls"})
 
 
-async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
-    client = httpx.AsyncClient()
+async def _default_httpx2_handler(request: HttpRequest) -> HttpResponse:
+    client = httpx2.AsyncClient()
     try:
         outbound_request = client.build_request(
             request.method, request.url, headers=request.headers, content=request.body
@@ -96,7 +96,10 @@ async def _default_httpx_handler(request: HttpRequest) -> HttpResponse:
 
     async def _stream_body() -> AsyncIterable[bytes]:
         try:
-            async for chunk in response.aiter_bytes():
+            # The host receives the response body and passes it to the guest;
+            # preserve Content-Encoding so the guest HTTP client can perform
+            # its normal decoding exactly once.
+            async for chunk in response.aiter_raw():
                 yield chunk
         finally:
             await response.aclose()
@@ -288,7 +291,7 @@ def _resolve_http_handler(handler: object) -> HttpHandler | None:
     if handler is None:
         return None
     if handler is True:
-        return _default_httpx_handler
+        return _default_httpx2_handler
     if isinstance(handler, bool):
         msg = "http must be an async callable, True, or None"
         raise TypeError(msg)
@@ -554,7 +557,10 @@ class Sandbox:
             raise
 
         if producers:
-            await asyncio.gather(*producers)
+            for producer in producers:
+                if not producer.done():
+                    producer.cancel()
+            await asyncio.gather(*producers, return_exceptions=True)
         return result
 
     async def run_stream(
