@@ -42,6 +42,8 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          cmd-format: "nix --accept-flake-config develop --command {0}"
       - name: Run integration test
         run: nix --accept-flake-config develop --command just integration
       - name: Run Python pytest suite
