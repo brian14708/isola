@@ -312,9 +312,7 @@ class SandboxContext:
         runtime_path = kwargs.pop("runtime_path", None)
 
         if runtime_path is None:
-            from isola._runtime import (  # ruff:ignore[import-outside-top-level]
-                resolve_runtime,
-            )
+            from isola._runtime import resolve_runtime  # ruff:ignore[import-outside-top-level]
 
             defaults = await resolve_runtime(runtime, version=version)
             resolved: dict[str, object] = {**defaults, **kwargs}
@@ -329,9 +327,7 @@ class SandboxContext:
 
         patch: dict[str, object] = dict(resolved)
         if "cache_dir" not in patch or patch["cache_dir"] is None:
-            from isola._runtime import (  # ruff:ignore[import-outside-top-level]
-                _cache_base,
-            )
+            from isola._runtime import _cache_base  # ruff:ignore[import-outside-top-level]
 
             patch["cache_dir"] = str(_cache_base() / "isola" / "cache")
         if "cache_dir" in patch:
