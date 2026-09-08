@@ -23,6 +23,17 @@ pub fn register(ctx: &Ctx<'_>) {
     // Reads the completed HTTP response transport payload for the given handle.
     http.set("_recv", Function::new(ctx.clone(), js_recv).unwrap())
         .unwrap();
+    http.set("_read", Function::new(ctx.clone(), js_read).unwrap())
+        .unwrap();
+    http.set(
+        "_finishRead",
+        Function::new(ctx.clone(), js_finish_read).unwrap(),
+    )
+    .unwrap();
+    http.set("_cancel", Function::new(ctx.clone(), js_cancel).unwrap())
+        .unwrap();
+    http.set("_release", Function::new(ctx.clone(), js_release).unwrap())
+        .unwrap();
 
     globals.set("_isola_http", http).unwrap();
 }
@@ -44,6 +55,41 @@ fn js_send<'js>(
 #[expect(clippy::needless_pass_by_value)]
 fn js_recv(ctx: Ctx<'_>, handle: u32) -> rquickjs::Result<Object<'_>> {
     future::recv_http(&ctx, handle)
+}
+
+fn js_read(_ctx: Ctx<'_>, handle: u32) -> u32 {
+    isola_runtime::pending::register_http_stream_read(handle)
+}
+
+fn js_finish_read(ctx: Ctx<'_>, handle: u32) -> rquickjs::Result<Value<'_>> {
+    let chunk = match isola_runtime::pending::take(handle)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "stream", &e.to_string()))?
+    {
+        isola_runtime::pending::Take::Ready(isola_runtime::pending::Output::HttpStream(result)) => {
+            result.map_err(|e| rquickjs::Error::new_from_js_message("fetch", "stream", &e))?
+        }
+        _ => {
+            return Err(rquickjs::Error::new_from_js_message(
+                "fetch",
+                "stream",
+                "stream read is not ready",
+            ));
+        }
+    };
+    match chunk {
+        Some(bytes) => Ok(rquickjs::ArrayBuffer::new(ctx, bytes)?.into_value()),
+        None => Ok(Value::new_null(ctx)),
+    }
+}
+
+fn js_cancel(handle: u32) -> rquickjs::Result<()> {
+    isola_runtime::pending::cancel_http_stream(handle)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "stream", &e.to_string()))
+}
+
+fn js_release(handle: u32) -> rquickjs::Result<()> {
+    isola_runtime::pending::release_http_stream(handle)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "stream", &e.to_string()))
 }
 
 fn value_to_string(value: &Value<'_>) -> Option<String> {
@@ -177,9 +223,13 @@ pub fn build_response_object<'js>(
     url: &str,
 ) -> Result<Object<'js>, String> {
     let resp_obj = Object::new(ctx.clone()).map_err(|e| e.to_string())?;
+    let isola_runtime::wasi_http::HttpResponse {
+        status,
+        headers,
+        body,
+    } = response;
 
     // status metadata
-    let status = response.status;
     resp_obj.set("status", status).map_err(|e| e.to_string())?;
     resp_obj.set("statusText", "").map_err(|e| e.to_string())?;
     resp_obj.set("url", url).map_err(|e| e.to_string())?;
@@ -188,7 +238,7 @@ pub fn build_response_object<'js>(
     let hdr_list = Array::new(ctx.clone()).map_err(|e| e.to_string())?;
     let mut header_index = 0;
     {
-        for (k, v) in response.headers {
+        for (k, v) in headers {
             if let Ok(v_str) = std::str::from_utf8(&v) {
                 let pair = Array::new(ctx.clone()).map_err(|e| e.to_string())?;
                 pair.set(0, k).map_err(|e| e.to_string())?;
@@ -204,16 +254,9 @@ pub fn build_response_object<'js>(
         .set("headersList", hdr_list)
         .map_err(|e| e.to_string())?;
 
-    let buf = response.body;
-
-    // bodyBytes as ArrayBuffer
-    let ab = rquickjs::ArrayBuffer::new(ctx.clone(), buf.clone()).map_err(|e| e.to_string())?;
-    resp_obj.set("bodyBytes", ab).map_err(|e| e.to_string())?;
-
-    // UTF-8 decoded text hint used by JS Response.text/json.
-    let body_text = String::from_utf8_lossy(&buf).into_owned();
+    let stream_handle = isola_runtime::pending::register_http_stream(body);
     resp_obj
-        .set("bodyText", body_text.as_str())
+        .set("bodyStreamHandle", stream_handle)
         .map_err(|e| e.to_string())?;
 
     Ok(resp_obj)

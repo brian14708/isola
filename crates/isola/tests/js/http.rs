@@ -143,7 +143,7 @@ async function main(url) {
 
     let oversizedError = "expected response-size error";
     try {
-        await fetch(url + "/oversized");
+        await (await fetch(url + "/oversized")).arrayBuffer();
     } catch (error) {
         oversizedError = String(error.message || error);
     }
@@ -609,6 +609,396 @@ async function main(url) {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_response_body_is_readable_stream() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/stream"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(b"first-second"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/stream");
+    const clone = response.clone();
+    const cloneText = await clone.text();
+    const originalBodyUsedBeforeRead = response.bodyUsed;
+    const originalText = await response.text();
+    return {
+        bodyUsed: response.bodyUsed,
+        originalBodyUsedBeforeRead,
+        originalText,
+        cloneText,
+    };
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate stream script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call stream function")?;
+    let value: serde_json::Value = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode stream result")?;
+    assert_eq!(value["originalBodyUsedBeforeRead"], false);
+    assert_eq!(value["bodyUsed"], true);
+    assert_eq!(value["originalText"], "first-second");
+    assert_eq!(value["cloneText"], "first-second");
+
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_response_body_supports_multiple_clones() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/multi-clone"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("multi-clone"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/multi-clone");
+    const first = response.clone();
+    const second = first.clone();
+    const third = response.clone();
+    return await Promise.all([
+        response.text(),
+        first.text(),
+        second.text(),
+        third.text(),
+    ]);
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate multi-clone script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call multi-clone function")?;
+    let value: Vec<String> = output
+        .result
+        .context("expected multi-clone result")?
+        .to_serde()
+        .context("failed to decode multi-clone result")?;
+    assert_eq!(value, vec!["multi-clone"; 4]);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_fetch_resolves_before_body_finishes() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/delayed-stream");
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    return {
+        status: response.status,
+        done: first.done,
+        chunk: String.fromCharCode.apply(null, Array.from(first.value)),
+    };
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate delayed-stream script")?;
+
+    let started = Instant::now();
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args!["http://stream.test"]?,
+        Duration::from_millis(750),
+    )
+    .await
+    .context("fetch waited for the complete response body")?;
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "fetch should resolve after headers and the first chunk"
+    );
+
+    let value: serde_json::Value = output
+        .result
+        .context("expected delayed-stream result")?
+        .to_serde()
+        .context("failed to decode delayed-stream result")?;
+    assert_eq!(value["status"], 200);
+    assert_eq!(value["done"], false);
+    assert_eq!(value["chunk"], "first");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_response_body_survives_sandbox_boundaries() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/retained"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("retained"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+let retainedResponse;
+async function fetchAndRetain(url) {
+    retainedResponse = await fetch(url + "/retained");
+    return retainedResponse.status;
+}
+async function readRetained() {
+    return retainedResponse.text();
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate retained-response script")?;
+
+    let first = call_with_timeout(
+        &mut sandbox,
+        "fetchAndRetain",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to fetch retained response")?;
+    assert_eq!(
+        first
+            .result
+            .as_ref()
+            .context("expected status result")?
+            .to_serde::<u16>()?,
+        200
+    );
+
+    let second = call_with_timeout(
+        &mut sandbox,
+        "readRetained",
+        Vec::new(),
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to read retained response")?;
+    let text: String = second
+        .result
+        .context("expected retained body")?
+        .to_serde()?;
+    assert_eq!(text, "retained");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_sse_events_can_be_consumed_incrementally() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/events"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string("data: one\n\ndata: two\n\n"),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/events");
+    const text = await response.text();
+    return text.split("\n").filter((line) => line.indexOf("data: ") === 0)
+        .map((line) => line.slice(6));
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate SSE script")?;
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call SSE function")?;
+    let events: Vec<String> = output
+        .result
+        .context("expected SSE result")?
+        .to_serde()
+        .context("failed to decode SSE result")?;
+    assert_eq!(events, ["one", "two"]);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_empty_response_body_is_eof() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/empty"))
+        .respond_with(ResponseTemplate::new(204))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/empty");
+    const reader = response.body.getReader();
+    return (await reader.read()).done;
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate empty-body script")?;
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call empty-body function")?;
+    let done: bool = output.result.context("expected EOF result")?.to_serde()?;
+    assert!(done);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_response_body_cancel_releases_reader() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/cancel"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("cancel-me"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const response = await fetch(url + "/cancel");
+    const reader = response.body.getReader();
+    await reader.cancel("abandoned");
+    return response.bodyUsed;
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate cancellation script")?;
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("failed to call cancellation function")?;
+    let value: bool = output
+        .result
+        .as_ref()
+        .context("expected end output")?
+        .to_serde()
+        .context("failed to decode cancellation result")?;
+    assert!(value);
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_http_abort_pre_aborted_rejects() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());
@@ -721,6 +1111,65 @@ async function main(url) {
         "abort waited for the HTTP response: {elapsed:?}"
     );
 
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_abort_after_headers_cancels_body_read() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function main(url) {
+    const controller = new AbortController();
+    const response = await fetch(url + "/delayed-stream", {
+        signal: controller.signal,
+    });
+    const reader = response.body.getReader();
+    const first = await reader.read();
+    if (first.done) return "unexpected-eof";
+    controller.abort("stop");
+    try {
+        await reader.read();
+        return "expected-abort";
+    } catch (error) {
+        return String(error.name || error);
+    }
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate post-header abort script")?;
+
+    let started = Instant::now();
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args!["http://stream.test"]?,
+        Duration::from_millis(750),
+    )
+    .await
+    .context("post-header abort did not settle")?;
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "body read remained pending after abort: {:?}",
+        started.elapsed()
+    );
+    let value: String = output
+        .result
+        .context("expected post-header abort result")?
+        .to_serde()
+        .context("failed to decode post-header abort result")?;
+    assert_eq!(value, "AbortError");
     Ok(())
 }
 

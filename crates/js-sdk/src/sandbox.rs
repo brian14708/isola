@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 
 use crate::{
     context::{ContextInner, PendingSandboxConfig, SandboxConfigPatch},
-    env::{Env, JsHostcallHandler, JsHttpHandler},
+    env::{Env, JsHostcallHandler, JsHttpHandler, JsHttpStreamChunk},
     error::{Error, invalid_argument},
     stream::StreamHandle,
 };
@@ -26,6 +26,8 @@ type CallbackTsfn = Arc<
 >;
 type HttpHandlerFunction<'env> =
     Function<'env, (String, String, Buffer, Option<Buffer>), Promise<crate::env::JsHttpResponse>>;
+type HttpStreamHandlerFunction<'env> =
+    Function<'env, (String, String, Buffer, Option<Buffer>), Promise<JsHttpStreamChunk>>;
 
 // ---------------------------------------------------------------------------
 // RunResult
@@ -475,13 +477,21 @@ impl SandboxCore {
     /// Set the HTTP handler: (method, url, headers, body) =>
     /// Promise<response>
     #[napi(
-        ts_args_type = "handler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null }>) | null"
+        ts_args_type = "handler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null; streamHandle?: number }>) | null, streamHandler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ body?: Buffer | null; done: boolean }>) | null"
     )]
-    pub fn set_http_handler(&self, handler: Option<HttpHandlerFunction<'_>>) -> napi::Result<()> {
+    pub fn set_http_handler(
+        &self,
+        handler: Option<HttpHandlerFunction<'_>>,
+        stream_handler: Option<HttpStreamHandlerFunction<'_>>,
+    ) -> napi::Result<()> {
         let js_handler = handler
             .map(|cb| {
                 let tsfn = cb.build_threadsafe_function().build()?;
-                Ok::<_, napi::Error>(Arc::new(JsHttpHandler::new(tsfn)))
+                let stream_cb = stream_handler.ok_or_else(|| {
+                    napi::Error::from_reason("missing HTTP stream handler callback")
+                })?;
+                let stream_tsfn = stream_cb.build_threadsafe_function().build()?;
+                Ok::<_, napi::Error>(Arc::new(JsHttpHandler::new(tsfn, stream_tsfn)))
             })
             .transpose()?;
 

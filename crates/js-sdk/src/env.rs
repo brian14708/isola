@@ -10,7 +10,7 @@ use isola::{
 use napi::{
     Status,
     bindgen_prelude::{Buffer, Promise},
-    threadsafe_function::ThreadsafeFunction,
+    threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
 
@@ -23,6 +23,13 @@ pub struct JsHttpResponse {
     pub status: u16,
     pub headers: Option<BTreeMap<String, String>>,
     pub body: Option<Buffer>,
+    pub stream_handle: Option<u32>,
+}
+
+#[napi(object)]
+pub struct JsHttpStreamChunk {
+    pub body: Option<Buffer>,
+    pub done: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -76,14 +83,43 @@ type HttpTsfn = ThreadsafeFunction<
     Status,
     false,
 >;
+type HttpStreamTsfn = ThreadsafeFunction<
+    (String, String, Buffer, Option<Buffer>),
+    Promise<JsHttpStreamChunk>,
+    (String, String, Buffer, Option<Buffer>),
+    Status,
+    false,
+>;
 
+struct HttpStreamState {
+    tsfn: Arc<HttpStreamTsfn>,
+    handle: u32,
+}
+
+impl Drop for HttpStreamState {
+    fn drop(&mut self) {
+        let _ = self.tsfn.call(
+            (
+                "__isola_stream_release".to_owned(),
+                self.handle.to_string(),
+                Buffer::from(Vec::new()),
+                None,
+            ),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+    }
+}
 pub struct JsHttpHandler {
-    tsfn: HttpTsfn,
+    tsfn: Arc<HttpTsfn>,
+    stream_tsfn: Arc<HttpStreamTsfn>,
 }
 
 impl JsHttpHandler {
-    pub(crate) const fn new(tsfn: HttpTsfn) -> Self {
-        Self { tsfn }
+    pub(crate) fn new(tsfn: HttpTsfn, stream_tsfn: HttpStreamTsfn) -> Self {
+        Self {
+            tsfn: Arc::new(tsfn),
+            stream_tsfn: Arc::new(stream_tsfn),
+        }
     }
 
     pub(crate) async fn invoke(
@@ -125,7 +161,41 @@ impl JsHttpHandler {
             }
         }
 
-        let body_stream: HttpBodyStream = if let Some(body) = resp.body {
+        let body_stream: HttpBodyStream = if let Some(handle) = resp.stream_handle {
+            let tsfn = self.stream_tsfn.clone();
+            Box::pin(stream::unfold(
+                HttpStreamState { tsfn, handle },
+                |state| async move {
+                    let tsfn = state.tsfn.clone();
+                    let handle = state.handle;
+                    let result = match tsfn
+                        .call_async((
+                            "__isola_stream_read".to_owned(),
+                            handle.to_string(),
+                            Buffer::from(Vec::new()),
+                            None,
+                        ))
+                        .await
+                    {
+                        Ok(promise) => promise
+                            .await
+                            .map_err(|e| io_error(format!("HTTP stream promise rejected: {e}"))),
+                        Err(e) => Err(io_error(format!("HTTP stream callback failed: {e}"))),
+                    };
+                    match result {
+                        Ok(resp) => {
+                            let done = resp.done;
+                            let item = resp.body.map_or_else(
+                                || Ok(Frame::data(Bytes::new())),
+                                |body| Ok(Frame::data(Bytes::from(Vec::<u8>::from(body)))),
+                            );
+                            if done { None } else { Some((item, state)) }
+                        }
+                        Err(error) => Some((Err(error), state)),
+                    }
+                },
+            ))
+        } else if let Some(body) = resp.body {
             let body_bytes = Bytes::from(Vec::<u8>::from(body));
             Box::pin(stream::once(async move { Ok(Frame::data(body_bytes)) }))
         } else {

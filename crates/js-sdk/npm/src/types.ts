@@ -41,8 +41,19 @@ export interface HttpRequest {
 export interface HttpResponse {
   status: number;
   headers?: Record<string, string>;
-  body?: Buffer | null;
+  /**
+   * A buffered response body, or a source that yields chunks incrementally.
+   * Web streams are supported in addition to Node's async iterables so a
+   * response returned by `fetch` can be forwarded without buffering.
+   */
+  body?: HttpResponseBody;
 }
+
+export type HttpResponseBody =
+  | Buffer
+  | AsyncIterable<Uint8Array>
+  | ReadableStream<Uint8Array>
+  | null;
 
 export type HttpHandler = (req: HttpRequest) => Promise<HttpResponse>;
 export type HttpHandlerConfig = HttpHandler | true;
