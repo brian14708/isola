@@ -267,6 +267,81 @@ describeIfRuntime("isola js-sdk", () => {
     sandbox.close();
   });
 
+  it("should accept async iterable http response bodies", async () => {
+    async function* responseChunks(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode("stream-");
+      yield new TextEncoder().encode("body");
+    }
+    const sandbox = await template.create({
+      http: async () => ({
+        status: 200,
+        body: responseChunks(),
+      }),
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "import httpx2",
+        "",
+        "def main(url):",
+        "    return httpx2.get(url).text",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/stream"]);
+    expect(result).toBe("stream-body");
+    sandbox.close();
+  });
+
+  it("should accept Web ReadableStream http response bodies", async () => {
+    const sandbox = await template.create({
+      http: async () => ({
+        status: 200,
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode("web-"));
+            controller.enqueue(new TextEncoder().encode("stream"));
+            controller.close();
+          },
+        }),
+      }),
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "import httpx2",
+        "",
+        "def main(url):",
+        "    return httpx2.get(url).text",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/web"]);
+    expect(result).toBe("web-stream");
+    sandbox.close();
+  });
+
+  it("should propagate async iterable http response errors", async () => {
+    async function* responseChunks(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode("partial");
+      throw new Error("response stream failed");
+    }
+    const sandbox = await template.create({
+      http: async () => ({ status: 200, body: responseChunks() }),
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "import httpx2",
+        "",
+        "def main(url):",
+        "    return httpx2.get(url).text",
+      ].join("\n"),
+    );
+    await expect(
+      sandbox.run("main", ["https://example.test/error"]),
+    ).rejects.toThrow("response stream failed");
+    sandbox.close();
+  });
+
   it("should support http: true", async () => {
     const fetchMock = vi.fn(async () => {
       const headers = new Headers({ "x-test": "builtin" });
@@ -366,6 +441,57 @@ describe("StreamArg", () => {
     await expect(
       sandbox.run("consume", [new StreamArg(values())]),
     ).rejects.toThrow("producer failed");
+    expect(runWithStreams).toHaveBeenCalledOnce();
+  });
+
+  it("should stop producers when the guest finishes early", async () => {
+    async function* values(): AsyncGenerator<number> {
+      while (true) yield 1;
+    }
+
+    const runWithStreams = vi.fn(async () => ({
+      resultJson: [],
+      finalJson: undefined,
+      stdout: [],
+      stderr: [],
+      logs: [],
+      errors: [],
+    }));
+    const sandbox = new Sandbox({
+      runWithStreams,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("finishEarly", [new StreamArg(values())]),
+    ).resolves.toBeNull();
+    expect(runWithStreams).toHaveBeenCalledOnce();
+  });
+
+  it("should not wait for a producer blocked on its source", async () => {
+    async function* values(): AsyncGenerator<number> {
+      yield 1;
+      await new Promise<void>(() => {});
+    }
+
+    const runWithStreams = vi.fn(async () => ({
+      resultJson: [],
+      finalJson: undefined,
+      stdout: [],
+      stderr: [],
+      logs: [],
+      errors: [],
+    }));
+    const sandbox = new Sandbox({
+      runWithStreams,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("finishEarly", [new StreamArg(values())]),
+    ).resolves.toBeNull();
     expect(runWithStreams).toHaveBeenCalledOnce();
   });
 });

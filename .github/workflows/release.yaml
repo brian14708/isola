@@ -341,3 +341,7 @@ jobs:
           NPM_CONFIG_PROVENANCE: true
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public
+
+      - name: Verify published package entrypoint
+        working-directory: crates/js-sdk/npm
+        run: node --input-type=module -e "import('./dist/index.js')"

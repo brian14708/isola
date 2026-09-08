@@ -71,6 +71,10 @@ pub fn clear() {
     pending::clear();
 }
 
+pub fn clear_streams() {
+    pending::clear_http_streams();
+}
+
 pub fn recv_http<'js>(ctx: &Ctx<'js>, handle: u32) -> rquickjs::Result<Object<'js>> {
     match pending::take(handle).map_err(invalid_handle_error)? {
         Take::Ready(Output::Http {

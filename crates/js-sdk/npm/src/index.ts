@@ -1,7 +1,7 @@
 import { decode, encode } from "cbor-x";
 import { resolveRuntime } from "./_runtime.js";
 // @ts-expect-error - napi bindings are generated at build time
-import { ContextCore, type SandboxCore, StreamHandle } from "./isola.js";
+import { ContextCore, type SandboxCore, StreamHandle } from "./isola.cjs";
 import type {
   Event,
   Hostcalls,
@@ -9,6 +9,7 @@ import type {
   HttpHandlerConfig,
   HttpRequest,
   HttpResponse,
+  HttpResponseBody,
   JsonValue,
   MountConfig,
   RunArg,
@@ -28,6 +29,7 @@ export type {
   HttpHandlerConfig,
   HttpRequest,
   HttpResponse,
+  HttpResponseBody,
   JsonValue,
   MountConfig,
   RunArg,
@@ -58,7 +60,9 @@ type NativeHttpResponse = {
   status: number;
   headers?: Record<string, string>;
   body?: Buffer | null;
+  streamHandle?: number;
 };
+const MAX_HTTP_RESPONSE_BODY_BYTES = 16 * 1024 * 1024;
 type NativeRunResult = {
   resultJson: string[];
   finalJson?: string;
@@ -128,13 +132,65 @@ async function pumpStream(
   source: StreamSource,
   stream: NativeStreamHandle,
 ): Promise<void> {
+  const iterator: AsyncIterator<JsonValue> = isAsyncIterable(source)
+    ? (source[Symbol.asyncIterator]() as AsyncIterator<JsonValue>)
+    : (async function* () {
+        yield* source as Iterable<JsonValue>;
+      })();
+
   try {
-    for await (const value of source) {
-      await stream.pushAsync(value);
+    let current = await iterator.next();
+    while (!current.done) {
+      // Advance the source before waiting on a potentially back-pressured
+      // channel so source failures are not replaced by StreamClosed errors
+      // when the guest finishes early.
+      const next = iterator.next().then(
+        (value) => ({ kind: "next" as const, ok: true as const, value }),
+        (error: unknown) => ({
+          kind: "next" as const,
+          ok: false as const,
+          error,
+        }),
+      );
+      const push = stream.pushAsync(current.value).then(
+        () => ({ kind: "push" as const, ok: true as const }),
+        (error: unknown) => ({
+          kind: "push" as const,
+          ok: false as const,
+          error,
+        }),
+      );
+      const first = await Promise.race([next, push]);
+      if (first.kind === "next") {
+        if (!first.ok) throw first.error;
+        const pushResult = await push;
+        if (!pushResult.ok) throw new StreamPushError(pushResult.error);
+        current = first.value;
+      } else {
+        if (!first.ok) throw new StreamPushError(first.error);
+        const nextResult = await next;
+        if (!nextResult.ok) throw nextResult.error;
+        current = nextResult.value;
+      }
     }
   } finally {
+    await iterator.return?.();
     stream.end();
   }
+}
+
+class StreamPushError extends Error {
+  constructor(readonly cause: unknown) {
+    super("stream push failed");
+  }
+}
+
+function isStreamClosedError(error: unknown): boolean {
+  return error instanceof Error && error.message === "Stream is closed";
+}
+
+function nextTurn(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function encodeArgs(args?: readonly RunArg[]): EncodedRunArguments {
@@ -215,11 +271,39 @@ async function executeRun(
   if (encoded.producers.length === 0) return operation;
 
   try {
-    const results = await Promise.all([operation, ...encoded.producers]);
-    return results[0] as NativeRunResult;
+    const result = await operation;
+    const producersDone = Promise.all(encoded.producers).then(
+      () => ({ ok: true as const }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    // Let already-advanced sources report failures before closing channels.
+    let producerOutcome = await Promise.race([
+      producersDone,
+      nextTurn().then(() => null),
+    ]);
+    for (const stream of encoded.streams) stream.end();
+    if (producerOutcome === null) {
+      // A source may be waiting indefinitely for its next value. Once the
+      // channel is closed, give it one more turn to finish without blocking
+      // the successful guest result forever.
+      producerOutcome = await Promise.race([
+        producersDone,
+        nextTurn().then(() => null),
+      ]);
+    }
+    if (producerOutcome !== null && !producerOutcome.ok) {
+      const error = producerOutcome.error;
+      if (
+        !(error instanceof StreamPushError) ||
+        !isStreamClosedError(error.cause)
+      ) {
+        throw error instanceof StreamPushError ? error.cause : error;
+      }
+    }
+    return result;
   } catch (error) {
     for (const stream of encoded.streams) stream.end();
-    await Promise.allSettled([operation, ...encoded.producers]);
+    void Promise.allSettled(encoded.producers);
     throw error;
   }
 }
@@ -320,15 +404,75 @@ async function defaultHttpHandler(request: HttpRequest): Promise<HttpResponse> {
     body: request.body ?? undefined,
   });
 
-  const body = Buffer.from(await response.arrayBuffer());
   return {
     status: response.status,
     headers: Object.fromEntries(response.headers.entries()),
-    body,
+    // Preserve the platform response stream until the host bridge normalizes it.
+    body: response.body ?? null,
   };
 }
 
-function normalizeHttpResponse(response: HttpResponse): NativeHttpResponse {
+function isAsyncIterable(value: unknown): value is AsyncIterable<Uint8Array> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Symbol.asyncIterator in value &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[
+      Symbol.asyncIterator
+    ] === "function"
+  );
+}
+
+function isReadableStream(value: unknown): value is ReadableStream<Uint8Array> {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    typeof (value as { getReader?: unknown }).getReader === "function"
+  );
+}
+
+async function bodyToBuffer(body: HttpResponseBody): Promise<Buffer | null> {
+  if (body == null) return null;
+  if (Buffer.isBuffer(body)) return body;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  const append = (chunk: Uint8Array): void => {
+    total += chunk.byteLength;
+    if (total > MAX_HTTP_RESPONSE_BODY_BYTES) {
+      throw new RangeError(
+        `http response body exceeds maximum size of ${MAX_HTTP_RESPONSE_BODY_BYTES} bytes`,
+      );
+    }
+    chunks.push(chunk);
+  };
+  if (isAsyncIterable(body)) {
+    for await (const chunk of body) append(chunk);
+  } else if (isReadableStream(body)) {
+    const reader = (body as ReadableStream<Uint8Array>).getReader();
+    let completed = false;
+    try {
+      for (;;) {
+        const item = await reader.read();
+        if (item.done) {
+          completed = true;
+          break;
+        }
+        append(item.value);
+      }
+    } finally {
+      if (!completed) {
+        await reader.cancel().catch(() => undefined);
+      }
+      reader.releaseLock();
+    }
+  }
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+}
+
+async function normalizeHttpResponse(
+  response: HttpResponse,
+  registerStream?: (body: HttpResponseBody) => number,
+): Promise<NativeHttpResponse> {
   if (response === null || typeof response !== "object") {
     throw new TypeError("http handler must return an HttpResponse object");
   }
@@ -348,15 +492,30 @@ function normalizeHttpResponse(response: HttpResponse): NativeHttpResponse {
       }
     }
   }
-  if (response.body != null && !Buffer.isBuffer(response.body)) {
+  if (
+    response.body != null &&
+    !Buffer.isBuffer(response.body) &&
+    !isAsyncIterable(response.body) &&
+    !isReadableStream(response.body)
+  ) {
     throw new TypeError(
-      "http response body must be a Buffer, null, or undefined",
+      "http response body must be a Buffer, AsyncIterable<Uint8Array>, ReadableStream<Uint8Array>, null, or undefined",
     );
   }
+  const streamHandle =
+    response.body != null &&
+    !Buffer.isBuffer(response.body) &&
+    registerStream !== undefined
+      ? registerStream(response.body)
+      : undefined;
   return {
     status: response.status,
     headers: response.headers,
-    body: response.body ?? null,
+    body:
+      streamHandle === undefined
+        ? await bodyToBuffer(response.body ?? null)
+        : undefined,
+    streamHandle,
   };
 }
 
@@ -473,6 +632,7 @@ export class SandboxTemplate {
 export class Sandbox {
   private _core: InstanceType<typeof SandboxCore>;
   private _busy = false;
+  private _closeHttpStreams: (() => void) | null = null;
 
   /** @internal */
   constructor(core: InstanceType<typeof SandboxCore>) {
@@ -504,6 +664,75 @@ export class Sandbox {
 
   /** @internal */
   _setHttpHandler(handler: (req: HttpRequest) => Promise<HttpResponse>): void {
+    type RegisteredStream = {
+      iterator: AsyncIterator<Uint8Array>;
+      cleanup: () => Promise<void>;
+    };
+    const streams = new Map<number, RegisteredStream>();
+    let nextStreamHandle = 1;
+    const registerStream = (body: HttpResponseBody): number => {
+      let iterator: AsyncIterator<Uint8Array>;
+      let cancel: (() => Promise<void>) | undefined;
+      if (isAsyncIterable(body)) {
+        iterator = body[Symbol.asyncIterator]();
+        cancel = async () => {
+          await iterator.return?.();
+        };
+      } else if (isReadableStream(body)) {
+        const reader = body.getReader();
+        let cancelled = false;
+        cancel = async () => {
+          if (cancelled) return;
+          cancelled = true;
+          try {
+            await reader.cancel();
+          } catch {
+            // Cancellation is best effort when the source has already closed.
+          } finally {
+            reader.releaseLock();
+          }
+        };
+        iterator = (async function* () {
+          try {
+            for (;;) {
+              const item = await reader.read();
+              if (item.done) return;
+              yield item.value;
+            }
+          } finally {
+            await cancel?.();
+          }
+        })();
+      } else {
+        throw new TypeError("invalid HTTP stream body");
+      }
+      let cleanupPromise: Promise<void> | undefined;
+      const cleanup = (): Promise<void> => {
+        if (cleanupPromise !== undefined) return cleanupPromise;
+        try {
+          const result = cancel ? cancel() : iterator.return?.();
+          cleanupPromise = Promise.resolve(result).then(() => undefined);
+        } catch (error) {
+          cleanupPromise = Promise.reject(error);
+        }
+        return cleanupPromise;
+      };
+      const handle = nextStreamHandle++;
+      streams.set(handle, { iterator, cleanup });
+      return handle;
+    };
+    const releaseStream = async (handle: number): Promise<void> => {
+      const entry = streams.get(handle);
+      streams.delete(handle);
+      await entry?.cleanup();
+    };
+    this._closeHttpStreams = () => {
+      const entries = [...streams.values()];
+      streams.clear();
+      for (const entry of entries) {
+        void entry.cleanup().catch(() => undefined);
+      }
+    };
     this._core.setHttpHandler(
       async (...raw: unknown[]): Promise<NativeHttpResponse> => {
         const [method, url, headersBuffer, body] =
@@ -514,7 +743,29 @@ export class Sandbox {
         >;
         const req: HttpRequest = { method, url, headers, body };
         const resp = await handler(req);
-        return normalizeHttpResponse(resp);
+        return normalizeHttpResponse(resp, registerStream);
+      },
+      async (...raw: unknown[]) => {
+        const [method, url] = unpackTuple<NativeHttpArgs>(raw);
+        const handle = Number(url);
+        if (
+          method === "__isola_stream_release" ||
+          method === "__isola_stream_cancel"
+        ) {
+          await releaseStream(handle);
+          return { done: true };
+        }
+        const entry = streams.get(handle);
+        if (!entry) return { done: true };
+        const item = await entry.iterator.next();
+        if (item.done) {
+          streams.delete(handle);
+          await entry.cleanup();
+        }
+        return {
+          body: item.done ? undefined : Buffer.from(item.value),
+          done: item.done,
+        };
       },
     );
   }
@@ -648,6 +899,8 @@ export class Sandbox {
   }
 
   close(): void {
+    this._closeHttpStreams?.();
+    this._closeHttpStreams = null;
     this._core.close();
   }
 

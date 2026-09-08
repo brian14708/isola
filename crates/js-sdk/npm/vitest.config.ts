@@ -9,8 +9,8 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^(.*\/)?isola\.js$/,
-        replacement: path.resolve(__dirname, "dist/isola.js"),
+        find: /^(.*\/)?isola\.cjs$/,
+        replacement: path.resolve(__dirname, "dist/isola.cjs"),
       },
     ],
   },

@@ -187,6 +187,11 @@ fn scrub_snapshot_state() {
         return;
     }
 
+    // Streams belong to the previous sandbox instance when a preinitialized
+    // runtime is reused on the same thread. They must not survive instance
+    // teardown, while ordinary call boundaries deliberately retain them.
+    future::clear_streams();
+
     GLOBAL_SCOPE.with(|scope| {
         if let Some(scope) = &*scope.borrow() {
             scope

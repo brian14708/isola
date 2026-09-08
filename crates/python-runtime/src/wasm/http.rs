@@ -107,14 +107,19 @@ pub mod http_module {
 
         fn try_from(value: Result<HttpResponse, String>) -> Result<Self, Self::Error> {
             match value {
-                Ok(response) => Ok(Self {
-                    status: response.status,
-                    headers: response.headers,
-                    body: response.body,
-                    cursor: 0,
-                    consumed: false,
-                    closed: false,
-                }),
+                Ok(response) => {
+                    let stream_handle = isola_runtime::pending::register_http_stream(response.body);
+                    Ok(Self {
+                        status: response.status,
+                        headers: response.headers,
+                        stream_handle: Some(stream_handle),
+                        chunk: Vec::new(),
+                        cursor: 0,
+                        consumed: false,
+                        closed: false,
+                        pending_read: None,
+                    })
+                }
                 Err(e) => Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(e)),
             }
         }

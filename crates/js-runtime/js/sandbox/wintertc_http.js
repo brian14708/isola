@@ -3,6 +3,107 @@
 (function () {
   var hasOwn = Object.prototype.hasOwnProperty;
 
+  // QuickJS does not provide Web Streams. Keep the guest-facing contract
+  // available with the small subset needed by fetch response bodies.
+  if (typeof globalThis.ReadableStream === "undefined") {
+    class IsolaReadableStream {
+      constructor(source) {
+        this._source = source || {};
+        this._queue = [];
+        this._waiters = [];
+        this._closed = false;
+        this._error = null;
+        this._pulling = false;
+        this._cancelled = false;
+      }
+
+      getReader() {
+        if (this._locked) throw new TypeError("ReadableStream is locked");
+        this._locked = true;
+        var stream = this;
+        return {
+          read: function () {
+            return stream._read();
+          },
+          cancel: function (reason) {
+            return stream._cancel(reason);
+          },
+          releaseLock: function () {
+            stream._locked = false;
+          },
+        };
+      }
+
+      _read() {
+        if (this._queue.length > 0) {
+          return Promise.resolve({ value: this._queue.shift(), done: false });
+        }
+        if (this._error !== null) return Promise.reject(this._error);
+        if (this._closed) return Promise.resolve({ value: undefined, done: true });
+        var stream = this;
+        var promise = new Promise(function (resolve, reject) {
+          stream._waiters.push({ resolve: resolve, reject: reject });
+        });
+        this._pump();
+        return promise;
+      }
+
+      _pump() {
+        if (this._pulling || this._closed || this._cancelled) return;
+        this._pulling = true;
+        var stream = this;
+        var controller = {
+          enqueue: function (value) {
+            if (stream._closed || stream._cancelled) return;
+            var waiter = stream._waiters.shift();
+            if (waiter) waiter.resolve({ value: value, done: false });
+            else stream._queue.push(value);
+          },
+          close: function () {
+            stream._closed = true;
+            var waiter;
+            while ((waiter = stream._waiters.shift())) {
+              waiter.resolve({ value: undefined, done: true });
+            }
+          },
+          error: function (error) {
+            stream._error = error;
+            var waiter;
+            while ((waiter = stream._waiters.shift())) waiter.reject(error);
+          },
+        };
+        Promise.resolve()
+          .then(function () {
+            if (typeof stream._source.pull === "function") {
+              return stream._source.pull(controller);
+            }
+            controller.close();
+            return undefined;
+          })
+          .catch(controller.error)
+          .then(function () {
+            stream._pulling = false;
+            if (stream._waiters.length > 0) stream._pump();
+          });
+      }
+
+      _cancel(reason) {
+        this._cancelled = true;
+        this._closed = true;
+        this._queue = [];
+        var waiter;
+        while ((waiter = this._waiters.shift())) {
+          waiter.resolve({ value: undefined, done: true });
+        }
+        if (typeof this._source.cancel === "function") {
+          return Promise.resolve(this._source.cancel(reason));
+        }
+        return Promise.resolve();
+      }
+    }
+    globalThis.ReadableStream = IsolaReadableStream;
+  }
+
   function abortError(reason) {
     if (typeof globalThis.__isolaAbortError === "function") {
       return globalThis.__isolaAbortError(reason);
@@ -200,6 +301,12 @@
     }
 
     instance.bodyUsed = true;
+    if (instance._teeBranch) {
+      return consumeReadableStream(instance);
+    }
+    if (instance._streamHandle !== null && instance._streamHandle !== undefined) {
+      return consumeStream(instance);
+    }
     if (instance._bodyBytes === null) {
       return Promise.resolve(new ArrayBuffer(0));
     }
@@ -208,7 +315,11 @@
 
   function textBody(instance) {
     return consumeBody(instance).then(function (bytes) {
-      if (instance._bodyText !== null && instance._bodyText !== undefined) {
+      if (
+        (instance._streamHandle === null || instance._streamHandle === undefined) &&
+        instance._bodyText !== null &&
+        instance._bodyText !== undefined
+      ) {
         return instance._bodyText;
       }
       var text = decodeUtf8(new Uint8Array(bytes));
@@ -225,6 +336,418 @@
 
   function arrayBufferBody(instance) {
     return consumeBody(instance);
+  }
+
+  function releaseStream(instance) {
+    var handle = instance._streamHandle;
+    if (handle === null || handle === undefined || instance._streamReleased) {
+      return;
+    }
+    instance._streamReleased = true;
+    detachAbortSignal(instance);
+    if (globalThis._isola_http && typeof globalThis._isola_http._release === "function") {
+      try {
+        globalThis._isola_http._release(handle);
+      } catch (_err) {
+        // Releasing an already-finished native stream is idempotent.
+      }
+    }
+  }
+
+  function detachAbortSignal(instance) {
+    if (
+      instance._abortSignal !== null &&
+      instance._abortSignal !== undefined &&
+      instance._abortHandler !== null &&
+      instance._abortHandler !== undefined
+    ) {
+      instance._abortSignal.removeEventListener("abort", instance._abortHandler);
+    }
+    instance._abortSignal = null;
+    instance._abortHandler = null;
+    instance._abortResolve = null;
+    instance._abortPromise = null;
+  }
+
+  function attachAbortSignal(instance, signal) {
+    if (
+      (signal === null || signal === undefined) ||
+      (instance._streamHandle === null || instance._streamHandle === undefined)
+    ) {
+      return;
+    }
+
+    instance._abortSignal = signal;
+    instance._abortPromise = new Promise(function (resolve) {
+      instance._abortResolve = resolve;
+    });
+    instance._abortHandler = function () {
+      if (instance._abortError !== null && instance._abortError !== undefined) {
+        return;
+      }
+      var error = abortError(signal.reason);
+      instance._abortError = error;
+      if (instance._abortResolve !== null && instance._abortResolve !== undefined) {
+        instance._abortResolve(error);
+      }
+      // Cancel the native body as soon as the signal fires. Pending reads also
+      // race _abortPromise and cancel their individual pollable handles.
+      void cancelStream(instance, error).catch(function () {});
+    };
+    signal.addEventListener("abort", instance._abortHandler);
+    if (signal.aborted) {
+      instance._abortHandler();
+    }
+  }
+
+  function cancelStream(instance, reason) {
+    var handle = instance._streamHandle;
+    if (
+      handle === null ||
+      handle === undefined ||
+      instance._streamCancelled ||
+      instance._streamReleased
+    ) {
+      return Promise.resolve();
+    }
+    instance._streamCancelled = true;
+    if (
+      instance._readHandle !== null &&
+      instance._readHandle !== undefined &&
+      typeof _isola_async !== "undefined" &&
+      typeof _isola_async._cancel === "function"
+    ) {
+      _isola_async._cancel(instance._readHandle, reason);
+      instance._readHandle = null;
+    }
+    var cancel = globalThis._isola_http && globalThis._isola_http._cancel;
+    if (typeof cancel !== "function") {
+      releaseStream(instance);
+      return Promise.resolve();
+    }
+    try {
+      var result = cancel(handle, reason === undefined ? null : String(reason));
+      return Promise.resolve(result).then(
+        function () {
+          releaseStream(instance);
+        },
+        function (error) {
+          releaseStream(instance);
+          throw error;
+        },
+      );
+    } catch (error) {
+      releaseStream(instance);
+      return Promise.reject(error);
+    }
+  }
+
+  function readStreamChunk(instance) {
+    if (instance._abortError !== null && instance._abortError !== undefined) {
+      return Promise.reject(instance._abortError);
+    }
+    var read = globalThis._isola_http && globalThis._isola_http._read;
+    var finish = globalThis._isola_http && globalThis._isola_http._finishRead;
+    if (typeof read !== "function") {
+      return Promise.reject(new TypeError("HTTP response stream is unavailable."));
+    }
+    try {
+      var handle = read(instance._streamHandle);
+      instance._readHandle = handle;
+      if (typeof finish !== "function" || typeof _isola_async === "undefined") {
+        var unavailable = new TypeError("HTTP response stream completion is unavailable.");
+        if (typeof _isola_async !== "undefined" && typeof _isola_async._cancel === "function") {
+          _isola_async._cancel(handle, unavailable);
+        }
+        instance._readHandle = null;
+        return Promise.reject(unavailable);
+      }
+      var wait = _isola_async._wait(handle, function () {
+        return finish(handle);
+      }).then(
+        function (result) {
+          if (instance._readHandle === handle) instance._readHandle = null;
+          return result;
+        },
+        function (error) {
+          if (instance._readHandle === handle) instance._readHandle = null;
+          throw error;
+        },
+      );
+      if (instance._abortPromise === null || instance._abortPromise === undefined) {
+        return wait;
+      }
+      return Promise.race([
+        wait,
+        instance._abortPromise.then(function (error) {
+          if (typeof _isola_async._cancel === "function") {
+            _isola_async._cancel(handle, error);
+          }
+          throw error;
+        }),
+      ]);
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  function chunkToBytes(chunk) {
+    if (chunk === null || chunk === undefined) return new Uint8Array(0);
+    if (chunk instanceof Uint8Array) return chunk;
+    if (isArrayBuffer(chunk)) return new Uint8Array(chunk);
+    if (isArrayBufferView(chunk)) {
+      return new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    }
+    if (chunk.value !== undefined) return chunkToBytes(chunk.value);
+    return new Uint8Array(0);
+  }
+
+  function consumeStream(instance) {
+    var parts = [];
+    var total = 0;
+    function next() {
+      return readStreamChunk(instance).then(function (result) {
+        var done = result === null || result === undefined || result.done === true;
+        if (done) {
+          releaseStream(instance);
+          var output = new Uint8Array(total);
+          var offset = 0;
+          for (var i = 0; i < parts.length; i += 1) {
+            output.set(parts[i], offset);
+            offset += parts[i].length;
+          }
+          return output.buffer;
+        }
+        var bytes = chunkToBytes(result);
+        if (bytes.length > 0) {
+          parts.push(new Uint8Array(bytes));
+          total += bytes.length;
+        }
+        return next();
+      });
+    }
+    return next().catch(function (error) {
+      releaseStream(instance);
+      throw error;
+    });
+  }
+
+  function consumeReadableStream(instance) {
+    var reader = instance.body.getReader();
+    var parts = [];
+    var total = 0;
+    function next() {
+      return reader.read().then(function (result) {
+        if (result === null || result === undefined || result.done === true) {
+          reader.releaseLock();
+          var output = new Uint8Array(total);
+          var offset = 0;
+          for (var i = 0; i < parts.length; i += 1) {
+            output.set(parts[i], offset);
+            offset += parts[i].length;
+          }
+          return output.buffer;
+        }
+        var bytes = chunkToBytes(result.value);
+        if (bytes.length > 0) {
+          parts.push(new Uint8Array(bytes));
+          total += bytes.length;
+        }
+        return next();
+      });
+    }
+    return next();
+  }
+
+  function createResponseTee(instance) {
+    var state = {
+      queues: [],
+      waiters: [],
+      pulling: false,
+      done: false,
+      error: null,
+      cancelled: [],
+    };
+
+    function settleWaiters() {
+      for (var i = 0; i < state.waiters.length; i += 1) {
+        var waiter;
+        while ((waiter = state.waiters[i].shift())) {
+          if (state.error !== null) waiter.reject(state.error);
+          else waiter.resolve(null);
+        }
+      }
+    }
+
+    function pump() {
+      if (state.pulling || state.done || state.error !== null) return;
+      state.pulling = true;
+      readStreamChunk(instance)
+        .then(function (result) {
+          var done = result === null || result === undefined || result.done === true;
+          if (done) {
+            state.done = true;
+            releaseStream(instance);
+            settleWaiters();
+            return;
+          }
+          var bytes = new Uint8Array(chunkToBytes(result));
+          for (var i = 0; i < state.waiters.length; i += 1) {
+            if (state.cancelled[i]) continue;
+            var waiter = state.waiters[i].shift();
+            if (waiter) waiter.resolve(bytes);
+            else state.queues[i].push(bytes);
+          }
+        })
+        .catch(function (error) {
+          state.error = error;
+          releaseStream(instance);
+          settleWaiters();
+        })
+        .then(function () {
+          state.pulling = false;
+          if (state.waiters.some(function (waiters) {
+            return waiters.length > 0;
+          })) {
+            pump();
+          }
+        });
+    }
+
+    state.read = function (index) {
+      if (state.queues[index].length > 0) {
+        return Promise.resolve(state.queues[index].shift());
+      }
+      if (state.error !== null) return Promise.reject(state.error);
+      if (state.done || state.cancelled[index]) return Promise.resolve(null);
+      var promise = new Promise(function (resolve, reject) {
+        state.waiters[index].push({resolve: resolve, reject: reject});
+      });
+      pump();
+      return promise;
+    };
+
+    state.cancel = function (index, reason) {
+      if (state.cancelled[index]) return Promise.resolve();
+      state.cancelled[index] = true;
+      state.queues[index] = [];
+      while (state.waiters[index].length > 0) {
+        state.waiters[index].shift().resolve(null);
+      }
+      if (state.cancelled.every(function (cancelled) {
+        return cancelled;
+      })) {
+        state.done = true;
+        return cancelStream(instance, reason);
+      }
+      return Promise.resolve();
+    };
+
+    function branch(index, owner) {
+      var pulling = null;
+      var stream = new ReadableStream({
+        pull: function (controller) {
+          if (pulling !== null) return pulling;
+          pulling = state
+            .read(index)
+            .then(function (bytes) {
+              if (bytes === null) controller.close();
+              else controller.enqueue(new Uint8Array(bytes));
+            })
+            .finally(function () {
+              pulling = null;
+            });
+          return pulling;
+        },
+        cancel: function (reason) {
+          return state.cancel(index, reason);
+        },
+      });
+      var getReader = stream.getReader;
+      stream.getReader = function () {
+        owner.bodyUsed = true;
+        return getReader.call(stream);
+      };
+      return stream;
+    }
+
+    function addBranch(owner) {
+      var index = state.queues.length;
+      state.queues.push([]);
+      state.waiters.push([]);
+      state.cancelled.push(false);
+      return branch(index, owner);
+    }
+
+    return {addBranch: addBranch};
+  }
+
+  function makeResponseBody(instance) {
+    if (typeof ReadableStream === "undefined") {
+      return null;
+    }
+    if (instance._streamHandle === null || instance._streamHandle === undefined) {
+      if (instance._bodyBytes === null) return null;
+      var bytes = new Uint8Array(instance._bodyBytes);
+      var offset = 0;
+      var buffered = new ReadableStream({
+        pull: function (controller) {
+          instance.bodyUsed = true;
+          if (offset >= bytes.length) {
+            controller.close();
+            return undefined;
+          }
+          var end = Math.min(offset + 65536, bytes.length);
+          controller.enqueue(bytes.slice(offset, end));
+          offset = end;
+          return undefined;
+        },
+        cancel: function () {
+          offset = bytes.length;
+        },
+      });
+      var bufferedGetReader = buffered.getReader;
+      buffered.getReader = function () {
+        instance.bodyUsed = true;
+        return bufferedGetReader.call(buffered);
+      };
+      return buffered;
+    }
+    var pulling = null;
+    var stream = new ReadableStream({
+      pull: function (controller) {
+        instance.bodyUsed = true;
+        if (pulling !== null) return pulling;
+        pulling = readStreamChunk(instance)
+          .then(function (result) {
+            var done = result === null || result === undefined || result.done === true;
+            if (done) {
+              releaseStream(instance);
+              controller.close();
+            } else {
+              var bytes = chunkToBytes(result);
+              controller.enqueue(new Uint8Array(bytes));
+            }
+          })
+          .catch(function (error) {
+            releaseStream(instance);
+            controller.error(error);
+          })
+          .then(function () {
+            pulling = null;
+          });
+        return pulling;
+      },
+      cancel: function (reason) {
+        return cancelStream(instance, reason);
+      },
+    });
+    var getReader = stream.getReader;
+    stream.getReader = function () {
+      instance.bodyUsed = true;
+      return getReader.call(stream);
+    };
+    return stream;
   }
 
   function encodeFormComponent(value) {
@@ -527,9 +1050,37 @@
     next._bodyBytes =
       request._bodyBytes === null ? null : copyArrayBuffer(request._bodyBytes);
     next._bodyText = request._bodyText;
+    next._streamHandle = null;
+    next._streamReleased = false;
+    next._streamCancelled = false;
     next.body = null;
     next.bodyUsed = false;
     return next;
+  }
+
+  function initializeResponseState(response, bodyBytes, bodyText, streamHandle) {
+    response._bodyBytes = bodyBytes;
+    response._bodyText = bodyText;
+    response._streamHandle =
+      streamHandle === undefined ? null : streamHandle;
+    response._streamReleased = false;
+    response._streamCancelled = false;
+    response._readHandle = null;
+    response._abortSignal = null;
+    response._abortHandler = null;
+    response._abortPromise = null;
+    response._abortResolve = null;
+    response._abortError = null;
+  }
+
+  function payloadStreamHandle(payload) {
+    if (payload.bodyStreamHandle !== undefined) {
+      return payload.bodyStreamHandle;
+    }
+    if (payload.streamHandle !== undefined) {
+      return payload.streamHandle;
+    }
+    return payload.bodyHandle;
   }
 
   class Request {
@@ -623,12 +1174,31 @@
     next.headers = new Headers(response.headers);
     next.url = response.url;
     next.ok = response.ok;
-    next._bodyBytes =
+    initializeResponseState(
+      next,
       response._bodyBytes === null
         ? null
-        : copyArrayBuffer(response._bodyBytes);
-    next._bodyText = response._bodyText;
-    next.body = null;
+        : copyArrayBuffer(response._bodyBytes),
+      response._bodyText,
+      null,
+    );
+    if (
+      (response._streamHandle !== null && response._streamHandle !== undefined) ||
+      response._tee !== null && response._tee !== undefined
+    ) {
+      var tee = response._tee;
+      if (tee === null || tee === undefined) {
+        tee = createResponseTee(response);
+        response._tee = tee;
+        response._teeBranch = true;
+        response.body = tee.addBranch(response);
+      }
+      next._teeBranch = true;
+      next._tee = tee;
+      next.body = tee.addBranch(next);
+    } else {
+      next.body = makeResponseBody(next);
+    }
     next.bodyUsed = false;
     return next;
   }
@@ -645,9 +1215,8 @@
       this.ok = this.status >= 200 && this.status <= 299;
 
       var normalizedBody = normalizeBody(body, this.headers, false);
-      this._bodyBytes = normalizedBody.bytes;
-      this._bodyText = normalizedBody.text;
-      this.body = null;
+      initializeResponseState(this, normalizedBody.bytes, normalizedBody.text, null);
+      this.body = makeResponseBody(this);
       this.bodyUsed = false;
     }
 
@@ -663,10 +1232,13 @@
       response.ok = response.status >= 200 && response.status <= 299;
 
       var bytes = toBodyBytes(payload.bodyBytes || payload.body);
-      response._bodyBytes = bytes;
-      response._bodyText =
-        payload.bodyText === undefined ? null : String(payload.bodyText);
-      response.body = null;
+      initializeResponseState(
+        response,
+        bytes,
+        payload.bodyText === undefined ? null : String(payload.bodyText),
+        payloadStreamHandle(payload),
+      );
+      response.body = makeResponseBody(response);
       response.bodyUsed = false;
       return response;
     }
@@ -746,7 +1318,9 @@
         throw recvError;
       }
 
-      return Response._fromPayload(payload);
+      var response = Response._fromPayload(payload);
+      attachAbortSignal(response, request.signal);
+      return response;
     });
 
     function onAbort() {

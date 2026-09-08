@@ -30,3 +30,7 @@ jobs:
         run: pnpm install
       - name: Type check
         run: pnpm --filter isola-core tsc --noEmit
+      - name: Validate package entrypoint
+        run: |
+          pnpm --filter isola-core run build
+          node --input-type=module -e "import('./crates/js-sdk/npm/dist/index.js')"

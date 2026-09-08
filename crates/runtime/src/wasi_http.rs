@@ -1,4 +1,6 @@
-use futures::future::join;
+use std::{future::Future, pin::Pin};
+
+use futures::{StreamExt, future::join, stream};
 use wit_bindgen::rt::async_support::StreamResult;
 
 use crate::{
@@ -69,18 +71,46 @@ impl HttpRequest {
     }
 }
 
+pub type HttpBodyStream = Pin<Box<dyn futures::Stream<Item = Result<Vec<u8>, String>> + 'static>>;
+
 pub struct HttpResponse {
     pub status: u16,
     pub headers: Vec<(String, Vec<u8>)>,
-    pub body: Vec<u8>,
+    pub body: HttpBodyStream,
 }
 
-/// Send and fully buffer a request through `wasi:http/client`.
+/// Collect a response body for runtimes that expose buffered response APIs.
+///
+/// # Errors
+///
+/// Returns an error when a body chunk fails or the response exceeds the
+/// configured size limit.
+#[expect(
+    clippy::future_not_send,
+    reason = "WASI stream readers are local to the component runtime"
+)]
+pub async fn collect_body(mut body: HttpBodyStream) -> Result<Vec<u8>, String> {
+    let mut output = Vec::new();
+    while let Some(chunk) = body.next().await {
+        let chunk = chunk?;
+        if output.len().saturating_add(chunk.len()) > MAX_HTTP_RESPONSE_BODY_BYTES {
+            return Err(format!(
+                "HTTP response body exceeds maximum size of {MAX_HTTP_RESPONSE_BODY_BYTES} bytes"
+            ));
+        }
+        output.extend_from_slice(&chunk);
+    }
+    Ok(output)
+}
+
+/// Send a request through `wasi:http/client` and return its response headers
+/// and a lazy body stream.
 ///
 /// # Errors
 ///
 /// Returns an error when the request is invalid, the WASI HTTP exchange fails,
-/// or the response body exceeds the configured limit.
+/// or the response headers cannot be received. Body transport and size errors
+/// are reported by the returned stream when it is consumed.
 pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
     let HttpRequest {
         method,
@@ -150,48 +180,84 @@ pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
     let (body_result, response) = join(write_body, client::send(request)).await;
     body_result?;
     let response = response.map_err(|e| format_http_error("HTTP request", &e))?;
-    let (response, transmission) =
-        join(decode_response(response), async move { transmission.await }).await;
-    let response = response?;
-    transmission.map_err(|e| format_http_error("HTTP request transmission", &e))?;
-    Ok(response)
+    Ok(decode_response(response, async move { transmission.await }))
 }
 
-async fn decode_response(response: Response) -> Result<HttpResponse, String> {
+fn decode_response(
+    response: Response,
+    transmission: impl Future<Output = Result<(), ErrorCode>> + 'static,
+) -> HttpResponse {
     let status = response.get_status_code();
     let headers = response.get_headers().copy_all();
     let (result_writer, result_reader) = wit_future::new(|| Ok(()));
+    let (stream, trailers) = Response::consume_body(response, result_reader);
     drop(result_writer);
-    let (mut stream, trailers) = Response::consume_body(response, result_reader);
-    let mut body = Vec::new();
-    let mut chunk = Vec::with_capacity(HTTP_RESPONSE_BODY_CHUNK_BYTES);
-    loop {
-        let (result, read_chunk) = stream.read(chunk).await;
-        chunk = read_chunk;
-        if body.len().saturating_add(chunk.len()) > MAX_HTTP_RESPONSE_BODY_BYTES {
-            return Err(format!(
-                "HTTP response body exceeds maximum size of {MAX_HTTP_RESPONSE_BODY_BYTES} bytes"
-            ));
-        }
-        body.extend_from_slice(&chunk);
-        chunk.clear();
 
-        match result {
-            StreamResult::Complete(_) => {}
-            StreamResult::Dropped => break,
-            StreamResult::Cancelled => {
-                unreachable!("awaited HTTP response body read was cancelled")
+    let body = stream::unfold(
+        (
+            stream,
+            Some(trailers),
+            Some(transmission),
+            Vec::with_capacity(HTTP_RESPONSE_BODY_CHUNK_BYTES),
+            0usize,
+        ),
+        |(mut stream, mut trailers, mut transmission, mut chunk, total)| async move {
+            loop {
+                let (result, read_chunk) = stream.read(chunk).await;
+                chunk = read_chunk;
+
+                match result {
+                    StreamResult::Complete(_) if !chunk.is_empty() => {
+                        let chunk_len = chunk.len();
+                        let next_total = total.saturating_add(chunk_len);
+                        if next_total > MAX_HTTP_RESPONSE_BODY_BYTES {
+                            let error = format!(
+                                "HTTP response body exceeds maximum size of {MAX_HTTP_RESPONSE_BODY_BYTES} bytes"
+                            );
+                            return Some((
+                                Err(error),
+                                (stream, None, None, Vec::new(), next_total),
+                            ));
+                        }
+                        let output = std::mem::take(&mut chunk);
+                        return Some((
+                            Ok(output),
+                            (
+                                stream,
+                                trailers,
+                                transmission,
+                                Vec::with_capacity(HTTP_RESPONSE_BODY_CHUNK_BYTES),
+                                next_total,
+                            ),
+                        ));
+                    }
+                    StreamResult::Complete(_) => {}
+                    StreamResult::Dropped => {
+                        let result = match (trailers.take(), transmission.take()) {
+                            (Some(trailers), Some(transmission)) => match trailers.await {
+                                Ok(_) => transmission.await.map_err(|e| {
+                                    format_http_error("HTTP request transmission", &e)
+                                }),
+                                Err(error) => Err(format!("HTTP response body failed: {error:?}")),
+                            },
+                            _ => Ok(()),
+                        };
+                        return result
+                            .err()
+                            .map(|error| (Err(error), (stream, None, None, Vec::new(), total)));
+                    }
+                    StreamResult::Cancelled => {
+                        unreachable!("awaited HTTP response body read was cancelled")
+                    }
+                }
             }
-        }
-    }
-    trailers
-        .await
-        .map_err(|e| format!("HTTP response body failed: {e:?}"))?;
-    Ok(HttpResponse {
+        },
+    );
+    HttpResponse {
         status,
         headers,
-        body,
-    })
+        body: Box::pin(body),
+    }
 }
 
 fn format_http_error(context: &str, error: &ErrorCode) -> String {

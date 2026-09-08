@@ -20,7 +20,7 @@ pub type HttpBodyStream =
 /// The request body is fully buffered. `None` represents an empty body.
 pub type HttpRequest = http::Request<Option<Bytes>>;
 
-/// HTTP response returned by [`Host::http_request`].
+/// HTTP response returned by [`Host::http_request_stream`].
 ///
 /// The response body is streamed back to the guest through [`HttpBodyStream`].
 pub type HttpResponse = http::Response<HttpBodyStream>;

@@ -26,5 +26,6 @@ pub fn reset_preinitialized_state() {
         wasilibc_reset_preopens();
     }
     crate::pending::clear();
+    crate::pending::clear_http_streams();
     crate::time::reset_monotonic();
 }

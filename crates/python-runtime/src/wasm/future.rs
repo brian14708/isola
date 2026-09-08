@@ -56,7 +56,7 @@ impl PyPollable {
             PollableState::Ready => Ok(()),
             PollableState::Operation(handle) => match pending::take(handle) {
                 Ok(Take::Ready(Output::Sleep)) => Ok(()),
-                Ok(Take::Ready(Output::Host(_) | Output::Http { .. })) => {
+                Ok(Take::Ready(Output::Host(_) | Output::Http { .. } | Output::HttpStream(_))) => {
                     Err(pyo3::exceptions::PyRuntimeError::new_err(
                         "operation result must be read from its owner",
                     ))
@@ -80,7 +80,7 @@ impl PyPollable {
             PollableState::Ready => Ok(()),
             PollableState::Operation(handle) => match pending::drive_one(handle) {
                 Ok(Output::Sleep) => Ok(()),
-                Ok(Output::Host(_) | Output::Http { .. }) => {
+                Ok(Output::Host(_) | Output::Http { .. } | Output::HttpStream(_)) => {
                     Err(pyo3::exceptions::PyRuntimeError::new_err(
                         "operation result must be read from its owner",
                     ))
