@@ -3,6 +3,7 @@ use std::{
     cmp::Reverse,
     collections::{BinaryHeap, HashMap, HashSet, VecDeque},
     fmt,
+    task::{Context, Poll, Waker},
     time::{Duration, Instant},
 };
 
@@ -17,7 +18,7 @@ use crate::{
     Deadline, block_on,
     isola::script::host,
     wasi::clocks::monotonic_clock,
-    wasi_http::{self, HttpRequest, HttpResponse},
+    wasi_http::{self, HttpBodyStream, HttpRequest, HttpResponse},
 };
 
 /// The completed value of a deferred runtime operation.
@@ -28,6 +29,21 @@ pub enum Output {
         response: Result<HttpResponse, String>,
     },
     Sleep,
+    HttpStream(Result<Option<Vec<u8>>, String>),
+}
+
+struct HttpStream {
+    source: HttpBodyStream,
+    cancelled: bool,
+}
+
+impl HttpStream {
+    fn new(source: HttpBodyStream) -> Self {
+        Self {
+            source,
+            cancelled: false,
+        }
+    }
 }
 
 /// The state of an operation removed from the registry.
@@ -88,6 +104,7 @@ enum Operation {
         state: State<HttpRequest, Result<HttpResponse, String>>,
     },
     Sleep(Deadline),
+    HttpStreamRead(State<u32, Result<Option<Vec<u8>>, String>>),
 }
 
 impl Operation {
@@ -96,6 +113,7 @@ impl Operation {
             Self::Host(state) => state.is_ready(),
             Self::Http { state, .. } => state.is_ready(),
             Self::Sleep(deadline) => deadline.is_ready_at(now),
+            Self::HttpStreamRead(state) => state.is_ready(),
         }
     }
 }
@@ -103,11 +121,13 @@ impl Operation {
 enum Request {
     Host(HostRequest),
     Http(HttpRequest),
+    HttpStreamRead(u32),
 }
 
 enum Response {
     Host(Result<Vec<u8>, String>),
     Http(Result<HttpResponse, String>),
+    HttpStream(Result<Option<Vec<u8>>, String>),
 }
 
 enum Completion {
@@ -132,6 +152,7 @@ struct Registry {
     next_handle: u32,
     next_sequence: u64,
     ready_generation: u64,
+    streams: HashMap<u32, HttpStream>,
 }
 
 impl Registry {
@@ -147,6 +168,7 @@ impl Registry {
             next_handle: 0,
             next_sequence: 0,
             ready_generation: 0,
+            streams: HashMap::new(),
         }
     }
 
@@ -155,7 +177,7 @@ impl Registry {
         loop {
             let handle = self.next_handle;
             self.next_handle = self.next_handle.wrapping_add(1);
-            if !self.operations.contains_key(&handle) {
+            if !self.operations.contains_key(&handle) && !self.streams.contains_key(&handle) {
                 return handle;
             }
             assert_ne!(
@@ -167,10 +189,11 @@ impl Registry {
 
     fn insert(&mut self, operation: Operation) -> u32 {
         let handle = self.allocate_handle();
-        let deferred = matches!(operation, Operation::Host(_) | Operation::Http { .. });
-        let deadline = match &operation {
-            Operation::Sleep(deadline) => Some(*deadline),
-            Operation::Host(_) | Operation::Http { .. } => None,
+        let (deferred, deadline) = match &operation {
+            Operation::Sleep(deadline) => (false, Some(*deadline)),
+            Operation::Host(_) | Operation::Http { .. } | Operation::HttpStreamRead(_) => {
+                (true, None)
+            }
         };
         self.operations.insert(handle, operation);
         if deferred {
@@ -197,6 +220,7 @@ impl Registry {
                 .and_then(|operation| match operation {
                     Operation::Host(state) => state.start().map(Request::Host),
                     Operation::Http { state, .. } => state.start().map(Request::Http),
+                    Operation::HttpStreamRead(state) => state.start().map(Request::HttpStreamRead),
                     Operation::Sleep(_) => None,
                 });
             let Some(request) = request else {
@@ -211,6 +235,9 @@ impl Registry {
                         Response::Host(host::hostcall(call_type, payload).await)
                     }
                     Request::Http(request) => Response::Http(wasi_http::send(request).await),
+                    Request::HttpStreamRead(handle) => {
+                        Response::HttpStream(read_http_stream_async(handle).await)
+                    }
                 }
             };
             in_flight.push(
@@ -295,9 +322,18 @@ impl Registry {
                 *state = State::Ready(response);
                 true
             }
-            (Operation::Host(_), Response::Http(_))
+            (Operation::HttpStreamRead(state), Response::HttpStream(response)) => {
+                *state = State::Ready(response);
+                true
+            }
+            (Operation::Host(_), Response::Http(_) | Response::HttpStream(_))
             | (Operation::Http { .. }, Response::Host(_))
-            | (Operation::Sleep(_), Response::Host(_) | Response::Http(_)) => false,
+            | (Operation::Http { .. }, Response::HttpStream(_))
+            | (
+                Operation::Sleep(_),
+                Response::Host(_) | Response::Http(_) | Response::HttpStream(_),
+            )
+            | (Operation::HttpStreamRead(_), Response::Host(_) | Response::Http(_)) => false,
         };
         if completed {
             self.mark_ready(handle);
@@ -335,6 +371,10 @@ impl Registry {
         self.ready_members.clear();
         self.deadlines.clear();
     }
+
+    fn clear_streams(&mut self) {
+        self.streams.clear();
+    }
 }
 
 thread_local! {
@@ -361,6 +401,132 @@ pub fn register_http(request: HttpRequest) -> u32 {
     register(Operation::Http {
         request_url,
         state: State::Deferred(request),
+    })
+}
+
+/// Register one asynchronous read from a native response stream.
+#[must_use]
+pub fn register_http_stream_read(handle: u32) -> u32 {
+    register(Operation::HttpStreamRead(State::Deferred(handle)))
+}
+
+/// Register a response body stream and return its native handle.
+#[must_use]
+pub fn register_http_stream(source: HttpBodyStream) -> u32 {
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let handle = operations.allocate_handle();
+        operations.streams.insert(handle, HttpStream::new(source));
+        handle
+    })
+}
+
+/// Read an already-ready chunk without entering the component async executor.
+/// Production consumers should use [`read_http_stream_async`].
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the stream handle is unknown or released.
+pub fn read_http_stream(handle: u32) -> Result<Option<Vec<u8>>, InvalidHandle> {
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let stream = operations
+            .streams
+            .get_mut(&handle)
+            .ok_or(InvalidHandle(handle))?;
+        if stream.cancelled {
+            return Ok(None);
+        }
+        let mut source = std::mem::replace(&mut stream.source, Box::pin(futures::stream::empty()));
+        let mut cx = Context::from_waker(Waker::noop());
+        let value = match source.as_mut().poll_next(&mut cx) {
+            Poll::Ready(Some(Ok(chunk))) => Some(chunk),
+            Poll::Ready(Some(Err(_)) | None) | Poll::Pending => None,
+        };
+        stream.source = source;
+        Ok(value)
+    })
+}
+
+/// Read one chunk from a lazily-produced response body stream.
+///
+/// # Errors
+///
+/// Returns an error when the stream handle is unknown or the source fails.
+#[expect(
+    clippy::future_not_send,
+    reason = "response streams and the pending registry are intentionally local"
+)]
+pub async fn read_http_stream_async(handle: u32) -> Result<Option<Vec<u8>>, String> {
+    let Some(mut source_stream) = OPERATIONS.with(|operations| -> Result<_, String> {
+        let mut operations = operations.borrow_mut();
+        let stream = operations
+            .streams
+            .get_mut(&handle)
+            .ok_or_else(|| InvalidHandle(handle).to_string())?;
+        if stream.cancelled {
+            return Ok(None);
+        }
+        Ok(Some(std::mem::replace(
+            &mut stream.source,
+            Box::pin(futures::stream::empty()),
+        )))
+    })?
+    else {
+        return Ok(None);
+    };
+    let next = source_stream.next().await;
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let Some(stream) = operations.streams.get_mut(&handle) else {
+            return;
+        };
+        if stream.cancelled {
+            return;
+        }
+        if next.is_some() && !matches!(next, Some(Err(_))) {
+            stream.source = source_stream;
+        }
+    });
+    match next {
+        None => Ok(None),
+        Some(Ok(chunk)) => Ok(Some(chunk)),
+        Some(Err(error)) => Err(error),
+    }
+}
+
+/// Cancel a response body stream and discard buffered chunks.
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the stream handle is unknown or released.
+pub fn cancel_http_stream(handle: u32) -> Result<(), InvalidHandle> {
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let stream = operations
+            .streams
+            .get_mut(&handle)
+            .ok_or(InvalidHandle(handle))?;
+        stream.cancelled = true;
+        stream.source = Box::pin(futures::stream::empty());
+        Ok(())
+    })
+}
+
+/// Release a response body stream handle.
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the stream handle is unknown or already
+/// released.
+pub fn release_http_stream(handle: u32) -> Result<(), InvalidHandle> {
+    OPERATIONS.with(|operations| {
+        operations
+            .borrow_mut()
+            .streams
+            .remove(&handle)
+            .map(|_| ())
+            .ok_or(InvalidHandle(handle))
     })
 }
 
@@ -571,12 +737,14 @@ pub fn take(handle: u32) -> Result<Take, InvalidHandle> {
             response,
         }),
         Operation::Sleep(deadline) if deadline.is_ready() => Take::Ready(Output::Sleep),
+        Operation::HttpStreamRead(State::Ready(result)) => Take::Ready(Output::HttpStream(result)),
         Operation::Host(State::Deferred(_) | State::Running)
         | Operation::Http {
             state: State::Deferred(_) | State::Running,
             ..
         }
-        | Operation::Sleep(_) => Take::Pending,
+        | Operation::Sleep(_)
+        | Operation::HttpStreamRead(State::Deferred(_) | State::Running) => Take::Pending,
     })
 }
 
@@ -599,6 +767,10 @@ pub fn drive_one(handle: u32) -> Result<Output, InvalidHandle> {
             request_url,
             response,
         }),
+        Operation::HttpStreamRead(State::Ready(result)) => Ok(Output::HttpStream(result)),
+        Operation::HttpStreamRead(State::Deferred(handle)) => {
+            Ok(Output::HttpStream(block_on(read_http_stream_async(handle))))
+        }
         Operation::Http {
             request_url,
             state: State::Deferred(request),
@@ -614,7 +786,8 @@ pub fn drive_one(handle: u32) -> Result<Output, InvalidHandle> {
         | Operation::Http {
             state: State::Running,
             ..
-        } => Err(InvalidHandle(handle)),
+        }
+        | Operation::HttpStreamRead(State::Running) => Err(InvalidHandle(handle)),
     }
 }
 
@@ -627,6 +800,16 @@ pub fn release(handle: u32) {
 pub fn clear() {
     let _ = drive_pending(|| Drive::Stop);
     OPERATIONS.with(|operations| operations.borrow_mut().clear());
+}
+
+/// Release every registered response body stream.
+///
+/// Unlike [`clear`], this is intended for sandbox/instance teardown rather
+/// than ordinary call-boundary cleanup. Response streams can legitimately be
+/// retained across calls, so clearing them after every guest invocation would
+/// invalidate those responses.
+pub fn clear_http_streams() {
+    OPERATIONS.with(|operations| operations.borrow_mut().clear_streams());
 }
 
 #[cfg(test)]

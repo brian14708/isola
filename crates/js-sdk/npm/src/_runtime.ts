@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as zlib from "node:zlib";
 
 import type { RuntimeName } from "./types.js";
@@ -30,10 +31,9 @@ function cacheBase(): string {
 }
 
 function pkgVersion(): string {
-  // Search upward from __dirname for the package's own package.json.
-  // At runtime __dirname is npm/dist/; during tests (vitest/vite) it is the
-  // source root, so we also check a nested npm/package.json as we walk up.
-  let dir = __dirname;
+  // Search upward from this ESM module for the package's own package.json.
+  // During tests the module may be rooted at src/, so also check npm/.
+  let dir = path.dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 4; i++) {
     for (const candidate of [
       path.join(dir, "package.json"),

@@ -307,6 +307,8 @@ Request and response shapes:
 `HttpResponse.body` may be:
 
 - `Buffer`
+- an `AsyncIterable<Uint8Array>`
+- a `ReadableStream<Uint8Array>`
 - `null`
 - omitted
 

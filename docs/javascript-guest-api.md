@@ -152,14 +152,20 @@ Supported members:
 - `ok`
 - `headers`
 - `url`
+- `body`
 - `bodyUsed`
 - `clone()`
 - `text()`
 - `json()`
 - `arrayBuffer()`
 
-Response bodies are buffered. Once you consume a body with `text()`, `json()`,
-or `arrayBuffer()`, `bodyUsed` becomes `true` and the body cannot be read again.
+Response bodies are exposed as a lazy `ReadableStream`. Fetch resolves after the
+response headers are available, and body chunks are requested as the stream is
+read. `text()`, `json()`, and `arrayBuffer()` consume the stream incrementally;
+once `bodyUsed` becomes `true`, the response body cannot be consumed again.
+Calling `clone()` tees a streaming body so the original response and every clone
+can be consumed independently. Aborting the request also cancels an unfinished
+response body read.
 
 ### Abort Support
 
