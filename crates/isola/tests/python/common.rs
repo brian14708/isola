@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use futures::TryStreamExt;
 use http::header::HOST;
 use isola::{
-    host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
+    host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse},
     sandbox::{FsPerms, SandboxTemplate},
     value::Value,
 };
@@ -48,15 +48,21 @@ impl Host for TestHost {
         }
     }
 
-    async fn http_request(&self, req: HttpRequest) -> std::result::Result<HttpResponse, BoxError> {
-        let mut headers = req.headers().clone();
+    async fn http_request_stream(
+        &self,
+        req: HttpRequestStream,
+    ) -> std::result::Result<HttpResponse, BoxError> {
+        let (parts, body) = req.into_parts();
+        let mut headers = parts.headers;
         headers.remove(HOST);
-
+        let body = body
+            .map_ok(|frame| frame.into_data().ok())
+            .try_filter_map(|data| async move { Ok(data) });
         let response = self
             .client
-            .request(req.method().clone(), req.uri().to_string())
+            .request(parts.method, parts.uri.to_string())
             .headers(headers)
-            .body(req.body().clone().unwrap_or_default())
+            .body(reqwest::Body::wrap_stream(body))
             .send()
             .await
             .map_err(|e| -> BoxError { Box::new(e) })?;

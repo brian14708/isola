@@ -15,7 +15,10 @@ use crate::{
     error::{Error, Result},
     serde::{cbor_to_js, js_to_cbor_emit},
     transpile::strip_typescript,
-    wasm::{future, isola::script::host::EmitType},
+    wasm::{
+        future,
+        isola::script::host::{EmitType, ValueIterator},
+    },
 };
 
 pub struct Scope {
@@ -79,7 +82,7 @@ fn is_boundary_cancellation(reason: &Value<'_>) -> bool {
 
 pub enum InputValue<'a> {
     Cbor(Cow<'a, [u8]>),
-    Iter(Vec<Vec<u8>>),
+    Iter(ValueIterator),
 }
 
 impl Scope {
@@ -93,15 +96,21 @@ impl Scope {
                 cause: e,
                 stack: None,
             }),
-            InputValue::Iter(items) => {
+            InputValue::Iter(iter) => {
                 let arr = Array::new(ctx.clone()).map_err(|_| Error::from_js_catch(ctx))?;
-                for (index, item) in items.into_iter().enumerate() {
+                // The public JS contract is synchronous `for...of`; consume
+                // the async WIT resource before entering the guest call and
+                // decode directly into the array to avoid a second host-side
+                // materialization.
+                let mut index = 0;
+                while let Some(item) = isola_runtime::block_on(iter.read()) {
                     let value = cbor_to_js(ctx, &item).map_err(|e| Error::Js {
                         cause: e,
                         stack: None,
                     })?;
                     arr.set(index, value)
                         .map_err(|_| Error::from_js_catch(ctx))?;
+                    index += 1;
                 }
                 Ok(arr.into_value())
             }

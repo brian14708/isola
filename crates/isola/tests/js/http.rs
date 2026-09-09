@@ -100,6 +100,70 @@ async function main(url) {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_http_streaming_upload() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/upload"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+async function* chunks() {
+    yield new Uint8Array([102, 105, 114, 115, 116]);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    yield new Uint8Array([115, 101, 99, 111, 110, 100]);
+}
+
+async function main(url) {
+    const response = await fetch(url + "/upload", {
+        method: "POST",
+        body: chunks(),
+    });
+    return [response.status, await response.text()];
+}
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate streaming upload script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("streaming upload did not complete")?;
+    let value: (u16, String) = output
+        .result
+        .context("expected streaming upload result")?
+        .to_serde()
+        .context("failed to decode streaming upload result")?;
+    assert_eq!(value, (200, "ok".to_owned()));
+    let requests = server
+        .received_requests()
+        .await
+        .context("request recording is disabled")?;
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].body, b"firstsecond");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_http_large_response_is_chunked_and_limited() -> Result<()> {
     const LARGE_RESPONSE_BODY_BYTES: usize = 256 * 1024 + 7;
     const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -570,7 +634,13 @@ async function main(url) {
     } catch (e) {
         secondError = String(e.message || e);
     }
-    return {first, secondError, bodyUsed: resp.bodyUsed};
+    const streamRead = await resp.body.getReader().read();
+    return {
+        first,
+        secondError,
+        bodyUsed: resp.bodyUsed,
+        streamDone: streamRead.done,
+    };
 }
 "#;
     sandbox
@@ -603,6 +673,7 @@ async function main(url) {
         second_error.contains("Body has already been"),
         "unexpected bodyUsed second-read error: {second_error}",
     );
+    assert_eq!(value["streamDone"], true);
 
     Ok(())
 }

@@ -118,7 +118,8 @@ def main(url):
 
 Use `httpx2.Client` for cookies, redirects, shared headers, and multiple
 requests. Streaming responses are available through `httpx2.stream(...)` or
-`Client.stream(...)`.
+`Client.stream(...)`. Iterable request content is also uploaded incrementally
+with bounded backpressure.
 
 ### Asynchronous usage
 
@@ -130,6 +131,20 @@ async def main(url):
     async with httpx2.AsyncClient() as client:
         resp = await client.get(url)
         return resp.text
+```
+
+Async iterable request content is uploaded incrementally:
+
+```python
+async def chunks():
+    yield b"first"
+    yield b"second"
+
+
+async def main(url):
+    async with httpx2.AsyncClient() as client:
+        response = await client.post(url, content=chunks())
+        return response.text
 ```
 
 The host owns the network connection, so transport-level HTTPX2 options such as

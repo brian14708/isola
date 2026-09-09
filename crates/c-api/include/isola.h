@@ -40,6 +40,16 @@ typedef struct isola_context_handle isola_context_handle;
 typedef struct isola_hostcall_response isola_hostcall_response;
 
 /**
+ * Opaque handle for a streaming HTTP request body.
+ *
+ * The C side reads request chunks with `isola_http_request_body_read`. The
+ * read call blocks until the next chunk is available, which preserves
+ * backpressure from the guest runtime. The data pointer returned by a read is
+ * valid until the next read or until the handle is closed.
+ */
+typedef struct isola_http_request_body isola_http_request_body;
+
+/**
  * Opaque handle for an in-flight HTTP response.
  *
  * The C side drives the response through three phases:
@@ -74,8 +84,11 @@ typedef struct isola_http_request {
   const char *url;
   const struct isola_http_header *headers;
   size_t headers_len;
-  const uint8_t *body;
-  size_t body_len;
+  /**
+   * Streaming request body. The callback owns this handle and must close
+   * it after consuming or abandoning the request body.
+   */
+  struct isola_http_request_body *body_stream;
 } isola_http_request;
 
 /**
@@ -98,6 +111,10 @@ typedef struct isola_sandbox_handler_vtable {
   void (*on_event)(enum isola_callback_event, const uint8_t*, size_t, void*);
   /**
    * Called to initiate an HTTP request.
+   *
+   * Consume the request body from `request->body_stream` with
+   * `isola_http_request_body_read` and release it with
+   * `isola_http_request_body_close`.
    *
    * The callback should return immediately. The `response_body` handle
    * is Rust-owned; the C side completes the response asynchronously:
@@ -377,6 +394,34 @@ enum isola_error_code isola_stream_push(const struct isola_stream_handle *stream
  * not already been ended. `NULL` is rejected.
  */
 enum isola_error_code isola_stream_end(struct isola_stream_handle *stream);
+
+/**
+ * Reads the next chunk from a streaming HTTP request body.
+ *
+ * This function blocks until a chunk or EOF is available. The returned data
+ * pointer is owned by `body` and remains valid until the next read or until
+ * `isola_http_request_body_close` is called. Set `eof` to a non-zero value
+ * when the request body has ended.
+ *
+ * # Safety
+ *
+ * - `body` must be a live handle obtained from an HTTP request callback.
+ * - `data`, `len`, and `eof` must point to writable output storage.
+ */
+enum isola_error_code isola_http_request_body_read(const struct isola_http_request_body *body,
+                                                   const uint8_t **data,
+                                                   size_t *len,
+                                                   int *eof);
+
+/**
+ * Releases a streaming HTTP request body handle.
+ *
+ * # Safety
+ *
+ * `body` must be `NULL` or a live handle obtained from an HTTP request
+ * callback. After this call a non-`NULL` pointer is invalid.
+ */
+void isola_http_request_body_close(struct isola_http_request_body *body);
 
 /**
  * Delivers the HTTP status code and response headers.

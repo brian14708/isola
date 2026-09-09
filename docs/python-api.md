@@ -305,8 +305,13 @@ async with template.create(http=http) as sandbox:
 
 Request and response models:
 
-- `HttpRequest(method, url, headers, body)`
+- `HttpRequest(method, url, headers, body_stream)`
 - `HttpResponse(status, headers={}, body=None)`
+
+The request body is always streamed: iterate `body_stream: AsyncIterable[bytes]`
+to pull the next guest chunk with backpressure, or call `await request.aread()`
+to collect it into a single `bytes` buffer (cached, like `httpx2.Request.aread`).
+The built-in `http=True` bridge forwards the stream directly through HTTPX2.
 
 `HttpResponse.body` may be:
 

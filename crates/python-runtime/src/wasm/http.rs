@@ -26,6 +26,31 @@ pub mod http_module {
     }
 
     #[pyfunction]
+    #[pyo3(signature = (capacity = 16))]
+    fn open_upload(capacity: usize) -> u32 {
+        isola_runtime::pending::register_http_upload(capacity)
+    }
+
+    #[pyfunction]
+    fn write_upload(handle: u32, body: &Bound<'_, PyAny>) -> PyResult<PyUploadWrite> {
+        let bytes = body
+            .extract::<Bound<'_, PyBytes>>()
+            .map_err(|_| pyo3::exceptions::PyTypeError::new_err("upload chunk must be bytes"))?;
+        let handle = isola_runtime::pending::register_http_upload_write(
+            handle,
+            Ok(bytes.as_bytes().to_vec()),
+        )
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+        Ok(PyUploadWrite { handle })
+    }
+
+    #[pyfunction]
+    fn close_upload(handle: u32) -> PyResult<()> {
+        isola_runtime::pending::close_http_upload(handle)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    #[pyfunction]
     #[pyo3(signature = (method, url, params, headers, body, timeout))]
     fn fetch(
         method: &str,
@@ -90,16 +115,83 @@ pub mod http_module {
         )))
     }
 
+    #[pyfunction]
+    #[pyo3(signature = (method, url, params, headers, upload_handle, timeout))]
+    fn fetch_stream(
+        method: &str,
+        url: &str,
+        params: Option<&Bound<'_, PyDict>>,
+        headers: Option<&Bound<'_, PyDict>>,
+        upload_handle: u32,
+        timeout: Option<f64>,
+    ) -> PyResult<PyFutureResponse> {
+        let mut header_fields = Vec::new();
+        if let Some(headers) = headers {
+            for (k, v) in headers {
+                let k: String = k.extract()?;
+                let v: &str = v.extract()?;
+                header_fields.push((k, v.as_bytes().to_vec()));
+            }
+        }
+
+        let mut u = Url::parse(url)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
+        if let Some(params) = params {
+            for (k, v) in params {
+                u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
+            }
+        }
+        let timeout_ms = timeout
+            .filter(|timeout| timeout.is_finite() && *timeout > 0.0)
+            .map(|timeout| std::time::Duration::from_secs_f64(timeout).as_millis())
+            .map(|timeout_ms| u64::try_from(timeout_ms).unwrap_or(u64::MAX));
+        let body = isola_runtime::pending::take_http_upload_stream(upload_handle)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
+        Ok(PyFutureResponse::new(crate::wasm::future::register_http(
+            HttpRequest::new_stream(method.to_string(), u, header_fields, body, timeout_ms),
+        )))
+    }
+
+    #[pyclass]
+    struct PyUploadWrite {
+        handle: u32,
+    }
+
+    #[pymethods]
+    impl PyUploadWrite {
+        fn wait(&self) -> PyResult<()> {
+            crate::wasm::future::drive_one_http_upload_write(self.handle)
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+        }
+
+        fn subscribe(&self) -> Option<PyPollable> {
+            let pollable = PyPollable::operation(self.handle);
+            (!pollable.is_ready()).then_some(pollable)
+        }
+
+        fn get(&self) -> PyResult<()> {
+            crate::wasm::future::take_http_upload_write_result(self.handle)
+                .map_err(pyo3::exceptions::PyRuntimeError::new_err)
+        }
+
+        fn release(&self) {
+            crate::wasm::future::release_call(self.handle);
+        }
+    }
+
     create_future!(PyFutureResponse, http -> PyResponse);
 
     #[pyclass]
     struct PyResponse {
         status: u16,
         headers: Vec<(String, Vec<u8>)>,
-        body: Vec<u8>,
+        stream_handle: Option<u32>,
+        chunk: Vec<u8>,
         cursor: usize,
         consumed: bool,
         closed: bool,
+        pending_read: Option<u32>,
     }
 
     impl TryFrom<Result<HttpResponse, String>> for PyResponse {
@@ -127,8 +219,17 @@ pub mod http_module {
 
     #[pymethods]
     impl PyResponse {
-        const fn close(&mut self) {
+        fn close(&mut self) {
+            if self.closed {
+                return;
+            }
             self.closed = true;
+            if let Some(handle) = self.pending_read.take() {
+                isola_runtime::pending::release(handle);
+            }
+            if let Some(handle) = self.stream_handle.take() {
+                let _ = isola_runtime::pending::release_http_stream(handle);
+            }
         }
 
         fn status(&self) -> PyResult<u16> {
@@ -181,7 +282,9 @@ pub mod http_module {
             let mut buf = Buffer::new(kind).ok_or_else(|| {
                 pyo3::exceptions::PyValueError::new_err(format!("invalid buffer kind: {kind}"))
             })?;
-            while read_into(self, &mut buf, size)?.is_some() {}
+            while let Some(pollable) = read_into(self, &mut buf, size)? {
+                pollable.wait_blocking()?;
+            }
             if size < 0 {
                 self.consumed = true;
             }
@@ -213,7 +316,7 @@ pub mod http_module {
             ));
         }
         let read_size = if size < 0 {
-            slf.body.len().saturating_sub(slf.cursor)
+            usize::MAX
         } else {
             usize::try_from(size).map_err(|_| {
                 PyErr::new::<pyo3::exceptions::PyOverflowError, _>(
@@ -226,20 +329,55 @@ pub mod http_module {
         // `_aread`) don't spin forever on the always-ready pollable.
         // The response is left unconsumed so subsequent reads still
         // work.
-        if read_size == 0 && slf.cursor < slf.body.len() {
+        if read_size == 0 {
             return Ok(None);
         }
-        let end = slf.cursor.saturating_add(read_size).min(slf.body.len());
-        if slf.cursor < end {
-            buf.write(&slf.body[slf.cursor..end]);
-            slf.cursor = end;
+
+        if let Some(handle) = slf.pending_read {
+            if !isola_runtime::pending::is_ready(handle) {
+                return Ok(Some(PyPollable::operation(handle)));
+            }
+            let result = match isola_runtime::pending::take(handle) {
+                Ok(isola_runtime::pending::Take::Ready(
+                    isola_runtime::pending::Output::HttpStream(result),
+                )) => result,
+                Ok(_) => Err("invalid HTTP response stream operation".to_string()),
+                Err(error) => Err(error.to_string()),
+            }
+            .map_err(PyErr::new::<pyo3::exceptions::PyTypeError, _>)?;
+            slf.pending_read = None;
+            if let Some(chunk) = result {
+                slf.chunk = chunk;
+                slf.cursor = 0;
+            } else {
+                if let Some(stream_handle) = slf.stream_handle.take() {
+                    let _ = isola_runtime::pending::release_http_stream(stream_handle);
+                }
+                slf.consumed = true;
+                buf.close();
+                return Ok(None);
+            }
         }
-        if slf.cursor >= slf.body.len() {
+
+        if slf.cursor < slf.chunk.len() {
+            let end = slf.cursor.saturating_add(read_size).min(slf.chunk.len());
+            buf.write(&slf.chunk[slf.cursor..end]);
+            slf.cursor = end;
+            if slf.cursor < slf.chunk.len() {
+                return Ok(Some(PyPollable::default()));
+            }
+            slf.chunk.clear();
+            slf.cursor = 0;
+        }
+
+        if let Some(stream_handle) = slf.stream_handle {
+            let read_handle = isola_runtime::pending::register_http_stream_read(stream_handle);
+            slf.pending_read = Some(read_handle);
+            Ok(Some(PyPollable::operation(read_handle)))
+        } else {
             buf.close();
             slf.consumed = true;
             Ok(None)
-        } else {
-            Ok(Some(PyPollable::default()))
         }
     }
 

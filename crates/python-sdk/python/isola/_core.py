@@ -68,7 +68,25 @@ class HttpRequest:
     method: str
     url: str
     headers: dict[str, str]
-    body: bytes | None
+    body_stream: AsyncIterable[bytes]
+    _content: list[bytes] = field(init=False, repr=False, default_factory=list)
+
+    async def aread(self) -> bytes:
+        """Consume the request body stream and return it as a single buffer.
+
+        The result is cached, so repeated calls return the same bytes without
+        consuming the stream again, mirroring `httpx2.Request.aread`.
+
+        Returns:
+            The concatenated request body chunks.
+
+        """
+        if self._content:
+            return self._content[0]
+        chunks = [chunk async for chunk in self.body_stream]
+        content = b"".join(chunks)
+        self._content.append(content)
+        return content
 
 
 @dataclass(slots=True)
@@ -87,7 +105,10 @@ async def _default_httpx2_handler(request: HttpRequest) -> HttpResponse:
     client = httpx2.AsyncClient()
     try:
         outbound_request = client.build_request(
-            request.method, request.url, headers=request.headers, content=request.body
+            request.method,
+            request.url,
+            headers=request.headers,
+            content=request.body_stream,
         )
         response = await client.send(outbound_request, stream=True)
     except Exception:
@@ -439,7 +460,7 @@ class Sandbox:
         ) = None
         self._http_handler_dispatch: (
             Callable[
-                [str, str, dict[str, str], bytes | None],
+                [str, str, dict[str, str], AsyncIterable[bytes]],
                 Awaitable[tuple[int, dict[str, str], str, object]],
             ]
             | None
@@ -500,9 +521,14 @@ class Sandbox:
         loop = asyncio.get_running_loop()
 
         async def _dispatch(
-            method: str, url: str, headers: dict[str, str], body: bytes | None
+            method: str,
+            url: str,
+            headers: dict[str, str],
+            body_stream: AsyncIterable[bytes],
         ) -> tuple[int, dict[str, str], str, object]:
-            request = HttpRequest(method=method, url=url, headers=headers, body=body)
+            request = HttpRequest(
+                method=method, url=url, headers=headers, body_stream=body_stream
+            )
             response: object = await handler(request)
             if not isinstance(response, HttpResponse):
                 msg = "http handler must return HttpResponse"
@@ -557,10 +583,18 @@ class Sandbox:
             raise
 
         if producers:
+            # Let producers that have already advanced report immediate
+            # failures before successful guest completion cancels them.
+            await asyncio.wait(producers, timeout=0.01)
+            producer_error: BaseException | None = None
             for producer in producers:
                 if not producer.done():
                     producer.cancel()
+                elif not producer.cancelled() and producer.exception() is not None:
+                    producer_error = producer.exception()
             await asyncio.gather(*producers, return_exceptions=True)
+            if producer_error is not None:
+                raise producer_error
         return result
 
     async def run_stream(

@@ -55,7 +55,7 @@ type WireMountConfig = {
 };
 type NativeCallbackArgs = [string, string | null];
 type NativeHostcallArgs = [string, Buffer];
-type NativeHttpArgs = [string, string, Buffer, Buffer | null];
+type NativeHttpArgs = [string, string, Buffer, number];
 type NativeHttpResponse = {
   status: number;
   headers?: Record<string, string>;
@@ -138,6 +138,7 @@ async function pumpStream(
         yield* source as Iterable<JsonValue>;
       })();
 
+  let completedNormally = false;
   try {
     let current = await iterator.next();
     while (!current.done) {
@@ -173,9 +174,18 @@ async function pumpStream(
         current = nextResult.value;
       }
     }
+    // A completed iterator must not be closed again. Some valid custom
+    // iterators reject return(), which would otherwise turn success into an
+    // error.
+    completedNormally = true;
   } finally {
-    await iterator.return?.();
-    stream.end();
+    try {
+      if (!completedNormally) {
+        await iterator.return?.();
+      }
+    } finally {
+      stream.end();
+    }
   }
 }
 
@@ -398,11 +408,19 @@ async function defaultHttpHandler(request: HttpRequest): Promise<HttpResponse> {
     );
   }
 
-  const response = await fetch(request.url, {
+  const init: RequestInit = {
     method: request.method,
     headers: request.headers,
-    body: request.body ?? undefined,
-  });
+    duplex: "half" as const,
+  };
+  if (
+    request.bodyStream !== undefined &&
+    request.method !== "GET" &&
+    request.method !== "HEAD"
+  ) {
+    init.body = request.bodyStream;
+  }
+  const response = await fetch(request.url, init);
 
   return {
     status: response.status,
@@ -669,6 +687,7 @@ export class Sandbox {
       cleanup: () => Promise<void>;
     };
     const streams = new Map<number, RegisteredStream>();
+    const core = this._core;
     let nextStreamHandle = 1;
     const registerStream = (body: HttpResponseBody): number => {
       let iterator: AsyncIterator<Uint8Array>;
@@ -735,15 +754,73 @@ export class Sandbox {
     };
     this._core.setHttpHandler(
       async (...raw: unknown[]): Promise<NativeHttpResponse> => {
-        const [method, url, headersBuffer, body] =
+        const [method, url, headersBuffer, bodyStreamHandle] =
           unpackTuple<NativeHttpArgs>(raw);
         const headers = JSON.parse(headersBuffer.toString()) as Record<
           string,
           string
         >;
-        const req: HttpRequest = { method, url, headers, body };
-        const resp = await handler(req);
-        return normalizeHttpResponse(resp, registerStream);
+        let bodyUsed = false;
+        const takeBody = (): void => {
+          if (bodyUsed) throw new TypeError("Body has already been consumed");
+          bodyUsed = true;
+        };
+        let requestBodyReleased = false;
+        const releaseRequestBody = (): void => {
+          if (requestBodyReleased) return;
+          requestBodyReleased = true;
+          try {
+            core.releaseHttpRequest(bodyStreamHandle);
+          } catch {
+            // The sandbox may already be tearing down the handler.
+          }
+        };
+        const bodyChunks = (async function* () {
+          try {
+            for (;;) {
+              const chunk = await core.readHttpRequest(bodyStreamHandle);
+              if (chunk.done) return;
+              if (chunk.body !== undefined && chunk.body !== null) {
+                yield new Uint8Array(chunk.body);
+              }
+            }
+          } finally {
+            releaseRequestBody();
+          }
+        })();
+        const drainBody = async (): Promise<Buffer> => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of bodyChunks) chunks.push(Buffer.from(chunk));
+          return Buffer.concat(chunks);
+        };
+        const req: HttpRequest = {
+          method,
+          url,
+          headers,
+          bodyStream: (async function* () {
+            takeBody();
+            yield* bodyChunks;
+          })(),
+          get bodyUsed() {
+            return bodyUsed;
+          },
+          arrayBuffer: async () => {
+            takeBody();
+            return drainBody();
+          },
+          text: async () => {
+            takeBody();
+            return (await drainBody()).toString("utf8");
+          },
+        };
+        try {
+          const resp = await handler(req);
+          return await normalizeHttpResponse(resp, registerStream);
+        } finally {
+          // A handler may return without consuming the request body. Ensure
+          // the native stream handle is released in that case.
+          releaseRequestBody();
+        }
       },
       async (...raw: unknown[]) => {
         const [method, url] = unpackTuple<NativeHttpArgs>(raw);

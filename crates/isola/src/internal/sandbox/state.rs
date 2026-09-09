@@ -1,6 +1,7 @@
 use std::{future::Future, sync::Arc};
 
 use bytes::{Bytes, BytesMut};
+use http_body::Frame;
 use http_body_util::BodyExt as _;
 use tokio::time::timeout;
 use tracing::Instrument;
@@ -16,7 +17,7 @@ use wasmtime_wasi_http::{
 
 use super::bindings::{EmitValue, HostView, add_to_linker};
 use crate::{
-    host::{Host, HttpRequest, LogContext, LogLevel, OutputTarget},
+    host::{Host, HttpBodyStream, HttpRequestStream, LogContext, LogLevel, OutputTarget},
     internal::{
         resource::MemoryLimiter,
         trace_output::{LogTargetStore, TraceOutput, new_log_target_store, set_log_target},
@@ -56,6 +57,7 @@ const MAX_OUTGOING_HTTP_BODY_BYTES: usize = 16 * 1024 * 1024;
 const MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 const MAX_BUFFERED_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
 
+#[cfg(test)]
 async fn collect_outgoing_http_body(
     body: WasiBody,
     max_bytes: usize,
@@ -249,29 +251,20 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
                     .connect_timeout
                     .unwrap_or(MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT)
                     .min(MAX_OUTGOING_HTTP_BODY_READ_TIMEOUT);
-                let content_length = headers
-                    .get(http::header::CONTENT_LENGTH)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(|value| value.parse::<usize>().ok());
-                let body = collect_outgoing_http_body(
-                    body,
-                    MAX_OUTGOING_HTTP_BODY_BYTES,
-                    body_timeout,
-                    content_length,
-                )
-                .await?;
+                let body =
+                    stream_outgoing_http_body(body, MAX_OUTGOING_HTTP_BODY_BYTES, body_timeout);
 
-                let mut req = HttpRequest::new(body);
+                let mut req = HttpRequestStream::new(body);
                 *req.method_mut() = parts.method;
                 *req.uri_mut() = parts.uri;
                 *req.headers_mut() = headers;
                 let first_byte_timeout = options
                     .first_byte_timeout
                     .unwrap_or(std::time::Duration::from_secs(600));
-                let resp = timeout(first_byte_timeout, host.http_request(req))
+                let resp = timeout(first_byte_timeout, host.http_request_stream(req))
                     .await
                     .map_err(|_e| HttpError::HttpResponseTimeout)?
-                    .map_err(|e| HttpError::InternalError(Some(format!("request error: {e}"))))?;
+                    .map_err(|error| map_http_request_error(&error))?;
 
                 let resp = resp.map(|b| {
                     http_body_util::StreamBody::new(futures::StreamExt::map(b, |e| {
@@ -285,6 +278,78 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
             .in_current_span(),
         )
     }
+}
+
+/// Error yielded by the outgoing-body stream when the body exceeds the
+/// configured maximum. Kept typed so [`map_http_request_error`] can recognize
+/// it without matching on the message.
+#[derive(Debug)]
+struct HttpBodyTooLarge {
+    max_bytes: usize,
+}
+
+impl std::fmt::Display for HttpBodyTooLarge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "HTTP request body exceeds maximum size of {} bytes",
+            self.max_bytes
+        )
+    }
+}
+
+impl std::error::Error for HttpBodyTooLarge {}
+
+fn map_http_request_error(error: &crate::host::BoxError) -> HttpError {
+    if error
+        .downcast_ref::<std::io::Error>()
+        .is_some_and(|error| error.kind() == std::io::ErrorKind::TimedOut)
+    {
+        return HttpError::ConnectionWriteTimeout;
+    }
+    if let Some(error) = error.downcast_ref::<HttpBodyTooLarge>() {
+        return HttpError::HttpRequestBodySize(Some(
+            u64::try_from(error.max_bytes).unwrap_or(u64::MAX),
+        ));
+    }
+
+    HttpError::InternalError(Some(format!("request error: {error}")))
+}
+
+fn stream_outgoing_http_body(
+    body: WasiBody,
+    max_bytes: usize,
+    read_timeout: std::time::Duration,
+) -> HttpBodyStream {
+    let stream = futures::stream::try_unfold((body, 0usize), move |(mut body, total)| async move {
+        loop {
+            let frame = timeout(read_timeout, http_body_util::BodyExt::frame(&mut body))
+                .await
+                .map_err(|_| {
+                    Box::new(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "HTTP request body read timed out",
+                    )) as crate::host::BoxError
+                })?;
+            let Some(frame) = frame else {
+                return Ok(None);
+            };
+            let frame = frame.map_err(|e| {
+                Box::new(std::io::Error::other(format!(
+                    "HTTP request body read error: {e:?}"
+                ))) as crate::host::BoxError
+            })?;
+            let Ok(data) = frame.into_data() else {
+                continue;
+            };
+            let next_total = total.saturating_add(data.len());
+            if next_total > max_bytes {
+                return Err(Box::new(HttpBodyTooLarge { max_bytes }) as crate::host::BoxError);
+            }
+            return Ok(Some((Frame::data(data), (body, next_total))));
+        }
+    });
+    Box::pin(stream)
 }
 
 impl<H: Host> HostView for InstanceState<H> {
@@ -429,7 +494,7 @@ impl OutputBuffer {
 
     #[inline]
     fn take(&mut self) -> Bytes {
-        std::mem::take(&mut self.0).freeze()
+        self.0.split().freeze()
     }
 }
 
@@ -441,15 +506,15 @@ mod tests {
     use parking_lot::Mutex;
 
     use super::*;
-    use crate::host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse};
+    use crate::host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse};
 
     #[derive(Clone, Default)]
     struct ScriptedHost {
-        calls: Arc<Mutex<Vec<HttpRequest>>>,
+        calls: Arc<Mutex<Vec<http::Request<Option<Bytes>>>>>,
     }
 
     impl ScriptedHost {
-        fn calls(&self) -> Vec<HttpRequest> {
+        fn calls(&self) -> Vec<http::Request<Option<Bytes>>> {
             self.calls.lock().clone()
         }
     }
@@ -471,13 +536,16 @@ mod tests {
             Err(std::io::Error::other("unsupported").into())
         }
 
-        async fn http_request(
+        async fn http_request_stream(
             &self,
-            req: HttpRequest,
+            req: HttpRequestStream,
         ) -> core::result::Result<HttpResponse, BoxError> {
-            self.calls.lock().push(req.clone());
-
-            let uri = req.uri().to_string();
+            let (parts, body) = req.into_parts();
+            let collected = crate::host::collect_http_body(body, 1024).await?;
+            let recorded =
+                http::Request::from_parts(parts, (!collected.is_empty()).then_some(collected));
+            let uri = recorded.uri().to_string();
+            self.calls.lock().push(recorded);
             let resp = match uri.as_str() {
                 "http://a.example/" => http::Response::builder()
                     .status(http::StatusCode::FOUND)

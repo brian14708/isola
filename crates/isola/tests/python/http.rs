@@ -98,6 +98,119 @@ async def main(url):
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_http_streaming_upload() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/upload"))
+        .and(body_string("firstsecond"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+import asyncio
+import httpx2
+
+async def chunks():
+    yield b"first"
+    await asyncio.sleep(0.01)
+    yield b"second"
+
+async def main(url):
+    async with httpx2.AsyncClient() as client:
+        response = await client.post(url + "/upload", content=chunks())
+        return response.text
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate streaming upload script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("streaming upload did not complete")?;
+    let value: String = output
+        .result
+        .context("expected streaming upload result")?
+        .to_serde()
+        .context("failed to decode streaming upload result")?;
+    assert_eq!(value, "ok");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_http_sync_streaming_upload() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/upload-sync"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("ok"))
+        .expect(1)
+        .mount(&server)
+        .await;
+
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await
+        .context("failed to instantiate sandbox")?;
+    sandbox
+        .eval_script(
+            r#"
+import httpx2
+
+def chunks():
+    for value in (b"first", b"second", b"third", b"fourth", b"fifth"):
+        yield value
+
+def main(url):
+    with httpx2.Client() as client:
+        response = client.post(url + "/upload-sync", content=chunks())
+        return response.text
+"#,
+            OutputTarget::discard(),
+        )
+        .await
+        .context("failed to evaluate sync streaming upload script")?;
+
+    let output = call_with_timeout(
+        &mut sandbox,
+        "main",
+        args![server.uri()]?,
+        Duration::from_secs(5),
+    )
+    .await
+    .context("sync streaming upload did not complete")?;
+    let value: String = output
+        .result
+        .context("expected sync streaming upload result")?
+        .to_serde()
+        .context("failed to decode sync streaming upload result")?;
+    assert_eq!(value, "ok");
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_python_http_large_response_is_chunked_and_limited() -> Result<()> {
     const LARGE_RESPONSE_BODY_BYTES: usize = 256 * 1024 + 7;
     const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;

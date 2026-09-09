@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import suppress
 from typing import cast, override
 
 import _isola_http as _http
@@ -82,17 +84,26 @@ class IsolaTransport(httpx2.BaseTransport):
 
     @override
     def handle_request(self, request: httpx2.Request) -> httpx2.Response:
+        upload = _http.open_upload()
         try:
-            pending = _http.fetch(
+            pending = _http.fetch_stream(
                 request.method,
                 str(request.url),
                 None,
                 dict(request.headers.items()),
-                request.read() or None,
+                upload,
                 _timeout(request),
             )
+            for chunk in cast("httpx2.SyncByteStream", request.stream):
+                data = bytes(chunk)
+                write = _http.write_upload(upload, data)
+                write.wait()
+                write.get()
+            _http.close_upload(upload)
             resp = pending.wait()
         except Exception as error:
+            with suppress(Exception):
+                _http.close_upload(upload)
             message = str(error)
             if "timed out" in message.lower():
                 raise httpx2.ReadTimeout(message, request=request) from error
@@ -106,17 +117,35 @@ class IsolaAsyncTransport(httpx2.AsyncBaseTransport):
 
     @override
     async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+        upload = _http.open_upload()
+
+        async def _pump_upload() -> None:
+            try:
+                async for chunk in cast("httpx2.AsyncByteStream", request.stream):
+                    data = bytes(chunk)
+                    await subscribe(_http.write_upload(upload, data))
+            finally:
+                with suppress(Exception):
+                    _http.close_upload(upload)
+
+        producer = asyncio.create_task(_pump_upload())
         try:
-            pending = _http.fetch(
+            pending = _http.fetch_stream(
                 request.method,
                 str(request.url),
                 None,
                 dict(request.headers.items()),
-                await request.aread() or None,
+                upload,
                 _timeout(request),
             )
             resp = await subscribe(pending)
+            await producer
         except Exception as error:
+            producer.cancel()
+            with suppress(asyncio.CancelledError):
+                await producer
+            with suppress(Exception):
+                _http.close_upload(upload)
             message = str(error)
             if "timed out" in message.lower():
                 raise httpx2.ReadTimeout(message, request=request) from error

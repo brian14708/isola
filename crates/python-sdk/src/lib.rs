@@ -8,11 +8,11 @@ use std::{
 
 use ::serde::Deserialize;
 use bytes::Bytes;
-use futures::stream;
+use futures::{StreamExt, stream};
 use http_body::Frame;
 use isola::{
     host::{
-        BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse, LogLevel, OutputEvent,
+        BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse, LogLevel, OutputEvent,
         OutputTarget,
     },
     sandbox::{Arg, FsPerms, Sandbox, SandboxOptions, SandboxTemplate},
@@ -494,6 +494,63 @@ struct PyHttpHandler {
     event_loop: Py<PyAny>,
 }
 
+/// Async iterator exposed to Python HTTP handlers for streamed request bodies.
+///
+/// The underlying body is pulled only when Python asks for the next chunk, so
+/// a slow handler naturally applies backpressure to the guest runtime.
+#[pyclass(name = "_HttpRequestBody")]
+struct PyHttpRequestBody {
+    stream: Arc<tokio::sync::Mutex<Option<HttpBodyStream>>>,
+}
+
+impl PyHttpRequestBody {
+    fn new(stream: HttpBodyStream) -> Self {
+        Self {
+            stream: Arc::new(tokio::sync::Mutex::new(Some(stream))),
+        }
+    }
+}
+
+#[pymethods]
+impl PyHttpRequestBody {
+    const fn __aiter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    #[expect(clippy::needless_pass_by_value)]
+    fn __anext__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+        let stream = Arc::clone(&slf.stream);
+        pyo3_async_runtimes::tokio::future_into_py(py, async move {
+            loop {
+                let mut source = stream.lock().await.take();
+                let Some(mut source) = source.take() else {
+                    return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
+                };
+                let item = source.next().await;
+                match item {
+                    None => {
+                        return Err(pyo3::exceptions::PyStopAsyncIteration::new_err(()));
+                    }
+                    Some(Ok(frame)) => match frame.into_data() {
+                        Ok(data) => {
+                            *stream.lock().await = Some(source);
+                            return Python::attach(|py| {
+                                Ok(PyBytes::new(py, &data).unbind().into_any())
+                            });
+                        }
+                        Err(_) => {
+                            *stream.lock().await = Some(source);
+                        }
+                    },
+                    Some(Err(error)) => {
+                        return Err(pyo3::exceptions::PyRuntimeError::new_err(error.to_string()));
+                    }
+                }
+            }
+        })
+    }
+}
+
 struct PyHostcallHandler {
     callback: Py<PyAny>,
     event_loop: Py<PyAny>,
@@ -565,12 +622,13 @@ impl PyHttpHandler {
 
     async fn invoke_http_handler(
         &self,
-        incoming: &HttpRequest,
+        incoming: HttpRequestStream,
     ) -> std::result::Result<(http::response::Parts, HttpResponseBody), BoxError> {
-        let method = incoming.method().as_str().to_owned();
-        let url = incoming.uri().to_string();
-        let headers = incoming
-            .headers()
+        let (parts, body) = incoming.into_parts();
+        let method = parts.method.as_str().to_owned();
+        let url = parts.uri.to_string();
+        let headers = parts
+            .headers
             .iter()
             .filter_map(|(k, v)| {
                 v.to_str()
@@ -578,7 +636,17 @@ impl PyHttpHandler {
                     .map(|value| (k.as_str().to_string(), value.to_string()))
             })
             .collect::<Vec<_>>();
-        let body = incoming.body().clone();
+        self.invoke_http_handler_parts(method, url, headers, body)
+            .await
+    }
+
+    async fn invoke_http_handler_parts(
+        &self,
+        method: String,
+        url: String,
+        headers: Vec<(String, String)>,
+        body_stream: HttpBodyStream,
+    ) -> std::result::Result<(http::response::Parts, HttpResponseBody), BoxError> {
         let callback = Python::attach(|py| self.callback.clone_ref(py));
 
         let result = self
@@ -587,12 +655,11 @@ impl PyHttpHandler {
                 for (k, v) in headers {
                     headers_dict.set_item(k, v)?;
                 }
-                let body_obj = body.as_ref().map_or_else(
-                    || py.None().into_bound(py),
-                    |bytes| PyBytes::new(py, bytes).into_any(),
-                );
+                let body_stream_obj = Py::new(py, PyHttpRequestBody::new(body_stream))?
+                    .into_bound(py)
+                    .into_any();
                 let callback = callback.bind(py);
-                callback.call1((method, url, headers_dict, body_obj))
+                callback.call1((method, url, headers_dict, body_stream_obj))
             })
             .await?;
 
@@ -836,20 +903,18 @@ impl OutputCollector {
     fn handle_event(&self, event: OutputEvent) -> std::result::Result<(), BoxError> {
         match event {
             OutputEvent::Item(item) => {
-                let text = item.to_json_str().map_err(|e| -> BoxError {
-                    Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                })?;
-                self.record(|data| data.result_json.push(text));
                 if let Some(callback) = &self.callback {
                     callback.emit_value(CallbackEvent::Result, Some(&item));
                 }
             }
             OutputEvent::Complete(item) => {
                 if let Some(item) = item {
-                    let text = item.to_json_str().map_err(|e| -> BoxError {
-                        Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
-                    })?;
-                    self.record(|data| data.final_json = Some(text));
+                    if self.callback.is_none() {
+                        let text = item.to_json_str().map_err(|e| -> BoxError {
+                            Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+                        })?;
+                        self.record(|data| data.final_json = Some(text));
+                    }
                     if let Some(callback) = &self.callback {
                         callback.emit_value(CallbackEvent::End, Some(&item));
                     }
@@ -858,17 +923,15 @@ impl OutputCollector {
                 }
             }
             OutputEvent::Log { level, message, .. } => {
+                if self.callback.is_none() {
+                    return Ok(());
+                }
                 let callback_event = match level {
                     LogLevel::Stdout => CallbackEvent::Stdout,
                     LogLevel::Stderr => CallbackEvent::Stderr,
                     _ => CallbackEvent::Log,
                 };
                 self.emit(callback_event, Some(&message));
-                self.record(|data| match level {
-                    LogLevel::Stdout => data.stdout.push(message),
-                    LogLevel::Stderr => data.stderr.push(message),
-                    _ => data.logs.push(message),
-                });
             }
             _ => {}
         }
@@ -1215,7 +1278,9 @@ impl PySandbox {
             let (mut lease, callback) = {
                 let mut guard = inner.lock();
                 match &mut *guard {
-                    SandboxInner::Running { sandbox, callback } => {
+                    SandboxInner::Running {
+                        sandbox, callback, ..
+                    } => {
                         let sandbox = sandbox
                             .take()
                             .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
@@ -1254,7 +1319,9 @@ impl PySandbox {
             let (mut lease, callback) = {
                 let mut guard = inner.lock();
                 match &mut *guard {
-                    SandboxInner::Running { sandbox, callback } => {
+                    SandboxInner::Running {
+                        sandbox, callback, ..
+                    } => {
                         let sandbox = sandbox
                             .take()
                             .ok_or_else(|| to_py_err(invalid_argument("sandbox is busy")))?;
@@ -1460,9 +1527,9 @@ impl Host for Env {
         handler.invoke_hostcall(call_type, payload).await
     }
 
-    async fn http_request(
+    async fn http_request_stream(
         &self,
-        incoming: HttpRequest,
+        incoming: HttpRequestStream,
     ) -> std::result::Result<HttpResponse, BoxError> {
         let Some(handler) = &self.http_handler else {
             return Err(std::io::Error::new(
@@ -1472,7 +1539,7 @@ impl Host for Env {
             .into());
         };
 
-        let (parts, body) = handler.invoke_http_handler(&incoming).await?;
+        let (parts, body) = handler.invoke_http_handler(incoming).await?;
         let stream: HttpBodyStream = match body {
             HttpResponseBody::Empty => Box::pin(stream::empty()),
             HttpResponseBody::Buffered(bytes) => {
@@ -1504,5 +1571,6 @@ fn _isola(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_class::<PySandbox>()?;
     module.add_class::<PyRunResult>()?;
     module.add_class::<StreamHandle>()?;
+    module.add_class::<PyHttpRequestBody>()?;
     Ok(())
 }

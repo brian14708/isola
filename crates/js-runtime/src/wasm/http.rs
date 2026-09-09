@@ -34,6 +34,31 @@ pub fn register(ctx: &Ctx<'_>) {
         .unwrap();
     http.set("_release", Function::new(ctx.clone(), js_release).unwrap())
         .unwrap();
+    http.set(
+        "_openUpload",
+        Function::new(ctx.clone(), js_open_upload).unwrap(),
+    )
+    .unwrap();
+    http.set(
+        "_writeUpload",
+        Function::new(ctx.clone(), js_write_upload).unwrap(),
+    )
+    .unwrap();
+    http.set(
+        "_finishUploadWrite",
+        Function::new(ctx.clone(), js_finish_upload_write).unwrap(),
+    )
+    .unwrap();
+    http.set(
+        "_closeUpload",
+        Function::new(ctx.clone(), js_close_upload).unwrap(),
+    )
+    .unwrap();
+    http.set(
+        "_sendStream",
+        Function::new(ctx.clone(), js_send_stream).unwrap(),
+    )
+    .unwrap();
 
     globals.set("_isola_http", http).unwrap();
 }
@@ -90,6 +115,55 @@ fn js_cancel(handle: u32) -> rquickjs::Result<()> {
 fn js_release(handle: u32) -> rquickjs::Result<()> {
     isola_runtime::pending::release_http_stream(handle)
         .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "stream", &e.to_string()))
+}
+
+fn js_open_upload(_ctx: Ctx<'_>, capacity: Option<u32>) -> u32 {
+    isola_runtime::pending::register_http_upload(
+        capacity
+            .and_then(|value| usize::try_from(value).ok())
+            .unwrap_or(4),
+    )
+}
+
+fn js_write_upload<'js>(_ctx: Ctx<'js>, handle: u32, body: Value<'js>) -> rquickjs::Result<u32> {
+    let bytes = body_to_bytes(body, false)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "upload", &e))?;
+    isola_runtime::pending::register_http_upload_write(handle, Ok(bytes))
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "upload", &e.to_string()))
+}
+
+fn js_finish_upload_write(handle: u32) -> rquickjs::Result<()> {
+    match isola_runtime::pending::take(handle)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "upload", &e.to_string()))?
+    {
+        isola_runtime::pending::Take::Ready(isola_runtime::pending::Output::HttpUploadWrite(
+            result,
+        )) => result.map_err(|e| rquickjs::Error::new_from_js_message("fetch", "upload", &e)),
+        _ => Err(rquickjs::Error::new_from_js_message(
+            "fetch",
+            "upload",
+            "upload write is not ready",
+        )),
+    }
+}
+
+fn js_close_upload(handle: u32) -> rquickjs::Result<()> {
+    isola_runtime::pending::close_http_upload(handle)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "upload", &e.to_string()))
+}
+
+#[expect(clippy::needless_pass_by_value)]
+fn js_send_stream<'js>(
+    _ctx: Ctx<'js>,
+    method: String,
+    url: String,
+    params: Value<'js>,
+    headers: Value<'js>,
+    upload_handle: u32,
+    timeout: Value<'js>,
+) -> rquickjs::Result<u32> {
+    send_stream_impl(&method, &url, params, headers, upload_handle, timeout)
+        .map_err(|e| rquickjs::Error::new_from_js_message("fetch", "error", &e))
 }
 
 fn value_to_string(value: &Value<'_>) -> Option<String> {
@@ -201,6 +275,45 @@ fn send_impl(
         header_fields,
         body,
         timeout_ms,
+    )))
+}
+
+#[expect(clippy::needless_pass_by_value)]
+fn send_stream_impl(
+    method: &str,
+    url: &str,
+    params: Value<'_>,
+    headers: Value<'_>,
+    upload_handle: u32,
+    timeout: Value<'_>,
+) -> Result<u32, String> {
+    let mut header_fields = Vec::new();
+    append_headers(&mut header_fields, &headers)?;
+
+    let mut u = Url::parse(url).map_err(|e| e.to_string())?;
+    if let Some(params_obj) = params.as_object() {
+        let params_props: Vec<(String, String)> = params_obj
+            .own_props(Filter::new().string().enum_only())
+            .flatten()
+            .filter_map(|(k, v): (String, Value<'_>)| {
+                v.as_string()
+                    .and_then(|s| s.to_string().ok())
+                    .map(|s| (k, s))
+            })
+            .collect();
+        for (k, v) in &params_props {
+            u.query_pairs_mut().append_pair(k, v);
+        }
+    }
+
+    let body = isola_runtime::pending::take_http_upload_stream(upload_handle)
+        .map_err(|e| e.to_string())?;
+    Ok(future::register_http(HttpRequest::new_stream(
+        method.to_string(),
+        u,
+        header_fields,
+        body,
+        timeout_ms_from_value(&timeout),
     )))
 }
 

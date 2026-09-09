@@ -299,10 +299,28 @@ const sandbox = await template.create({ http });
 
 Request and response shapes:
 
-- `HttpRequest = { method, url, headers, body }`
+- `HttpRequest = { method, url, headers, bodyStream, bodyUsed, arrayBuffer(), text() }`
 - `HttpResponse = { status, headers?, body? }`
 
-`HttpRequest.body` is `Buffer | null`.
+The request body is always streamed: consume `bodyStream: AsyncIterable<Uint8Array>`
+with `for await`; each read pulls the next guest chunk and applies backpressure.
+For buffered access, `await request.arrayBuffer()` and `await request.text()`
+mirror the Fetch API. Like Fetch, the body is single-use: any consumption sets
+`bodyUsed` and further reads throw `TypeError: Body has already been consumed`.
+The built-in `http: true` bridge passes the stream directly to Node's `fetch`;
+custom fetch-based handlers must do the same and set `duplex: "half"`:
+
+```typescript
+async function http(request: HttpRequest): Promise<HttpResponse> {
+  const upstream = await fetch(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.bodyStream,
+    duplex: "half",
+  });
+  return { status: upstream.status, body: upstream.body };
+}
+```
 
 `HttpResponse.body` may be:
 

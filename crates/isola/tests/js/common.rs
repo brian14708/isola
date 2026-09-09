@@ -9,7 +9,7 @@ use bytes::Bytes;
 use futures::TryStreamExt;
 use http::header::HOST;
 use isola::{
-    host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
+    host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse},
     sandbox::SandboxTemplate,
     value::Value,
 };
@@ -26,6 +26,29 @@ impl Default for TestHost {
             client: Arc::new(Client::new()),
         }
     }
+}
+
+fn delayed_response() -> std::result::Result<HttpResponse, BoxError> {
+    let body = futures::stream::unfold(0u8, |index| async move {
+        match index {
+            0 => Some((
+                Ok::<_, BoxError>(http_body::Frame::data(Bytes::from_static(b"first"))),
+                1,
+            )),
+            1 => {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Some((
+                    Ok::<_, BoxError>(http_body::Frame::data(Bytes::from_static(b"second"))),
+                    2,
+                ))
+            }
+            _ => None,
+        }
+    });
+    http::Response::builder()
+        .status(200)
+        .body(Box::pin(body) as HttpBodyStream)
+        .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError)
 }
 
 impl Host for TestHost {
@@ -49,40 +72,26 @@ impl Host for TestHost {
         }
     }
 
-    async fn http_request(&self, req: HttpRequest) -> std::result::Result<HttpResponse, BoxError> {
+    async fn http_request_stream(
+        &self,
+        req: HttpRequestStream,
+    ) -> std::result::Result<HttpResponse, BoxError> {
         if req.uri().path() == "/delayed-stream" {
-            let body = futures::stream::unfold(0u8, |index| async move {
-                match index {
-                    0 => Some((
-                        Ok::<_, BoxError>(http_body::Frame::data(Bytes::from_static(b"first"))),
-                        1,
-                    )),
-                    1 => {
-                        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                        Some((
-                            Ok::<_, BoxError>(http_body::Frame::data(Bytes::from_static(
-                                b"second",
-                            ))),
-                            2,
-                        ))
-                    }
-                    _ => None,
-                }
-            });
-            return http::Response::builder()
-                .status(200)
-                .body(Box::pin(body) as HttpBodyStream)
-                .map_err(|e| Box::new(std::io::Error::other(e)) as BoxError);
+            return delayed_response();
         }
 
-        let mut headers = req.headers().clone();
+        let (parts, body) = req.into_parts();
+        let mut headers = parts.headers;
         headers.remove(HOST);
 
+        let body = body
+            .map_ok(|frame| frame.into_data().ok())
+            .try_filter_map(|data| async move { Ok(data) });
         let response = self
             .client
-            .request(req.method().clone(), req.uri().to_string())
+            .request(parts.method, parts.uri.to_string())
             .headers(headers)
-            .body(req.body().clone().unwrap_or_default())
+            .body(reqwest::Body::wrap_stream(body))
             .send()
             .await
             .map_err(|e| -> BoxError { Box::new(e) })?;

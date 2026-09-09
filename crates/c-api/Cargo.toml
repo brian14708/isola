@@ -13,6 +13,7 @@ bytes = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 isola = { workspace = true, features = ["serde"] }
+parking_lot = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

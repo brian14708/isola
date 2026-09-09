@@ -3,6 +3,7 @@
 
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -124,6 +125,9 @@ struct http_test_context {
   callback_outputs outputs;
   std::string captured_method;
   std::string captured_url;
+  bool body_stream_seen = false;
+  std::mutex body_mutex;
+  std::string captured_body;
 };
 
 static void mock_http_handler(const isola_http_request *request,
@@ -133,6 +137,9 @@ static void mock_http_handler(const isola_http_request *request,
   // Capture the request details for later assertions.
   tc->captured_method = request->method;
   tc->captured_url = request->url;
+
+  // This test does not consume the request body; release the handle.
+  isola_http_request_body_close(request->body_stream);
 
   // Deliver the response from a separate thread (non-blocking).
   std::thread([body]() {
@@ -200,6 +207,87 @@ TEST_CASE("HTTP mock handler") {
   auto &result = tc.outputs.results.back();
   REQUIRE(result.find("hello from mock") != std::string::npos);
   REQUIRE(result.find("200") != std::string::npos);
+
+  isola_sandbox_destroy(sandbox);
+  isola_context_destroy(ctx);
+}
+
+static void mock_streaming_upload_handler(const isola_http_request *request,
+                                          isola_http_response_body *body,
+                                          void *user_data) {
+  auto *tc = reinterpret_cast<http_test_context *>(user_data);
+  {
+    std::lock_guard lock(tc->body_mutex);
+    tc->body_stream_seen = request->body_stream != nullptr;
+  }
+  auto *request_body = request->body_stream;
+
+  std::thread([request_body, body, tc]() {
+    std::string captured;
+    for (;;) {
+      const uint8_t *data = nullptr;
+      size_t len = 0;
+      int eof = 0;
+      if (isola_http_request_body_read(request_body, &data, &len, &eof) !=
+          ISOLA_ERROR_CODE_OK) {
+        break;
+      }
+      if (eof != 0) {
+        break;
+      }
+      captured.append(reinterpret_cast<const char *>(data), len);
+    }
+    isola_http_request_body_close(request_body);
+    {
+      std::lock_guard lock(tc->body_mutex);
+      tc->captured_body = captured;
+    }
+
+    isola_http_response_body_start(body, 200, nullptr, 0);
+    const std::string response = "uploaded";
+    isola_http_response_body_push(
+        body, reinterpret_cast<const uint8_t *>(response.data()),
+        response.size());
+    isola_http_response_body_close(body);
+  }).detach();
+}
+
+TEST_CASE("HTTP streaming upload handler") {
+  isola_context_handle *ctx;
+  REQUIRE(isola_context_create(0, &ctx) == 0);
+  auto path = runtime_wasm_path();
+  REQUIRE(isola_context_initialize(ctx, path.c_str()) == 0);
+
+  isola_sandbox_handle *sandbox;
+  REQUIRE(isola_sandbox_create(ctx, &sandbox) == 0);
+
+  http_test_context tc;
+  isola_sandbox_handler_vtable vtable = {};
+  vtable.on_event = mock_on_event;
+  vtable.http_request = mock_streaming_upload_handler;
+  REQUIRE(isola_sandbox_set_handler(sandbox, &vtable, &tc) == 0);
+  REQUIRE(isola_sandbox_start(sandbox) == 0);
+
+  REQUIRE(isola_sandbox_load_script(
+              sandbox,
+              "import httpx2\n"
+              "def chunks():\n"
+              "    yield b'first'\n"
+              "    yield b'second'\n"
+              "def main():\n"
+              "    resp = httpx2.post('http://mock.test/upload', "
+              "content=chunks())\n"
+              "    return resp.text\n",
+              5000) == 0);
+  REQUIRE(isola_sandbox_run(sandbox, "main", nullptr, 0, 5000) == 0);
+
+  {
+    std::lock_guard lock(tc.body_mutex);
+    REQUIRE(tc.body_stream_seen);
+    REQUIRE(tc.captured_body == "firstsecond");
+  }
+  REQUIRE(!tc.outputs.results.empty());
+  REQUIRE(tc.outputs.results.back().find("uploaded") != std::string::npos);
 
   isola_sandbox_destroy(sandbox);
   isola_context_destroy(ctx);
