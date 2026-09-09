@@ -7,7 +7,7 @@ use std::cell::RefCell;
 
 pub use isola_runtime::{exports, isola, wasi};
 
-use self::{exports::isola::script::runtime, isola::script::host};
+use self::exports::isola::script::runtime;
 use crate::{
     error::Error,
     script::{InputValue, Scope},
@@ -114,9 +114,7 @@ impl runtime::Guest for Global {
                         let runtime::Argument { name, value } = arg;
                         let value = match value {
                             isola::script::host::Value::Cbor(s) => InputValue::Cbor(s.into()),
-                            isola::script::host::Value::CborIterator(e) => {
-                                InputValue::Iter(collect_stream_arg(&e))
-                            }
+                            isola::script::host::Value::CborIterator(e) => InputValue::Iter(e),
                         };
                         if let Some(name) = name {
                             named.push((name.into(), value));
@@ -133,14 +131,6 @@ impl runtime::Guest for Global {
             )
         })
     }
-}
-
-fn collect_stream_arg(iter: &host::ValueIterator) -> Vec<Vec<u8>> {
-    let mut items = Vec::new();
-    while let Some(cbor) = isola_runtime::block_on(iter.read()) {
-        items.push(cbor);
-    }
-    items
 }
 
 unsafe extern "C" {

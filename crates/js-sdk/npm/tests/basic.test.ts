@@ -245,6 +245,75 @@ describeIfRuntime("isola js-sdk", () => {
     sandbox.close();
   });
 
+  it("should stream request bodies to the Node HTTP handler", async () => {
+    let received = Buffer.alloc(0);
+    const sandbox = await template.create({
+      http: async (req) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of req.bodyStream) {
+          chunks.push(Buffer.from(chunk));
+        }
+        received = Buffer.concat(chunks);
+        return { status: 200, body: received };
+      },
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "import asyncio",
+        "import httpx2",
+        "",
+        "async def chunks():",
+        "    yield b'first'",
+        "    await asyncio.sleep(0.01)",
+        "    yield b'second'",
+        "",
+        "async def main(url):",
+        "    async with httpx2.AsyncClient() as client:",
+        "        response = await client.post(url, content=chunks())",
+        "        return response.text",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/upload"]);
+    expect(result).toBe("firstsecond");
+    expect(received).toEqual(Buffer.from("firstsecond"));
+    sandbox.close();
+  });
+
+  it("should buffer request bodies with text() and enforce single use", async () => {
+    const sandbox = await template.create({
+      http: async (req) => {
+        expect(req.bodyUsed).toBe(false);
+        const body = await req.text();
+        expect(req.bodyUsed).toBe(true);
+        await expect(req.arrayBuffer()).rejects.toThrow(
+          "Body has already been consumed",
+        );
+        return { status: 200, body: Buffer.from(body) };
+      },
+    });
+    await sandbox.start();
+    await sandbox.loadScript(
+      [
+        "import asyncio",
+        "import httpx2",
+        "",
+        "async def chunks():",
+        "    yield b'first'",
+        "    await asyncio.sleep(0.01)",
+        "    yield b'second'",
+        "",
+        "async def main(url):",
+        "    async with httpx2.AsyncClient() as client:",
+        "        response = await client.post(url, content=chunks())",
+        "        return response.text",
+      ].join("\n"),
+    );
+    const result = await sandbox.run("main", ["https://example.test/upload"]);
+    expect(result).toBe("firstsecond");
+    sandbox.close();
+  });
+
   it("should preserve binary http response bodies", async () => {
     const responseBody = Buffer.from([0x00, 0xff, 0xc3, 0x28, 0x80, 0x41]);
     const sandbox = await template.create({
@@ -442,6 +511,36 @@ describe("StreamArg", () => {
       sandbox.run("consume", [new StreamArg(values())]),
     ).rejects.toThrow("producer failed");
     expect(runWithStreams).toHaveBeenCalledOnce();
+  });
+
+  it("should not close an async iterator after natural completion", async () => {
+    const iterator: AsyncIterator<number> = {
+      next: async () => ({ done: true, value: undefined }),
+      return: vi.fn(async () => {
+        throw new Error("iterator should not be closed");
+      }),
+    };
+    const values: AsyncIterable<number> = {
+      [Symbol.asyncIterator]: () => iterator,
+    };
+    const runWithStreams = vi.fn(async () => ({
+      resultJson: [],
+      finalJson: undefined,
+      stdout: [],
+      stderr: [],
+      logs: [],
+      errors: [],
+    }));
+    const sandbox = new Sandbox({
+      runWithStreams,
+      close: vi.fn(),
+      setCallback: vi.fn(),
+    } as never);
+
+    await expect(
+      sandbox.run("consume", [new StreamArg(values)]),
+    ).resolves.toBeNull();
+    expect(iterator.return).not.toHaveBeenCalled();
   });
 
   it("should stop producers when the guest finishes early", async () => {

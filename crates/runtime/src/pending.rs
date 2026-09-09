@@ -1,18 +1,21 @@
 use std::{
     cell::RefCell,
     cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet, VecDeque},
+    collections::{BinaryHeap, HashMap, VecDeque},
     fmt,
+    rc::Rc,
     task::{Context, Poll, Waker},
     time::{Duration, Instant},
 };
 
 use futures::{
-    FutureExt, StreamExt,
+    FutureExt, SinkExt, StreamExt,
+    channel::mpsc,
     future::{AbortHandle, Abortable, Either, LocalBoxFuture, select},
     pin_mut,
     stream::FuturesUnordered,
 };
+use parking_lot::Mutex;
 
 use crate::{
     Deadline, block_on,
@@ -30,11 +33,26 @@ pub enum Output {
     },
     Sleep,
     HttpStream(Result<Option<Vec<u8>>, String>),
+    HttpUploadWrite(Result<(), String>),
 }
 
 struct HttpStream {
     source: HttpBodyStream,
     cancelled: bool,
+}
+
+type HttpUploadSender = Rc<Mutex<mpsc::Sender<Result<Vec<u8>, String>>>>;
+
+const UPLOAD_CLOSED: &str = "HTTP request body stream is closed";
+
+struct HttpUpload {
+    sender: HttpUploadSender,
+    receiver: Option<mpsc::Receiver<Result<Vec<u8>, String>>>,
+}
+
+struct HttpUploadWrite {
+    sender: HttpUploadSender,
+    chunk: Result<Vec<u8>, String>,
 }
 
 impl HttpStream {
@@ -105,6 +123,7 @@ enum Operation {
     },
     Sleep(Deadline),
     HttpStreamRead(State<u32, Result<Option<Vec<u8>>, String>>),
+    HttpUploadWrite(State<HttpUploadWrite, Result<(), String>>),
 }
 
 impl Operation {
@@ -114,6 +133,7 @@ impl Operation {
             Self::Http { state, .. } => state.is_ready(),
             Self::Sleep(deadline) => deadline.is_ready_at(now),
             Self::HttpStreamRead(state) => state.is_ready(),
+            Self::HttpUploadWrite(state) => state.is_ready(),
         }
     }
 }
@@ -122,12 +142,14 @@ enum Request {
     Host(HostRequest),
     Http(HttpRequest),
     HttpStreamRead(u32),
+    HttpUploadWrite(HttpUploadWrite),
 }
 
 enum Response {
     Host(Result<Vec<u8>, String>),
     Http(Result<HttpResponse, String>),
     HttpStream(Result<Option<Vec<u8>>, String>),
+    HttpUploadWrite(Result<(), String>),
 }
 
 enum Completion {
@@ -146,13 +168,14 @@ struct Registry {
     in_flight: InFlightSet,
     abort_handles: HashMap<u32, AbortHandle>,
     deferred: VecDeque<u32>,
-    ready: VecDeque<u32>,
-    ready_members: HashSet<u32>,
+    ready: Vec<u32>,
+    ready_indexes: HashMap<u32, usize>,
     deadlines: BinaryHeap<Reverse<(Instant, u64, u32)>>,
     next_handle: u32,
     next_sequence: u64,
     ready_generation: u64,
     streams: HashMap<u32, HttpStream>,
+    uploads: HashMap<u32, HttpUpload>,
 }
 
 impl Registry {
@@ -162,13 +185,14 @@ impl Registry {
             in_flight: InFlightSet::new(),
             abort_handles: HashMap::new(),
             deferred: VecDeque::new(),
-            ready: VecDeque::new(),
-            ready_members: HashSet::new(),
+            ready: Vec::new(),
+            ready_indexes: HashMap::new(),
             deadlines: BinaryHeap::new(),
             next_handle: 0,
             next_sequence: 0,
             ready_generation: 0,
             streams: HashMap::new(),
+            uploads: HashMap::new(),
         }
     }
 
@@ -177,7 +201,10 @@ impl Registry {
         loop {
             let handle = self.next_handle;
             self.next_handle = self.next_handle.wrapping_add(1);
-            if !self.operations.contains_key(&handle) && !self.streams.contains_key(&handle) {
+            if !self.operations.contains_key(&handle)
+                && !self.streams.contains_key(&handle)
+                && !self.uploads.contains_key(&handle)
+            {
                 return handle;
             }
             assert_ne!(
@@ -189,15 +216,20 @@ impl Registry {
 
     fn insert(&mut self, operation: Operation) -> u32 {
         let handle = self.allocate_handle();
+        let ready = operation.is_ready(Instant::now());
         let (deferred, deadline) = match &operation {
             Operation::Sleep(deadline) => (false, Some(*deadline)),
-            Operation::Host(_) | Operation::Http { .. } | Operation::HttpStreamRead(_) => {
-                (true, None)
-            }
+            Operation::Host(_)
+            | Operation::Http { .. }
+            | Operation::HttpStreamRead(_)
+            | Operation::HttpUploadWrite(_) => (true, None),
         };
         self.operations.insert(handle, operation);
         if deferred {
             self.deferred.push_back(handle);
+        }
+        if ready {
+            self.mark_ready(handle);
         }
         if let Some(deadline) = deadline {
             if let Some(ready_at) = deadline.ready_at() {
@@ -221,6 +253,9 @@ impl Registry {
                     Operation::Host(state) => state.start().map(Request::Host),
                     Operation::Http { state, .. } => state.start().map(Request::Http),
                     Operation::HttpStreamRead(state) => state.start().map(Request::HttpStreamRead),
+                    Operation::HttpUploadWrite(state) => {
+                        state.start().map(Request::HttpUploadWrite)
+                    }
                     Operation::Sleep(_) => None,
                 });
             let Some(request) = request else {
@@ -237,6 +272,15 @@ impl Registry {
                     Request::Http(request) => Response::Http(wasi_http::send(request).await),
                     Request::HttpStreamRead(handle) => {
                         Response::HttpStream(read_http_stream_async(handle).await)
+                    }
+                    Request::HttpUploadWrite(HttpUploadWrite { sender, chunk }) => {
+                        let mut sender = sender.lock().clone();
+                        Response::HttpUploadWrite(
+                            sender
+                                .send(chunk)
+                                .await
+                                .map_err(|_| UPLOAD_CLOSED.to_string()),
+                        )
                     }
                 }
             };
@@ -261,8 +305,9 @@ impl Registry {
     }
 
     fn mark_ready(&mut self, handle: u32) {
-        if self.operations.contains_key(&handle) && self.ready_members.insert(handle) {
-            self.ready.push_back(handle);
+        if self.operations.contains_key(&handle) && !self.ready_indexes.contains_key(&handle) {
+            self.ready_indexes.insert(handle, self.ready.len());
+            self.ready.push(handle);
             self.ready_generation = self.ready_generation.wrapping_add(1);
         }
     }
@@ -286,13 +331,11 @@ impl Registry {
 
     fn refresh_ready(&mut self, now: Instant) {
         self.refresh_deadlines(now);
-        self.ready
-            .retain(|handle| self.ready_members.contains(handle));
     }
 
     fn ready_handles(&mut self, now: Instant) -> Vec<u32> {
         self.refresh_ready(now);
-        self.ready.iter().copied().collect()
+        self.ready.clone()
     }
 
     fn next_deadline(&mut self, now: Instant) -> Option<Instant> {
@@ -326,14 +369,31 @@ impl Registry {
                 *state = State::Ready(response);
                 true
             }
-            (Operation::Host(_), Response::Http(_) | Response::HttpStream(_))
-            | (Operation::Http { .. }, Response::Host(_))
+            (Operation::HttpUploadWrite(state), Response::HttpUploadWrite(response)) => {
+                *state = State::Ready(response);
+                true
+            }
+            (
+                Operation::Host(_),
+                Response::Http(_) | Response::HttpStream(_) | Response::HttpUploadWrite(_),
+            )
+            | (Operation::Http { .. }, Response::Host(_) | Response::HttpUploadWrite(_))
             | (Operation::Http { .. }, Response::HttpStream(_))
             | (
                 Operation::Sleep(_),
-                Response::Host(_) | Response::Http(_) | Response::HttpStream(_),
+                Response::Host(_)
+                | Response::Http(_)
+                | Response::HttpStream(_)
+                | Response::HttpUploadWrite(_),
             )
-            | (Operation::HttpStreamRead(_), Response::Host(_) | Response::Http(_)) => false,
+            | (
+                Operation::HttpStreamRead(_),
+                Response::Host(_) | Response::Http(_) | Response::HttpUploadWrite(_),
+            )
+            | (
+                Operation::HttpUploadWrite(_),
+                Response::Host(_) | Response::Http(_) | Response::HttpStream(_),
+            ) => false,
         };
         if completed {
             self.mark_ready(handle);
@@ -352,7 +412,13 @@ impl Registry {
         if let Some(abort_handle) = self.abort_handles.remove(&handle) {
             abort_handle.abort();
         }
-        self.ready_members.remove(&handle);
+        if let Some(index) = self.ready_indexes.remove(&handle) {
+            let moved = *self.ready.last().expect("ready index points to an entry");
+            self.ready.swap_remove(index);
+            if moved != handle {
+                self.ready_indexes.insert(moved, index);
+            }
+        }
         Ok(operation)
     }
 
@@ -368,8 +434,9 @@ impl Registry {
         self.in_flight = InFlightSet::new();
         self.deferred.clear();
         self.ready.clear();
-        self.ready_members.clear();
+        self.ready_indexes.clear();
         self.deadlines.clear();
+        self.uploads.clear();
     }
 
     fn clear_streams(&mut self) {
@@ -418,6 +485,96 @@ pub fn register_http_stream(source: HttpBodyStream) -> u32 {
         let handle = operations.allocate_handle();
         operations.streams.insert(handle, HttpStream::new(source));
         handle
+    })
+}
+
+/// Create a bounded producer/consumer pair for an HTTP request body.
+#[must_use]
+pub fn register_http_upload(capacity: usize) -> u32 {
+    let capacity = capacity.max(1);
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let handle = operations.allocate_handle();
+        let (sender, receiver) = mpsc::channel(capacity);
+        operations.uploads.insert(
+            handle,
+            HttpUpload {
+                sender: Rc::new(Mutex::new(sender)),
+                receiver: Some(receiver),
+            },
+        );
+        handle
+    })
+}
+
+/// Take the consumer side of a registered HTTP upload.
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the upload is unknown or already attached to
+/// a request.
+pub fn take_http_upload_stream(handle: u32) -> Result<HttpBodyStream, InvalidHandle> {
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let upload = operations
+            .uploads
+            .get_mut(&handle)
+            .ok_or(InvalidHandle(handle))?;
+        let receiver = upload.receiver.take().ok_or(InvalidHandle(handle))?;
+        Ok(Box::pin(receiver) as HttpBodyStream)
+    })
+}
+
+/// Queue one request-body chunk and return a pollable operation handle.
+///
+/// The operation becomes ready only when the bounded upload channel accepts
+/// the chunk, which provides backpressure to language runtimes.
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the upload is unknown or closed.
+pub fn register_http_upload_write(
+    handle: u32,
+    chunk: Result<Vec<u8>, String>,
+) -> Result<u32, InvalidHandle> {
+    let sender = OPERATIONS.with(|operations| {
+        operations
+            .borrow()
+            .uploads
+            .get(&handle)
+            .map(|upload| upload.sender.clone())
+            .ok_or(InvalidHandle(handle))
+    })?;
+    let mut channel = sender.lock();
+    match channel.try_send(chunk) {
+        Ok(()) => Ok(register(Operation::HttpUploadWrite(State::Ready(Ok(()))))),
+        Err(error) if error.is_full() => Ok(register(Operation::HttpUploadWrite(State::Deferred(
+            HttpUploadWrite {
+                sender: sender.clone(),
+                chunk: error.into_inner(),
+            },
+        )))),
+        // The only remaining `try_send` failure mode is a disconnected channel.
+        Err(_) => Ok(register(Operation::HttpUploadWrite(State::Ready(Err(
+            UPLOAD_CLOSED.to_string(),
+        ))))),
+    }
+}
+
+/// Close an upload producer. Buffered chunks remain available to the request.
+///
+/// # Errors
+///
+/// Returns [`InvalidHandle`] when the upload is unknown or already closed.
+pub fn close_http_upload(handle: u32) -> Result<(), InvalidHandle> {
+    OPERATIONS.with(|operations| {
+        let mut operations = operations.borrow_mut();
+        let upload = operations
+            .uploads
+            .remove(&handle)
+            .ok_or(InvalidHandle(handle))?;
+        upload.sender.lock().close_channel();
+        Ok(())
     })
 }
 
@@ -555,6 +712,17 @@ pub fn is_ready(handle: u32) -> bool {
             .borrow()
             .get(handle)
             .is_none_or(|operation| operation.is_ready(now))
+    })
+}
+
+/// Return whether a handle represents a response-body stream read.
+#[must_use]
+pub fn is_http_stream_read(handle: u32) -> bool {
+    OPERATIONS.with(|operations| {
+        matches!(
+            operations.borrow().get(handle),
+            Some(Operation::HttpStreamRead(_))
+        )
     })
 }
 
@@ -738,13 +906,17 @@ pub fn take(handle: u32) -> Result<Take, InvalidHandle> {
         }),
         Operation::Sleep(deadline) if deadline.is_ready() => Take::Ready(Output::Sleep),
         Operation::HttpStreamRead(State::Ready(result)) => Take::Ready(Output::HttpStream(result)),
+        Operation::HttpUploadWrite(State::Ready(result)) => {
+            Take::Ready(Output::HttpUploadWrite(result))
+        }
         Operation::Host(State::Deferred(_) | State::Running)
         | Operation::Http {
             state: State::Deferred(_) | State::Running,
             ..
         }
         | Operation::Sleep(_)
-        | Operation::HttpStreamRead(State::Deferred(_) | State::Running) => Take::Pending,
+        | Operation::HttpStreamRead(State::Deferred(_) | State::Running)
+        | Operation::HttpUploadWrite(State::Deferred(_) | State::Running) => Take::Pending,
     })
 }
 
@@ -771,6 +943,16 @@ pub fn drive_one(handle: u32) -> Result<Output, InvalidHandle> {
         Operation::HttpStreamRead(State::Deferred(handle)) => {
             Ok(Output::HttpStream(block_on(read_http_stream_async(handle))))
         }
+        Operation::HttpUploadWrite(State::Ready(result)) => Ok(Output::HttpUploadWrite(result)),
+        Operation::HttpUploadWrite(State::Deferred(HttpUploadWrite { sender, chunk })) => {
+            Ok(Output::HttpUploadWrite(block_on(async move {
+                let mut sender = sender.lock().clone();
+                sender
+                    .send(chunk)
+                    .await
+                    .map_err(|_| UPLOAD_CLOSED.to_string())
+            })))
+        }
         Operation::Http {
             request_url,
             state: State::Deferred(request),
@@ -787,7 +969,8 @@ pub fn drive_one(handle: u32) -> Result<Output, InvalidHandle> {
             state: State::Running,
             ..
         }
-        | Operation::HttpStreamRead(State::Running) => Err(InvalidHandle(handle)),
+        | Operation::HttpStreamRead(State::Running)
+        | Operation::HttpUploadWrite(State::Running) => Err(InvalidHandle(handle)),
     }
 }
 
@@ -884,5 +1067,19 @@ mod tests {
         super::release(first);
         super::release(second);
         super::release(third);
+    }
+
+    #[test]
+    fn immediately_accepted_upload_writes_are_ready() {
+        let upload = super::register_http_upload(1);
+        let write = super::register_http_upload_write(upload, Ok(vec![1])).unwrap();
+
+        assert!(super::ready_handles().contains(&write));
+        assert!(matches!(
+            super::take(write),
+            Ok(Take::Ready(Output::HttpUploadWrite(Ok(()))))
+        ));
+
+        super::close_http_upload(upload).unwrap();
     }
 }

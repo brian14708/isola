@@ -1,5 +1,5 @@
 from asyncio import AbstractEventLoop
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterable, Awaitable, Callable
 
 class IsolaError(Exception): ...
 class InvalidArgumentError(IsolaError): ...
@@ -38,7 +38,7 @@ class _SandboxCore:
     def set_http_handler(
         self,
         callback: Callable[
-            [str, str, dict[str, str], bytes | None],
+            [str, str, dict[str, str], AsyncIterable[bytes]],
             Awaitable[tuple[int, dict[str, str], str, object]],
         ]
         | None,

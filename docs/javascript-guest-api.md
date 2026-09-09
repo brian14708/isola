@@ -89,10 +89,13 @@ Supported request body types:
 - `TypedArray`
 - `URLSearchParams`
 - plain JSON-like objects
+- `ReadableStream<Uint8Array>`
+- `AsyncIterable<Uint8Array>`
 
 If the request body is a plain object and `content-type` is not already set, the
 runtime uses `application/json`. `URLSearchParams` bodies use
-`application/x-www-form-urlencoded;charset=UTF-8`.
+`application/x-www-form-urlencoded;charset=UTF-8`. Stream chunks are forwarded
+incrementally with bounded backpressure.
 
 `GET` and `HEAD` requests cannot have a body.
 

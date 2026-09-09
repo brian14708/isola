@@ -1,10 +1,14 @@
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock, Weak},
+};
 
 use wasmtime::{Engine, component::Component};
 use wasmtime_wizer::{WasmtimeWizerComponent, Wizer};
 
 use crate::{
-    host::{BoxError, Host, HttpRequest, HttpResponse},
+    host::{BoxError, Host, HttpRequestStream, HttpResponse},
     internal::{
         module::{
             ModuleConfig,
@@ -44,12 +48,34 @@ pub async fn load_or_compile_component(
         return Ok(component);
     }
 
+    let lock = cache_lock(&cache_path);
+    let _guard = lock.lock().await;
+
+    // Another task may have populated the cache while this task waited for
+    // the per-key lock.
+    if let Ok(component) = unsafe { Component::deserialize_file(engine, &cache_path) } {
+        return Ok(component);
+    }
+
     let bytes = compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
     write_cache_file_atomic(&cache_path, &bytes).await?;
 
     let component =
         unsafe { Component::deserialize_file(engine, &cache_path) }.map_err(Error::Wasm)?;
     Ok(component)
+}
+
+fn cache_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Weak<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let locks = LOCKS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut locks = locks.lock().expect("cache lock registry poisoned");
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(path).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(path.to_owned(), Arc::downgrade(&lock));
+    lock
 }
 
 async fn compile_serialized_component(
@@ -133,9 +159,9 @@ impl Host for CompileHost {
         Err(std::io::Error::other("unsupported during compilation").into())
     }
 
-    async fn http_request(
+    async fn http_request_stream(
         &self,
-        _req: HttpRequest,
+        _req: HttpRequestStream,
     ) -> core::result::Result<HttpResponse, BoxError> {
         Err(std::io::Error::other("unsupported during compilation").into())
     }

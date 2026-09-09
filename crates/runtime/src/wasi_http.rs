@@ -43,24 +43,43 @@ pub struct HttpRequest {
     method: String,
     url: url::Url,
     headers: Vec<(String, Vec<u8>)>,
-    body: Option<Vec<u8>>,
+    body: Option<HttpBodyStream>,
     timeout_ms: Option<u64>,
 }
 
 impl HttpRequest {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         method: String,
         url: url::Url,
         headers: Vec<(String, Vec<u8>)>,
         body: Option<Vec<u8>>,
         timeout_ms: Option<u64>,
     ) -> Self {
+        let body =
+            body.map(|bytes| Box::pin(stream::once(async move { Ok(bytes) })) as HttpBodyStream);
         Self {
             method,
             url,
             headers,
             body,
+            timeout_ms,
+        }
+    }
+
+    #[must_use]
+    pub fn new_stream(
+        method: String,
+        url: url::Url,
+        headers: Vec<(String, Vec<u8>)>,
+        body: HttpBodyStream,
+        timeout_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            method,
+            url,
+            headers,
+            body: Some(body),
             timeout_ms,
         }
     }
@@ -111,6 +130,10 @@ pub async fn collect_body(mut body: HttpBodyStream) -> Result<Vec<u8>, String> {
 /// Returns an error when the request is invalid, the WASI HTTP exchange fails,
 /// or the response headers cannot be received. Body transport and size errors
 /// are reported by the returned stream when it is consumed.
+#[expect(
+    clippy::future_not_send,
+    reason = "WASI stream readers are local to the component runtime"
+)]
 pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
     let HttpRequest {
         method,
@@ -169,10 +192,16 @@ pub(crate) async fn send(request: HttpRequest) -> Result<HttpResponse, String> {
         .map_err(|()| "invalid HTTP path".to_string())?;
 
     let write_body = async move {
-        if let Some(bytes) = body {
+        if let Some(mut body) = body {
             let mut writer = body_writer;
-            if !writer.write_all(bytes).await.is_empty() {
-                return Err("HTTP request body stream closed early".to_string());
+            while let Some(chunk) = body.next().await {
+                let chunk = chunk?;
+                if chunk.is_empty() {
+                    continue;
+                }
+                if !writer.write_all(chunk).await.is_empty() {
+                    return Err("HTTP request body stream closed early".to_string());
+                }
             }
         }
         Ok(())

@@ -4,7 +4,7 @@ use bytes::Bytes;
 use futures::stream;
 use http_body::Frame;
 use isola::{
-    host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
+    host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse},
     value::Value,
 };
 use napi::{
@@ -13,6 +13,8 @@ use napi::{
     threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode},
 };
 use napi_derive::napi;
+use parking_lot::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 fn io_error(msg: impl Into<String>) -> BoxError {
     Box::new(std::io::Error::other(msg.into()))
@@ -30,6 +32,10 @@ pub struct JsHttpResponse {
 pub struct JsHttpStreamChunk {
     pub body: Option<Buffer>,
     pub done: bool,
+}
+
+struct JsRequestStream {
+    source: AsyncMutex<HttpBodyStream>,
 }
 
 // ---------------------------------------------------------------------------
@@ -77,9 +83,9 @@ impl JsHostcallHandler {
 // ---------------------------------------------------------------------------
 
 type HttpTsfn = ThreadsafeFunction<
-    (String, String, Buffer, Option<Buffer>),
+    (String, String, Buffer, u32),
     Promise<JsHttpResponse>,
-    (String, String, Buffer, Option<Buffer>),
+    (String, String, Buffer, u32),
     Status,
     false,
 >;
@@ -112,6 +118,8 @@ impl Drop for HttpStreamState {
 pub struct JsHttpHandler {
     tsfn: Arc<HttpTsfn>,
     stream_tsfn: Arc<HttpStreamTsfn>,
+    request_streams: Arc<Mutex<BTreeMap<u32, Arc<JsRequestStream>>>>,
+    next_request_stream: std::sync::atomic::AtomicU32,
 }
 
 impl JsHttpHandler {
@@ -119,59 +127,119 @@ impl JsHttpHandler {
         Self {
             tsfn: Arc::new(tsfn),
             stream_tsfn: Arc::new(stream_tsfn),
+            request_streams: Arc::new(Mutex::new(BTreeMap::new())),
+            next_request_stream: std::sync::atomic::AtomicU32::new(1),
         }
+    }
+
+    fn register_request_stream(&self, body: HttpBodyStream) -> u32 {
+        let handle = self
+            .next_request_stream
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.request_streams.lock().insert(
+            handle,
+            Arc::new(JsRequestStream {
+                source: AsyncMutex::new(body),
+            }),
+        );
+        handle
+    }
+
+    pub(crate) async fn read_request_stream(
+        &self,
+        handle: u32,
+    ) -> std::result::Result<JsHttpStreamChunk, BoxError> {
+        let Some(stream) = self.request_streams.lock().get(&handle).cloned() else {
+            return Ok(JsHttpStreamChunk {
+                body: None,
+                done: true,
+            });
+        };
+        let mut source = stream.source.lock().await;
+        let item = futures::StreamExt::next(&mut *source).await;
+        drop(source);
+        match item {
+            None => {
+                self.request_streams.lock().remove(&handle);
+                Ok(JsHttpStreamChunk {
+                    body: None,
+                    done: true,
+                })
+            }
+            Some(Ok(frame)) => frame.into_data().map_or_else(
+                |_| {
+                    Ok(JsHttpStreamChunk {
+                        body: None,
+                        done: false,
+                    })
+                },
+                |data| {
+                    Ok(JsHttpStreamChunk {
+                        body: Some(Buffer::from(data.to_vec())),
+                        done: false,
+                    })
+                },
+            ),
+            Some(Err(error)) => {
+                self.request_streams.lock().remove(&handle);
+                Err(error)
+            }
+        }
+    }
+
+    pub(crate) fn release_request_stream(&self, handle: u32) {
+        self.request_streams.lock().remove(&handle);
     }
 
     pub(crate) async fn invoke(
         &self,
-        incoming: HttpRequest,
+        incoming: HttpRequestStream,
     ) -> std::result::Result<HttpResponse, BoxError> {
-        let method = incoming.method().as_str().to_owned();
-        let url = incoming.uri().to_string();
-
-        let headers: BTreeMap<String, String> = incoming
-            .headers()
+        let (parts, body) = incoming.into_parts();
+        let method = parts.method.as_str().to_owned();
+        let url = parts.uri.to_string();
+        let headers: BTreeMap<String, String> = parts
+            .headers
             .iter()
             .filter_map(|(k, v)| {
                 v.to_str()
                     .ok()
-                    .map(|val| (k.as_str().to_string(), val.to_string()))
+                    .map(|value| (k.as_str().to_owned(), value.to_owned()))
             })
             .collect();
         let headers_json = serde_json::to_string(&headers)
             .map_err(|e| io_error(format!("failed to serialize headers: {e}")))?;
-
-        let body = incoming.body().as_ref().map(|b| Buffer::from(b.to_vec()));
-
+        let stream_handle = self.register_request_stream(body);
         let promise = self
             .tsfn
-            .call_async((method, url, Buffer::from(headers_json.into_bytes()), body))
+            .call_async((
+                method,
+                url,
+                Buffer::from(headers_json.into_bytes()),
+                stream_handle,
+            ))
             .await
             .map_err(|e| io_error(format!("HTTP JS handler failed: {e}")))?;
-
         let resp = promise
             .await
             .map_err(|e| io_error(format!("HTTP JS promise rejected: {e}")))?;
 
         let mut builder = http::Response::builder().status(resp.status);
-
         if let Some(headers) = resp.headers {
             for (k, v) in headers {
                 builder = builder.header(k, v);
             }
         }
-
         let body_stream: HttpBodyStream = if let Some(handle) = resp.stream_handle {
             let tsfn = self.stream_tsfn.clone();
             Box::pin(stream::unfold(
                 HttpStreamState { tsfn, handle },
                 |state| async move {
-                    let tsfn = state.tsfn.clone();
-                    let handle = state.handle;
-                    let result = match tsfn
+                    let result = match state
+                        .tsfn
                         .call_async((
                             "__isola_stream_read".to_owned(),
-                            handle.to_string(),
+                            state.handle.to_string(),
                             Buffer::from(Vec::new()),
                             None,
                         ))
@@ -182,31 +250,30 @@ impl JsHttpHandler {
                             .map_err(|e| io_error(format!("HTTP stream promise rejected: {e}"))),
                         Err(e) => Err(io_error(format!("HTTP stream callback failed: {e}"))),
                     };
-                    match result {
-                        Ok(resp) => {
-                            let done = resp.done;
-                            let item = resp.body.map_or_else(
-                                || Ok(Frame::data(Bytes::new())),
-                                |body| Ok(Frame::data(Bytes::from(Vec::<u8>::from(body)))),
-                            );
-                            if done { None } else { Some((item, state)) }
-                        }
-                        Err(error) => Some((Err(error), state)),
+                    let result = match result {
+                        Ok(result) => result,
+                        Err(error) => return Some((Err(error), state)),
+                    };
+                    if result.done {
+                        return None;
                     }
+                    let item = result.body.map_or_else(
+                        || Ok(Frame::data(Bytes::new())),
+                        |body| Ok(Frame::data(Bytes::from(Vec::<u8>::from(body)))),
+                    );
+                    Some((item, state))
                 },
             ))
         } else if let Some(body) = resp.body {
-            let body_bytes = Bytes::from(Vec::<u8>::from(body));
-            Box::pin(stream::once(async move { Ok(Frame::data(body_bytes)) }))
+            Box::pin(stream::once(async move {
+                Ok(Frame::data(Bytes::from(Vec::<u8>::from(body))))
+            }))
         } else {
             Box::pin(stream::empty())
         };
-
-        let response = builder
+        builder
             .body(body_stream)
-            .map_err(|e| io_error(format!("invalid response metadata: {e}")))?;
-
-        Ok(response)
+            .map_err(|e| io_error(format!("invalid response metadata: {e}")))
     }
 }
 
@@ -245,9 +312,9 @@ impl Host for Env {
         handler.invoke(call_type, payload).await
     }
 
-    async fn http_request(
+    async fn http_request_stream(
         &self,
-        incoming: HttpRequest,
+        incoming: HttpRequestStream,
     ) -> std::result::Result<HttpResponse, BoxError> {
         let handler = self
             .http_handler

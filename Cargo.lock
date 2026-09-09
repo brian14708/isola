@@ -1596,6 +1596,7 @@ dependencies = [
  "http",
  "http-body",
  "isola",
+ "parking_lot",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -1690,6 +1691,7 @@ version = "0.5.0"
 dependencies = [
  "futures",
  "minicbor",
+ "parking_lot",
  "url",
  "wit-bindgen",
 ]
