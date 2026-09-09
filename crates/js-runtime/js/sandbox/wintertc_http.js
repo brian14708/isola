@@ -15,6 +15,22 @@
         this._error = null;
         this._pulling = false;
         this._cancelled = false;
+        this._started = false;
+        this._startError = null;
+        if (typeof this._source.start === "function") {
+          try {
+            var result = this._source.start(this._controller());
+            if (result && typeof result.then === "function") {
+              result.catch((error) => {
+                this._startError = error;
+                this._error = error;
+              });
+            }
+          } catch (error) {
+            this._startError = error;
+            this._error = error;
+          }
+        }
       }
 
       getReader() {
@@ -48,11 +64,9 @@
         return promise;
       }
 
-      _pump() {
-        if (this._pulling || this._closed || this._cancelled) return;
-        this._pulling = true;
+      _controller() {
         var stream = this;
-        var controller = {
+        return {
           enqueue: function (value) {
             if (stream._closed || stream._cancelled) return;
             var waiter = stream._waiters.shift();
@@ -62,9 +76,7 @@
           close: function () {
             stream._closed = true;
             var waiter;
-            while ((waiter = stream._waiters.shift())) {
-              waiter.resolve({ value: undefined, done: true });
-            }
+            while ((waiter = stream._waiters.shift())) waiter.resolve({ value: undefined, done: true });
           },
           error: function (error) {
             stream._error = error;
@@ -72,6 +84,13 @@
             while ((waiter = stream._waiters.shift())) waiter.reject(error);
           },
         };
+      }
+
+      _pump() {
+        if (this._pulling || this._closed || this._cancelled) return;
+        this._pulling = true;
+        var stream = this;
+        var controller = stream._controller();
         Promise.resolve()
           .then(function () {
             if (typeof stream._source.pull === "function") {
@@ -139,6 +158,16 @@
     var copy = new Uint8Array(bytes.length);
     copy.set(bytes);
     return copy.buffer;
+  }
+
+  function isAsyncIterable(value) {
+    return (
+      value !== null &&
+      value !== undefined &&
+      typeof Symbol !== "undefined" &&
+      Symbol.asyncIterator !== undefined &&
+      typeof value[Symbol.asyncIterator] === "function"
+    );
   }
 
   function encodeUtf8(input) {
@@ -247,15 +276,23 @@
 
   function normalizeBody(body, headers, forRequest) {
     if (body === undefined || body === null) {
-      return { bytes: null, text: null };
+      return { bytes: null, text: null, stream: null };
+    }
+
+    if (
+      forRequest &&
+      ((typeof ReadableStream !== "undefined" && body instanceof ReadableStream) ||
+        isAsyncIterable(body))
+    ) {
+      return { bytes: null, text: null, stream: body };
     }
 
     if (isArrayBuffer(body)) {
-      return { bytes: copyArrayBuffer(body), text: null };
+      return { bytes: copyArrayBuffer(body), text: null, stream: null };
     }
 
     if (isArrayBufferView(body)) {
-      return { bytes: copyViewToArrayBuffer(body), text: null };
+      return { bytes: copyViewToArrayBuffer(body), text: null, stream: null };
     }
 
     if (
@@ -269,14 +306,14 @@
           "application/x-www-form-urlencoded;charset=UTF-8",
         );
       }
-      return { bytes: encodeUtf8(formText), text: formText };
+      return { bytes: encodeUtf8(formText), text: formText, stream: null };
     }
 
     if (typeof body === "string") {
       if (forRequest) {
         setDefaultContentType(headers, "text/plain;charset=UTF-8");
       }
-      return { bytes: encodeUtf8(body), text: body };
+      return { bytes: encodeUtf8(body), text: body, stream: null };
     }
 
     if (forRequest && typeof body === "object") {
@@ -285,14 +322,14 @@
         jsonText = "null";
       }
       setDefaultContentType(headers, "application/json");
-      return { bytes: encodeUtf8(jsonText), text: jsonText };
+      return { bytes: encodeUtf8(jsonText), text: jsonText, stream: null };
     }
 
     var fallbackText = String(body);
     if (forRequest) {
       setDefaultContentType(headers, "text/plain;charset=UTF-8");
     }
-    return { bytes: encodeUtf8(fallbackText), text: fallbackText };
+    return { bytes: encodeUtf8(fallbackText), text: fallbackText, stream: null };
   }
 
   function consumeBody(instance) {
@@ -301,9 +338,11 @@
     }
 
     instance.bodyUsed = true;
-    if (instance._teeBranch) {
+    if (instance.body !== null && instance.body !== undefined) {
       return consumeReadableStream(instance);
     }
+    // Keep the native fallback for environments where a response stream could
+    // not be exposed, while normal responses always consume through body.
     if (instance._streamHandle !== null && instance._streamHandle !== undefined) {
       return consumeStream(instance);
     }
@@ -533,13 +572,28 @@
   }
 
   function consumeReadableStream(instance) {
-    var reader = instance.body.getReader();
+    var reader;
+    try {
+      reader = instance.body.getReader();
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    var released = false;
     var parts = [];
     var total = 0;
+    function releaseReader() {
+      if (released) return;
+      released = true;
+      try {
+        reader.releaseLock();
+      } catch (_err) {
+        // The stream may already have released the reader after an error.
+      }
+    }
     function next() {
       return reader.read().then(function (result) {
         if (result === null || result === undefined || result.done === true) {
-          reader.releaseLock();
+          releaseReader();
           var output = new Uint8Array(total);
           var offset = 0;
           for (var i = 0; i < parts.length; i += 1) {
@@ -556,7 +610,10 @@
         return next();
       });
     }
-    return next();
+    return next().catch(function (error) {
+      releaseReader();
+      throw error;
+    });
   }
 
   function createResponseTee(instance) {
@@ -1042,6 +1099,9 @@
   }
 
   function cloneRequest(request) {
+    if (request._bodyStream !== null && request._bodyStream !== undefined) {
+      throw new TypeError("Cannot clone a request with a streaming body.");
+    }
     var next = Object.create(Request.prototype);
     next.method = request.method;
     next.url = request.url;
@@ -1050,6 +1110,7 @@
     next._bodyBytes =
       request._bodyBytes === null ? null : copyArrayBuffer(request._bodyBytes);
     next._bodyText = request._bodyText;
+    next._bodyStream = null;
     next._streamHandle = null;
     next._streamReleased = false;
     next._streamCancelled = false;
@@ -1074,6 +1135,9 @@
   }
 
   function payloadStreamHandle(payload) {
+    if (payload === null || payload === undefined) {
+      return undefined;
+    }
     if (payload.bodyStreamHandle !== undefined) {
       return payload.bodyStreamHandle;
     }
@@ -1081,6 +1145,92 @@
       return payload.streamHandle;
     }
     return payload.bodyHandle;
+  }
+
+  function releasePayloadStream(payload) {
+    var handle = payloadStreamHandle(payload);
+    if (handle === null || handle === undefined) {
+      return;
+    }
+    var release = globalThis._isola_http && globalThis._isola_http._release;
+    if (typeof release !== "function") {
+      return;
+    }
+    try {
+      release(handle);
+    } catch (_err) {
+      // The response may already have been cancelled or released.
+    }
+  }
+
+  function uploadChunkBytes(value) {
+    if (isArrayBuffer(value)) return copyArrayBuffer(value);
+    if (isArrayBufferView(value)) return copyViewToArrayBuffer(value);
+    throw new TypeError("Request body stream chunks must be ArrayBuffer or TypedArray values.");
+  }
+
+  function pumpUpload(source, uploadHandle) {
+    var reader = null;
+    var iterator = null;
+    if (
+      typeof ReadableStream !== "undefined" &&
+      source instanceof ReadableStream
+    ) {
+      reader = source.getReader();
+    } else if (isAsyncIterable(source)) {
+      iterator = source[Symbol.asyncIterator]();
+    } else {
+      return Promise.reject(new TypeError("Invalid request body stream."));
+    }
+
+    function next() {
+      return reader !== null ? reader.read() : iterator.next();
+    }
+
+    function closeSource(reason) {
+      if (reader !== null) {
+        return Promise.resolve(reader.cancel(reason)).catch(function () {});
+      }
+      if (iterator !== null && typeof iterator.return === "function") {
+        return Promise.resolve(iterator.return()).catch(function () {});
+      }
+      return Promise.resolve();
+    }
+
+    function writeNext() {
+      return Promise.resolve(next()).then(function (item) {
+        if (item.done) return undefined;
+        var bytes = uploadChunkBytes(item.value);
+        var writeHandle = _isola_http._writeUpload(uploadHandle, bytes);
+        return _isola_async
+          ._wait(writeHandle, function () {
+            return _isola_http._finishUploadWrite(writeHandle);
+          })
+          .then(writeNext);
+      });
+    }
+
+    return writeNext().then(
+      function () {
+        if (reader !== null) reader.releaseLock();
+        try {
+          _isola_http._closeUpload(uploadHandle);
+        } catch (_err) {
+          // The request may have been aborted after the final chunk.
+        }
+      },
+      function (error) {
+        return closeSource(error).then(function () {
+          if (reader !== null) reader.releaseLock();
+          try {
+            _isola_http._closeUpload(uploadHandle);
+          } catch (_err) {
+            // The HTTP side may already have released the upload.
+          }
+          throw error;
+        });
+      },
+    );
   }
 
   class Request {
@@ -1124,6 +1274,9 @@
         if (source.bodyUsed) {
           throw new TypeError("Cannot construct a Request with a used body.");
         }
+        if (source._bodyStream !== null && source._bodyStream !== undefined) {
+          throw new TypeError("Cannot construct a Request from a streaming body.");
+        }
         bodyInit =
           source._bodyBytes !== null
             ? source._bodyBytes
@@ -1143,7 +1296,8 @@
       var normalizedBody = normalizeBody(bodyInit, this.headers, true);
       this._bodyBytes = normalizedBody.bytes;
       this._bodyText = normalizedBody.text;
-      this.body = null;
+      this._bodyStream = normalizedBody.stream;
+      this.body = normalizedBody.stream;
       this.bodyUsed = false;
     }
 
@@ -1280,21 +1434,42 @@
     }
 
     var body = request._bodyBytes;
-    if (body !== null) {
+    var bodyStream = request._bodyStream;
+    if (body !== null || bodyStream !== null) {
       request.bodyUsed = true;
     }
 
     var handle;
+    var uploadHandle = null;
+    var upload = null;
     try {
-      handle = _isola_http._send(
-        request.method,
-        request.url,
-        null,
-        request.headers._toList(),
-        body,
-        null,
-      );
+      if (bodyStream !== null && bodyStream !== undefined) {
+        uploadHandle = _isola_http._openUpload(4);
+        handle = _isola_http._sendStream(
+          request.method,
+          request.url,
+          null,
+          request.headers._toList(),
+          uploadHandle,
+          null,
+        );
+        upload = pumpUpload(bodyStream, uploadHandle);
+      } else {
+        handle = _isola_http._send(
+          request.method,
+          request.url,
+          null,
+          request.headers._toList(),
+          body,
+          null,
+        );
+      }
     } catch (err) {
+      if (uploadHandle !== null) {
+        try {
+          _isola_http._closeUpload(uploadHandle);
+        } catch (_closeError) {}
+      }
       return Promise.reject(err);
     }
 
@@ -1311,6 +1486,7 @@
       }
 
       if (request.signal.aborted) {
+        releasePayloadStream(payload);
         throw abortError(request.signal.reason);
       }
 
@@ -1318,18 +1494,48 @@
         throw recvError;
       }
 
-      var response = Response._fromPayload(payload);
-      attachAbortSignal(response, request.signal);
-      return response;
+      var response = null;
+      try {
+        response = Response._fromPayload(payload);
+        attachAbortSignal(response, request.signal);
+        return response;
+      } catch (error) {
+        if (response !== null) {
+          releaseStream(response);
+        } else {
+          releasePayloadStream(payload);
+        }
+        throw error;
+      }
     });
 
     function onAbort() {
       _isola_async._cancel(handle, abortError(request.signal.reason));
+      if (uploadHandle !== null) {
+        try {
+          _isola_http._closeUpload(uploadHandle);
+        } catch (_err) {}
+      }
     }
 
     request.signal.addEventListener("abort", onAbort);
     if (request.signal.aborted) {
       onAbort();
+    }
+
+    if (upload !== null) {
+      // A failed producer must reject fetch even when the native request is
+      // still waiting for another body chunk. Successful uploads leave the
+      // response promise in control so fetch can resolve on response headers.
+      pending = Promise.race([
+        pending,
+        upload.then(function () {
+          return pending;
+        }, function (error) {
+          _isola_async._cancel(handle, error);
+          throw error;
+        }),
+      ]);
     }
 
     return pending.then(

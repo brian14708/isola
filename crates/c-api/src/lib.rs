@@ -77,6 +77,10 @@ pub struct SandboxHandlerVtable {
 
     /// Called to initiate an HTTP request.
     ///
+    /// Consume the request body from `request->body_stream` with
+    /// `isola_http_request_body_read` and release it with
+    /// `isola_http_request_body_close`.
+    ///
     /// The callback should return immediately. The `response_body` handle
     /// is Rust-owned; the C side completes the response asynchronously:
     ///
@@ -1144,8 +1148,61 @@ pub unsafe extern "C" fn isola_stream_end(stream: *mut StreamHandle) -> ErrorCod
 }
 
 // ---------------------------------------------------------------------------
-// HTTP response body (push-based)
+// HTTP request/response bodies
 // ---------------------------------------------------------------------------
+
+/// Reads the next chunk from a streaming HTTP request body.
+///
+/// This function blocks until a chunk or EOF is available. The returned data
+/// pointer is owned by `body` and remains valid until the next read or until
+/// `isola_http_request_body_close` is called. Set `eof` to a non-zero value
+/// when the request body has ended.
+///
+/// # Safety
+///
+/// - `body` must be a live handle obtained from an HTTP request callback.
+/// - `data`, `len`, and `eof` must point to writable output storage.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn isola_http_request_body_read(
+    body: *const crate::env::HttpRequestBody,
+    data: *mut *const u8,
+    len: *mut usize,
+    eof: *mut c_int,
+) -> ErrorCode {
+    let data = c_try!(unsafe { require_mut(data, "data must not be NULL") });
+    let len = c_try!(unsafe { require_mut(len, "len must not be NULL") });
+    let eof = c_try!(unsafe { require_mut(eof, "eof must not be NULL") });
+    *data = std::ptr::null();
+    *len = 0;
+    *eof = 0;
+
+    let body = c_try!(unsafe { require_ref(body, "body must not be NULL") });
+    match body.read_chunk() {
+        Ok(Some((chunk_data, chunk_len))) => {
+            *data = chunk_data;
+            *len = chunk_len;
+            ErrorCode::Ok
+        }
+        Ok(None) => {
+            *eof = 1;
+            ErrorCode::Ok
+        }
+        Err(error) => fail(Error::Internal(error)),
+    }
+}
+
+/// Releases a streaming HTTP request body handle.
+///
+/// # Safety
+///
+/// `body` must be `NULL` or a live handle obtained from an HTTP request
+/// callback. After this call a non-`NULL` pointer is invalid.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn isola_http_request_body_close(body: *mut crate::env::HttpRequestBody) {
+    if !body.is_null() {
+        drop(unsafe { Box::from_raw(body) });
+    }
+}
 
 /// Delivers the HTTP status code and response headers.
 ///
@@ -1394,9 +1451,52 @@ mod tests {
         unsafe {
             isola_context_destroy(std::ptr::null_mut());
             isola_sandbox_destroy(std::ptr::null_mut());
+            isola_http_request_body_close(std::ptr::null_mut());
             isola_http_response_body_close(std::ptr::null_mut());
             isola_hostcall_response_cancel(std::ptr::null_mut());
         }
+    }
+
+    #[test]
+    fn http_request_body_ffi_reads_chunks_and_eof() {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<
+            std::result::Result<http_body::Frame<bytes::Bytes>, BoxError>,
+        >(1);
+        sender
+            .send(Ok(http_body::Frame::data(bytes::Bytes::from_static(
+                b"request chunk",
+            ))))
+            .expect("send request chunk");
+        drop(sender);
+
+        let body = Box::into_raw(Box::new(crate::env::HttpRequestBody::new(receiver)));
+        let mut data = std::ptr::null();
+        let mut len = 0;
+        let mut eof = 0;
+
+        assert_eq!(
+            unsafe {
+                isola_http_request_body_read(body, &raw mut data, &raw mut len, &raw mut eof)
+            },
+            ErrorCode::Ok
+        );
+        assert_eq!(eof, 0);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(data, len) },
+            b"request chunk"
+        );
+
+        assert_eq!(
+            unsafe {
+                isola_http_request_body_read(body, &raw mut data, &raw mut len, &raw mut eof)
+            },
+            ErrorCode::Ok
+        );
+        assert_eq!(eof, 1);
+        assert!(data.is_null());
+        assert_eq!(len, 0);
+
+        unsafe { isola_http_request_body_close(body) };
     }
 
     #[test]

@@ -1,6 +1,7 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use bytes::Bytes;
+use futures::StreamExt as _;
 use http_body::Frame;
 
 use crate::value::Value;
@@ -15,10 +16,39 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 pub type HttpBodyStream =
     Pin<Box<dyn futures::Stream<Item = core::result::Result<Frame<Bytes>, BoxError>> + Send>>;
 
-/// HTTP request forwarded from a guest to [`Host::http_request`].
+/// HTTP request forwarded from a guest to [`Host::http_request_stream`].
 ///
-/// The request body is fully buffered. `None` represents an empty body.
-pub type HttpRequest = http::Request<Option<Bytes>>;
+/// The body is pulled incrementally and applies backpressure to the guest
+/// runtime.
+pub type HttpRequestStream = http::Request<HttpBodyStream>;
+
+/// Collect a streamed body into a single buffer.
+///
+/// Buffers at most `limit` bytes; exceeding the limit discards the buffered
+/// chunks and returns an error. Non-data frames such as trailers are ignored.
+///
+/// # Errors
+///
+/// Returns the source error or an error when `limit` is exceeded.
+pub async fn collect_http_body(
+    mut body: HttpBodyStream,
+    limit: usize,
+) -> core::result::Result<Bytes, BoxError> {
+    let mut output = Vec::new();
+    while let Some(frame) = body.next().await {
+        let frame = frame?;
+        if let Ok(data) = frame.into_data() {
+            if output.len().saturating_add(data.len()) > limit {
+                return Err(std::io::Error::other(format!(
+                    "HTTP body exceeds maximum size of {limit} bytes"
+                ))
+                .into());
+            }
+            output.extend_from_slice(&data);
+        }
+    }
+    Ok(Bytes::from(output))
+}
 
 /// HTTP response returned by [`Host::http_request_stream`].
 ///
@@ -448,7 +478,7 @@ pub trait Host: Send + Sync + 'static {
         }
     }
 
-    /// Perform an HTTP request.
+    /// Perform an HTTP request with a lazily-consumed request body.
     ///
     /// Implementations own redirect behavior and header hygiene. In particular,
     /// remove any caller-supplied `Host` header before dispatching.
@@ -459,9 +489,9 @@ pub trait Host: Send + Sync + 'static {
     /// Implementations may return any [`BoxError`] when the request cannot be
     /// dispatched. Errors yielded later by [`HttpBodyStream`] are propagated
     /// while the guest consumes the response body.
-    fn http_request(
+    fn http_request_stream(
         &self,
-        req: HttpRequest,
+        req: HttpRequestStream,
     ) -> impl Future<Output = core::result::Result<HttpResponse, BoxError>> + Send {
         async move {
             let _req = req;
@@ -482,8 +512,11 @@ impl<T: Host + ?Sized> Host for Arc<T> {
         (**self).hostcall(call_type, payload).await
     }
 
-    async fn http_request(&self, req: HttpRequest) -> core::result::Result<HttpResponse, BoxError> {
-        (**self).http_request(req).await
+    async fn http_request_stream(
+        &self,
+        req: HttpRequestStream,
+    ) -> core::result::Result<HttpResponse, BoxError> {
+        (**self).http_request_stream(req).await
     }
 }
 
@@ -522,6 +555,28 @@ mod tests {
                 message,
             }) if context == "runtime" && message == "message"
         ));
+    }
+
+    #[tokio::test]
+    async fn collect_http_body_concatenates_data_frames() {
+        let body: HttpBodyStream = Box::pin(futures::stream::iter([
+            Ok(Frame::data(Bytes::from_static(b"abc"))),
+            Ok(Frame::data(Bytes::from_static(b"def"))),
+        ]));
+        let collected = collect_http_body(body, 16).await.expect("within limit");
+        assert_eq!(&collected[..], b"abcdef");
+    }
+
+    #[tokio::test]
+    async fn collect_http_body_enforces_limit() {
+        let body: HttpBodyStream = Box::pin(futures::stream::iter([Ok(Frame::data(
+            Bytes::from_static(b"abcdef"),
+        ))]));
+        let error = collect_http_body(body, 4).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "HTTP body exceeds maximum size of 4 bytes"
+        );
     }
 
     #[tokio::test]

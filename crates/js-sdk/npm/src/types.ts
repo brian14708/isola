@@ -35,7 +35,14 @@ export interface HttpRequest {
   method: string;
   url: string;
   headers: Record<string, string>;
-  body: Buffer | null;
+  /** Lazily-consumed request body. */
+  bodyStream: AsyncIterable<Uint8Array>;
+  /** Whether the request body has been consumed, mirroring the Fetch API. */
+  readonly bodyUsed: boolean;
+  /** Consume the body and return it as a single buffer. */
+  arrayBuffer(): Promise<Buffer>;
+  /** Consume the body and decode it as UTF-8. */
+  text(): Promise<string>;
 }
 
 export interface HttpResponse {

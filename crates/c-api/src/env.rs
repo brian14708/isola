@@ -1,15 +1,16 @@
 use std::{
     ffi::{CString, c_char},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
 };
 
 use bytes::Bytes;
 use http_body::Frame;
 use isola::{
-    host::{BoxError, Host, HttpBodyStream, HttpRequest, HttpResponse},
+    host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse},
     value::Value,
 };
-use tokio_stream::wrappers::ReceiverStream;
+use parking_lot::Mutex;
+use tokio_stream::{StreamExt as _, wrappers::ReceiverStream};
 
 /// C-compatible HTTP header.
 #[repr(C)]
@@ -30,8 +31,68 @@ pub struct HttpRequestInfo {
     pub url: *const c_char,
     pub headers: *const HttpHeader,
     pub headers_len: usize,
-    pub body: *const u8,
-    pub body_len: usize,
+    /// Streaming request body. The callback owns this handle and must close
+    /// it after consuming or abandoning the request body.
+    pub body_stream: *mut HttpRequestBody,
+}
+
+type HttpRequestChunk = Result<Frame<Bytes>, BoxError>;
+type HttpRequestReceiver = std::sync::mpsc::Receiver<HttpRequestChunk>;
+
+/// Opaque handle for a streaming HTTP request body.
+///
+/// The C side reads request chunks with `isola_http_request_body_read`. The
+/// read call blocks until the next chunk is available, which preserves
+/// backpressure from the guest runtime. The data pointer returned by a read is
+/// valid until the next read or until the handle is closed.
+pub struct HttpRequestBody {
+    receiver: Mutex<Option<HttpRequestReceiver>>,
+    chunk: Mutex<Option<Bytes>>,
+}
+
+impl HttpRequestBody {
+    pub fn new(receiver: HttpRequestReceiver) -> Self {
+        Self {
+            receiver: Mutex::new(Some(receiver)),
+            chunk: Mutex::new(None),
+        }
+    }
+
+    /// Read the next data frame, blocking until data or EOF is available.
+    ///
+    /// The returned pointer borrows the internally-stashed chunk and stays
+    /// valid until the next call or until the handle is closed.
+    pub fn read_chunk(&self) -> Result<Option<(*const u8, usize)>, String> {
+        let chunk = self.read()?;
+        let mut stashed = self.chunk.lock();
+        *stashed = chunk;
+        Ok(stashed.as_ref().map(|chunk| (chunk.as_ptr(), chunk.len())))
+    }
+
+    fn read(&self) -> Result<Option<Bytes>, String> {
+        let mut receiver_slot = self.receiver.lock();
+        let Some(receiver) = receiver_slot.as_mut() else {
+            return Ok(None);
+        };
+
+        loop {
+            match receiver.recv() {
+                Ok(Ok(frame)) => {
+                    if let Ok(data) = frame.into_data() {
+                        return Ok(Some(data));
+                    }
+                }
+                Ok(Err(error)) => {
+                    return Err(format!("HTTP request body stream failed: {error}"));
+                }
+                Err(_) => {
+                    *receiver_slot = None;
+                    drop(receiver_slot);
+                    return Ok(None);
+                }
+            }
+        }
+    }
 }
 
 /// Status + headers delivered by the C side via `start`.
@@ -57,7 +118,6 @@ impl HttpResponseBody {
     pub fn start(&self, head: HttpResponseHead) -> Result<(), ()> {
         self.head
             .lock()
-            .map_err(|_| ())?
             .take()
             .ok_or(())?
             .send(head)
@@ -67,7 +127,7 @@ impl HttpResponseBody {
     /// Push a body data frame. Blocks the calling thread if the channel is
     /// full. Returns `Err` if the receiver has been dropped.
     pub fn send(&self, data: Bytes) -> Result<(), ()> {
-        if self.head.lock().map_err(|_| ())?.is_some() {
+        if self.head.lock().is_some() {
             return Err(());
         }
         self.body
@@ -92,7 +152,6 @@ impl HostcallResponse {
     pub fn resolve(self, value: Value) -> Result<(), ()> {
         self.sender
             .into_inner()
-            .map_err(|_| ())?
             .ok_or(())?
             .send(Ok(value))
             .map_err(|_| ())
@@ -102,7 +161,6 @@ impl HostcallResponse {
     pub fn reject(self, error: String) -> Result<(), ()> {
         self.sender
             .into_inner()
-            .map_err(|_| ())?
             .ok_or(())?
             .send(Err(Box::new(std::io::Error::other(error))))
             .map_err(|_| ())
@@ -172,7 +230,10 @@ impl Host for Env {
         })?
     }
 
-    async fn http_request(&self, incoming: HttpRequest) -> Result<HttpResponse, BoxError> {
+    async fn http_request_stream(
+        &self,
+        incoming: HttpRequestStream,
+    ) -> Result<HttpResponse, BoxError> {
         let handler = self
             .handler
             .get()
@@ -191,20 +252,43 @@ impl Host for Env {
             ))
         })?;
 
-        // Create channels. Rust keeps the receivers; C gets the senders
-        // wrapped in an HttpResponseBody handle.
-        let (head_tx, head_rx) = tokio::sync::oneshot::channel();
-        let (body_tx, body_rx) = tokio::sync::mpsc::channel(32);
+        let (parts, mut incoming_body) = incoming.into_parts();
+        let (body_tx, mut body_rx) = tokio::sync::mpsc::channel(32);
+        let (c_body_tx, c_body_rx) = std::sync::mpsc::sync_channel(32);
+        let request_body = Box::into_raw(Box::new(HttpRequestBody::new(c_body_rx)));
 
-        // Inner block ensures all raw-pointer locals (c_request, etc.) are
-        // dropped before the `.await`, keeping the future `Send`.
+        // Keep blocking C reads off the async runtime using Tokio's bounded
+        // blocking pool, while retaining a bounded queue between the guest
+        // stream and the C callback.
+        tokio::task::spawn_blocking(move || {
+            while let Some(frame) = body_rx.blocking_recv() {
+                if c_body_tx.send(frame).is_err() {
+                    break;
+                }
+            }
+        });
+
+        // The C side pulls from this bounded channel. A full channel suspends
+        // the pump, propagating backpressure into the guest request stream.
+        tokio::spawn(async move {
+            while let Some(frame) = incoming_body.next().await {
+                if body_tx.send(frame).await.is_err() {
+                    break;
+                }
+            }
+        });
+
+        let (head_tx, head_rx) = tokio::sync::oneshot::channel();
+        let (response_tx, response_rx) = tokio::sync::mpsc::channel(32);
+
+        // Inner block ensures raw-pointer locals do not cross the `.await`,
+        // keeping the host future `Send`.
         {
-            let header_pairs: Vec<(Vec<u8>, Vec<u8>)> = incoming
-                .headers()
+            let header_pairs: Vec<(Vec<u8>, Vec<u8>)> = parts
+                .headers
                 .iter()
                 .map(|(k, v)| (k.as_str().as_bytes().to_vec(), v.as_bytes().to_vec()))
                 .collect();
-
             let c_headers: Vec<HttpHeader> = header_pairs
                 .iter()
                 .map(|(name, value)| HttpHeader {
@@ -215,16 +299,10 @@ impl Host for Env {
                 })
                 .collect();
 
-            let method = CString::new(incoming.method().as_str())
+            let method = CString::new(parts.method.as_str())
                 .map_err(|e| -> BoxError { Box::new(std::io::Error::other(e)) })?;
-            let url = CString::new(incoming.uri().to_string())
+            let url = CString::new(parts.uri.to_string())
                 .map_err(|e| -> BoxError { Box::new(std::io::Error::other(e)) })?;
-
-            let body_bytes = incoming.body().as_ref().map(|b| b.to_vec());
-            let (body_ptr, body_len) = body_bytes
-                .as_ref()
-                .map_or((std::ptr::null(), 0), |b| (b.as_ptr(), b.len()));
-
             let c_request = HttpRequestInfo {
                 method: method.as_ptr(),
                 url: url.as_ptr(),
@@ -234,34 +312,29 @@ impl Host for Env {
                     c_headers.as_ptr()
                 },
                 headers_len: c_headers.len(),
-                body: body_ptr,
-                body_len,
+                body_stream: request_body,
             };
 
             let response_body = Box::into_raw(Box::new(HttpResponseBody {
                 head: Mutex::new(Some(head_tx)),
-                body: body_tx,
+                body: response_tx,
             }));
 
             http_request_fn(&raw const c_request, response_body, handler.user_data);
         }
 
-        // Await status + headers from C side (non-blocking on the async runtime).
         let head = head_rx.await.map_err(|_| -> BoxError {
             Box::new(std::io::Error::other("HTTP response closed without status"))
         })?;
 
-        let body_stream: HttpBodyStream = Box::pin(ReceiverStream::new(body_rx));
-
+        let body_stream: HttpBodyStream = Box::pin(ReceiverStream::new(response_rx));
         let mut builder = http::Response::builder().status(head.status);
         for (name, value) in &head.headers {
             builder = builder.header(name.as_slice(), value.as_slice());
         }
-        let response = builder
+        builder
             .body(body_stream)
-            .map_err(|e| -> BoxError { Box::new(e) })?;
-
-        Ok(response)
+            .map_err(|e| -> BoxError { Box::new(e) })
     }
 }
 

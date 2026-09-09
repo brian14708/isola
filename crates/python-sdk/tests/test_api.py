@@ -788,6 +788,83 @@ async def test_sandbox_http_stream_response_shape() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sandbox_http_streaming_request_body() -> None:
+    runtime_dir, lib_dir = _resolve_runtime_paths()
+    template = await isola.build_template(
+        "python",
+        runtime_path=runtime_dir,
+        max_memory=64 * 1024 * 1024,
+        runtime_lib_dir=lib_dir,
+    )
+
+    received: list[bytes] = []
+
+    async def http(req: HttpRequest) -> HttpResponse:
+        assert req.method == "POST"
+        received.extend([chunk async for chunk in req.body_stream])
+        return cast(
+            "HttpResponse", isola.HttpResponse(status=200, body=b"".join(received))
+        )
+
+    async with template.create(http=http) as sandbox:
+        await sandbox.load_script(
+            "import asyncio\n"
+            "import httpx2\n"
+            "\n"
+            "async def chunks():\n"
+            "    yield b'first'\n"
+            "    await asyncio.sleep(0.01)\n"
+            "    yield b'second'\n"
+            "\n"
+            "async def main(url):\n"
+            "    async with httpx2.AsyncClient() as client:\n"
+            "        response = await client.post(url, content=chunks())\n"
+            "        return response.text\n"
+        )
+        result = await sandbox.run("main", "https://example.test/upload")
+
+    assert result == "firstsecond"
+    assert received
+    assert b"".join(received) == b"firstsecond"
+
+
+@pytest.mark.asyncio
+async def test_sandbox_http_request_aread_caches_body() -> None:
+    runtime_dir, lib_dir = _resolve_runtime_paths()
+    template = await isola.build_template(
+        "python",
+        runtime_path=runtime_dir,
+        max_memory=64 * 1024 * 1024,
+        runtime_lib_dir=lib_dir,
+    )
+
+    async def http(req: HttpRequest) -> HttpResponse:
+        first = await req.aread()
+        second = await req.aread()
+        assert first == second == b"firstsecond"
+        return cast("HttpResponse", isola.HttpResponse(status=200, body=first))
+
+    async with template.create(http=http) as sandbox:
+        await sandbox.load_script(
+            "import asyncio\n"
+            "import httpx2\n"
+            "\n"
+            "async def chunks():\n"
+            "    yield b'first'\n"
+            "    await asyncio.sleep(0.01)\n"
+            "    yield b'second'\n"
+            "\n"
+            "async def main(url):\n"
+            "    async with httpx2.AsyncClient() as client:\n"
+            "        response = await client.post(url, content=chunks())\n"
+            "        return response.text\n"
+        )
+        result = await sandbox.run("main", "https://example.test/upload")
+
+    assert result == "firstsecond"
+
+
+@pytest.mark.asyncio
 async def test_sandbox_caller_timeout_does_not_break_following_requests() -> None:
     runtime_dir, lib_dir = _resolve_runtime_paths()
     template = await isola.build_template(

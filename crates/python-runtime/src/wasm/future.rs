@@ -39,6 +39,28 @@ impl PyPollable {
             PollableState::Operation(handle) => pending::is_ready(handle),
         }
     }
+
+    pub(crate) fn wait_blocking(&self) -> PyResult<()> {
+        match self.state {
+            PollableState::Ready => Ok(()),
+            PollableState::Operation(handle) => {
+                let _ = pending::drive_pending(|| {
+                    if pending::is_ready(handle) {
+                        pending::Drive::Suspend
+                    } else {
+                        pending::Drive::Wait
+                    }
+                });
+                if pending::is_ready(handle) {
+                    Ok(())
+                } else {
+                    Err(pyo3::exceptions::PyRuntimeError::new_err(
+                        "operation did not become ready",
+                    ))
+                }
+            }
+        }
+    }
 }
 
 #[pymethods]
@@ -54,13 +76,25 @@ impl PyPollable {
     fn get(&self) -> PyResult<()> {
         match self.state {
             PollableState::Ready => Ok(()),
-            PollableState::Operation(handle) => match pending::take(handle) {
-                Ok(Take::Ready(Output::Sleep)) => Ok(()),
-                Ok(Take::Ready(Output::Host(_) | Output::Http { .. } | Output::HttpStream(_))) => {
+            PollableState::Operation(handle) if pending::is_http_stream_read(handle) => {
+                if pending::is_ready(handle) {
+                    Ok(())
+                } else {
                     Err(pyo3::exceptions::PyRuntimeError::new_err(
-                        "operation result must be read from its owner",
+                        "operation is not ready",
                     ))
                 }
+            }
+            PollableState::Operation(handle) => match pending::take(handle) {
+                Ok(Take::Ready(Output::Sleep)) => Ok(()),
+                Ok(Take::Ready(
+                    Output::Host(_)
+                    | Output::Http { .. }
+                    | Output::HttpStream(_)
+                    | Output::HttpUploadWrite(_),
+                )) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                    "operation result must be read from its owner",
+                )),
                 Ok(Take::Pending) => Err(pyo3::exceptions::PyRuntimeError::new_err(
                     "operation is not ready",
                 )),
@@ -71,23 +105,17 @@ impl PyPollable {
 
     fn release(&self) {
         if let PollableState::Operation(handle) = self.state {
-            pending::release(handle);
+            // A response owner consumes stream-read results itself after the
+            // pollable wakes. Keep a ready read alive for that owner; pending
+            // reads can still be cancelled normally.
+            if !pending::is_http_stream_read(handle) || !pending::is_ready(handle) {
+                pending::release(handle);
+            }
         }
     }
 
     fn wait(&self) -> PyResult<()> {
-        match self.state {
-            PollableState::Ready => Ok(()),
-            PollableState::Operation(handle) => match pending::drive_one(handle) {
-                Ok(Output::Sleep) => Ok(()),
-                Ok(Output::Host(_) | Output::Http { .. } | Output::HttpStream(_)) => {
-                    Err(pyo3::exceptions::PyRuntimeError::new_err(
-                        "operation result must be read from its owner",
-                    ))
-                }
-                Err(error) => Err(pyo3::exceptions::PyRuntimeError::new_err(error.to_string())),
-            },
-        }
+        self.wait_blocking()
     }
 }
 
@@ -130,10 +158,38 @@ pub fn take_http_result(handle: u32) -> Result<HttpResponse, String> {
     }
 }
 
+/// Pump the executor until `handle` is ready (or the executor stalls).
+fn drive_until_ready(handle: u32) {
+    let _ = pending::drive_pending(|| {
+        if pending::is_ready(handle) {
+            pending::Drive::Suspend
+        } else {
+            pending::Drive::Wait
+        }
+    });
+}
+
 pub fn drive_one_http(handle: u32) -> Result<HttpResponse, String> {
-    match pending::drive_one(handle) {
-        Ok(Output::Http { response, .. }) => response,
-        _ => Err("invalid HTTP handle".to_string()),
+    drive_until_ready(handle);
+    match pending::take(handle) {
+        Ok(Take::Ready(Output::Http { response, .. })) => response,
+        _ => Err("invalid or undriven HTTP handle".to_string()),
+    }
+}
+
+pub fn take_http_upload_write_result(handle: u32) -> Result<(), String> {
+    match pending::take(handle) {
+        Ok(Take::Ready(Output::HttpUploadWrite(result))) => result,
+        _ => Err("invalid or undriven HTTP upload handle".to_string()),
+    }
+}
+
+pub fn drive_one_http_upload_write(handle: u32) -> Result<(), String> {
+    drive_until_ready(handle);
+    if pending::is_ready(handle) {
+        Ok(())
+    } else {
+        Err("invalid or undriven HTTP upload handle".to_string())
     }
 }
 

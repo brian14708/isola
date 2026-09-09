@@ -25,7 +25,7 @@ type CallbackTsfn = Arc<
     ThreadsafeFunction<(String, Option<String>), (), (String, Option<String>), napi::Status, false>,
 >;
 type HttpHandlerFunction<'env> =
-    Function<'env, (String, String, Buffer, Option<Buffer>), Promise<crate::env::JsHttpResponse>>;
+    Function<'env, (String, String, Buffer, u32), Promise<crate::env::JsHttpResponse>>;
 type HttpStreamHandlerFunction<'env> =
     Function<'env, (String, String, Buffer, Option<Buffer>), Promise<JsHttpStreamChunk>>;
 
@@ -148,35 +148,61 @@ impl OutputCollector {
     fn handle_event(&self, event: OutputEvent) -> std::result::Result<(), BoxError> {
         match event {
             OutputEvent::Item(item) => {
+                if self.callback.is_none() {
+                    return Ok(());
+                }
                 let text = item.to_json_str().map_err(|e| -> BoxError {
                     Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                 })?;
-                self.emit_or_record_error(CallbackEvent::Result, Some(&text), "result");
-                self.record(|data| data.result_json.push(text));
+                if !self.emit(CallbackEvent::Result, Some(&text)) {
+                    self.record(|data| {
+                        data.result_json.push(text);
+                        data.errors
+                            .push("output callback rejected a result event".to_owned());
+                    });
+                }
             }
             OutputEvent::Complete(item) => {
                 if let Some(item) = item {
                     let text = item.to_json_str().map_err(|e| -> BoxError {
                         Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, e))
                     })?;
-                    self.emit_or_record_error(CallbackEvent::End, Some(&text), "end");
-                    self.record(|data| data.final_json = Some(text));
+                    if self.callback.is_none() {
+                        self.record(|data| data.final_json = Some(text));
+                    } else if !self.emit(CallbackEvent::End, Some(&text)) {
+                        self.record(|data| data.final_json = Some(text));
+                        self.record(|data| {
+                            data.errors
+                                .push("output callback rejected an end event".to_owned());
+                        });
+                    }
                 } else {
+                    if self.callback.is_none() {
+                        return Ok(());
+                    }
                     self.emit_or_record_error(CallbackEvent::End, None, "end");
                 }
             }
             OutputEvent::Log { level, message, .. } => {
+                if self.callback.is_none() {
+                    return Ok(());
+                }
                 let callback_event = match level {
                     LogLevel::Stdout => CallbackEvent::Stdout,
                     LogLevel::Stderr => CallbackEvent::Stderr,
                     _ => CallbackEvent::Log,
                 };
-                self.emit_or_record_error(callback_event, Some(&message), "log");
-                self.record(|data| match level {
-                    LogLevel::Stdout => data.stdout.push(message),
-                    LogLevel::Stderr => data.stderr.push(message),
-                    _ => data.logs.push(message),
-                });
+                if !self.emit(callback_event, Some(&message)) {
+                    self.record(|data| match level {
+                        LogLevel::Stdout => data.stdout.push(message),
+                        LogLevel::Stderr => data.stderr.push(message),
+                        _ => data.logs.push(message),
+                    });
+                    self.record(|data| {
+                        data.errors
+                            .push("output callback rejected a log event".to_owned());
+                    });
+                }
             }
             _ => {}
         }
@@ -199,6 +225,7 @@ enum SandboxInner {
     Running {
         sandbox: Option<Sandbox<Env>>,
         callback: Option<CallbackTsfn>,
+        http_handler: Option<Arc<JsHttpHandler>>,
     },
 }
 
@@ -350,7 +377,9 @@ fn take_running_lease(
 ) -> napi::Result<(RunningSandboxLease, Option<CallbackTsfn>)> {
     let mut guard = inner.lock();
     match &mut *guard {
-        SandboxInner::Running { sandbox, callback } => {
+        SandboxInner::Running {
+            sandbox, callback, ..
+        } => {
             let sandbox = sandbox
                 .take()
                 .ok_or_else(|| napi::Error::from(invalid_argument("sandbox is busy")))?;
@@ -474,10 +503,10 @@ impl SandboxCore {
         }
     }
 
-    /// Set the HTTP handler: (method, url, headers, body) =>
+    /// Set the HTTP handler: (method, url, headers, bodyStreamHandle) =>
     /// Promise<response>
     #[napi(
-        ts_args_type = "handler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null; streamHandle?: number }>) | null, streamHandler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ body?: Buffer | null; done: boolean }>) | null"
+        ts_args_type = "handler: ((method: string, url: string, headers: Buffer, bodyStreamHandle: number) => Promise<{ status: number; headers?: Record<string, string>; body?: Buffer | null; streamHandle?: number }>) | null, streamHandler: ((method: string, url: string, headers: Buffer, body: Buffer | null) => Promise<{ body?: Buffer | null; done: boolean }>) | null"
     )]
     pub fn set_http_handler(
         &self,
@@ -510,6 +539,35 @@ impl SandboxCore {
                 "sandbox is not initialized",
             ))),
         }
+    }
+
+    fn running_http_handler(&self) -> napi::Result<Arc<JsHttpHandler>> {
+        let guard = self.inner.lock();
+        match &*guard {
+            SandboxInner::Running {
+                http_handler: Some(handler),
+                ..
+            } => Ok(Arc::clone(handler)),
+            _ => Err(napi::Error::from(invalid_argument(
+                "sandbox HTTP handler is not available",
+            ))),
+        }
+    }
+
+    /// Read one chunk from a request body stream exposed to a Node handler.
+    #[napi]
+    pub async fn read_http_request(&self, handle: u32) -> napi::Result<JsHttpStreamChunk> {
+        self.running_http_handler()?
+            .read_request_stream(handle)
+            .await
+            .map_err(|e| napi::Error::from_reason(e.to_string()))
+    }
+
+    /// Release a request body stream that a Node handler stopped consuming.
+    #[napi]
+    pub fn release_http_request(&self, handle: u32) -> napi::Result<()> {
+        self.running_http_handler()?.release_request_stream(handle);
+        Ok(())
     }
 
     #[napi]
@@ -546,6 +604,7 @@ impl SandboxCore {
                 *guard = SandboxInner::Running {
                     sandbox: Some(sandbox),
                     callback,
+                    http_handler,
                 };
                 drop(guard);
                 Ok(())

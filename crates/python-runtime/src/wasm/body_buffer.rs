@@ -117,6 +117,7 @@ impl BodyBuffer for Bytes {
 pub struct Lines {
     buffer: VecDeque<u8>,
     closed: bool,
+    scanned: usize,
 }
 
 impl BodyBuffer for Lines {
@@ -125,16 +126,29 @@ impl BodyBuffer for Lines {
     }
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
-        let b = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
-            (_, Some(idx)) => self.buffer.drain(..=idx).collect::<Vec<_>>(),
+        let newline = self
+            .buffer
+            .iter()
+            .skip(self.scanned)
+            .position(|&b| b == b'\n')
+            .map(|idx| self.scanned + idx);
+        let b = match (self.closed, newline) {
+            (_, Some(idx)) => {
+                self.scanned = 0;
+                self.buffer.drain(..=idx).collect::<Vec<_>>()
+            }
             (true, None) => {
                 if self.buffer.is_empty() {
                     return Ok(None);
                 }
 
+                self.scanned = 0;
                 std::mem::take(&mut self.buffer).into()
             }
-            (false, None) => return Ok(None),
+            (false, None) => {
+                self.scanned = self.buffer.len();
+                return Ok(None);
+            }
         };
 
         Ok(Some(
@@ -242,6 +256,7 @@ impl BodyBuffer for Text {
 pub struct ServerSentEvent {
     buffer: VecDeque<u8>,
     closed: bool,
+    scanned: usize,
     event: eventsource::event::Event,
 }
 
@@ -250,6 +265,7 @@ impl Default for ServerSentEvent {
         Self {
             buffer: VecDeque::new(),
             closed: false,
+            scanned: 0,
             event: eventsource::event::Event::new(),
         }
     }
@@ -262,8 +278,17 @@ impl BodyBuffer for ServerSentEvent {
 
     fn decode<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
         loop {
-            let line = match (self.closed, self.buffer.iter().position(|&b| b == b'\n')) {
-                (_, Some(idx)) => self.buffer.drain(..=idx).collect::<Vec<_>>(),
+            let newline = self
+                .buffer
+                .iter()
+                .skip(self.scanned)
+                .position(|&b| b == b'\n')
+                .map(|idx| self.scanned + idx);
+            let line = match (self.closed, newline) {
+                (_, Some(idx)) => {
+                    self.scanned = 0;
+                    self.buffer.drain(..=idx).collect::<Vec<_>>()
+                }
                 (true, None) => {
                     if self.buffer.is_empty() {
                         if !self.event.is_empty() {
@@ -276,10 +301,14 @@ impl BodyBuffer for ServerSentEvent {
                         return Ok(None);
                     }
 
+                    self.scanned = 0;
                     let s = std::mem::take(&mut self.buffer);
                     s.into()
                 }
-                (false, None) => return Ok(None),
+                (false, None) => {
+                    self.scanned = self.buffer.len();
+                    return Ok(None);
+                }
             };
             let line = String::from_utf8(line)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyTypeError, _>(e.to_string()))?;
