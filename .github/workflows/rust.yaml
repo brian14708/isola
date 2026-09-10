@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
       - name: Run tests
@@ -78,7 +78,7 @@ jobs:
     steps:
       - name: Checkout your repository using git
         uses: actions/checkout@v7
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
       - name: Download wasm bundles
