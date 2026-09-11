@@ -87,13 +87,13 @@ fn js_serde_loads<'js>(
         }
         "cbor" => {
             if let Some(buf) = js_serde::array_buffer_from_value(data.clone())
-                && let Some(bytes) = buf.as_bytes()
+                && let Some(bytes) = unsafe { buf.as_bytes() }
             {
                 return js_serde::cbor_to_js(&ctx, bytes)
                     .map_err(|e| rquickjs::Error::new_from_js_message("cbor", "value", &e));
             }
             if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(data)
-                && let Some(bytes) = ta.as_bytes()
+                && let Some(bytes) = unsafe { ta.as_bytes() }
             {
                 return js_serde::cbor_to_js(&ctx, bytes)
                     .map_err(|e| rquickjs::Error::new_from_js_message("cbor", "value", &e));
