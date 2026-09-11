@@ -44,7 +44,7 @@ pyo3 = "0.29"
 pyo3-async-runtimes = "0.29"
 pyo3-build-config = "0.29"
 reqwest = { version = "0.13", default-features = false }
-rquickjs = "0.12"
+rquickjs = "0.13"
 rustc-demangle = "0.1"
 serde = "1.0"
 serde-transcode = "1.1"

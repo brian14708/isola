@@ -221,9 +221,9 @@ fn body_to_bytes(body: Value<'_>, is_json_body: bool) -> Result<Vec<u8>, String>
     if let Some(s) = body.as_string() {
         Ok(s.to_string().map_err(|e| e.to_string())?.into_bytes())
     } else if let Some(buf) = js_serde::array_buffer_from_value(body.clone()) {
-        Ok(buf.as_bytes().unwrap_or_default().to_vec())
+        Ok(unsafe { buf.as_bytes() }.unwrap_or_default().to_vec())
     } else if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(body.clone()) {
-        Ok(ta.as_bytes().unwrap_or_default().to_vec())
+        Ok(unsafe { ta.as_bytes() }.unwrap_or_default().to_vec())
     } else if is_json_body {
         Ok(js_serde::js_to_json(body)?.into_bytes())
     } else {

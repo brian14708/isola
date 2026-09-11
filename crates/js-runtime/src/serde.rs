@@ -323,7 +323,7 @@ impl Serialize for JsValue<'_> {
                     // Check if it's an ArrayBuffer
                     if v.as_object().is_some() {
                         if let Some(buf) = array_buffer_from_value(v.clone())
-                            && let Some(bytes) = buf.as_bytes()
+                            && let Some(bytes) = unsafe { buf.as_bytes() }
                         {
                             return serializer.serialize_bytes(bytes);
                         }
@@ -331,7 +331,7 @@ impl Serialize for JsValue<'_> {
                             ($ty:ty, $tag:expr) => {
                                 if let Ok(array) =
                                     rquickjs::TypedArray::<$ty>::from_value(v.clone())
-                                    && let Some(bytes) = array.as_bytes()
+                                    && let Some(bytes) = unsafe { array.as_bytes() }
                                 {
                                     return minicbor_serde::tag::Any::tagged(
                                         minicbor::data::Tag::new($tag),
@@ -416,12 +416,12 @@ impl<'de> Deserializer<'de> for JsValue<'_> {
         } else if v.is_object() {
             // Check ArrayBuffer first
             if let Some(buf) = array_buffer_from_value(v.clone())
-                && let Some(bytes) = buf.as_bytes()
+                && let Some(bytes) = unsafe { buf.as_bytes() }
             {
                 return visitor.visit_bytes(bytes);
             }
             if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(v.clone())
-                && let Some(bytes) = ta.as_bytes()
+                && let Some(bytes) = unsafe { ta.as_bytes() }
             {
                 return visitor.visit_bytes(bytes);
             }
@@ -844,7 +844,10 @@ mod typed_array_tests {
 
             let roundtrip = cbor_to_js(&ctx, &encoded).unwrap();
             let array = rquickjs::TypedArray::<f32>::from_value(roundtrip).unwrap();
-            assert_eq!(array.as_bytes().unwrap(), &[0, 0, 192, 63, 0, 0, 16, 192]);
+            assert_eq!(
+                unsafe { array.as_bytes().unwrap() },
+                &[0, 0, 192, 63, 0, 0, 16, 192]
+            );
         });
     }
 
