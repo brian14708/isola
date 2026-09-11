@@ -1489,6 +1489,7 @@ impl Host for Env {
 }
 
 #[pymodule]
+#[allow(clippy::used_underscore_items)]
 fn _isola(py: Python<'_>, module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add("IsolaError", py.get_type::<IsolaError>())?;
     module.add(

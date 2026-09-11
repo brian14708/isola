@@ -49,10 +49,7 @@ impl ResourceLimiter for MemoryLimiter {
         desired: usize,
         _maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
-        if desired > self.max_table_elements_hard {
-            return Ok(false);
-        }
-        Ok(true)
+        Ok(desired <= self.max_table_elements_hard)
     }
 }
 
