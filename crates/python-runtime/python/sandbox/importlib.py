@@ -207,7 +207,6 @@ def _initialize_pep723(meta: str) -> None:  # pyright: ignore[reportUnusedFuncti
         "isola-py",
         "numpy",
         "pillow",
-        "duron",
     }
 
     importers: list[HttpImporter] = []

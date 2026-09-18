@@ -25,19 +25,11 @@ let
     ++ (builtins.map toString [
       (fetchPypi {
         pname = "httpx2";
-        version = "2.12.0";
+        version = "2.13.0";
         format = "wheel";
         python = "py3";
         dist = "py3";
-        hash = "sha256-zItu7LhmHBRrj4mmDpdFbuCG6Rp4TtMaxFDDqeYT3TY=";
-      })
-      (fetchPypi {
-        pname = "duron";
-        version = "0.0.3";
-        format = "wheel";
-        python = "py3";
-        dist = "py3";
-        hash = "sha256-6clLYJzGSNPzVZESBaAt1lYe16Q6zNL+buMvgobKKo4=";
+        hash = "sha256-/BJyDO33L6omzKa0yjlOBciU59eTP8Rcr+dnlggE5Jo=";
       })
     ]);
 
