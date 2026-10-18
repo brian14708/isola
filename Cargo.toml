@@ -38,7 +38,7 @@ napi-build = "2.3"
 napi-derive = "3.5"
 oxc = "0.154"
 parking_lot = "0.12"
-pyo3 = "0.29"
+pyo3 = "0.30"
 pyo3-async-runtimes = "0.29"
 pyo3-build-config = "0.29"
 reqwest = { version = "0.13", default-features = false }
