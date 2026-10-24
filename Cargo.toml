@@ -37,7 +37,7 @@ napi = { version = "3.10", default-features = false }
 napi-build = "2.3"
 napi-derive = "3.5"
 oxc = "0.155"
-parking_lot = "0.12"
+parking_lot = "0.13"
 pyo3 = "0.30"
 pyo3-async-runtimes = "0.30"
 pyo3-build-config = "0.30"
