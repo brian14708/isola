@@ -89,7 +89,11 @@ async fn compile_serialized_component(
     let directory_mappings = directory_mappings.to_vec();
     let wasm_bytes = wasm_bytes.to_vec();
 
+    let span = tracing::Span::current();
+    let dispatcher = tracing::dispatcher::get_default(Clone::clone);
     tokio::task::spawn_blocking(move || {
+        let _subscriber = tracing::dispatcher::set_default(&dispatcher);
+        let _span = span.enter();
         // Run initialization on a blocking worker so the compile-time guest
         // instantiation stays off the main async scheduler.
         tokio::runtime::Handle::current().block_on(async move {

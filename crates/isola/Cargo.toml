@@ -47,6 +47,7 @@ wasmtime-wasi-http = { workspace = true }
 wasmtime-wizer = { workspace = true, features = ["component-model", "wasmtime"] }
 
 [dev-dependencies]
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 criterion = { workspace = true }
 reqwest = { workspace = true, features = ["http2", "stream", "gzip", "rustls"] }
 tempfile = { workspace = true }

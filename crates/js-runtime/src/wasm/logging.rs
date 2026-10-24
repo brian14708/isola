@@ -12,7 +12,7 @@ pub fn register(ctx: &Ctx<'_>) {
         .set(
             "debug",
             Function::new(ctx.clone(), |msg: String| {
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Debug, "log", &json);
             })
             .unwrap(),
@@ -23,7 +23,7 @@ pub fn register(ctx: &Ctx<'_>) {
         .set(
             "info",
             Function::new(ctx.clone(), |msg: String| {
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Info, "log", &json);
             })
             .unwrap(),
@@ -34,7 +34,7 @@ pub fn register(ctx: &Ctx<'_>) {
         .set(
             "warn",
             Function::new(ctx.clone(), |msg: String| {
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Warn, "log", &json);
             })
             .unwrap(),
@@ -45,7 +45,7 @@ pub fn register(ctx: &Ctx<'_>) {
         .set(
             "error",
             Function::new(ctx.clone(), |msg: String| {
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Error, "log", &json);
             })
             .unwrap(),
@@ -62,7 +62,7 @@ pub fn register(ctx: &Ctx<'_>) {
             "log",
             Function::new(ctx.clone(), |args: rquickjs::function::Rest<String>| {
                 let msg = args.0.join(" ");
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Info, "log", &json);
             })
             .unwrap(),
@@ -74,7 +74,7 @@ pub fn register(ctx: &Ctx<'_>) {
             "debug",
             Function::new(ctx.clone(), |args: rquickjs::function::Rest<String>| {
                 let msg = args.0.join(" ");
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Debug, "log", &json);
             })
             .unwrap(),
@@ -86,7 +86,7 @@ pub fn register(ctx: &Ctx<'_>) {
             "warn",
             Function::new(ctx.clone(), |args: rquickjs::function::Rest<String>| {
                 let msg = args.0.join(" ");
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Warn, "log", &json);
             })
             .unwrap(),
@@ -98,7 +98,7 @@ pub fn register(ctx: &Ctx<'_>) {
             "error",
             Function::new(ctx.clone(), |args: rquickjs::function::Rest<String>| {
                 let msg = args.0.join(" ");
-                let json = format!(r#"{{"message":"{}"}}"#, msg.replace('"', "\\\""));
+                let json = serde_json::json!({ "message": msg }).to_string();
                 log(Level::Error, "log", &json);
             })
             .unwrap(),

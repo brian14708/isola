@@ -4,7 +4,7 @@ use bytes::{Bytes, BytesMut};
 use http_body::Frame;
 use http_body_util::BodyExt as _;
 use tokio::time::timeout;
-use tracing::Instrument;
+use tracing::{Instrument, instrument::WithSubscriber as _};
 use wasmtime::{
     Engine, Store,
     component::{Linker, ResourceTable},
@@ -142,12 +142,12 @@ impl<H: Host> InstanceState<H> {
             .stdout(TraceOutput::new(
                 LogLevel::Stdout,
                 LogContext::Stdout,
-                Arc::clone(&log_target_store),
+                log_target_store.clone(),
             ))
             .stderr(TraceOutput::new(
                 LogLevel::Stderr,
                 LogContext::Stderr,
-                Arc::clone(&log_target_store),
+                log_target_store.clone(),
             ))
             .build();
         let limiter = MemoryLimiter::new(max_memory);
@@ -182,12 +182,10 @@ impl<H: Host> InstanceState<H> {
 
     #[expect(
         clippy::needless_pass_by_ref_mut,
-        clippy::unused_async,
-        clippy::unused_async_trait_impl,
-        reason = "the async boundary is kept consistent with call cleanup hooks"
+        reason = "mutable borrow keeps the cleanup future Send without requiring InstanceState: Sync"
     )]
     pub async fn flush_logs(&mut self) -> wasmtime::Result<()> {
-        Ok(())
+        crate::internal::trace_output::flush_logs(&self.log_target_store).await
     }
 
     #[cfg(test)]
@@ -275,7 +273,8 @@ impl<H: Host> WasiHttpHooks for InstanceHttpHooks<H> {
 
                 Ok((resp, fut))
             }
-            .in_current_span(),
+            .in_current_span()
+            .with_current_subscriber(),
         )
     }
 }
@@ -580,7 +579,7 @@ mod tests {
             },
             output_target: None,
             capture_output: None,
-            log_target_store: Arc::new(Mutex::new(None)),
+            log_target_store: new_log_target_store(),
             output_buffer: OutputBuffer::new(),
         };
 
@@ -646,7 +645,7 @@ mod tests {
             },
             output_target: None,
             capture_output: None,
-            log_target_store: Arc::new(Mutex::new(None)),
+            log_target_store: new_log_target_store(),
             output_buffer: OutputBuffer::new(),
         };
 

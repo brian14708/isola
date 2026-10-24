@@ -4,3 +4,5 @@ mod hostcall;
 mod http;
 
 mod snapshot_audit;
+
+mod tracing;

@@ -2,7 +2,7 @@ use std::{pin::Pin, sync::Arc};
 
 use futures::StreamExt;
 use tokio_stream::Stream;
-use tracing::Instrument;
+use tracing::{Instrument, instrument::WithSubscriber as _};
 use wasmtime::component::{Accessor, Resource};
 
 use super::{
@@ -87,7 +87,8 @@ impl<T: HostView + 'static> HostWithStore<T> for LinkerHost<T> {
                     .map(|v| v.into_cbor().into())
                     .map_err(|e| e.to_string())
             }
-            .in_current_span(),
+            .in_current_span()
+            .with_current_subscriber(),
         )
         .await)
     }

@@ -988,3 +988,32 @@ async fn integration_python_stdlib_zstd_roundtrip() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_tracing_raw_stdout_is_drained_between_calls() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    sandbox.eval_script(
+        "import os\ndef main():\n\tos.write(1, b'raw stdout')\n\tos.write(2, b'raw stderr')\n\treturn 42",
+        OutputTarget::discard(),
+    ).await?;
+    for _ in 0..2 {
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        sandbox
+            .call_with_sink("main", [], CollectLogsSink::new(logs.clone()).into_target())
+            .await?;
+        assert_eq!(
+            *logs.lock(),
+            [
+                ("stdout".to_owned(), "raw stdout".to_owned()),
+                ("stderr".to_owned(), "raw stderr".to_owned())
+            ],
+        );
+    }
+    Ok(())
+}
