@@ -317,8 +317,8 @@ impl Serialize for JsValue<'_> {
                         )
                     }
                 } else if let Some(s) = v.as_string() {
-                    let s = s.to_string().map_err(serde::ser::Error::custom)?;
-                    serializer.serialize_str(&s)
+                    let s = s.clone().to_cstring().map_err(serde::ser::Error::custom)?;
+                    serializer.serialize_str(s.as_str())
                 } else if v.is_object() && !v.is_array() {
                     // Check if it's an ArrayBuffer
                     if v.as_object().is_some() {

@@ -92,17 +92,36 @@ pub mod sys_module {
     #[pyo3(signature = (step, suspend = false))]
     fn drive(step: &Bound<'_, PyAny>, suspend: bool) -> PyResult<()> {
         let mut error = None;
-        let _ = crate::wasm::future::drive_pending_calls(|| {
-            match step.call0().and_then(|wait| wait.extract::<bool>()) {
-                Ok(true) => isola_runtime::pending::Drive::Wait,
-                Ok(false) if suspend => isola_runtime::pending::Drive::Suspend,
-                Ok(false) => isola_runtime::pending::Drive::Stop,
-                Err(cause) => {
-                    error = Some(cause);
-                    isola_runtime::pending::Drive::Stop
-                }
+        let mut advance = || match step.call0().and_then(|wait| wait.extract::<bool>()) {
+            Ok(true) => isola_runtime::pending::Drive::Wait,
+            Ok(false) if suspend => isola_runtime::pending::Drive::Suspend,
+            Ok(false) => isola_runtime::pending::Drive::Stop,
+            Err(cause) => {
+                error = Some(cause);
+                isola_runtime::pending::Drive::Stop
             }
-        });
+        };
+
+        // Runner shutdown also drives coroutines that complete without I/O.
+        // Run their Python callbacks without constructing a Wasm executor. An
+        // existing operation still needs the driver's readiness refresh, and
+        // callbacks can register new operations, so check both sides of the
+        // first step before taking the fast path.
+        let mut first = if isola_runtime::pending::has_pending() {
+            None
+        } else {
+            Some(advance())
+        };
+        if matches!(
+            first,
+            Some(isola_runtime::pending::Drive::Stop | isola_runtime::pending::Drive::Suspend)
+        ) && !isola_runtime::pending::has_pending()
+        {
+            return error.map_or(Ok(()), Err);
+        }
+
+        let _ =
+            crate::wasm::future::drive_pending_calls(|| first.take().unwrap_or_else(&mut advance));
         error.map_or(Ok(()), Err)
     }
 }

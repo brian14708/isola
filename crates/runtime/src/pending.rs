@@ -127,11 +127,11 @@ enum Operation {
 }
 
 impl Operation {
-    fn is_ready(&self, now: Instant) -> bool {
+    fn is_ready(&self) -> bool {
         match self {
             Self::Host(state) => state.is_ready(),
             Self::Http { state, .. } => state.is_ready(),
-            Self::Sleep(deadline) => deadline.is_ready_at(now),
+            Self::Sleep(deadline) => deadline.is_ready(),
             Self::HttpStreamRead(state) => state.is_ready(),
             Self::HttpUploadWrite(state) => state.is_ready(),
         }
@@ -165,12 +165,13 @@ const FAIRNESS_YIELD: Duration = Duration::from_millis(1);
 
 struct Registry {
     operations: HashMap<u32, Operation>,
-    in_flight: InFlightSet,
+    in_flight: Option<InFlightSet>,
     abort_handles: HashMap<u32, AbortHandle>,
     deferred: VecDeque<u32>,
     ready: Vec<u32>,
     ready_indexes: HashMap<u32, usize>,
     deadlines: BinaryHeap<Reverse<(Instant, u64, u32)>>,
+    never_deadlines: usize,
     next_handle: u32,
     next_sequence: u64,
     ready_generation: u64,
@@ -182,12 +183,13 @@ impl Registry {
     fn new() -> Self {
         Self {
             operations: HashMap::new(),
-            in_flight: InFlightSet::new(),
+            in_flight: None,
             abort_handles: HashMap::new(),
             deferred: VecDeque::new(),
             ready: Vec::new(),
             ready_indexes: HashMap::new(),
             deadlines: BinaryHeap::new(),
+            never_deadlines: 0,
             next_handle: 0,
             next_sequence: 0,
             ready_generation: 0,
@@ -216,7 +218,7 @@ impl Registry {
 
     fn insert(&mut self, operation: Operation) -> u32 {
         let handle = self.allocate_handle();
-        let ready = operation.is_ready(Instant::now());
+        let ready = operation.is_ready();
         let (deferred, deadline) = match &operation {
             Operation::Sleep(deadline) => (false, Some(*deadline)),
             Operation::Host(_)
@@ -232,6 +234,9 @@ impl Registry {
             self.mark_ready(handle);
         }
         if let Some(deadline) = deadline {
+            if deadline.is_never() {
+                self.never_deadlines += 1;
+            }
             if let Some(ready_at) = deadline.ready_at() {
                 let sequence = self.next_sequence;
                 self.next_sequence = self.next_sequence.wrapping_add(1);
@@ -297,11 +302,11 @@ impl Registry {
     }
 
     fn take_in_flight(&mut self) -> InFlightSet {
-        std::mem::replace(&mut self.in_flight, InFlightSet::new())
+        self.in_flight.take().unwrap_or_default()
     }
 
     fn suspend(&mut self, in_flight: InFlightSet) {
-        self.in_flight = in_flight;
+        self.in_flight = Some(in_flight);
     }
 
     fn mark_ready(&mut self, handle: u32) {
@@ -345,10 +350,8 @@ impl Registry {
             .map(|Reverse((ready_at, _, _))| *ready_at)
     }
 
-    fn has_never_deadline(&self) -> bool {
-        self.operations
-            .values()
-            .any(|operation| matches!(operation, Operation::Sleep(deadline) if deadline.is_never()))
+    const fn has_never_deadline(&self) -> bool {
+        self.never_deadlines != 0
     }
 
     fn complete(&mut self, handle: u32, response: Response) {
@@ -409,6 +412,9 @@ impl Registry {
             .operations
             .remove(&handle)
             .ok_or(InvalidHandle(handle))?;
+        if matches!(&operation, Operation::Sleep(deadline) if deadline.is_never()) {
+            self.never_deadlines -= 1;
+        }
         if let Some(abort_handle) = self.abort_handles.remove(&handle) {
             abort_handle.abort();
         }
@@ -431,11 +437,12 @@ impl Registry {
             abort_handle.abort();
         }
         self.operations.clear();
-        self.in_flight = InFlightSet::new();
+        self.in_flight = None;
         self.deferred.clear();
         self.ready.clear();
         self.ready_indexes.clear();
         self.deadlines.clear();
+        self.never_deadlines = 0;
         self.uploads.clear();
     }
 
@@ -706,12 +713,11 @@ pub fn ready_handles() -> Vec<u32> {
 /// receive its concrete invalid-handle error instead of blocking forever.
 #[must_use]
 pub fn is_ready(handle: u32) -> bool {
-    let now = Instant::now();
     OPERATIONS.with(|operations| {
         operations
             .borrow()
             .get(handle)
-            .is_none_or(|operation| operation.is_ready(now))
+            .is_none_or(Operation::is_ready)
     })
 }
 
@@ -981,7 +987,10 @@ pub fn release(handle: u32) {
 
 /// Cancel and remove every registered operation without resetting handle IDs.
 pub fn clear() {
-    let _ = drive_pending(|| Drive::Stop);
+    // Cancellation needs no executor turn. Drop suspended futures outside the
+    // registry borrow: their destructors can re-enter the guest runtime.
+    let in_flight = OPERATIONS.with(|operations| operations.borrow_mut().in_flight.take());
+    drop(in_flight);
     OPERATIONS.with(|operations| operations.borrow_mut().clear());
 }
 

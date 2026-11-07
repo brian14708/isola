@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, cell::RefCell};
 
 use pyo3::{
     PyTypeInfo,
@@ -7,8 +7,8 @@ use pyo3::{
     prelude::*,
     sync::PyOnceLock,
     types::{
-        PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyInt, PyList, PyMemoryView, PyString,
-        PyTuple,
+        PyBool, PyByteArray, PyBytes, PyCode, PyCodeMethods, PyDict, PyFloat, PyInt, PyList,
+        PyMemoryView, PyString, PyTuple, code::PyCodeInput,
     },
 };
 
@@ -22,6 +22,7 @@ use crate::{
 pub struct Scope {
     locals: Py<PyAny>,
     stdio: Option<(Py<PyAny>, Py<PyAny>)>,
+    last_script: RefCell<Option<(String, Py<PyCode>)>>,
 }
 
 pub enum InputValue<'a> {
@@ -94,6 +95,7 @@ sandbox._httpx2.install()
             Self {
                 locals: locals.into_pyobject(py).unwrap().into(),
                 stdio,
+                last_script: RefCell::new(None),
             }
         })
     }
@@ -119,22 +121,41 @@ sandbox._httpx2.install()
                     .call1((meta,))
                     .map_err(|e| Error::from_pyerr(py, e))?;
             }
-            let code = std::ffi::CString::new(code).map_err(|e| {
-                Error::from_pyerr(
-                    py,
-                    PyValueError::new_err(format!("script contains NUL byte: {e}")),
+            let cached = self
+                .last_script
+                .borrow()
+                .as_ref()
+                .filter(|(source, _)| source == code)
+                .map(|(_, compiled)| compiled.clone_ref(py));
+            let compiled = if let Some(compiled) = cached {
+                compiled
+            } else {
+                let source = std::ffi::CString::new(code).map_err(|e| {
+                    Error::from_pyerr(
+                        py,
+                        PyValueError::new_err(format!("script contains NUL byte: {e}")),
+                    )
+                })?;
+                let compiled = PyCode::compile(py, &source, c"<string>", PyCodeInput::File)
+                    .map_err(|e| Error::from_pyerr(py, e))?
+                    .unbind();
+                // Bound retention to one small source; execution still happens
+                // on every load, including metadata initialization above.
+                *self.last_script.borrow_mut() =
+                    (code.len() <= 64 * 1024).then(|| (code.to_owned(), compiled.clone_ref(py)));
+                compiled
+            };
+            compiled
+                .bind(py)
+                .run(
+                    Some(
+                        self.locals
+                            .cast_bound(py)
+                            .map_err(|e| Error::from_pyerr(py, e))?,
+                    ),
+                    None,
                 )
-            })?;
-            py.run(
-                &code,
-                Some(
-                    self.locals
-                        .cast_bound(py)
-                        .map_err(|e| Error::from_pyerr(py, e))?,
-                ),
-                None,
-            )
-            .map_err(|e| Error::from_pyerr(py, e))?;
+                .map_err(|e| Error::from_pyerr(py, e))?;
             Ok(())
         })
     }

@@ -30,7 +30,7 @@ pub async fn load_or_compile_component(
 
     let Some(cache_dir) = &cfg.cache else {
         let bytes =
-            compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
+            compile_serialized_component(engine, cfg, directory_mappings, wasm_bytes).await?;
         // SAFETY: bytes are produced by wasmtime for the same version/config;
         // if incompatible, deserialization will fail and surface as an
         // error.
@@ -57,7 +57,7 @@ pub async fn load_or_compile_component(
         return Ok(component);
     }
 
-    let bytes = compile_serialized_component(engine, cfg, directory_mappings, &wasm_bytes).await?;
+    let bytes = compile_serialized_component(engine, cfg, directory_mappings, wasm_bytes).await?;
     write_cache_file_atomic(&cache_path, &bytes).await?;
 
     let component =
@@ -82,12 +82,11 @@ async fn compile_serialized_component(
     engine: &Engine,
     cfg: &ModuleConfig,
     directory_mappings: &[DirectoryMapping],
-    wasm_bytes: &[u8],
+    wasm_bytes: Vec<u8>,
 ) -> Result<Vec<u8>> {
     let engine = engine.clone();
     let cfg = cfg.clone();
     let directory_mappings = directory_mappings.to_vec();
-    let wasm_bytes = wasm_bytes.to_vec();
 
     let span = tracing::Span::current();
     let dispatcher = tracing::dispatcher::get_default(Clone::clone);
@@ -97,50 +96,58 @@ async fn compile_serialized_component(
         // Run initialization on a blocking worker so the compile-time guest
         // instantiation stays off the main async scheduler.
         tokio::runtime::Handle::current().block_on(async move {
-            let wizer = Wizer::new();
-            let (cx, instrumented_wasm) = wizer
-                .instrument_component(&wasm_bytes)
-                .map_err(Error::Wasm)?;
+            // Release the instrumented component, store, and initialization
+            // buffers before compiling the snapshot into the final component.
+            let data = {
+                let wizer = Wizer::new();
+                let (cx, instrumented_wasm) = wizer
+                    .instrument_component(&wasm_bytes)
+                    .map_err(Error::Wasm)?;
 
-            let component = Component::new(&engine, &instrumented_wasm).map_err(Error::Wasm)?;
-            let linker = InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
-            let mut store = InstanceState::new(
-                &engine,
-                &directory_mappings,
-                &cfg.env,
-                cfg.max_memory,
-                CompileHost,
-            )
-            .map_err(Error::Wasm)?;
-            store.epoch_deadline_async_yield_and_update(1);
-
-            let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
-            let instance = pre
-                .instantiate_async(&mut store)
-                .await
-                .map_err(Error::Wasm)?;
-            let guest = GuestIndices::new(&pre)
-                .map_err(Error::Wasm)?
-                .load(&mut store, &instance)
-                .map_err(Error::Wasm)?;
-
-            guest
-                .call_initialize(&mut store, true, cfg.prelude.as_deref())
-                .await
-                .map_err(Error::Wasm)?;
-
-            let data = wizer
-                .snapshot_component(
-                    &cx,
-                    &mut WasmtimeWizerComponent {
-                        store: &mut store,
-                        instance,
-                    },
+                let component = Component::new(&engine, &instrumented_wasm).map_err(Error::Wasm)?;
+                drop(instrumented_wasm);
+                let linker =
+                    InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
+                let mut store = InstanceState::new(
+                    &engine,
+                    &directory_mappings,
+                    &cfg.env,
+                    cfg.max_memory,
+                    CompileHost,
                 )
-                .await
                 .map_err(Error::Wasm)?;
+                store.epoch_deadline_async_yield_and_update(1);
+
+                let pre = linker.instantiate_pre(&component).map_err(Error::Wasm)?;
+                let instance = pre
+                    .instantiate_async(&mut store)
+                    .await
+                    .map_err(Error::Wasm)?;
+                let guest = GuestIndices::new(&pre)
+                    .map_err(Error::Wasm)?
+                    .load(&mut store, &instance)
+                    .map_err(Error::Wasm)?;
+
+                guest
+                    .call_initialize(&mut store, true, cfg.prelude.as_deref())
+                    .await
+                    .map_err(Error::Wasm)?;
+
+                wizer
+                    .snapshot_component(
+                        &cx,
+                        &mut WasmtimeWizerComponent {
+                            store: &mut store,
+                            instance,
+                        },
+                    )
+                    .await
+                    .map_err(Error::Wasm)?
+            };
+            drop(wasm_bytes);
 
             let component = Component::new(&engine, &data).map_err(Error::Wasm)?;
+            drop(data);
             component.serialize().map_err(Error::Wasm)
         })
     })

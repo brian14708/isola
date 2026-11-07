@@ -4,8 +4,8 @@ use isola_runtime::CallbackWriter;
 use pyo3::{
     Bound, IntoPyObject, PyAny, PyResult, PyTypeInfo, Python,
     types::{
-        PyAnyMethods, PyBytes, PyDict, PyFloat, PyInt, PyList, PyNone, PySet, PyStringMethods,
-        PyTuple, PyTypeMethods,
+        PyAnyMethods, PyBool, PyBoolMethods, PyBytes, PyBytesMethods, PyDict, PyFloat, PyInt,
+        PyList, PyNone, PySet, PyString, PyStringMethods, PyTuple, PyTypeMethods,
     },
 };
 use serde::{
@@ -250,8 +250,8 @@ impl Serialize for PyValue<'_> {
                         map.serialize_entry(&self.child(key), &self.child(value))?;
                     }
                     map.end()
-                } else if let Ok(s) = o.extract::<&[u8]>() {
-                    serializer.serialize_bytes(s)
+                } else if let Ok(s) = o.cast::<PyBytes>() {
+                    serializer.serialize_bytes(s.as_bytes())
                 } else if let Ok(list) = o.cast_exact::<PyList>() {
                     let len = list.len().ok();
                     let mut seq = serializer.serialize_seq(len)?;
@@ -273,10 +273,10 @@ impl Serialize for PyValue<'_> {
                         seq.serialize_element(&self.child(elem))?;
                     }
                     seq.end()
-                } else if let Ok(s) = o.extract::<&str>() {
+                } else if let Some(s) = o.cast::<PyString>().ok().and_then(|s| s.to_str().ok()) {
                     serializer.serialize_str(s)
-                } else if let Ok(b) = o.extract::<bool>() {
-                    serializer.serialize_bool(b)
+                } else if let Ok(b) = o.cast::<PyBool>() {
+                    serializer.serialize_bool(b.is_true())
                 } else if o.is_none() {
                     serializer.serialize_none()
                 } else if PyFloat::is_exact_type_of(o) {

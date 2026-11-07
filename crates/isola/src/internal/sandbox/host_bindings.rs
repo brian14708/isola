@@ -79,7 +79,7 @@ impl<T: HostView + 'static> HostWithStore<T> for LinkerHost<T> {
         payload: Vec<u8>,
     ) -> wasmtime::Result<Result<Vec<u8>, String>> {
         let host = accessor.with(|mut access| Arc::clone(access.get().0.host()));
-        Ok(wasmtime_wasi::runtime::spawn(
+        let mut call = Box::pin(
             async move {
                 let payload = Value::from_cbor(payload);
                 host.hostcall(&call_type, payload)
@@ -89,7 +89,16 @@ impl<T: HostView + 'static> HostWithStore<T> for LinkerHost<T> {
             }
             .in_current_span()
             .with_current_subscriber(),
-        )
-        .await)
+        );
+        // Complete immediate callbacks without scheduling a separate Tokio
+        // task. Pending callbacks keep the abort-on-drop task used for
+        // cancellation.
+        let ready = wasmtime_wasi::runtime::with_ambient_tokio_runtime(|| {
+            wasmtime_wasi::runtime::poll_noop(call.as_mut())
+        });
+        Ok(match ready {
+            Some(result) => result,
+            None => wasmtime_wasi::runtime::spawn(call).await,
+        })
     }
 }
