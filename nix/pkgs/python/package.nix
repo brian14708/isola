@@ -81,6 +81,7 @@ let
     nativeBuildInputs = [
       wasipkgs.python.host
       nukeReferences
+      pkgs.zstd
     ];
 
     env = {
@@ -89,6 +90,7 @@ let
       CARGO_INCREMENTAL = "0";
       PYO3_PYTHON = "${wasipkgs.python.host}/bin/python3";
       WASI_PYTHON_DEV = linkerInputs;
+      WASI_PYTHON_RUNTIME = bundle;
       WASI_SDK = wasipkgs.sdk;
     };
 
@@ -127,9 +129,9 @@ craneLib.buildPackage (
     installPhase = ''
       runHook preInstall
 
-      install -Dm644 target/python.wasm $out/bin/python.wasm
-      cp --no-preserve=mode -rL ${bundle}/. $out/
-      find $out/ -type f -exec nuke-refs '{}' +
+      mkdir -p "$out/bin"
+      nuke-refs target/python.wasm
+      zstd -q -19 target/python.wasm -o "$out/bin/python.wasm.zst"
 
       runHook postInstall
     '';

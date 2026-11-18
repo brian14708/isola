@@ -57,9 +57,8 @@ jobs:
       - name: Stage cross-platform bundles
         run: |
           nix --accept-flake-config develop --command bash -euo pipefail -c "
-            mkdir -p artifact/target artifact/runtime
+            mkdir -p artifact/target
             cp target/python.wasm target/js.wasm artifact/target/
-            cp -RL \"\$WASI_PYTHON_RUNTIME\"/. artifact/runtime/
           "
       - name: Upload wasm bundles
         uses: actions/upload-artifact@v7
@@ -95,6 +94,4 @@ jobs:
           cp artifact/target/python.wasm artifact/target/js.wasm target/
       - name: Run integration test
         shell: bash
-        env:
-          WASI_PYTHON_RUNTIME: ${{ github.workspace }}/artifact/runtime
         run: cargo test --release -p isola --test integration

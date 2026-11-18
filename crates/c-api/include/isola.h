@@ -233,7 +233,7 @@ enum isola_error_code isola_context_initialize(struct isola_context_handle *ctx,
  * | `prelude`  | Guest prelude source code. Empty string disables it. | `"import sandbox.asyncio"`      |
  * | `cache`    | Path to the compiled-component cache directory.      | `<wasm_dir>/cache`              |
  * | `env`      | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*                        |
- * | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none; `/lib` always mounted)* |
+ * | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none)* |
  *
  * The `env` and `mount` keys may be called multiple times to add multiple
  * entries. For `mount`, `writable` defaults to `false` when omitted.

@@ -21,6 +21,7 @@ mod args_macro;
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    io::Read as _,
     path::{Path, PathBuf},
     pin::Pin,
     sync::Arc,
@@ -38,9 +39,11 @@ use crate::{
     internal::{
         module::{
             ModuleConfig as InternalModuleConfig,
+            cache::cache_key,
             call::CallCleanup,
-            compile::load_or_compile_component,
+            compile::{load_cached_component, load_or_compile_component},
             configure::configure_engine,
+            embedded::{self, EmbeddedAssets},
             epoch::{EpochTickerRegistration, global_epoch_ticker},
         },
         sandbox::{
@@ -94,14 +97,16 @@ pub(crate) struct DirectoryMapping {
     pub(crate) host: PathBuf,
     pub(crate) guest: String,
     pub(crate) perms: FsPerms,
+    embedded: bool,
 }
 
 impl DirectoryMapping {
     pub fn new(host: impl Into<PathBuf>, guest: impl Into<String>) -> Self {
         Self {
             host: host.into(),
-            guest: guest.into(),
+            guest: normalize_guest_path(&guest.into()).to_owned(),
             perms: FsPerms::ReadOnly,
+            embedded: false,
         }
     }
 
@@ -109,6 +114,28 @@ impl DirectoryMapping {
         self.perms = perms;
         self
     }
+
+    fn covers_guest(&self, guest: &str) -> bool {
+        if self.guest == guest {
+            return true;
+        }
+        if !self.guest.starts_with('/') {
+            return false;
+        }
+        let prefix = self.guest.trim_end_matches('/');
+        guest
+            .strip_prefix(prefix)
+            .and_then(|relative| relative.strip_prefix('/'))
+            .is_some_and(|relative| self.host.join(relative).is_dir())
+    }
+}
+
+fn normalize_guest_path(path: &str) -> &str {
+    let trimmed = path.trim_end_matches('/');
+    if path.starts_with('/') && trimmed.is_empty() {
+        return "/";
+    }
+    trimmed
 }
 
 /// Function argument passed to guest `call-func`.
@@ -158,6 +185,7 @@ pub struct SandboxTemplateBuilder {
     pub(crate) cache: Option<PathBuf>,
     pub(crate) base_options: SandboxOptions,
     pub(crate) prelude: Option<String>,
+    required_guest_directory: Option<String>,
 }
 
 /// Compiled sandbox template that can instantiate multiple sandboxes.
@@ -170,6 +198,8 @@ pub struct SandboxTemplate {
     pub(crate) engine: Engine,
     pub(crate) component: Component,
     pub(crate) ticker: Arc<EpochTickerRegistration>,
+    /// Keeps uncached embedded asset directories alive.
+    asset_dirs: Arc<[tempfile::TempDir]>,
     pre_instances: Mutex<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
@@ -183,6 +213,7 @@ pub struct Sandbox<H: Host> {
     pub(crate) bindings: WasmSandbox,
     /// Keeps the epoch ticker alive for the lifetime of this sandbox.
     pub(crate) _ticker: Arc<EpochTickerRegistration>,
+    _asset_dirs: Arc<[tempfile::TempDir]>,
 }
 
 /// Per-instantiation policy overrides for a [`Sandbox`].
@@ -207,8 +238,9 @@ impl SandboxOptions {
 
     /// Mount a host directory into this sandbox instance.
     ///
-    /// If a guest path duplicates a module-level mount, this mount replaces it
-    /// for that instance.
+    /// A matching guest path replaces a template mount. A host directory
+    /// mounted at a parent path also replaces an embedded mount if it contains
+    /// the corresponding subdirectory.
     #[must_use]
     pub fn mount(
         mut self,
@@ -249,6 +281,14 @@ impl SandboxOptions {
         if let Some(max_memory) = overrides.max_memory {
             merged.max_memory = Some(max_memory);
         }
+
+        merged.directory_mappings.retain(|mapping| {
+            !mapping.embedded
+                || !overrides
+                    .directory_mappings
+                    .iter()
+                    .any(|user| user.covers_guest(&mapping.guest))
+        });
 
         let mut mount_indices =
             std::collections::HashMap::with_capacity(merged.directory_mappings.len());
@@ -293,11 +333,18 @@ pub struct CallOutput {
     pub result: Option<Value>,
 }
 
+enum PreparedComponent {
+    Cached(Component),
+    Source(Vec<u8>),
+}
+
 impl SandboxTemplateBuilder {
     /// Set the optional component cache directory.
     ///
     /// When set, compiled artifacts are cached on disk and reused across
     /// builds.
+    /// Use a directory writable only by trusted processes. Wasmtime loads
+    /// native code from compiled cache entries.
     #[must_use]
     pub fn cache(mut self, cache: Option<std::path::PathBuf>) -> Self {
         self.cache = cache;
@@ -350,6 +397,14 @@ impl SandboxTemplateBuilder {
         self
     }
 
+    /// Require the runtime to supply a guest directory through embedded assets
+    /// or a configured host mount before running the guest prelude.
+    #[must_use]
+    pub fn require_guest_directory(mut self, path: impl AsRef<str>) -> Self {
+        self.required_guest_directory = Some(normalize_guest_path(path.as_ref()).to_owned());
+        self
+    }
+
     /// Compile and initialize a reusable template from an Isola runtime
     /// component.
     ///
@@ -363,22 +418,74 @@ impl SandboxTemplateBuilder {
     /// be opened, the component is incompatible, initialization fails, or a
     /// compiled artifact cannot be cached.
     pub async fn build(self, wasm: impl AsRef<Path>) -> Result<SandboxTemplate> {
-        let wasm_path = std::fs::canonicalize(wasm.as_ref()).map_err(Error::from)?;
-        let base_options = self.base_options;
+        let wasm_path = wasm.as_ref().to_owned();
+        let mut base_options = self.base_options;
         let cfg = InternalModuleConfig {
-            cache: self.cache.clone(),
             max_memory: base_options.max_memory.unwrap_or(usize::MAX),
             directory_mappings: base_options.directory_mappings.clone(),
             env: base_options.env.clone(),
-            prelude: self.prelude.clone(),
+            prelude: self.prelude,
         };
-
         let mut engine_cfg = wasmtime::Config::default();
         configure_engine(&mut engine_cfg);
         let engine = Engine::new(&engine_cfg).map_err(Error::Wasm)?;
 
-        let component =
-            load_or_compile_component(&engine, &wasm_path, &cfg.directory_mappings, &cfg).await?;
+        let cache = self.cache;
+        let cache_engine = engine.clone();
+        let required = self.required_guest_directory;
+        let (prepared, EmbeddedAssets { mounts, temp_dirs }, compiled_cache, mut cfg) =
+            tokio::task::spawn_blocking(move || {
+                let wasm_path = std::fs::canonicalize(wasm_path)?;
+                let file = std::fs::File::open(wasm_path)?;
+                let size = file.metadata()?.len();
+                let input = read_runtime(file, MAX_RUNTIME_BYTES, size)?;
+                let cache = cache.as_deref().map(|dir| (dir, blake3::hash(&input)));
+                let compiled_cache = cache.map(|(dir, digest)| {
+                    dir.join(cache_key(&cache_engine, &cfg, digest))
+                        .with_extension("cwasm")
+                });
+                let explicit = |guest: &str| cfg.directory_mappings.iter().any(|mount| mount.covers_guest(guest));
+                let (prepared, assets) = if let Some(((root, digest), path)) = cache.zip(compiled_cache.as_deref())
+                    && path.is_file()
+                    && let Ok(assets) = embedded::prepare_from_index(root, digest, explicit)
+                    && let Ok(component) = load_cached_component(&cache_engine, path)
+                {
+                    (PreparedComponent::Cached(component), assets)
+                } else {
+                    let wasm_bytes = decode_runtime(input, MAX_RUNTIME_BYTES)?;
+                    let assets = embedded::prepare(&wasm_bytes, cache, explicit)
+                        .map_err(|e| Error::Other(e.into()))?;
+                    (PreparedComponent::Source(wasm_bytes), assets)
+                };
+                if let Some(guest) = required
+                    && !explicit(&guest)
+                    && !assets.mounts.iter().any(|mount| {
+                        DirectoryMapping::new(&mount.path, &mount.guest).covers_guest(&guest)
+                    })
+                {
+                    return Err(std::io::Error::other(format!(
+                        "runtime has no embedded files at {guest}. Use a runtime with embedded assets or mount the runtime library directory at {guest}"
+                    )).into());
+                }
+                Ok::<_, Error>((prepared, assets, compiled_cache, cfg))
+            })
+            .await
+            .map_err(|e| Error::Other(e.into()))??;
+        for mount in &mounts {
+            let mut mapping = DirectoryMapping::new(&mount.path, &mount.guest);
+            mapping.embedded = true;
+            base_options.directory_mappings.push(mapping);
+        }
+        cfg.directory_mappings
+            .clone_from(&base_options.directory_mappings);
+
+        let component = match prepared {
+            PreparedComponent::Cached(component) => component,
+            PreparedComponent::Source(wasm_bytes) => {
+                load_or_compile_component(&engine, wasm_bytes, &cfg, compiled_cache.as_deref())
+                    .await?
+            }
+        };
         Engine::tls_eager_initialize();
         let ticker = global_epoch_ticker()
             .map_err(Error::from)?
@@ -389,9 +496,52 @@ impl SandboxTemplateBuilder {
             engine,
             component,
             ticker,
+            asset_dirs: temp_dirs.into(),
             pre_instances: Mutex::new(HashMap::new()),
         })
     }
+}
+
+const ZSTD_MAGIC: [u8; 4] = zstd::zstd_safe::MAGICNUMBER.to_le_bytes();
+const MAX_RUNTIME_BYTES: u64 = 512 * 1024 * 1024;
+const MAX_INITIAL_DECODE_CAPACITY: u64 = 64 * 1024 * 1024;
+
+fn decode_runtime(bytes: Vec<u8>, limit: u64) -> std::io::Result<Vec<u8>> {
+    if !bytes.starts_with(&ZSTD_MAGIC) {
+        return Ok(bytes);
+    }
+    let size = zstd::zstd_safe::get_frame_content_size(&bytes)
+        .ok()
+        .flatten()
+        .unwrap_or(0)
+        .min(MAX_INITIAL_DECODE_CAPACITY);
+    let mut decoder = zstd::Decoder::new(bytes.as_slice())?;
+    decoder.window_log_max(MAX_RUNTIME_BYTES.ilog2())?;
+    read_runtime(decoder, limit, size.min(limit))
+}
+
+fn read_runtime(
+    reader: impl std::io::Read,
+    limit: u64,
+    size_hint: u64,
+) -> std::io::Result<Vec<u8>> {
+    if size_hint > limit {
+        return Err(runtime_too_large(limit));
+    }
+    // Reserve enough space for the EOF check even when the hint is exact.
+    let mut bytes = Vec::with_capacity(usize::try_from(size_hint + 1).unwrap());
+    reader.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(runtime_too_large(limit));
+    }
+    Ok(bytes)
+}
+
+fn runtime_too_large(limit: u64) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("runtime component exceeds the {limit}-byte limit"),
+    )
 }
 
 impl SandboxTemplate {
@@ -459,6 +609,7 @@ impl SandboxTemplate {
             store,
             bindings,
             _ticker: ticker,
+            _asset_dirs: Arc::clone(&self.asset_dirs),
         })
     }
 }
@@ -658,5 +809,69 @@ mod tests {
             .max_memory(1024)
             .mount("/host", "/guest", FsPerms::ReadOnly)
             .env("KEY", "value");
+    }
+
+    #[test]
+    fn runtime_compression_is_detected_by_content() {
+        use std::io::Write as _;
+
+        let raw = b"\0asm";
+        let mut encoder = zstd::Encoder::new(Vec::new(), 1).unwrap();
+        encoder
+            .set_pledged_src_size(Some(raw.len() as u64))
+            .unwrap();
+        encoder.write_all(raw).unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert_eq!(decode_runtime(compressed.clone(), 4).unwrap(), raw);
+        assert_eq!(decode_runtime(raw.to_vec(), 4).unwrap(), raw);
+        assert_eq!(
+            decode_runtime(compressed.clone(), 3).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let concatenated = [compressed.as_slice(), compressed.as_slice()].concat();
+        assert_eq!(
+            decode_runtime(concatenated, 7).unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn embedded_mount_overrides_handle_trailing_slash_and_parent() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let mut base = SandboxOptions::default().mount(root.path(), "/lib", FsPerms::ReadOnly);
+        base.directory_mappings[0].embedded = true;
+        let exact = SandboxOptions::default().mount(root.path(), "/lib/", FsPerms::ReadOnly);
+        let merged = base.merged_with(&exact);
+        assert_eq!(merged.directory_mappings.len(), 1);
+        assert!(!merged.directory_mappings[0].embedded);
+        assert_eq!(merged.directory_mappings[0].guest, "/lib");
+
+        let parent = SandboxOptions::default().mount(root.path(), "/", FsPerms::ReadOnly);
+        assert_eq!(base.merged_with(&parent).directory_mappings.len(), 2);
+        std::fs::create_dir(root.path().join("lib"))?;
+        let merged = base.merged_with(&parent);
+        assert_eq!(merged.directory_mappings.len(), 1);
+        assert_eq!(merged.directory_mappings[0].guest, "/");
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn required_guest_directory_explains_missing_embedded_assets() -> std::io::Result<()> {
+        let root = tempfile::tempdir()?;
+        let wasm = root.path().join("python.wasm");
+        std::fs::write(&wasm, wasm_encoder::Component::new().finish())?;
+        let result = SandboxTemplate::builder()
+            .require_guest_directory("/lib")
+            .build(wasm)
+            .await;
+        let Err(error) = result else {
+            panic!("expected missing guest directory error");
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("runtime has no embedded files at /lib")
+        );
+        Ok(())
     }
 }

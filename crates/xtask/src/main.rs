@@ -1,12 +1,16 @@
 use std::{
-    collections::hash_map::DefaultHasher,
-    env,
+    collections::{HashSet, hash_map::DefaultHasher},
+    env, fs,
     hash::Hasher,
+    io,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
 };
 
 use anyhow::{Context, Result, ensure};
+use serde::Serialize;
+use tar::{Builder as TarBuilder, Header};
+use wasm_encoder::{CustomSection, Section};
 use wasmparser::{Parser, Payload};
 use xshell::{Cmd, Shell, cmd};
 
@@ -15,6 +19,7 @@ use crate::async_shim::link_library;
 mod async_shim;
 
 const TARGET: &str = "wasm32-wasip2";
+const EMBEDDED_ASSETS_SECTION_NAME: &str = "isola:assets";
 const COMPONENT_BUILD_INPUTS: &[(&str, &[u8])] = &[
     ("crates/xtask/src/main.rs", include_bytes!("main.rs")),
     (
@@ -65,6 +70,22 @@ struct LoadedComponentLibrary {
     module: Vec<u8>,
     dlopen: bool,
     async_shim_name: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+struct EmbeddedMount<'a> {
+    // Keep the serialized keys in canonical CBOR order.
+    guest: &'a str,
+    source: String,
+    #[serde(skip)]
+    root: &'a Path,
+    #[serde(skip)]
+    files: Vec<PathBuf>,
+}
+
+#[derive(Serialize)]
+struct Manifest<'a> {
+    mounts: &'a [EmbeddedMount<'a>],
 }
 
 struct FingerprintHasher {
@@ -208,13 +229,18 @@ fn encode_rustflags(rustflags: &str) -> String {
 }
 
 fn build_python(sh: &Shell) -> Result<()> {
+    let output = Path::new("target/python.wasm");
+    let runtime_root = env::var_os("WASI_PYTHON_RUNTIME")
+        .context("WASI_PYTHON_RUNTIME must point to the Python runtime bundle")?;
+    let embedded_root = PathBuf::from(runtime_root).join("lib");
     build_guest(
         sh,
         "isola-python-runtime",
         Some(("PYO3_CROSS_PYTHON_VERSION", "3.15")),
         python_libraries,
-        Path::new("target/python.wasm"),
+        output,
         8_388_608,
+        &[("/lib", &embedded_root)],
     )
 }
 
@@ -233,6 +259,7 @@ fn build_js(sh: &Shell) -> Result<()> {
         |wasi_deps_dir, runtime| Ok(js_libraries(wasi_deps_dir, runtime)),
         Path::new("target/js.wasm"),
         2_097_152,
+        &[],
     )
 }
 
@@ -243,6 +270,7 @@ fn build_guest(
     libraries: impl FnOnce(&Path, &Path) -> Result<Vec<ComponentLibrary>>,
     output: &Path,
     stack_size: u32,
+    embedded_mounts: &[(&str, &Path)],
 ) -> Result<()> {
     let wasi_deps_dir = env::var("WASI_PYTHON_DEV").unwrap();
     let rustflags = encode_rustflags(&wasm_rustflags(&wasi_deps_dir));
@@ -265,7 +293,7 @@ fn build_guest(
     ));
     assert_shared_pic_module(&runtime)?;
     let libraries = libraries(Path::new(&wasi_deps_dir), &runtime)?;
-    write_component_if_changed(libraries, output, stack_size)?;
+    write_component_if_changed(libraries, output, stack_size, embedded_mounts)?;
 
     Ok(())
 }
@@ -403,9 +431,42 @@ fn component_hasher(stack_size: u32) -> FingerprintHasher {
     hasher
 }
 
+/// Hash a file's size and modification time under `{prefix}-*` field names.
+fn hash_file_metadata(hasher: &mut FingerprintHasher, prefix: &str, path: &Path) -> Result<()> {
+    let metadata = path
+        .metadata()
+        .with_context(|| format!("failed to read metadata {}", path.display()))?;
+    hash_field(
+        hasher,
+        &format!("{prefix}-size"),
+        &metadata.len().to_le_bytes(),
+    );
+    let (after_epoch, modified) = match metadata.modified()?.duration_since(UNIX_EPOCH) {
+        Ok(modified) => (true, modified),
+        Err(error) => (false, error.duration()),
+    };
+    hash_field(
+        hasher,
+        &format!("{prefix}-modified-after-epoch"),
+        &[u8::from(after_epoch)],
+    );
+    hash_field(
+        hasher,
+        &format!("{prefix}-modified-seconds"),
+        &modified.as_secs().to_le_bytes(),
+    );
+    hash_field(
+        hasher,
+        &format!("{prefix}-modified-nanoseconds"),
+        &modified.subsec_nanos().to_le_bytes(),
+    );
+    Ok(())
+}
+
 fn component_metadata_fingerprint(
     libraries: &[ComponentLibrary],
     stack_size: u32,
+    embedded_mounts: &[EmbeddedMount<'_>],
 ) -> Result<String> {
     let mut hasher = component_hasher(stack_size);
     for library in libraries {
@@ -421,37 +482,32 @@ fn component_metadata_fingerprint(
             "library-async-shim",
             library.async_shim_name.unwrap_or_default().as_bytes(),
         );
-        let metadata = library.path.metadata().with_context(|| {
-            format!(
-                "failed to read component library metadata {}",
-                library.path.display()
-            )
-        })?;
-        hash_field(&mut hasher, "library-size", &metadata.len().to_le_bytes());
-        let (after_epoch, modified) = match metadata.modified()?.duration_since(UNIX_EPOCH) {
-            Ok(modified) => (true, modified),
-            Err(error) => (false, error.duration()),
-        };
+        hash_file_metadata(&mut hasher, "library", &library.path)?;
+    }
+    for mount in embedded_mounts {
+        hash_field(&mut hasher, "embedded-mount", mount.guest.as_bytes());
         hash_field(
             &mut hasher,
-            "library-modified-after-epoch",
-            &[u8::from(after_epoch)],
+            "embedded-root",
+            mount.root.to_string_lossy().as_bytes(),
         );
-        hash_field(
-            &mut hasher,
-            "library-modified-seconds",
-            &modified.as_secs().to_le_bytes(),
-        );
-        hash_field(
-            &mut hasher,
-            "library-modified-nanoseconds",
-            &modified.subsec_nanos().to_le_bytes(),
-        );
+        for relative in &mount.files {
+            hash_field(
+                &mut hasher,
+                "embedded-file-path",
+                relative.to_string_lossy().as_bytes(),
+            );
+            hash_file_metadata(&mut hasher, "embedded-file", &mount.root.join(relative))?;
+        }
     }
     Ok(hasher.finish())
 }
 
-fn component_content_fingerprint(libraries: &[LoadedComponentLibrary], stack_size: u32) -> String {
+fn component_content_fingerprint(
+    libraries: &[LoadedComponentLibrary],
+    stack_size: u32,
+    embedded_archive: Option<&[u8]>,
+) -> String {
     let mut hasher = component_hasher(stack_size);
     for library in libraries {
         hash_field(&mut hasher, "library-name", library.name.as_bytes());
@@ -462,6 +518,9 @@ fn component_content_fingerprint(libraries: &[LoadedComponentLibrary], stack_siz
             "library-async-shim",
             library.async_shim_name.unwrap_or_default().as_bytes(),
         );
+    }
+    if let Some(archive) = embedded_archive {
+        hash_field(&mut hasher, "embedded-runtime-files", archive);
     }
     hasher.finish()
 }
@@ -482,8 +541,21 @@ fn write_component_if_changed(
     libraries: Vec<ComponentLibrary>,
     output: &Path,
     stack_size: u32,
+    embedded_mounts: &[(&str, &Path)],
 ) -> Result<()> {
-    let metadata_fingerprint = component_metadata_fingerprint(&libraries, stack_size)?;
+    let mounts = embedded_mounts
+        .iter()
+        .enumerate()
+        .map(|(index, &(guest, root))| {
+            Ok(EmbeddedMount {
+                guest,
+                source: format!("mounts/{index}"),
+                root,
+                files: collect_files(root)?,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let metadata_fingerprint = component_metadata_fingerprint(&libraries, stack_size, &mounts)?;
     let fingerprint_path = output.with_extension("wasm.fingerprint");
     let cached = std::fs::read_to_string(&fingerprint_path).unwrap_or_default();
     let mut cached = cached.lines();
@@ -493,11 +565,15 @@ fn write_component_if_changed(
         return Ok(());
     }
 
+    let embedded_archive = (!mounts.is_empty())
+        .then(|| archive_mounts(&mounts))
+        .transpose()?;
     let libraries = libraries
         .into_iter()
         .map(ComponentLibrary::load)
         .collect::<Result<Vec<_>>>()?;
-    let content_fingerprint = component_content_fingerprint(&libraries, stack_size);
+    let content_fingerprint =
+        component_content_fingerprint(&libraries, stack_size, embedded_archive.as_deref());
     if output.is_file() && cached_content_fingerprint == content_fingerprint {
         write_component_fingerprints(
             &fingerprint_path,
@@ -524,7 +600,15 @@ fn write_component_if_changed(
     // no `wasi_snapshot_preview1` imports left to satisfy (componentize-py
     // keeps the adapter only because its runtime calls `reset_adapter_state`,
     // which isola gates to p1 builds in `runtime::lifecycle`).
-    let component = linker.encode()?;
+    let mut component = linker.encode()?;
+    if let Some(archive) = embedded_archive {
+        component.reserve(archive.len() + 32);
+        CustomSection {
+            name: EMBEDDED_ASSETS_SECTION_NAME.into(),
+            data: archive.into(),
+        }
+        .append_to(&mut component);
+    }
 
     std::fs::write(output, component)
         .with_context(|| format!("failed to write component {}", output.display()))?;
@@ -534,6 +618,89 @@ fn write_component_if_changed(
         &content_fingerprint,
     )?;
 
+    Ok(())
+}
+
+fn archive_mounts(mounts: &[EmbeddedMount<'_>]) -> Result<Vec<u8>> {
+    let mut archive = TarBuilder::new(Vec::new());
+    archive.follow_symlinks(true);
+    let manifest = minicbor_serde::to_vec(Manifest { mounts })?;
+    let mut header = Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_mode(0o644);
+    header.set_size(u64::try_from(manifest.len())?);
+    // The loader reads the first tar entry as the manifest.
+    archive.append_data(&mut header, "manifest.cbor", manifest.as_slice())?;
+
+    for mount in mounts {
+        let prefix = Path::new(&mount.source);
+        let mut header = Header::new_gnu();
+        header.set_entry_type(tar::EntryType::Directory);
+        header.set_mode(0o755);
+        header.set_size(0);
+        archive.append_data(&mut header, prefix, io::empty())?;
+        for relative in &mount.files {
+            let source = mount.root.join(relative);
+            archive
+                .append_path_with_name(&source, prefix.join(relative))
+                .with_context(|| {
+                    format!(
+                        "failed to archive embedded runtime file {}",
+                        source.display()
+                    )
+                })?;
+        }
+    }
+    Ok(archive.into_inner()?)
+}
+
+/// List regular files under `root` as sorted relative paths.
+fn collect_files(root: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    collect_files_into(root, root, &mut HashSet::new(), &mut files)?;
+    Ok(files)
+}
+
+fn collect_files_into(
+    root: &Path,
+    current: &Path,
+    ancestors: &mut HashSet<PathBuf>,
+    files: &mut Vec<PathBuf>,
+) -> Result<()> {
+    let directory = current.canonicalize()?;
+    ensure!(
+        ancestors.insert(directory.clone()),
+        "symlink cycle in embedded runtime directory {}",
+        current.display()
+    );
+    let mut entries = fs::read_dir(current)
+        .with_context(|| {
+            format!(
+                "failed to read embedded runtime directory {}",
+                current.display()
+            )
+        })?
+        .collect::<io::Result<Vec<_>>>()?;
+    entries.sort_by_key(std::fs::DirEntry::file_name);
+    for entry in entries {
+        let path = entry.path();
+        let file_type = fs::metadata(&path)
+            .with_context(|| {
+                format!(
+                    "failed to resolve embedded runtime entry {}",
+                    path.display()
+                )
+            })?
+            .file_type();
+        if file_type.is_dir() {
+            collect_files_into(root, &path, ancestors, files)?;
+        } else if file_type.is_file() {
+            files.push(path.strip_prefix(root)?.to_owned());
+        } else {
+            anyhow::bail!("unsupported embedded runtime entry {}", path.display());
+        }
+    }
+    ancestors.remove(&directory);
     Ok(())
 }
 
@@ -560,38 +727,47 @@ mod tests {
         let original = component_content_fingerprint(
             &[library("runtime.so", b"runtime", false, Some("shim.so"))],
             1024,
+            None,
         );
 
         assert_ne!(
             original,
             component_content_fingerprint(
                 &[library("renamed.so", b"runtime", false, Some("shim.so"))],
-                1024
+                1024,
+                None
             )
         );
         assert_ne!(
             original,
             component_content_fingerprint(
                 &[library("runtime.so", b"changed", false, Some("shim.so"))],
-                1024
+                1024,
+                None
             )
         );
         assert_ne!(
             original,
             component_content_fingerprint(
                 &[library("runtime.so", b"runtime", true, Some("shim.so"))],
-                1024
+                1024,
+                None
             )
         );
         assert_ne!(
             original,
-            component_content_fingerprint(&[library("runtime.so", b"runtime", false, None)], 1024)
+            component_content_fingerprint(
+                &[library("runtime.so", b"runtime", false, None)],
+                1024,
+                None,
+            )
         );
         assert_ne!(
             original,
             component_content_fingerprint(
                 &[library("runtime.so", b"runtime", false, Some("shim.so"))],
-                2048
+                2048,
+                None
             )
         );
     }

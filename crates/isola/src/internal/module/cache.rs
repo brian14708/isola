@@ -16,10 +16,10 @@ fn engine_fingerprint(engine: &Engine) -> u64 {
     hasher.finish()
 }
 
-pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> String {
+pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, runtime_digest: blake3::Hash) -> String {
     let mut h = blake3::Hasher::new();
     h.update(b"isola-cache-v2\0");
-    h.update(blake3::hash(wasm_bytes).as_bytes());
+    h.update(runtime_digest.as_bytes());
     h.update(&engine_fingerprint(engine).to_le_bytes());
 
     h.update(&(cfg.directory_mappings.len() as u64).to_le_bytes());
@@ -60,9 +60,15 @@ pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> Stri
 pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<()> {
     static CACHE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+    if let Some(parent) = cache_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(Error::from)?;
+    }
     let sequence = CACHE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let extension = cache_path.extension().unwrap_or_default().to_string_lossy();
     let tmp_path =
-        cache_path.with_extension(format!("cwasm.tmp-{}-{sequence}", std::process::id()));
+        cache_path.with_extension(format!("{extension}.tmp-{}-{sequence}", std::process::id()));
 
     tokio::fs::write(&tmp_path, bytes)
         .await

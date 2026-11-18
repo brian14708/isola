@@ -152,7 +152,6 @@ class TemplateConfig(TypedDict, total=False):
     cache_dir: Pathish | None
     max_memory: int | None
     prelude: str | None
-    runtime_lib_dir: Pathish | None
     mounts: list[MountConfig] | None
     env: dict[str, str]
 
@@ -357,10 +356,6 @@ class SandboxContext:
         if "cache_dir" in patch:
             patch["cache_dir"] = _normalize_optional_path(
                 patch["cache_dir"], key="cache_dir"
-            )
-        if "runtime_lib_dir" in patch:
-            patch["runtime_lib_dir"] = _normalize_optional_path(
-                patch["runtime_lib_dir"], key="runtime_lib_dir"
             )
         if "mounts" in patch:
             patch["mounts"] = _normalize_mounts(patch["mounts"])

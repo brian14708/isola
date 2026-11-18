@@ -45,10 +45,6 @@ impl RuntimeFlavor {
             Self::Js => "js.wasm",
         }
     }
-
-    const fn uses_runtime_lib_mount(self) -> bool {
-        matches!(self, Self::Python)
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -63,7 +59,6 @@ struct ContextConfig {
     cache_dir: CacheDirConfig,
     max_memory: Option<usize>,
     prelude: Option<String>,
-    runtime_lib_dir: Option<PathBuf>,
     mounts: Vec<ConfiguredMount>,
     env: Vec<(String, String)>,
 }
@@ -74,7 +69,6 @@ impl Default for ContextConfig {
             cache_dir: CacheDirConfig::Auto,
             max_memory: None,
             prelude: None,
-            runtime_lib_dir: None,
             mounts: Vec::new(),
             env: Vec::new(),
         }
@@ -137,8 +131,6 @@ struct ContextConfigPatch {
     max_memory: Option<Option<u64>>,
     #[serde(default)]
     prelude: Option<Option<String>>,
-    #[serde(default)]
-    runtime_lib_dir: Option<Option<String>>,
     #[serde(default)]
     mounts: Option<Vec<MountConfigInput>>,
     #[serde(default)]
@@ -221,31 +213,6 @@ fn dedupe_mounts_by_guest(mounts: Vec<ConfiguredMount>) -> Vec<ConfiguredMount> 
     deduped
 }
 
-fn resolve_runtime_lib_dir(
-    template_parent: &std::path::Path,
-    runtime_lib_dir: Option<PathBuf>,
-) -> PathBuf {
-    if let Some(path) = runtime_lib_dir {
-        return path;
-    }
-    std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
-        |_| {
-            let mut lib_dir = template_parent.to_owned();
-            lib_dir.push("wasm32-wasip2");
-            lib_dir.push("wasi-deps");
-            lib_dir.push("usr");
-            lib_dir.push("local");
-            lib_dir.push("lib");
-            lib_dir
-        },
-        |runtime| {
-            let mut lib_dir = PathBuf::from(runtime);
-            lib_dir.push("lib");
-            lib_dir
-        },
-    )
-}
-
 // ---------------------------------------------------------------------------
 // ContextInner
 // ---------------------------------------------------------------------------
@@ -276,6 +243,12 @@ impl ContextInner {
     ) -> Result<()> {
         let mut wasm_path = runtime_path;
         wasm_path.push(runtime.bundle_file());
+        if !wasm_path.is_file() {
+            let compressed = wasm_path.with_extension("wasm.zst");
+            if compressed.is_file() {
+                wasm_path = compressed;
+            }
+        }
 
         let parent = wasm_path
             .parent()
@@ -302,20 +275,7 @@ impl ContextInner {
             CacheDirConfig::Custom(path) => builder.cache(Some(path)),
         };
 
-        let mut mounts = config.mounts;
-        if runtime.uses_runtime_lib_mount() {
-            mounts.insert(
-                0,
-                ConfiguredMount {
-                    host: resolve_runtime_lib_dir(&parent, config.runtime_lib_dir),
-                    guest: "/lib".to_string(),
-                    perms: FsPerms::ReadOnly,
-                },
-            );
-        }
-        mounts = dedupe_mounts_by_guest(mounts);
-
-        for mapping in &mounts {
+        for mapping in &dedupe_mounts_by_guest(config.mounts) {
             builder = builder.mount(&mapping.host, &mapping.guest, mapping.perms);
         }
 
@@ -378,9 +338,6 @@ impl ContextConfig {
         }
         if let Some(prelude) = patch.prelude {
             self.prelude = prelude;
-        }
-        if let Some(runtime_lib_dir) = patch.runtime_lib_dir {
-            self.runtime_lib_dir = runtime_lib_dir.map(PathBuf::from);
         }
         if let Some(mounts) = patch.mounts {
             self.mounts = parse_mounts(mounts)?;

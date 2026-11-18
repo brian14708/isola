@@ -309,25 +309,16 @@ impl ContextCore {
         let parent = path
             .parent()
             .ok_or_else(|| Error::Internal("Wasm path has no parent directory".to_string()))?;
-        let mut lib_dir = std::env::var("WASI_PYTHON_RUNTIME").map_or_else(
-            |_| {
-                let mut lib_dir = parent.to_owned();
-                lib_dir.push("wasm32-wasip2");
-                lib_dir.push("wasi-deps");
-                lib_dir.push("usr");
-                lib_dir.push("local");
-                lib_dir
-            },
-            PathBuf::from,
-        );
-        lib_dir.push("lib");
-
         let max_memory = self.config.max_memory.unwrap_or(DEFAULT_MAX_MEMORY);
         let prelude = match self.config.prelude.take() {
             Some(s) if s.is_empty() => None,
             Some(s) => Some(s),
             None => Some(DEFAULT_PRELUDE.to_string()),
         };
+        let python_runtime = prelude.as_deref() == Some(DEFAULT_PRELUDE)
+            || path
+                .file_name()
+                .is_some_and(|name| name == "python.wasm" || name == "python.wasm.zst");
         let cache = self
             .config
             .cache
@@ -338,9 +329,10 @@ impl ContextCore {
             let mut builder = SandboxTemplate::builder()
                 .prelude(prelude)
                 .cache(Some(cache))
-                .max_memory(max_memory)
-                .mount(&lib_dir, "/lib", FsPerms::ReadOnly);
-
+                .max_memory(max_memory);
+            if python_runtime {
+                builder = builder.require_guest_directory("/lib");
+            }
             for mount in &self.config.mounts {
                 builder = builder.mount(&mount.host, &mount.guest, mount.perms());
             }
@@ -432,7 +424,7 @@ pub unsafe extern "C" fn isola_context_initialize(
 /// | `prelude`  | Guest prelude source code. Empty string disables it. | `"import sandbox.asyncio"`      |
 /// | `cache`    | Path to the compiled-component cache directory.      | `<wasm_dir>/cache`              |
 /// | `env`      | JSON: `{"name":"VAR","value":"val"}`                 | *(none)*                        |
-/// | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none; `/lib` always mounted)* |
+/// | `mount`    | JSON: `{"host":"/h","guest":"/g","writable":false}`  | *(none)* |
 ///
 /// The `env` and `mount` keys may be called multiple times to add multiple
 /// entries. For `mount`, `writable` defaults to `false` when omitted.

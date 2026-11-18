@@ -47,7 +47,7 @@ craneLib.buildPackage {
     EOF
         fi
   '';
-  nativeBuildInputs = [ nukeReferences ];
+  nativeBuildInputs = [ nukeReferences pkgs.zstd ];
 
   env = {
     WASI_PYTHON_DEV = python.linkerInputs;
@@ -68,8 +68,9 @@ craneLib.buildPackage {
   installPhase = ''
     runHook preInstall
 
-    install -Dm644 target/js.wasm $out/bin/js.wasm
-    find $out/ -type f -print -exec nuke-refs '{}' +
+    mkdir -p "$out/bin"
+    nuke-refs target/js.wasm
+    zstd -q -19 target/js.wasm -o "$out/bin/js.wasm.zst"
 
     runHook postInstall
   '';

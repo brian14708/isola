@@ -4,18 +4,11 @@ import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as zlib from "node:zlib";
-
 import type { RuntimeName } from "./types.js";
 
-const BUNDLE_FILES: Record<RuntimeName, string> = {
-  python: "python.wasm",
-  js: "js.wasm",
-};
-
-const TARBALL_NAMES: Record<RuntimeName, string> = {
-  python: "isola-python-runtime.tar.gz",
-  js: "isola-js-runtime.tar.gz",
+const ASSET_FILES: Record<RuntimeName, string> = {
+  python: "python.wasm.zst",
+  js: "js.wasm.zst",
 };
 
 const RELEASE_API =
@@ -23,7 +16,6 @@ const RELEASE_API =
 
 export interface RuntimeConfig {
   runtimePath: string;
-  runtimeLibDir?: string;
 }
 
 function cacheBase(): string {
@@ -68,42 +60,49 @@ export async function resolveRuntime(
     "runtimes",
     `${runtime}-${ver}`,
   );
-  const checkPath = path.join(cacheDir, "bin", BUNDLE_FILES[runtime]);
+  const assetName = ASSET_FILES[runtime];
+  const assetPath = path.join(cacheDir, assetName);
 
-  try {
-    await fsp.access(checkPath, fs.constants.F_OK);
-    return buildConfig(runtime, cacheDir);
-  } catch {
-    // not cached, fall through to download
+  if (await isCached(assetPath)) {
+    return { runtimePath: cacheDir };
   }
 
-  const tarballName = TARBALL_NAMES[runtime];
-  const expectedDigest = await fetchExpectedDigest(ver, tarballName);
-  const tarballBytes = await downloadTarball(ver, tarballName, expectedDigest);
-  await extractTarball(tarballBytes, cacheDir);
-
+  const expectedDigest = await fetchExpectedDigest(ver, assetName);
+  const wasmBytes = await downloadAsset(ver, assetName, expectedDigest);
+  await fsp.mkdir(cacheDir, { recursive: true });
+  const staging = await fsp.mkdtemp(path.join(cacheDir, ".runtime-"));
   try {
-    await fsp.access(checkPath, fs.constants.F_OK);
-  } catch {
-    throw new Error(`downloaded runtime is missing '${BUNDLE_FILES[runtime]}'`);
+    const stagedAsset = path.join(staging, assetName);
+    await fsp.writeFile(stagedAsset, wasmBytes);
+    await fsp.writeFile(`${stagedAsset}.sha256`, expectedDigest);
+    await fsp.rename(stagedAsset, assetPath);
+    await fsp.rename(`${stagedAsset}.sha256`, `${assetPath}.sha256`);
+  } finally {
+    await fsp.rm(staging, { recursive: true, force: true });
   }
-
-  return buildConfig(runtime, cacheDir);
+  return { runtimePath: cacheDir };
 }
 
-function buildConfig(runtime: RuntimeName, cacheDir: string): RuntimeConfig {
-  if (runtime === "python") {
-    return {
-      runtimePath: path.join(cacheDir, "bin"),
-      runtimeLibDir: path.join(cacheDir, "lib"),
-    };
+async function isCached(assetPath: string): Promise<boolean> {
+  try {
+    const expected = await fsp.readFile(`${assetPath}.sha256`, "utf8");
+    const hash = crypto.createHash("sha256");
+    for await (const chunk of fs.createReadStream(assetPath)) {
+      hash.update(chunk);
+    }
+    return expected === `sha256:${hash.digest("hex")}`;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EISDIR") {
+      return false;
+    }
+    throw error;
   }
-  return { runtimePath: path.join(cacheDir, "bin") };
 }
 
 async function fetchExpectedDigest(
   version: string,
-  tarballName: string,
+  assetName: string,
 ): Promise<string> {
   const url = RELEASE_API.replace("{version}", versionTag(version));
   const resp = await fetch(url);
@@ -117,28 +116,28 @@ async function fetchExpectedDigest(
   };
 
   for (const asset of release.assets ?? []) {
-    if (asset.name === tarballName) {
+    if (asset.name === assetName) {
       if (!asset.digest) {
         throw new Error(
-          `no digest found for asset '${tarballName}' in release ${version}`,
+          `no digest found for asset '${assetName}' in release ${version}`,
         );
       }
       return asset.digest;
     }
   }
-  throw new Error(`asset '${tarballName}' not found in release ${version}`);
+  throw new Error(`asset '${assetName}' not found in release ${version}`);
 }
 
-async function downloadTarball(
+async function downloadAsset(
   version: string,
-  tarballName: string,
+  assetName: string,
   expectedDigest: string,
 ): Promise<Buffer> {
-  const url = `https://github.com/brian14708/isola/releases/download/${versionTag(version)}/${tarballName}`;
+  const url = `https://github.com/brian14708/isola/releases/download/${versionTag(version)}/${assetName}`;
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(
-      `failed to download tarball: ${resp.status} ${resp.statusText}`,
+      `failed to download asset: ${resp.status} ${resp.statusText}`,
     );
   }
 
@@ -146,185 +145,9 @@ async function downloadTarball(
   const actual = `sha256:${crypto.createHash("sha256").update(data).digest("hex")}`;
   if (actual !== expectedDigest) {
     throw new Error(
-      `digest mismatch for ${tarballName}: expected ${expectedDigest}, got ${actual}`,
+      `digest mismatch for ${assetName}: expected ${expectedDigest}, got ${actual}`,
     );
   }
 
   return data;
-}
-
-async function extractTarball(data: Buffer, dest: string): Promise<void> {
-  const tarData = await new Promise<Buffer>((resolve, reject) => {
-    zlib.gunzip(data, (err, result) => {
-      if (err) reject(err);
-      else resolve(result);
-    });
-  });
-
-  await fsp.mkdir(path.dirname(dest), { recursive: true });
-  const tmpDir = await fsp.mkdtemp(
-    path.join(path.dirname(dest), `.${path.basename(dest)}-`),
-  );
-  try {
-    await parseTar(tarData, tmpDir);
-    try {
-      await fsp.rename(tmpDir, dest);
-    } catch (err: unknown) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "EEXIST" || code === "ENOTEMPTY") {
-        await fsp.rm(tmpDir, { recursive: true, force: true });
-      } else {
-        throw err;
-      }
-    }
-  } catch (err) {
-    await fsp.rm(tmpDir, { recursive: true, force: true });
-    throw err;
-  }
-}
-
-async function parseTar(data: Buffer, dest: string): Promise<void> {
-  const BLOCK = 512;
-  let offset = 0;
-  let pendingPath: string | null = null;
-  let pendingLinkName: string | null = null;
-  const symlinkPaths = new Set<string>();
-
-  while (offset + BLOCK <= data.length) {
-    const hdr = data.subarray(offset, offset + BLOCK);
-    offset += BLOCK;
-
-    if (hdr.every((b) => b === 0)) break;
-
-    const name = nullTerm(hdr, 0, 100);
-    const modeStr = nullTerm(hdr, 100, 108).trim();
-    const sizeStr = nullTerm(hdr, 124, 136).trim();
-    const typeFlag = String.fromCharCode(hdr[156]);
-    const rawLinkName = nullTerm(hdr, 157, 257);
-    const prefix = nullTerm(hdr, 345, 500);
-
-    const rawFullName = prefix ? `${prefix}/${name}` : name;
-    const size = sizeStr ? parseInt(sizeStr, 8) : 0;
-    const fileData = data.subarray(offset, offset + size);
-    offset += Math.ceil(size / BLOCK) * BLOCK;
-
-    if (typeFlag === "L") {
-      pendingPath = nullTerm(fileData, 0, fileData.length);
-      continue;
-    }
-
-    if (typeFlag === "K") {
-      pendingLinkName = nullTerm(fileData, 0, fileData.length);
-      continue;
-    }
-
-    if (typeFlag === "x" || typeFlag === "g") {
-      const pax = parsePax(fileData);
-      pendingPath = pax.path ?? pendingPath;
-      pendingLinkName = pax.linkName ?? pendingLinkName;
-      continue;
-    }
-
-    const fullName = pendingPath ?? rawFullName;
-    const linkName = pendingLinkName ?? rawLinkName;
-    pendingPath = null;
-    pendingLinkName = null;
-
-    const stripped = stripFirstComponent(fullName);
-    if (!stripped) continue;
-
-    const archivePath = stripped.split(path.sep).join("/");
-    for (const symlinkPath of symlinkPaths) {
-      if (archivePath.startsWith(`${symlinkPath}/`)) {
-        throw new Error(`archive entry traverses symlink: ${fullName}`);
-      }
-    }
-
-    const outPath = path.join(dest, stripped);
-    if (!outPath.startsWith(dest + path.sep)) {
-      throw new Error(`path traversal in archive: ${fullName}`);
-    }
-
-    if (typeFlag === "5" || (typeFlag === "\0" && name.endsWith("/"))) {
-      await fsp.mkdir(outPath, { recursive: true });
-    } else if (typeFlag === "2") {
-      validateSymlinkTarget(archivePath, linkName, fullName);
-      await fsp.mkdir(path.dirname(outPath), { recursive: true });
-      try {
-        await fsp.unlink(outPath);
-      } catch {}
-      await fsp.symlink(linkName, outPath);
-      symlinkPaths.add(archivePath);
-    } else if (typeFlag === "0" || typeFlag === "\0") {
-      await fsp.mkdir(path.dirname(outPath), { recursive: true });
-      await fsp.writeFile(outPath, fileData);
-      if (modeStr) await fsp.chmod(outPath, parseInt(modeStr, 8) & 0o7777);
-    }
-  }
-}
-
-function validateSymlinkTarget(
-  archivePath: string,
-  linkName: string,
-  fullName: string,
-): void {
-  const normalizedTarget = linkName.replace(/\\/g, "/");
-  if (
-    path.posix.isAbsolute(normalizedTarget) ||
-    /^[A-Za-z]:\//.test(normalizedTarget)
-  ) {
-    throw new Error(`symlink target escapes archive: ${fullName}`);
-  }
-
-  const resolved = path.posix.normalize(
-    path.posix.join(path.posix.dirname(archivePath), normalizedTarget),
-  );
-  if (resolved === ".." || resolved.startsWith("../")) {
-    throw new Error(`symlink target escapes archive: ${fullName}`);
-  }
-}
-
-function nullTerm(buf: Buffer, start: number, end: number): string {
-  return buf.toString("utf8", start, end).replace(/\0.*$/, "");
-}
-
-function parsePax(data: Buffer): { path?: string; linkName?: string } {
-  const result: { path?: string; linkName?: string } = {};
-  const text = data.toString("utf8");
-  let offset = 0;
-
-  while (offset < text.length) {
-    const space = text.indexOf(" ", offset);
-    if (space === -1) break;
-
-    const recordLen = Number.parseInt(text.slice(offset, space), 10);
-    if (!Number.isFinite(recordLen) || recordLen <= space - offset + 1) break;
-
-    const record = text.slice(space + 1, offset + recordLen - 1);
-    const eq = record.indexOf("=");
-    if (eq !== -1) {
-      const key = record.slice(0, eq);
-      const value = record.slice(eq + 1);
-      if (key === "path") result.path = value;
-      if (key === "linkpath") result.linkName = value;
-    }
-
-    offset += recordLen;
-  }
-
-  return result;
-}
-
-function stripFirstComponent(p: string): string | null {
-  const parts = p
-    .replace(/\\/g, "/")
-    .replace(/^\//, "")
-    .split("/")
-    .filter((s) => s.length > 0);
-  if (parts.length <= 1) return null;
-  const rest = parts.slice(1);
-  if (rest.some((s) => s === "." || s === "..")) {
-    throw new Error(`invalid path in archive: ${p}`);
-  }
-  return rest.join(path.sep);
 }

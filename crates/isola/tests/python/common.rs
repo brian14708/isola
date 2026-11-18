@@ -9,7 +9,7 @@ use futures::TryStreamExt;
 use http::header::HOST;
 use isola::{
     host::{BoxError, Host, HttpBodyStream, HttpRequestStream, HttpResponse},
-    sandbox::{FsPerms, SandboxTemplate},
+    sandbox::{FsPerms, SandboxTemplate, SandboxTemplateBuilder},
     value::Value,
 };
 use reqwest::Client;
@@ -94,9 +94,16 @@ fn workspace_root() -> Result<PathBuf> {
 }
 
 fn bundle_path(root: &Path) -> PathBuf {
-    root.join("target").join("python.wasm")
+    let target = root.join("target");
+    let raw = target.join("python.wasm");
+    if raw.is_file() {
+        raw
+    } else {
+        target.join("python.wasm.zst")
+    }
 }
 
+#[allow(dead_code)]
 fn resolve_lib_dir(root: &Path) -> PathBuf {
     env::var_os("WASI_PYTHON_RUNTIME").map_or_else(
         || {
@@ -118,10 +125,9 @@ fn print_skip_once(message: &str) {
     });
 }
 
-fn resolve_prereqs() -> Result<Option<(PathBuf, PathBuf)>> {
+fn resolve_prereqs() -> Result<Option<PathBuf>> {
     let root = workspace_root()?;
     let wasm = bundle_path(&root);
-    let lib_dir = resolve_lib_dir(&root);
 
     if !wasm.is_file() {
         let message = format!(
@@ -132,16 +138,7 @@ fn resolve_prereqs() -> Result<Option<(PathBuf, PathBuf)>> {
         return Ok(None);
     }
 
-    if !lib_dir.is_dir() {
-        let message = format!(
-            "skipping integration_python tests: missing WASI runtime libraries at '{}'. Run in the dev shell or set WASI_PYTHON_RUNTIME, then build with `cargo xtask build-all`.",
-            lib_dir.display()
-        );
-        print_skip_once(&message);
-        return Ok(None);
-    }
-
-    Ok(Some((wasm, lib_dir)))
+    Ok(Some(wasm))
 }
 
 fn build_module_lock() -> &'static tokio::sync::Mutex<()> {
@@ -153,7 +150,7 @@ async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<Sa
     // Serialize compilation because tests can run in parallel and share cache
     // paths.
     let _build_guard = build_module_lock().lock().await;
-    let Some((wasm, lib_dir)) = resolve_prereqs()? else {
+    let Some(wasm) = resolve_prereqs()? else {
         return Ok(None);
     };
     let cache_dir = wasm
@@ -161,10 +158,7 @@ async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<Sa
         .ok_or_else(|| anyhow::anyhow!("integration wasm bundle has no parent directory"))?
         .join("cache");
 
-    let mut builder = SandboxTemplate::builder()
-        .prelude(Some("import sandbox.asyncio".to_string()))
-        .cache(Some(cache_dir))
-        .mount(&lib_dir, "/lib", FsPerms::ReadOnly);
+    let mut builder = base_builder().cache(Some(cache_dir));
     if let Some(max_memory) = max_memory {
         builder = builder.max_memory(max_memory);
     }
@@ -177,8 +171,33 @@ async fn build_module_with_policy(max_memory: Option<usize>) -> Result<Option<Sa
     Ok(Some(module))
 }
 
+fn base_builder() -> SandboxTemplateBuilder {
+    SandboxTemplate::builder().prelude(Some("import sandbox.asyncio".to_string()))
+}
+
 pub async fn build_module() -> Result<Option<SandboxTemplate>> {
     build_module_with_policy(None).await
+}
+
+#[allow(dead_code)]
+pub async fn build_module_uncached(external: bool) -> Result<Option<SandboxTemplate>> {
+    let Some(wasm) = resolve_prereqs()? else {
+        return Ok(None);
+    };
+
+    let mut builder = base_builder().cache(None);
+    if external {
+        let lib_dir = resolve_lib_dir(&workspace_root()?);
+        if !lib_dir.is_dir() {
+            return Ok(None);
+        }
+        builder = builder.mount(&lib_dir, "/lib", FsPerms::ReadOnly);
+    }
+    let module = builder
+        .build(&wasm)
+        .await
+        .context("failed to build uncached Python integration module")?;
+    Ok(Some(module))
 }
 
 pub async fn build_module_with_max_memory(max_memory: usize) -> Result<Option<SandboxTemplate>> {

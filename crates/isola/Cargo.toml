@@ -13,8 +13,6 @@ default = ["serde"]
 serde = [
     "dep:base64",
     "dep:minicbor",
-    "dep:minicbor-serde",
-    "dep:serde",
     "dep:serde-transcode",
     "dep:serde_json",
 ]
@@ -31,12 +29,14 @@ http-body = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true }
 minicbor = { workspace = true, optional = true }
-minicbor-serde = { workspace = true, features = ["alloc"], optional = true }
+minicbor-serde = { workspace = true, features = ["alloc"] }
 parking_lot = { workspace = true }
-serde = { workspace = true, optional = true }
+serde = { workspace = true, features = ["derive"] }
 serde-transcode = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new"] }
+tar = { workspace = true }
+tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["fs", "time", "macros", "rt", "sync"] }
 tokio-stream = { workspace = true }
@@ -45,12 +45,14 @@ wasmtime = { workspace = true, features = ["cranelift", "async", "parallel-compi
 wasmtime-wasi = { workspace = true }
 wasmtime-wasi-http = { workspace = true }
 wasmtime-wizer = { workspace = true, features = ["component-model", "wasmtime"] }
+wasmparser = { workspace = true, features = ["component-model"] }
+zstd = { workspace = true }
 
 [dev-dependencies]
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry"] }
 criterion = { workspace = true }
 reqwest = { workspace = true, features = ["http2", "stream", "gzip", "rustls"] }
-tempfile = { workspace = true }
+wasm-encoder = { workspace = true }
 wiremock = { workspace = true }
 
 [lints]

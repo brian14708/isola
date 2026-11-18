@@ -30,23 +30,19 @@
 //!
 //! # Quickstart
 //!
-//! This example uses the default `serde` feature. Download and extract the
-//! Python runtime bundle first:
+//! This example uses the default `serde` feature. Download the standalone
+//! Python runtime component first:
 //!
 //! ```bash
 //! VERSION=v0.x.y
-//! curl -L -o isola-python-runtime.tar.gz "https://github.com/brian14708/isola/releases/download/${VERSION}/isola-python-runtime.tar.gz"
-//! tar xzf isola-python-runtime.tar.gz
-//! mkdir -p isola-python-runtime/cache
+//! curl -L -o python.wasm.zst "https://github.com/brian14708/isola/releases/download/${VERSION}/python.wasm.zst"
 //! ```
-//! The archive extracts into `isola-python-runtime/` with `bin/python.wasm` and
-//! `lib/`. Point `.build(...)` and `.mount(...)` at those extracted paths.
 //!
 //! ```no_run
 //! # #[cfg(feature = "serde")]
 //! use isola::{
 //!     host::{Host, OutputTarget},
-//!     sandbox::{FsPerms, SandboxOptions, SandboxTemplate, args},
+//!     sandbox::{SandboxOptions, SandboxTemplate, args},
 //! };
 //!
 //! # #[cfg(feature = "serde")]
@@ -60,10 +56,9 @@
 //! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let template = SandboxTemplate::builder()
-//!         .cache(Some("./isola-python-runtime/cache".into()))
+//!         .cache(Some("./cache".into()))
 //!         .max_memory(64 * 1024 * 1024)
-//!         .mount("./isola-python-runtime/lib", "/lib", FsPerms::ReadOnly)
-//!         .build("./isola-python-runtime/bin/python.wasm")
+//!         .build("./python.wasm.zst")
 //!         .await?;
 //!
 //!     let mut sandbox = template

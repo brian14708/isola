@@ -86,7 +86,6 @@ const TEMPLATE_OPTION_KEYS = new Set([
   "cacheDir",
   "maxMemory",
   "prelude",
-  "runtimeLibDir",
   "mounts",
   "env",
 ]);
@@ -577,18 +576,15 @@ export class SandboxContext {
   ): Promise<SandboxTemplate> {
     validateOptionKeys(options, TEMPLATE_OPTION_KEYS, "template");
     let runtimePath = options?.runtimePath;
-    let runtimeLibDir = options?.runtimeLibDir;
     if (!runtimePath) {
       const resolved = await resolveRuntime(runtime, options?.version);
       runtimePath = resolved.runtimePath;
-      runtimeLibDir ??= resolved.runtimeLibDir;
     }
 
     const patch: Record<string, unknown> = {};
     if (options?.cacheDir !== undefined) patch.cache_dir = options.cacheDir;
     if (options?.maxMemory !== undefined) patch.max_memory = options.maxMemory;
     if (options?.prelude !== undefined) patch.prelude = options.prelude;
-    if (runtimeLibDir !== undefined) patch.runtime_lib_dir = runtimeLibDir;
     if (options?.mounts !== undefined)
       patch.mounts = encodeMounts(options.mounts);
     if (options?.env !== undefined) patch.env = options.env;

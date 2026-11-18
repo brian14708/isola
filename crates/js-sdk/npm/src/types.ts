@@ -8,7 +8,6 @@ export interface TemplateOptions {
   cacheDir?: string | null;
   maxMemory?: number | null;
   prelude?: string | null;
-  runtimeLibDir?: string | null;
   mounts?: MountConfig[];
   env?: Record<string, string>;
 }

@@ -1,4 +1,4 @@
-use std::hint::black_box;
+use std::{hint::black_box, time::Duration};
 
 use criterion::{BatchSize, Criterion};
 use isola::{
@@ -9,6 +9,7 @@ use isola::{
 use tokio::runtime::Runtime;
 
 pub fn bench(c: &mut Criterion, runtime: &Runtime) {
+    bench_runtime_mount_overhead(c, runtime);
     let python_module = runtime
         .block_on(super::python_common::build_module())
         .expect("failed to build Python integration module");
@@ -91,6 +92,57 @@ pub fn bench(c: &mut Criterion, runtime: &Runtime) {
             "skipping integration/python benchmark: missing artifacts. Build with `cargo xtask build-all`."
         );
     }
+}
+
+fn bench_runtime_mount_overhead(c: &mut Criterion, runtime: &Runtime) {
+    const SCRIPT: &str = "def read_runtime():\n\twith open('/lib/python315.zip', 'rb') as stream:\n\t\treturn len(stream.read(4096))";
+
+    let mut group = c.benchmark_group("integration/python/runtime_mount");
+    group.sample_size(10);
+    group.measurement_time(Duration::from_secs(20));
+    for (label, external) in [("embedded", false), ("external_mount", true)] {
+        let build = || {
+            runtime
+                .block_on(super::python_common::build_module_uncached(external))
+                .unwrap_or_else(|e| panic!("failed to build {label} Python module: {e:?}"))
+        };
+        let Some(module) = build() else {
+            eprintln!(
+                "skipping integration/python/runtime_mount/{label} benchmark: missing artifacts"
+            );
+            continue;
+        };
+
+        group.bench_function(format!("template_build_{label}"), |b| {
+            b.iter(|| black_box(build().expect("Python module disappeared during benchmark")));
+        });
+
+        let mut sandbox = runtime.block_on(async {
+            let mut sandbox = module
+                .instantiate(
+                    super::python_common::TestHost::default(),
+                    SandboxOptions::default(),
+                )
+                .await
+                .unwrap_or_else(|e| panic!("failed to instantiate {label} Python module: {e:?}"));
+            sandbox
+                .eval_script(SCRIPT, OutputTarget::discard())
+                .await
+                .unwrap_or_else(|e| {
+                    panic!("failed to initialize {label} filesystem benchmark: {e:?}")
+                });
+            sandbox
+        });
+        group.bench_function(format!("filesystem_read_{label}"), |b| {
+            b.iter(|| {
+                let output = runtime
+                    .block_on(sandbox.call("read_runtime", []))
+                    .unwrap_or_else(|e| panic!("{label} filesystem read failed: {e:?}"));
+                black_box(output.result);
+            });
+        });
+    }
+    group.finish();
 }
 
 fn bench_large_values(

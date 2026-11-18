@@ -50,13 +50,17 @@ When `runtimePath` is omitted from `buildTemplate(...)`, the SDK resolves the
 runtime automatically, downloads the matching release asset on first use,
 verifies its SHA-256 digest, and caches it under `~/.cache/isola/runtimes/`.
 
+Python runtime components are distributed as `python.wasm.zst`, carry their
+standard library and package assets in the Wasm component, and decompress and
+mount them automatically during template compilation.
+
 Supported runtime names:
 
 - `"python"`
 - `"js"`
 
 Use `version` to resolve a specific release tag. To use a runtime you unpacked
-yourself, pass `runtimePath` and, for Python runtimes, `runtimeLibDir`.
+yourself, pass `runtimePath`.
 
 ## Core Types
 
@@ -78,7 +82,6 @@ const template = await buildTemplate(runtime, options);
 - `cacheDir`: template cache directory, or `null` to disable caching
 - `maxMemory`: template memory limit in bytes
 - `prelude`: code injected before user scripts
-- `runtimeLibDir`: runtime library directory for manually provided Python runtimes
 - `mounts`: `MountConfig[]`
 - `env`: `Record<string, string>`
 

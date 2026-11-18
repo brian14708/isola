@@ -31,16 +31,13 @@ jobs:
       - name: Package release artifacts
         run: |
           mkdir -p dist
-          tar -C result -czf dist/isola-python-runtime.tar.gz \
-            --mode='u+rwX,go+rX,go-w' \
-            --transform='s,^,isola-python-runtime/,' \
-            bin lib
+          cp result/bin/python.wasm.zst dist/python.wasm.zst
       - name: Upload artifacts to target release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$RELEASE_TAG" -R "$GH_REPO" \
-            dist/isola-python-runtime.tar.gz \
+            dist/python.wasm.zst \
             --clobber
 
   js-runtime:
@@ -62,16 +59,13 @@ jobs:
         run: nix --accept-flake-config build .#js
       - name: Package release artifacts
         run: |
-          tar -C result -czf isola-js-runtime.tar.gz \
-            --mode='u+rwX,go+rX,go-w' \
-            --transform='s,^,isola-js-runtime/,' \
-            bin
+          cp result/bin/js.wasm.zst js.wasm.zst
       - name: Upload artifacts to target release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload "$RELEASE_TAG" -R "$GH_REPO" \
-            isola-js-runtime.tar.gz \
+            js.wasm.zst \
             --clobber
 
   python-sdk:

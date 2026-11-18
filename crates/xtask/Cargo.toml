@@ -10,7 +10,10 @@ repository.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 glob = { workspace = true }
+minicbor-serde = { workspace = true, features = ["alloc"] }
 rustc-demangle = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tar = { workspace = true }
 wasm-encoder = { workspace = true }
 wasmparser = { workspace = true }
 wit-component = { workspace = true }

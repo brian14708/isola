@@ -10,66 +10,45 @@ use wasmtime_wizer::{WasmtimeWizerComponent, Wizer};
 use crate::{
     host::{BoxError, Host, HttpRequestStream, HttpResponse},
     internal::{
-        module::{
-            ModuleConfig,
-            cache::{cache_key, write_cache_file_atomic},
-        },
+        module::{ModuleConfig, cache::write_cache_file_atomic},
         sandbox::{InstanceState, exports::GuestIndices},
     },
-    sandbox::{DirectoryMapping, Error, Result},
+    sandbox::{Error, Result},
     value::Value as IsolaValue,
 };
 
+pub fn load_cached_component(engine: &Engine, path: &Path) -> wasmtime::Result<Component> {
+    // Cache directories must be writable only by trusted processes.
+    unsafe { Component::deserialize_file(engine, path) }
+}
+
 pub async fn load_or_compile_component(
     engine: &Engine,
-    wasm_path: &Path,
-    directory_mappings: &[DirectoryMapping],
+    wasm_bytes: Vec<u8>,
     cfg: &ModuleConfig,
+    cache_path: Option<&Path>,
 ) -> Result<Component> {
-    let wasm_bytes = tokio::fs::read(wasm_path).await.map_err(Error::from)?;
-
-    let Some(cache_dir) = &cfg.cache else {
-        return compile_snapshot(
-            engine,
-            cfg,
-            directory_mappings,
-            wasm_bytes,
-            Component::from_binary,
-        )
-        .await;
+    let Some(cache_path) = cache_path else {
+        return compile_snapshot(engine, cfg, wasm_bytes, Component::from_binary).await;
     };
 
-    tokio::fs::create_dir_all(cache_dir)
-        .await
-        .map_err(Error::from)?;
-    let key = cache_key(engine, cfg, &wasm_bytes);
-    let cache_path = cache_dir.join(format!("{key}.cwasm"));
-
-    if let Ok(component) = unsafe { Component::deserialize_file(engine, &cache_path) } {
+    if let Ok(component) = load_cached_component(engine, cache_path) {
         return Ok(component);
     }
 
-    let lock = cache_lock(&cache_path);
+    let lock = cache_lock(cache_path);
     let _guard = lock.lock().await;
 
     // Another task may have populated the cache while this task waited for
     // the per-key lock.
-    if let Ok(component) = unsafe { Component::deserialize_file(engine, &cache_path) } {
+    if let Ok(component) = load_cached_component(engine, cache_path) {
         return Ok(component);
     }
 
-    let bytes = compile_snapshot(
-        engine,
-        cfg,
-        directory_mappings,
-        wasm_bytes,
-        Engine::precompile_component,
-    )
-    .await?;
-    write_cache_file_atomic(&cache_path, &bytes).await?;
+    let bytes = compile_snapshot(engine, cfg, wasm_bytes, Engine::precompile_component).await?;
+    write_cache_file_atomic(cache_path, &bytes).await?;
 
-    let component =
-        unsafe { Component::deserialize_file(engine, &cache_path) }.map_err(Error::Wasm)?;
+    let component = load_cached_component(engine, cache_path).map_err(Error::Wasm)?;
     Ok(component)
 }
 
@@ -89,13 +68,11 @@ fn cache_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
 async fn compile_snapshot<T: Send + 'static>(
     engine: &Engine,
     cfg: &ModuleConfig,
-    directory_mappings: &[DirectoryMapping],
     wasm_bytes: Vec<u8>,
     compile: impl FnOnce(&Engine, &[u8]) -> wasmtime::Result<T> + Send + 'static,
 ) -> Result<T> {
     let engine = engine.clone();
     let cfg = cfg.clone();
-    let directory_mappings = directory_mappings.to_vec();
 
     let span = tracing::Span::current();
     let dispatcher = tracing::dispatcher::get_default(Clone::clone);
@@ -119,7 +96,7 @@ async fn compile_snapshot<T: Send + 'static>(
                     InstanceState::<CompileHost>::new_linker(&engine).map_err(Error::Wasm)?;
                 let mut store = InstanceState::new(
                     &engine,
-                    &directory_mappings,
+                    &cfg.directory_mappings,
                     &cfg.env,
                     cfg.max_memory,
                     CompileHost,

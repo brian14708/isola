@@ -45,6 +45,11 @@ asyncio.run(main())
 Most users can skip this section and let `build_template(...)` handle runtime
 downloads automatically.
 
+Python runtime components are distributed as `python.wasm.zst` and carry their
+standard library and package assets in an embedded `isola:assets` section. The
+host loader decompresses the component and bootstraps those assets into the
+template filesystem.
+
 Use `resolve_runtime(runtime, *, version=None)` to fetch the runtime bundle
 config directly:
 
@@ -80,7 +85,6 @@ template = await build_template(runtime, *, version=None, **template_config)
 - `runtime`: `"python"` or `"js"`
 - `version`: optional release tag to resolve when auto-downloading a runtime
 - `runtime_path`: directory or path used to initialize the runtime bundle
-- `runtime_lib_dir`: runtime library directory, required for Python runtimes that are provided manually
 - `cache_dir`: template cache directory
 - `max_memory`: template memory limit in bytes
 - `prelude`: code injected before user scripts

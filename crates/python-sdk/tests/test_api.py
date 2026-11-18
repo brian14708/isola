@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import io
-import os
-import tarfile
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -17,7 +16,6 @@ if TYPE_CHECKING:
     from isola import Sandbox as IsolaSandbox
 
 isola = pytest.importorskip("isola")
-runtime_module = pytest.importorskip("isola._runtime")
 
 _FETCH_SCRIPT = (
     "import httpx2\n"
@@ -34,52 +32,34 @@ def test_json_stream_from_iterable_roundtrip() -> None:
     assert stream_arg.producer_task is None
 
 
-def test_strip_first_path_component_flattens_bundle_root() -> None:
-    strip_first_path_component = runtime_module._strip_first_path_component  # ruff:ignore[private-member-access]
-
-    assert (
-        strip_first_path_component("isola-python-runtime/bin/python.wasm")
-        == "bin/python.wasm"
+@pytest.mark.asyncio
+async def test_runtime_download_repairs_partial_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    runtime = pytest.importorskip("isola._runtime")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    wasm = b"verified runtime"
+    digest = f"sha256:{hashlib.sha256(wasm).hexdigest()}"
+    download = AsyncMock(return_value=wasm)
+    monkeypatch.setattr(
+        runtime, "_fetch_expected_digest", AsyncMock(return_value=digest)
     )
-    assert strip_first_path_component("isola-python-runtime") is None
+    monkeypatch.setattr(runtime, "_download_asset", download)
+    cache = tmp_path / "isola" / "runtimes" / "python-9.9.9"
+    cache.mkdir(parents=True)
+    asset = cache / "python.wasm.zst"
+    asset.write_bytes(b"partial")
+    await runtime.resolve_runtime("python", version="9.9.9")
+    assert asset.read_bytes() == wasm
+    await runtime.resolve_runtime("python", version="9.9.9")
+    assert download.await_count == 1
+    asset.write_bytes(b"truncated")
+    await runtime.resolve_runtime("python", version="9.9.9")
+    assert asset.read_bytes() == wasm
+    assert download.await_count == 2
 
 
-@pytest.mark.asyncio
-async def test_runtime_extraction_rejects_escaping_symlink(tmp_path: Path) -> None:
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w:gz") as tf:
-        link = tarfile.TarInfo("isola-python-runtime/lib/escape")
-        link.type = tarfile.SYMTYPE
-        link.linkname = "../../../outside"
-        tf.addfile(link)
-
-    with pytest.raises(RuntimeError, match="symlink target escapes archive"):
-        await runtime_module._extract_tarball(  # ruff:ignore[private-member-access]
-            archive.getvalue(), tmp_path / "runtime"
-        )
-
-
-@pytest.mark.asyncio
-async def test_runtime_extraction_rejects_member_below_symlink(tmp_path: Path) -> None:
-    archive = io.BytesIO()
-    with tarfile.open(fileobj=archive, mode="w:gz") as tf:
-        link = tarfile.TarInfo("isola-python-runtime/lib/link")
-        link.type = tarfile.SYMTYPE
-        link.linkname = "target"
-        tf.addfile(link)
-
-        payload = b"payload"
-        member = tarfile.TarInfo("isola-python-runtime/lib/link/payload")
-        member.size = len(payload)
-        tf.addfile(member, io.BytesIO(payload))
-
-    with pytest.raises(RuntimeError, match="archive entry traverses symlink"):
-        await runtime_module._extract_tarball(  # ruff:ignore[private-member-access]
-            archive.getvalue(), tmp_path / "runtime"
-        )
-
-
-def _resolve_runtime_paths() -> tuple[Path, Path]:
+def _resolve_runtime_dir() -> Path:
     workspace_root = Path(__file__).resolve().parents[3]
     runtime_dir = workspace_root / "target"
     wasm_path = runtime_dir / "python.wasm"
@@ -88,21 +68,7 @@ def _resolve_runtime_paths() -> tuple[Path, Path]:
             f"missing runtime wasm at '{wasm_path}', build with `cargo xtask build-all`"
         )
         pytest.skip(message)
-
-    wasi_runtime = os.environ.get("WASI_PYTHON_RUNTIME")
-    if wasi_runtime is None:
-        lib_dir = runtime_dir / "wasm32-wasip2" / "wasi-deps" / "usr" / "local" / "lib"
-    else:
-        lib_dir = Path(wasi_runtime) / "lib"
-
-    if not lib_dir.is_dir():
-        message = (
-            f"missing runtime libs at '{lib_dir}', "
-            "set WASI_PYTHON_RUNTIME or build runtime deps"
-        )
-        pytest.skip(message)
-
-    return runtime_dir, lib_dir
+    return runtime_dir
 
 
 def _resolve_js_runtime_dir() -> Path:
@@ -126,12 +92,11 @@ async def test_context_creation_smoke() -> None:
 
 @pytest.mark.asyncio
 async def test_async_context_managers_smoke() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async with template.create() as sandbox:
@@ -159,12 +124,11 @@ async def test_initialize_template_rejects_unknown_runtime() -> None:
 
 @pytest.mark.asyncio
 async def test_asyncio_timeout_wrapper() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async with template.create() as sandbox:
@@ -178,12 +142,11 @@ async def test_asyncio_timeout_wrapper() -> None:
 
 @pytest.mark.asyncio
 async def test_can_start_sandbox_and_execute_code() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async with template.create() as sandbox:
@@ -205,12 +168,11 @@ async def test_can_start_sandbox_and_execute_code() -> None:
 
 @pytest.mark.asyncio
 async def test_run_stream_yields_events() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async with template.create() as sandbox:
@@ -555,12 +517,11 @@ async def test_run_propagates_stream_producer_failure() -> None:
 
 @pytest.mark.asyncio
 async def test_two_sandboxes_can_run_concurrently() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async with template.create() as sandbox_a, template.create() as sandbox_b:
@@ -698,12 +659,11 @@ async def test_template_create_rejects_invalid_http_handler() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_http_bytes_response_shape() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async def http(_: HttpRequest) -> HttpResponse:
@@ -726,12 +686,11 @@ async def test_sandbox_http_bytes_response_shape() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_hostcalls_roundtrip() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async def lookup_user(payload: object) -> object:
@@ -753,12 +712,11 @@ async def test_sandbox_hostcalls_roundtrip() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_http_stream_response_shape() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async def response_chunks() -> AsyncIterator[bytes]:
@@ -789,12 +747,11 @@ async def test_sandbox_http_stream_response_shape() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_http_streaming_request_body() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     received: list[bytes] = []
@@ -830,12 +787,11 @@ async def test_sandbox_http_streaming_request_body() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_http_request_aread_caches_body() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async def http(req: HttpRequest) -> HttpResponse:
@@ -866,12 +822,11 @@ async def test_sandbox_http_request_aread_caches_body() -> None:
 
 @pytest.mark.asyncio
 async def test_sandbox_caller_timeout_does_not_break_following_requests() -> None:
-    runtime_dir, lib_dir = _resolve_runtime_paths()
+    runtime_dir = _resolve_runtime_dir()
     template = await isola.build_template(
         "python",
         runtime_path=runtime_dir,
         max_memory=64 * 1024 * 1024,
-        runtime_lib_dir=lib_dir,
     )
 
     async def warmup_handler(_: HttpRequest) -> HttpResponse:
