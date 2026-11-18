@@ -289,6 +289,24 @@ impl ArgIter {
     }
 }
 
+/// Rebuild `CPython`'s environment mapping from the refreshed libc `environ`.
+///
+/// `posix.environ` is the backing dict of `os.environ` and `os.environb`, so
+/// replacing its contents in place updates every view without calling
+/// `putenv`/`unsetenv` for each key.
+fn refresh_os_environ(py: Python<'_>) -> PyResult<()> {
+    let environ = PyModule::import(py, "posix")?.getattr("environ")?;
+    let environ = environ.cast::<pyo3::types::PyDict>()?;
+    environ.clear();
+    for (key, value) in std::env::vars_os() {
+        environ.set_item(
+            pyo3::types::PyBytes::new(py, key.as_encoded_bytes()),
+            pyo3::types::PyBytes::new(py, value.as_encoded_bytes()),
+        )?;
+    }
+    Ok(())
+}
+
 thread_local! {
     static GLOBAL_SCOPE: RefCell<Option<Scope>> = const { RefCell::new(None) };
 }
@@ -307,7 +325,13 @@ fn scrub_snapshot_state() {
         return;
     }
 
+    // The environment is per instance, but libc's `environ` and CPython's
+    // `os.environ` were both captured during pre-init.
+    isola_runtime::lifecycle::refresh_environ();
+
     let result = Python::attach(|py| -> PyResult<()> {
+        refresh_os_environ(py)?;
+
         // `random` seeds its global generator at import time; if the pre-init
         // prelude (or anything it pulls in) imported it, that seeded state is
         // baked into the snapshot and every sandbox sharing this template would
