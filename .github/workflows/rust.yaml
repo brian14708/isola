@@ -24,6 +24,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v2
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
       - name: Run tests
         run: cargo test --locked --all-features
       - name: Clippy

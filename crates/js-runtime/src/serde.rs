@@ -18,7 +18,26 @@ impl Serialize for Bytes<'_> {
 
 const MAX_DEPTH: usize = 128;
 
+/// Whether `value` is an `ArrayBuffer`, via a class-id check.
+///
+/// `rquickjs::ArrayBuffer::from_value` probes with `JS_GetArrayBuffer`, which
+/// throws (allocating an `Error` with a stack trace) for every non-buffer, so
+/// gate on this cheap check first.
+fn is_array_buffer(value: &Value<'_>) -> bool {
+    // SAFETY: `JS_IsArrayBuffer` only reads the class id of a live value.
+    unsafe { rquickjs::qjs::JS_IsArrayBuffer(value.as_raw()) }
+}
+
+/// Whether `value` is any typed array, via a class-id check.
+fn is_typed_array(value: &Value<'_>) -> bool {
+    // SAFETY: `JS_GetTypedArrayType` only reads the class id of a live value.
+    unsafe { rquickjs::qjs::JS_GetTypedArrayType(value.as_raw()) >= 0 }
+}
+
 pub fn array_buffer_from_value(value: Value<'_>) -> Option<rquickjs::ArrayBuffer<'_>> {
+    if !is_array_buffer(&value) {
+        return None;
+    }
     let ctx = value.ctx().clone();
     let had_exception = ctx.has_exception();
     let buffer = rquickjs::ArrayBuffer::from_value(value);
@@ -236,11 +255,14 @@ impl<'de, 'js> Visitor<'de> for JsVisitor<'js> {
         let obj = rquickjs::Object::new(self.0.clone())
             .map_err(|e| serde::de::Error::custom(e.to_string()))?;
         while let Some((key, val)) = map.next_entry_seed(
-            JsDeserializer(self.0.clone()),
+            JsKeyDeserializer(self.0.clone()),
             JsDeserializer(self.0.clone()),
         )? {
-            obj.set::<Value<'_>, Value<'_>>(key, val)
-                .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+            match key {
+                JsKey::Atom(key) => obj.set(key, val),
+                JsKey::Value(key) => obj.set(key, val),
+            }
+            .map_err(|e| serde::de::Error::custom(e.to_string()))?;
         }
         Ok(obj.into_value())
     }
@@ -268,6 +290,132 @@ impl<'de, 'js> DeserializeSeed<'de> for JsDeserializer<'js> {
         D: serde::Deserializer<'de>,
     {
         deserializer.deserialize_any(JsVisitor(self.0))
+    }
+}
+
+/// Decoded object key.
+enum JsKey<'js> {
+    /// ASCII string key interned directly as a property atom.
+    Atom(rquickjs::Atom<'js>),
+    /// Any other key, converted to a property key by `QuickJS`.
+    Value(Value<'js>),
+}
+
+/// Map-key seed that interns ASCII string keys straight into atoms.
+///
+/// `JS_NewAtomLen` finds an existing atom without allocating, whereas the
+/// generic path creates a temporary JS string per key and then interns it.
+/// Non-ASCII keys keep the generic path: `QuickJS` atom lookup compares raw
+/// bytes, so UTF-8 input could alias a different Latin-1 atom.
+struct JsKeyDeserializer<'js>(Ctx<'js>);
+
+impl<'de, 'js> DeserializeSeed<'de> for JsKeyDeserializer<'js> {
+    type Value = JsKey<'js>;
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(JsKeyVisitor(self.0))
+    }
+}
+
+struct JsKeyVisitor<'js>(Ctx<'js>);
+
+macro_rules! forward_key_visit {
+    ($($method:ident($ty:ty)),* $(,)?) => {
+        $(
+            fn $method<E>(self, v: $ty) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                JsVisitor(self.0).$method(v).map(JsKey::Value)
+            }
+        )*
+    };
+}
+
+impl<'de, 'js> Visitor<'de> for JsKeyVisitor<'js> {
+    type Value = JsKey<'js>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a type that can deserialize to a JS property key")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if v.is_ascii() {
+            rquickjs::Atom::from_str(self.0, v)
+                .map(JsKey::Atom)
+                .map_err(|e| serde::de::Error::custom(e.to_string()))
+        } else {
+            JsVisitor(self.0).visit_str(v).map(JsKey::Value)
+        }
+    }
+
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        self.visit_str(&v)
+    }
+
+    forward_key_visit!(
+        visit_bool(bool),
+        visit_i64(i64),
+        visit_i128(i128),
+        visit_u64(u64),
+        visit_u128(u128),
+        visit_f32(f32),
+        visit_f64(f64),
+        visit_bytes(&[u8]),
+        visit_byte_buf(Vec<u8>),
+    );
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JsVisitor(self.0).visit_unit().map(JsKey::Value)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        JsVisitor(self.0).visit_none().map(JsKey::Value)
+    }
+
+    fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::SeqAccess<'de>,
+    {
+        JsVisitor(self.0).visit_seq(seq).map(JsKey::Value)
+    }
+
+    fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+    where
+        A: serde::de::MapAccess<'de>,
+    {
+        JsVisitor(self.0).visit_map(map).map(JsKey::Value)
+    }
+
+    fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        JsVisitor(self.0).visit_some(deserializer).map(JsKey::Value)
+    }
+
+    fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        JsVisitor(self.0)
+            .visit_newtype_struct(deserializer)
+            .map(JsKey::Value)
     }
 }
 
@@ -320,8 +468,8 @@ impl Serialize for JsValue<'_> {
                     let s = s.clone().to_cstring().map_err(serde::ser::Error::custom)?;
                     serializer.serialize_str(s.as_str())
                 } else if v.is_object() && !v.is_array() {
-                    // Check if it's an ArrayBuffer
-                    if v.as_object().is_some() {
+                    // Check if it's an ArrayBuffer or typed array
+                    if is_array_buffer(v) || is_typed_array(v) {
                         if let Some(buf) = array_buffer_from_value(v.clone())
                             && let Some(bytes) = unsafe { buf.as_bytes() }
                         {
@@ -420,7 +568,8 @@ impl<'de> Deserializer<'de> for JsValue<'_> {
             {
                 return visitor.visit_bytes(bytes);
             }
-            if let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(v.clone())
+            if is_typed_array(v)
+                && let Ok(ta) = rquickjs::TypedArray::<u8>::from_value(v.clone())
                 && let Some(bytes) = unsafe { ta.as_bytes() }
             {
                 return visitor.visit_bytes(bytes);

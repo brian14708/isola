@@ -309,6 +309,64 @@ async fn integration_js_typed_array_cbor_path() -> Result<()> {
 
 #[tokio::test]
 #[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_js_binary_and_object_key_roundtrip() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    let script = r"
+function buffer() { return new Uint8Array([1, 2, 3]).buffer; }
+function bytes() { return new Uint8Array([4, 5]); }
+function keys(obj) {
+  return {
+    sorted: Object.keys(obj),
+    index: obj[0],
+    unicode: obj['caf\u00e9'],
+    latin1Alias: obj['caf\u00c3\u00a9'],
+    ascii: obj.plain,
+  };
+}
+";
+    sandbox.eval_script(script, OutputTarget::discard()).await?;
+
+    let output = call_with_timeout(&mut sandbox, "buffer", [], Duration::from_secs(5)).await?;
+    let value = output.result.context("expected ArrayBuffer result")?;
+    assert_eq!(minicbor::Decoder::new(value.as_cbor()).bytes()?, &[1, 2, 3]);
+
+    let output = call_with_timeout(&mut sandbox, "bytes", [], Duration::from_secs(5)).await?;
+    let value = output.result.context("expected Uint8Array result")?;
+    let mut decoder = minicbor::Decoder::new(value.as_cbor());
+    assert_eq!(decoder.tag()?.as_u64(), 64);
+    assert_eq!(decoder.bytes()?, &[4, 5]);
+
+    // Numeric-string keys must become array-index properties, and UTF-8
+    // keys must not alias the Latin-1 spelling of the same bytes.
+    let input = Value::from_json_str(r#"{"plain":1,"0":"zero","café":"utf8"}"#)?;
+    let output = call_with_timeout(
+        &mut sandbox,
+        "keys",
+        [Arg::Positional(input)],
+        Duration::from_secs(5),
+    )
+    .await?;
+    let value: serde_json::Value = output.result.context("expected keys result")?.to_serde()?;
+    assert_eq!(
+        value,
+        serde_json::json!({
+            "sorted": ["0", "plain", "café"],
+            "index": "zero",
+            "unicode": "utf8",
+            "latin1Alias": null,
+            "ascii": 1,
+        })
+    );
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
 async fn integration_js_return_object() -> Result<()> {
     let Some(module) = build_module().await? else {
         return Ok(());

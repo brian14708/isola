@@ -1,6 +1,4 @@
-use std::time::Duration;
-
-use isola_runtime::wasi_http::{HttpRequest, HttpResponse};
+use isola_runtime::wasi_http::{HttpRequest, HttpResponse, timeout_millis};
 use rquickjs::{Array, Ctx, Function, Object, Value, object::Filter};
 use url::Url;
 
@@ -260,7 +258,7 @@ fn send_impl(
         }
     }
 
-    let timeout_ms = timeout_ms_from_value(&timeout);
+    let timeout_ms = timeout.as_number().and_then(timeout_millis);
 
     let has_body = !body.is_null() && !body.is_undefined();
     let body = if has_body {
@@ -313,21 +311,8 @@ fn send_stream_impl(
         u,
         header_fields,
         body,
-        timeout_ms_from_value(&timeout),
+        timeout.as_number().and_then(timeout_millis),
     )))
-}
-
-fn timeout_ms_from_value(timeout: &Value<'_>) -> Option<u64> {
-    if timeout.is_null() || timeout.is_undefined() {
-        return None;
-    }
-    let timeout_secs = timeout
-        .as_float()
-        .or_else(|| timeout.as_int().map(f64::from))?;
-    if !timeout_secs.is_finite() || timeout_secs <= 0.0 {
-        return None;
-    }
-    Some(u64::try_from(Duration::from_secs_f64(timeout_secs).as_millis()).unwrap_or(u64::MAX))
 }
 
 pub fn build_response_object<'js>(

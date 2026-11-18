@@ -219,10 +219,17 @@ fn build_python(sh: &Shell) -> Result<()> {
 }
 
 fn build_js(sh: &Shell) -> Result<()> {
+    // Let Clang vectorize QuickJS's UTF-8 scans using WebAssembly SIMD.
+    // `-vectorizer-maximize-bandwidth` lets byte loops that widen into an
+    // `int` accumulator (e.g. the ASCII scan in `JS_ToCStringLen2`, run on
+    // every string crossing into CBOR) use full 16-byte vectors; the default
+    // cost model picks 4-byte loads, which run at roughly scalar speed.
+    let target_cflags = env::var("CFLAGS_wasm32_wasip2").unwrap_or_default();
+    let cflags = format!("-msimd128 -mllvm -vectorizer-maximize-bandwidth {target_cflags}");
     build_guest(
         sh,
         "isola-js-runtime",
-        None,
+        Some(("CFLAGS_wasm32_wasip2", &cflags)),
         |wasi_deps_dir, runtime| Ok(js_libraries(wasi_deps_dir, runtime)),
         Path::new("target/js.wasm"),
         2_097_152,

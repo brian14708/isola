@@ -27,9 +27,9 @@ jobs:
         with:
           package_json_file: crates/js-sdk/npm/package.json
       - name: Install dependencies
-        run: pnpm install
-      - name: Type check
-        run: pnpm --filter isola-core tsc --noEmit
+        run: pnpm install --frozen-lockfile
+      - name: Lint and type check
+        run: pnpm --filter isola-core run lint
       - name: Validate package entrypoint
         run: |
           pnpm --filter isola-core run build

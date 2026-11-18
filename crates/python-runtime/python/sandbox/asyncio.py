@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
+import inspect
 import logging
 import sys
 import weakref
@@ -155,6 +157,9 @@ class PollLoop(asyncio.AbstractEventLoop):
                 "exception": exception,
                 "asyncgen": generator,
             })
+
+    def has_asyncgens(self) -> bool:
+        return bool(self._asyncgens or self._finalizing_asyncgens)
 
     def _retain_asyncgens_for_shutdown(self) -> None:
         # Keep active generators alive after their top-level loop turn so
@@ -416,11 +421,52 @@ class PollLoop(asyncio.AbstractEventLoop):
         pass
 
 
+# Instantiated through a callable, as `asyncio.Runner(loop_factory=...)` did:
+# `PollLoop` leaves the unused `AbstractEventLoop` I/O methods unimplemented.
+_new_loop = cast("Callable[[], PollLoop]", PollLoop)
+
+
+def _close_loop(loop: PollLoop) -> None:
+    """Finalize `loop` like `asyncio.Runner.close()`, skipping empty turns.
+
+    `Runner.close()` always drives the loop twice more (async generator and
+    default executor shutdown), each turn costing a task, hook installation,
+    and a host poll. `PollLoop` has no executor, and async generator shutdown
+    only needs a turn when generators are still alive.
+    """
+    try:
+        _cancel_all_tasks(loop)
+        if loop.has_asyncgens():
+            loop.run_until_complete(loop.shutdown_asyncgens())
+    finally:
+        loop.close()
+
+
+def _cancel_all_tasks(loop: PollLoop) -> None:
+    # Mirrors asyncio.runners._cancel_all_tasks().
+    to_cancel = asyncio.all_tasks(loop)
+    if not to_cancel:
+        return
+    for task in to_cancel:
+        _ = task.cancel()
+    _ = loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
+    for task in to_cancel:
+        if task.cancelled():
+            continue
+        if (exception := task.exception()) is not None:
+            loop.call_exception_handler({
+                "message": "unhandled exception during asyncio.run() shutdown",
+                "exception": exception,
+                "task": task,
+            })
+
+
 def _iter[T](it: AsyncGenerator[T]) -> Generator[T]:
-    with asyncio.Runner(loop_factory=PollLoop) as runner:
-        loop = runner.get_loop()
-        assert isinstance(loop, PollLoop), "runner.get_loop() must return a PollLoop"
+    loop = _new_loop()
+    try:
         yield from loop.run_async_generator(it)
+    finally:
+        _close_loop(loop)
 
 
 @overload
@@ -428,10 +474,44 @@ def run[T](main: _Coroutine[T]) -> T: ...
 @overload
 def run[T](main: AsyncGenerator[T]) -> Generator[T]: ...
 def run[T](main: _Coroutine[T] | AsyncGenerator[T]) -> T | Generator[T]:
+    """Run `main` on a fresh `PollLoop`, like `asyncio.run()`.
+
+    Unlike `asyncio.Runner`, this skips SIGINT handling (signals never reach
+    the sandbox) and loop turns that would have nothing to finalize.
+
+    Returns:
+        The coroutine's result, or a generator over an async generator's items.
+
+    Raises:
+        RuntimeError: If called while an event loop is already running.
+        TypeError: If `main` is not awaitable.
+
+    """
     if hasattr(main, "__aiter__"):
         return _iter(cast("AsyncGenerator[T]", main))
-    with asyncio.Runner(loop_factory=PollLoop) as runner:
-        return runner.run(cast("Coroutine[None, None, T]", main))
+    if asyncio.events._get_running_loop() is not None:  # ruff:ignore[private-member-access]
+        msg = "sandbox.asyncio.run() cannot be called from a running event loop"
+        raise RuntimeError(msg)
+    # Like `asyncio.Runner.run()`: tasks need a real coroutine, so wrap other
+    # awaitables (e.g. objects defining `__await__`).
+    awaitable = cast("object", main)
+    if asyncio.iscoroutine(awaitable):
+        coro = cast("_Coroutine[T]", awaitable)
+    elif inspect.isawaitable(awaitable):
+        coro = _wrap_awaitable(cast("Awaitable[T]", awaitable))
+    else:
+        msg = "An asyncio.Future, a coroutine or an awaitable is required"
+        raise TypeError(msg)
+    loop = _new_loop()
+    try:
+        task = loop.create_task(coro, context=contextvars.copy_context())
+        return loop.run_until_complete(task)
+    finally:
+        _close_loop(loop)
+
+
+async def _wrap_awaitable[T](awaitable: Awaitable[T]) -> T:
+    return await awaitable
 
 
 async def _aiter_arg(args: _isola_sys.ArgIter) -> AsyncGenerator[object]:  # pyright:ignore[reportUnusedFunction]

@@ -8,21 +8,11 @@ permissions: {}
 
 env:
   GH_REPO: ${{ github.repository }}
+  RELEASE_TAG: ${{ github.event.release.tag_name }}
 
 jobs:
-  targets:
-    name: Tag
-    runs-on: ubuntu-latest
-    outputs:
-      release_tag: ${{ steps.resolve.outputs.release_tag }}
-    steps:
-      - name: Resolve release tag
-        id: resolve
-        run: |
-          echo "release_tag=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
   python-runtime:
     name: Python Runtime
-    needs: targets
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -49,13 +39,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
+          gh release upload "$RELEASE_TAG" -R "$GH_REPO" \
             dist/isola-python-runtime.tar.gz \
             --clobber
 
   js-runtime:
     name: JS Runtime
-    needs: targets
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,13 +70,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
+          gh release upload "$RELEASE_TAG" -R "$GH_REPO" \
             isola-js-runtime.tar.gz \
             --clobber
 
   python-sdk:
     name: Python SDK Wheel (${{ matrix.settings.target }})
-    needs: targets
     runs-on: ${{ matrix.settings.os }}
     strategy:
       fail-fast: false
@@ -142,7 +130,7 @@ jobs:
 
   python-sdk-publish:
     name: Python SDK Publish
-    needs: [targets, python-sdk]
+    needs: python-sdk
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -161,7 +149,6 @@ jobs:
           uv publish dist/*
 
   library:
-    needs: targets
     name: Library (${{ matrix.settings.target }})
     strategy:
       fail-fast: false
@@ -226,13 +213,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.targets.outputs.release_tag }}" -R "$GH_REPO" \
+          gh release upload "$RELEASE_TAG" -R "$GH_REPO" \
             "dist/${{ matrix.settings.archive_name }}" \
             --clobber
 
   cargo_publish:
     name: Cargo
-    needs: targets
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -252,7 +238,6 @@ jobs:
 
   js-sdk:
     name: JS SDK (${{ matrix.settings.target }})
-    needs: targets
     runs-on: ${{ matrix.settings.os }}
     strategy:
       fail-fast: false
@@ -280,14 +265,14 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: latest
+          package_json_file: crates/js-sdk/npm/package.json
       - uses: actions-rust-lang/setup-rust-toolchain@v2
         with:
           target: ${{ matrix.settings.target }}
       - name: Cache Rust artifacts
         uses: Swatinem/rust-cache@v2
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Build native module
         run: pnpm --filter isola-core run build -- --target ${{ matrix.settings.target }}
       - name: Stage platform package
@@ -304,7 +289,7 @@ jobs:
 
   js-sdk-publish:
     name: JS SDK Publish
-    needs: [targets, js-sdk]
+    needs: js-sdk
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -320,9 +305,9 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: latest
+          package_json_file: crates/js-sdk/npm/package.json
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:

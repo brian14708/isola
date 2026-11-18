@@ -1,7 +1,7 @@
 #[pyo3::pymodule]
 #[pyo3(name = "_isola_http")]
 pub mod http_module {
-    use isola_runtime::wasi_http::{HttpRequest, HttpResponse};
+    use isola_runtime::wasi_http::{HttpRequest, HttpResponse, timeout_millis};
     use pyo3::{
         prelude::*,
         types::{PyBytes, PyDict},
@@ -94,10 +94,7 @@ pub mod http_module {
                 u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
             }
         }
-        let timeout_ms = timeout
-            .filter(|timeout| timeout.is_finite() && *timeout > 0.0)
-            .map(|timeout| std::time::Duration::from_secs_f64(timeout).as_millis())
-            .map(|timeout_ms| u64::try_from(timeout_ms).unwrap_or(u64::MAX));
+        let timeout_ms = timeout.and_then(timeout_millis);
 
         let body = match &body {
             Body::None => None,
@@ -141,10 +138,7 @@ pub mod http_module {
                 u.query_pairs_mut().append_pair(k.extract()?, v.extract()?);
             }
         }
-        let timeout_ms = timeout
-            .filter(|timeout| timeout.is_finite() && *timeout > 0.0)
-            .map(|timeout| std::time::Duration::from_secs_f64(timeout).as_millis())
-            .map(|timeout_ms| u64::try_from(timeout_ms).unwrap_or(u64::MAX));
+        let timeout_ms = timeout.and_then(timeout_millis);
         let body = isola_runtime::pending::take_http_upload_stream(upload_handle)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
 
@@ -325,9 +319,9 @@ pub mod http_module {
             })?
         };
         // A zero-length read makes no progress. Report completion immediately
-        // so callers that loop until `None` (e.g. `blocking_read`, `_aread`) don't
-        // spin forever on the always-ready pollable. The response is left
-        // unconsumed so subsequent reads still work.
+        // so callers that loop until `None` (e.g. `blocking_read`, `_aread`)
+        // don't spin forever on the always-ready pollable. The response
+        // is left unconsumed so subsequent reads still work.
         if read_size == 0 {
             return Ok(None);
         }

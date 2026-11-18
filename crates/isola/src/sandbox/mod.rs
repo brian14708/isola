@@ -28,10 +28,7 @@ use std::{
 
 use futures::Stream;
 use parking_lot::Mutex;
-use wasmtime::{
-    Engine, Store,
-    component::{Component, InstancePre},
-};
+use wasmtime::{Engine, Store, component::Component};
 pub use wasmtime_wasi::FsPerms;
 
 #[cfg(feature = "serde")]
@@ -438,11 +435,11 @@ impl SandboxTemplate {
                 let pre = linker
                     .instantiate_pre(&self.component)
                     .map_err(Error::Wasm)?;
-                entry.insert(Box::new(pre));
+                entry.insert(Box::new(SandboxPre::new(pre).map_err(Error::Wasm)?));
             }
             cached
                 .get(&host_type)
-                .and_then(|pre| pre.downcast_ref::<InstancePre<InstanceState<H>>>())
+                .and_then(|pre| pre.downcast_ref::<SandboxPre<InstanceState<H>>>())
                 .ok_or_else(|| {
                     Error::Other(
                         std::io::Error::other(
@@ -453,8 +450,7 @@ impl SandboxTemplate {
                 })?
                 .clone()
         };
-        let bindings = SandboxPre::new(pre)
-            .map_err(Error::Wasm)?
+        let bindings = pre
             .instantiate_async(&mut store)
             .await
             .map_err(Error::Wasm)?;

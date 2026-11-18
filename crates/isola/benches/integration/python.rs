@@ -13,13 +13,11 @@ pub fn bench(c: &mut Criterion, runtime: &Runtime) {
         .block_on(super::python_common::build_module())
         .expect("failed to build Python integration module");
     if let Some(python_module) = python_module {
+        let host = super::python_common::TestHost::default();
         c.bench_function("integration/python/sandbox_create", |b| {
             b.iter(|| {
                 let sandbox = runtime
-                    .block_on(python_module.instantiate(
-                        super::python_common::TestHost::default(),
-                        SandboxOptions::default(),
-                    ))
+                    .block_on(python_module.instantiate(host.clone(), SandboxOptions::default()))
                     .expect("failed to instantiate python sandbox");
                 black_box(sandbox);
             });
@@ -100,10 +98,17 @@ fn bench_large_values(
     runtime: &Runtime,
     sandbox: &mut Sandbox<super::python_common::TestHost>,
 ) {
-    let large_cbor = Value::from_serde(&"x".repeat(1024 * 1024))
-        .expect("failed to encode large benchmark argument")
-        .into_cbor()
-        .to_vec();
+    let large_value = Value::from_serde(&"x".repeat(1024 * 1024))
+        .expect("failed to encode large benchmark argument");
+    c.bench_function("integration/python/shared_argument", |b| {
+        b.iter(|| {
+            let output = runtime
+                .block_on(sandbox.call("consume", [Arg::Positional(large_value.clone())]))
+                .expect("failed to process shared python argument");
+            black_box(output.result.expect("missing python result"));
+        });
+    });
+    let large_cbor = large_value.into_cbor().to_vec();
     for (benchmark, function) in [
         ("integration/python/large_argument", "consume"),
         ("integration/python/large_hostcall", "roundtrip"),

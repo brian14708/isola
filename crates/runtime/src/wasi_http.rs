@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, time::Duration};
 
 use futures::{StreamExt, future::join, stream};
 use wit_bindgen::rt::async_support::StreamResult;
@@ -37,6 +37,17 @@ fn is_forbidden_header(name: &str) -> bool {
     FORBIDDEN_HEADERS
         .iter()
         .any(|forbidden| name.eq_ignore_ascii_case(forbidden))
+}
+
+/// Convert a positive, finite timeout in seconds to milliseconds, saturating on
+/// overflow.
+#[must_use]
+pub fn timeout_millis(seconds: f64) -> Option<u64> {
+    if !seconds.is_finite() || seconds <= 0.0 {
+        return None;
+    }
+    let duration = Duration::try_from_secs_f64(seconds).unwrap_or(Duration::MAX);
+    Some(u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
 }
 
 pub struct HttpRequest {
@@ -324,5 +335,17 @@ fn parse_scheme(scheme: &str) -> Scheme {
         "http" => Scheme::Http,
         "https" => Scheme::Https,
         _ => Scheme::Other(scheme.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::timeout_millis;
+
+    #[test]
+    fn http_timeout_saturates_for_large_finite_values() {
+        assert_eq!(timeout_millis(f64::MAX), Some(u64::MAX));
+        assert_eq!(timeout_millis(1.25), Some(1_250));
+        assert_eq!(timeout_millis(f64::INFINITY), None);
     }
 }

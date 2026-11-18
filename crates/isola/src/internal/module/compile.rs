@@ -29,13 +29,14 @@ pub async fn load_or_compile_component(
     let wasm_bytes = tokio::fs::read(wasm_path).await.map_err(Error::from)?;
 
     let Some(cache_dir) = &cfg.cache else {
-        let bytes =
-            compile_serialized_component(engine, cfg, directory_mappings, wasm_bytes).await?;
-        // SAFETY: bytes are produced by wasmtime for the same version/config;
-        // if incompatible, deserialization will fail and surface as an
-        // error.
-        let component = unsafe { Component::deserialize(engine, &bytes) }.map_err(Error::Wasm)?;
-        return Ok(component);
+        return compile_snapshot(
+            engine,
+            cfg,
+            directory_mappings,
+            wasm_bytes,
+            Component::from_binary,
+        )
+        .await;
     };
 
     tokio::fs::create_dir_all(cache_dir)
@@ -57,7 +58,14 @@ pub async fn load_or_compile_component(
         return Ok(component);
     }
 
-    let bytes = compile_serialized_component(engine, cfg, directory_mappings, wasm_bytes).await?;
+    let bytes = compile_snapshot(
+        engine,
+        cfg,
+        directory_mappings,
+        wasm_bytes,
+        Engine::precompile_component,
+    )
+    .await?;
     write_cache_file_atomic(&cache_path, &bytes).await?;
 
     let component =
@@ -78,12 +86,13 @@ fn cache_lock(path: &Path) -> Arc<tokio::sync::Mutex<()>> {
     lock
 }
 
-async fn compile_serialized_component(
+async fn compile_snapshot<T: Send + 'static>(
     engine: &Engine,
     cfg: &ModuleConfig,
     directory_mappings: &[DirectoryMapping],
     wasm_bytes: Vec<u8>,
-) -> Result<Vec<u8>> {
+    compile: impl FnOnce(&Engine, &[u8]) -> wasmtime::Result<T> + Send + 'static,
+) -> Result<T> {
     let engine = engine.clone();
     let cfg = cfg.clone();
     let directory_mappings = directory_mappings.to_vec();
@@ -146,9 +155,7 @@ async fn compile_serialized_component(
             };
             drop(wasm_bytes);
 
-            let component = Component::new(&engine, &data).map_err(Error::Wasm)?;
-            drop(data);
-            component.serialize().map_err(Error::Wasm)
+            compile(&engine, &data).map_err(Error::Wasm)
         })
     })
     .await

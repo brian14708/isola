@@ -1,12 +1,10 @@
 use std::{
     collections::hash_map::DefaultHasher,
-    fmt::Write as _,
     hash::{Hash, Hasher},
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use sha2::{Digest, Sha256};
 use wasmtime::Engine;
 
 use super::ModuleConfig;
@@ -19,53 +17,44 @@ fn engine_fingerprint(engine: &Engine) -> u64 {
 }
 
 pub fn cache_key(engine: &Engine, cfg: &ModuleConfig, wasm_bytes: &[u8]) -> String {
-    let mut wasm_h = Sha256::new();
-    wasm_h.update(wasm_bytes);
-    let wasm_digest = wasm_h.finalize();
+    let mut h = blake3::Hasher::new();
+    h.update(b"isola-cache-v2\0");
+    h.update(blake3::hash(wasm_bytes).as_bytes());
+    h.update(&engine_fingerprint(engine).to_le_bytes());
 
-    let mut h = Sha256::new();
-    h.update(b"isola-cache-2026-08-29\0");
-    h.update(wasm_digest);
-    h.update(engine_fingerprint(engine).to_le_bytes());
-
-    h.update((cfg.directory_mappings.len() as u64).to_le_bytes());
+    h.update(&(cfg.directory_mappings.len() as u64).to_le_bytes());
     for mapping in &cfg.directory_mappings {
         h.update(mapping.guest.as_bytes());
-        h.update([0]);
+        h.update(&[0]);
         let host = mapping.host.to_string_lossy();
         h.update(host.as_bytes());
-        h.update([0]);
-        h.update([match mapping.perms {
+        h.update(&[0]);
+        h.update(&[match mapping.perms {
             wasmtime_wasi::FsPerms::ReadOnly => 0,
             wasmtime_wasi::FsPerms::ReadWrite => 1,
         }]);
     }
 
-    h.update((cfg.env.len() as u64).to_le_bytes());
+    h.update(&(cfg.env.len() as u64).to_le_bytes());
     for (k, v) in &cfg.env {
         h.update(k.as_bytes());
-        h.update([0]);
+        h.update(&[0]);
         h.update(v.as_bytes());
-        h.update([0]);
+        h.update(&[0]);
     }
 
     if let Some(prelude) = &cfg.prelude {
-        h.update([1]);
+        h.update(&[1]);
         h.update(prelude.as_bytes());
     } else {
-        h.update([0]);
+        h.update(&[0]);
     }
 
-    h.update((cfg.max_memory as u64).to_le_bytes());
+    h.update(&(cfg.max_memory as u64).to_le_bytes());
     // Optimization level is fixed in `configure_engine`.
-    h.update([1]);
+    h.update(&[1]);
 
-    let digest = h.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for b in digest {
-        let _ = write!(&mut out, "{b:02x}");
-    }
-    out
+    h.finalize().to_hex().to_string()
 }
 
 pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<()> {

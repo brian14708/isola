@@ -21,6 +21,7 @@ test:
 lint: init-py lint-rust lint-python lint-js
 
 lint-rust:
+    cargo fmt --all -- --check
     cargo clippy --workspace --all-targets --all-features -- --deny warnings
 
 lint-python: init-py

@@ -30,6 +30,15 @@ pub enum InputValue<'a> {
     Iter(ArgIter),
 }
 
+impl InputValue<'_> {
+    fn into_python(self, py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+        match self {
+            Self::Cbor(value) => cbor_to_python(py, &value),
+            Self::Iter(iter) => Ok(iter.into_pyobject(py)?.into_any()),
+        }
+    }
+}
+
 impl Scope {
     pub fn new() -> Self {
         Python::initialize();
@@ -160,7 +169,7 @@ sandbox._httpx2.install()
         })
     }
 
-    fn is_serializable(pyobject: &Bound<'_, PyAny>) -> bool {
+    fn is_builtin_result(pyobject: &Bound<'_, PyAny>) -> bool {
         pyobject.is_none()
             || PyDict::is_exact_type_of(pyobject)
             || PyList::is_exact_type_of(pyobject)
@@ -172,6 +181,10 @@ sandbox._httpx2.install()
             || PyBytes::is_exact_type_of(pyobject)
             || PyByteArray::is_exact_type_of(pyobject)
             || PyMemoryView::is_exact_type_of(pyobject)
+    }
+
+    fn is_serializable(pyobject: &Bound<'_, PyAny>) -> bool {
+        Self::is_builtin_result(pyobject)
             || (pyobject
                 .get_type()
                 .module()
@@ -179,16 +192,13 @@ sandbox._httpx2.install()
                 && pyobject.hasattr("dtype").unwrap_or_default())
     }
 
-    pub fn run<'a, U>(
+    pub fn run<'a>(
         &self,
         name: &str,
-        positional: impl IntoIterator<Item = InputValue<'a>, IntoIter = U>,
+        positional: impl IntoIterator<Item = InputValue<'a>, IntoIter: ExactSizeIterator>,
         named: impl IntoIterator<Item = (Cow<'a, str>, InputValue<'a>)>,
         mut callback: impl FnMut(crate::wasm::isola::script::host::EmitType, &[u8]),
-    ) -> Result<()>
-    where
-        U: ExactSizeIterator<Item = InputValue<'a>>,
-    {
+    ) -> Result<()> {
         Python::attach(|py| {
             let dict: &Bound<'_, PyDict> = self
                 .locals
@@ -202,44 +212,40 @@ sandbox._httpx2.install()
             };
 
             let obj = if f.is_callable() {
-                let args = PyTuple::new(
-                    py,
+                let mut positional = positional.into_iter().map(|arg| arg.into_python(py));
+                let mut named = named.into_iter().peekable();
+                let result = if named.peek().is_none() && positional.len() <= 1 {
                     positional
-                        .into_iter()
-                        .map(|v| match v {
-                            InputValue::Iter(it) => Ok(it.into_pyobject(py).unwrap().into_any()),
-                            InputValue::Cbor(v) => Ok(cbor_to_python(py, v.as_ref())
-                                .map_err(|e| Error::from_pyerr(py, e))?),
-                        })
-                        .collect::<Result<Vec<_>>>()?,
-                )
-                .map_err(|_e| Error::UnexpectedError("Failed to create Python tuple"))?;
-                let kwargs = PyDict::new(py);
-                for (k, v) in named {
-                    match v {
-                        InputValue::Cbor(v) => {
-                            kwargs
-                                .set_item(
-                                    k,
-                                    cbor_to_python(py, v.as_ref())
-                                        .map_err(|e| Error::from_pyerr(py, e))?,
-                                )
+                        .next()
+                        .map_or_else(|| f.call0(), |arg| arg.and_then(|arg| f.call1((arg,))))
+                } else {
+                    let args = positional
+                        .collect::<PyResult<Vec<_>>>()
+                        .map_err(|e| Error::from_pyerr(py, e))?;
+                    let args = PyTuple::new(py, args)
+                        .map_err(|_e| Error::UnexpectedError("Failed to create Python tuple"))?;
+                    if named.peek().is_some() {
+                        let kwargs = PyDict::new(py);
+                        for (name, arg) in named {
+                            arg.into_python(py)
+                                .and_then(|arg| kwargs.set_item(name, arg))
                                 .map_err(|e| Error::from_pyerr(py, e))?;
                         }
-                        InputValue::Iter(it) => kwargs
-                            .set_item(k, it.into_pyobject(py).unwrap())
-                            .map_err(|e| Error::from_pyerr(py, e))?,
+                        f.call(args, Some(&kwargs))
+                    } else {
+                        f.call1(args)
                     }
-                }
-                f.as_borrowed()
-                    .call(args, Some(&kwargs))
-                    .map_err(|e| Error::from_pyerr(py, e))?
+                };
+                result.map_err(|e| Error::from_pyerr(py, e))?
             } else {
                 f
             };
 
-            let obj = if obj.hasattr("__await__").unwrap_or_default()
-                || obj.hasattr("__aiter__").unwrap_or_default()
+            // Exact built-ins cannot implement the guest's async protocols.
+            let is_builtin = Self::is_builtin_result(&obj);
+            let obj = if !is_builtin
+                && (obj.hasattr(intern!(py, "__await__")).unwrap_or_default()
+                    || obj.hasattr(intern!(py, "__aiter__")).unwrap_or_default())
             {
                 static ASYNC_RUN: PyOnceLock<Py<PyAny>> = PyOnceLock::new();
                 ASYNC_RUN
@@ -251,7 +257,7 @@ sandbox._httpx2.install()
                 obj
             };
 
-            if Self::is_serializable(&obj) {
+            if is_builtin || Self::is_serializable(&obj) {
                 return python_to_cbor_emit(obj, EmitType::End, callback)
                     .map_err(|e| Error::from_pyerr(py, e));
             }

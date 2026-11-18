@@ -1,4 +1,7 @@
-use std::io::{self, Write};
+use std::{
+    cell::RefCell,
+    io::{self, Write},
+};
 
 use isola_runtime::CallbackWriter;
 use pyo3::{
@@ -19,6 +22,83 @@ use serde::{
 
 const MAX_DEPTH: usize = 128;
 
+/// Strings at least this long take the SIMD ASCII fast path in
+/// [`ascii_to_python`]; shorter ones are cheaper through CPython's decoder.
+#[cfg(target_arch = "wasm32")]
+const ASCII_FAST_PATH_MIN_LEN: usize = 256;
+
+/// Whether every byte is ASCII, 64 bytes per step with WebAssembly SIMD.
+///
+/// CPython's UTF-8 decoder scans a `size_t` (4 bytes on wasm32) at a time,
+/// which dominates the cost of creating large strings in the guest.
+#[cfg(target_arch = "wasm32")]
+#[target_feature(enable = "simd128")]
+fn is_ascii(bytes: &[u8]) -> bool {
+    use core::arch::wasm32::{u8x16_bitmask, v128, v128_load, v128_or};
+
+    let mut chunks = bytes.chunks_exact(64);
+    for chunk in &mut chunks {
+        let ptr = chunk.as_ptr().cast::<v128>();
+        // SAFETY: `chunk` holds exactly 64 bytes, i.e. four `v128` lanes, and
+        // WebAssembly loads have no alignment requirement.
+        let any_high = unsafe {
+            v128_or(
+                v128_or(v128_load(ptr), v128_load(ptr.add(1))),
+                v128_or(v128_load(ptr.add(2)), v128_load(ptr.add(3))),
+            )
+        };
+        if u8x16_bitmask(any_high) != 0 {
+            return false;
+        }
+    }
+    chunks.remainder().is_ascii()
+}
+
+/// Build a compact ASCII `str` directly when `bytes` is long and pure ASCII.
+///
+/// Returns `None` when the fast path does not apply, so callers fall back to
+/// CPython's general decoder (which also validates UTF-8).
+#[cfg(target_arch = "wasm32")]
+fn ascii_to_python<'py>(py: Python<'py>, bytes: &[u8]) -> Option<PyResult<Bound<'py, PyString>>> {
+    if bytes.len() < ASCII_FAST_PATH_MIN_LEN || !is_ascii(bytes) {
+        return None;
+    }
+    let len = pyo3::ffi::Py_ssize_t::try_from(bytes.len()).ok()?;
+    // SAFETY: `PyUnicode_New(len, 127)` returns a new compact ASCII string
+    // with `len` writable one-byte code units (NUL-terminated by CPython).
+    // Every byte copied in is ASCII, matching the declared maximum character.
+    Some(unsafe {
+        let obj = pyo3::ffi::PyUnicode_New(len, 127);
+        if obj.is_null() {
+            return Some(Err(pyo3::PyErr::fetch(py)));
+        }
+        std::ptr::copy_nonoverlapping(
+            bytes.as_ptr(),
+            pyo3::ffi::PyUnicode_DATA(obj).cast::<u8>(),
+            bytes.len(),
+        );
+        Ok(Bound::from_owned_ptr(py, obj).cast_into_unchecked())
+    })
+}
+
+/// Host builds (tests, lints) may use the `PyO3` limited API, which hides the
+/// `CPython` string internals, so they always take the `CPython` decoder.
+#[cfg(not(target_arch = "wasm32"))]
+const fn ascii_to_python<'py>(
+    _py: Python<'py>,
+    _bytes: &[u8],
+) -> Option<PyResult<Bound<'py, PyString>>> {
+    None
+}
+
+/// Create a Python `str` from validated UTF-8.
+fn str_to_python<'py>(py: Python<'py>, s: &str) -> Bound<'py, PyAny> {
+    match ascii_to_python(py, s.as_bytes()) {
+        Some(Ok(value)) => value.into_any(),
+        _ => PyString::new(py, s).into_any(),
+    }
+}
+
 struct PyValue<'py>(Bound<'py, PyAny>);
 
 impl<'py> PyValue<'py> {
@@ -30,7 +110,13 @@ impl<'py> PyValue<'py> {
     where
         D: serde::Deserializer<'de>,
     {
-        PyDeserializer(py).deserialize(deserializer)
+        let keys = KeyCache::new();
+        PyDeserializer {
+            py,
+            keys: &keys,
+            is_key: false,
+        }
+        .deserialize(deserializer)
     }
 }
 
@@ -84,15 +170,77 @@ impl PyValue<'_> {
     }
 }
 
-struct PyDeserializer<'py>(Python<'py>);
+/// Per-decode cache of short dict-key strings.
+///
+/// Records repeat the same few keys; reusing one `str` per distinct key skips
+/// an allocation per key and lets `dict` reuse the string's cached hash.
+/// Direct-mapped so a map with many distinct keys costs one compare per key.
+struct KeyCache<'py>(RefCell<[Option<CachedKey<'py>>; KEY_CACHE_SLOTS]>);
 
-impl<'py> PyDeserializer<'py> {
-    const fn py(&self) -> Python<'py> {
-        self.0
+type CachedKey<'py> = (Box<str>, Bound<'py, PyString>);
+
+const KEY_CACHE_SLOTS: usize = 64;
+const KEY_CACHE_MAX_LEN: usize = 32;
+
+impl<'py> KeyCache<'py> {
+    const fn new() -> Self {
+        Self(RefCell::new([const { None }; KEY_CACHE_SLOTS]))
+    }
+
+    fn get_or_insert(&self, py: Python<'py>, key: &str) -> Bound<'py, PyAny> {
+        let bytes = key.as_bytes();
+        let (Some(&first), Some(&last)) = (bytes.first(), bytes.last()) else {
+            return PyString::new(py, key).into_any();
+        };
+        if bytes.len() > KEY_CACHE_MAX_LEN {
+            return str_to_python(py, key);
+        }
+        let slot =
+            (bytes.len() * 31 + usize::from(first) * 7 + usize::from(last)) % KEY_CACHE_SLOTS;
+        let mut slots = self.0.borrow_mut();
+        if let Some((cached, value)) = &slots[slot]
+            && **cached == *key
+        {
+            return value.clone().into_any();
+        }
+        let value = PyString::new(py, key);
+        slots[slot] = Some((key.into(), value.clone()));
+        value.into_any()
     }
 }
 
-struct PyVisitor<'py>(Python<'py>);
+#[derive(Clone, Copy)]
+struct PyDeserializer<'a, 'py> {
+    py: Python<'py>,
+    keys: &'a KeyCache<'py>,
+    is_key: bool,
+}
+
+impl<'py> PyDeserializer<'_, 'py> {
+    const fn value(self) -> Self {
+        Self {
+            is_key: false,
+            ..self
+        }
+    }
+
+    const fn key(self) -> Self {
+        Self {
+            is_key: true,
+            ..self
+        }
+    }
+
+    fn str(self, v: &str) -> Bound<'py, PyAny> {
+        if self.is_key {
+            self.keys.get_or_insert(self.py, v)
+        } else {
+            str_to_python(self.py, v)
+        }
+    }
+}
+
+struct PyVisitor<'a, 'py>(PyDeserializer<'a, 'py>);
 
 macro_rules! impl_py_visit {
     ($name:ident, $t:ty) => {
@@ -101,11 +249,11 @@ macro_rules! impl_py_visit {
         where
             E: serde::de::Error,
         {
-            Ok(v.into_pyobject(self.0).unwrap().to_owned().into_any())
+            Ok(v.into_pyobject(self.0.py).unwrap().to_owned().into_any())
         }
     };
 }
-impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
+impl<'de, 'py> Visitor<'de> for PyVisitor<'_, 'py> {
     type Value = Bound<'py, PyAny>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -126,16 +274,37 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     impl_py_visit!(visit_f32, f32);
     impl_py_visit!(visit_f64, f64);
     impl_py_visit!(visit_char, char);
-    impl_py_visit!(visit_str, &str);
-    impl_py_visit!(visit_borrowed_str, &'de str);
-    impl_py_visit!(visit_string, String);
+
+    #[inline]
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(self.0.str(v))
+    }
+
+    #[inline]
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(self.0.str(v))
+    }
+
+    #[inline]
+    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        Ok(self.0.str(&v))
+    }
 
     #[inline]
     fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, v).into_any())
+        Ok(PyBytes::new(self.0.py, v).into_any())
     }
 
     #[inline]
@@ -143,7 +312,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, v).into_any())
+        Ok(PyBytes::new(self.0.py, v).into_any())
     }
 
     #[inline]
@@ -151,7 +320,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyBytes::new(self.0, &v).into_any())
+        Ok(PyBytes::new(self.0.py, &v).into_any())
     }
 
     #[inline]
@@ -159,7 +328,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(().into_pyobject(self.0).unwrap().into_any())
+        Ok(().into_pyobject(self.0.py).unwrap().into_any())
     }
 
     #[inline]
@@ -167,7 +336,7 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
     where
         E: serde::de::Error,
     {
-        Ok(PyNone::get(self.0).to_owned().into_any())
+        Ok(PyNone::get(self.0.py).to_owned().into_any())
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -175,52 +344,54 @@ impl<'de, 'py> Visitor<'de> for PyVisitor<'py> {
         A: serde::de::SeqAccess<'de>,
     {
         let mut elems = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(val) = seq.next_element_seed(PyDeserializer(self.0))? {
+        while let Some(val) = seq.next_element_seed(self.0.value())? {
             elems.push(val);
         }
-        Ok(elems.into_pyobject(self.0).unwrap().into_any())
+        Ok(elems.into_pyobject(self.0.py).unwrap().into_any())
     }
 
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
-        let dict = PyDict::new(self.0);
-        while let Some((key, val)) =
-            map.next_entry_seed(PyDeserializer(self.0), PyDeserializer(self.0))?
-        {
+        let dict = PyDict::new(self.0.py);
+        while let Some((key, val)) = map.next_entry_seed(self.0.key(), self.0.value())? {
             dict.set_item(key, val).unwrap();
         }
-        Ok(dict.into_pyobject(self.0).unwrap().into_any())
+        Ok(dict.into_pyobject(self.0.py).unwrap().into_any())
     }
 
     fn visit_some<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        PyValue::deserialize(self.0, deserializer)
+        self.0.value().deserialize(deserializer)
     }
 
     fn visit_newtype_struct<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        PyValue::deserialize(self.0, deserializer)
+        self.0.value().deserialize(deserializer)
     }
 }
 
-impl<'de, 'py> DeserializeSeed<'de> for PyDeserializer<'py> {
+impl<'de, 'py> DeserializeSeed<'de> for PyDeserializer<'_, 'py> {
     type Value = Bound<'py, PyAny>;
 
     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        deserializer.deserialize_any(PyVisitor(self.py()))
+        deserializer.deserialize_any(PyVisitor(self))
     }
 }
 
 impl Serialize for PyValue<'_> {
+    #[expect(
+        clippy::too_many_lines,
+        reason = "the recursive serializer keeps Python type dispatch in one place"
+    )]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -243,6 +414,22 @@ impl Serialize for PyValue<'_> {
                 }
 
                 let o = &self.0;
+                // Fast path for the most common leaves. These exact types can
+                // never match the container checks below, so dispatching on
+                // them first does not change which branch a value takes.
+                if PyString::is_exact_type_of(o)
+                    && let Some(s) = o.cast::<PyString>().ok().and_then(|s| s.to_str().ok())
+                {
+                    return serializer.serialize_str(s);
+                }
+                if PyInt::is_exact_type_of(o)
+                    && let Ok(i) = o.extract::<i64>()
+                {
+                    return serializer.serialize_i64(i);
+                }
+                if let Ok(b) = o.cast_exact::<PyBool>() {
+                    return serializer.serialize_bool(b.is_true());
+                }
                 if let Ok(dict) = o.cast_exact::<PyDict>() {
                     let len = dict.len().ok();
                     let mut map = serializer.serialize_map(len)?;
@@ -623,6 +810,22 @@ where
 }
 
 pub fn cbor_to_python<'py>(py: Python<'py>, cbor: &[u8]) -> PyResult<Bound<'py, PyAny>> {
+    // Let CPython validate UTF-8 as it creates strings with a four-byte CBOR
+    // length (typically 64 KiB and up).
+    const CBOR_TEXT_WITH_U32_LENGTH: u8 = 0x7a;
+    if let [CBOR_TEXT_WITH_U32_LENGTH, a, b, c, d, data @ ..] = cbor
+        && let Ok(len) = usize::try_from(u32::from_be_bytes([*a, *b, *c, *d]))
+        && let Some(bytes) = data.get(..len)
+    {
+        if let Some(value) = ascii_to_python(py, bytes) {
+            return value.map(Bound::into_any);
+        }
+        match PyString::from_bytes(py, bytes) {
+            Ok(value) => return Ok(value.into_any()),
+            Err(error) if error.is_instance_of::<pyo3::exceptions::PyUnicodeDecodeError>(py) => {}
+            Err(error) => return Err(error),
+        }
+    }
     let mut decoder = minicbor::Decoder::new(cbor);
     if decoder
         .datatype()
@@ -725,6 +928,23 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn large_cbor_text_roundtrips_and_rejects_invalid_data() {
+        Python::initialize();
+        Python::attach(|py| {
+            let text = "a\0é🦦".repeat(16_384);
+            let mut cbor = Vec::new();
+            minicbor::Encoder::new(&mut cbor).str(&text).unwrap();
+            let value = cbor_to_python(py, &cbor).unwrap();
+            assert_eq!(value.extract::<&str>().unwrap(), text);
+
+            assert!(cbor_to_python(py, &cbor[..cbor.len() - 1]).is_err());
+            cbor[5] = 0xff;
+            let error = cbor_to_python(py, &cbor).unwrap_err();
+            assert!(error.is_instance_of::<pyo3::exceptions::PyValueError>(py));
+        });
+    }
 
     #[test]
     fn test_numpy_typed_array_roundtrip() {

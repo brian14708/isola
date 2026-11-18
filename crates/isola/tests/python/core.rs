@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use isola::{
     host::{OutputEvent, OutputTarget},
     sandbox::{Arg, CallOutput, Error as IsolaError, FsPerms, Sandbox, SandboxOptions, args},
+    value::Value,
 };
 use parking_lot::Mutex;
 use tempfile::tempdir;
@@ -83,6 +84,38 @@ async fn integration_python_eval_and_call_roundtrip() -> Result<()> {
         .context("failed to decode end output")?;
     assert_eq!(value, 42);
 
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_awaitable_builtin_subclass() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    sandbox
+        .eval_script(
+            r"
+class Awaitable(str):
+    def __await__(self):
+        return resolve().__await__()
+
+async def resolve():
+    return 'awaited'
+
+def main():
+    return Awaitable('original')
+",
+            OutputTarget::discard(),
+        )
+        .await?;
+
+    let output = call_with_timeout(&mut sandbox, "main", [], Duration::from_secs(2)).await?;
+    let value: String = output.result.context("expected final result")?.to_serde()?;
+    assert_eq!(value, "awaited");
     Ok(())
 }
 
@@ -1015,5 +1048,118 @@ async fn integration_python_tracing_raw_stdout_is_drained_between_calls() -> Res
             ],
         );
     }
+    Ok(())
+}
+
+/// Call `function` and decode its final result.
+async fn call_result<T: serde::de::DeserializeOwned>(
+    sandbox: &mut Sandbox<TestHost>,
+    function: &str,
+    args: impl IntoIterator<Item = Arg>,
+) -> Result<T> {
+    let output = call_with_timeout(sandbox, function, args, Duration::from_secs(5))
+        .await
+        .with_context(|| format!("failed to call {function}"))?;
+    output
+        .result
+        .with_context(|| format!("expected {function} result"))?
+        .to_serde()
+        .with_context(|| format!("failed to decode {function} result"))
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_async_run_cancels_pending_tasks_and_isolates_context() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    let script = r#"
+import asyncio
+import contextvars
+
+var = contextvars.ContextVar("var", default="unset")
+events = []
+
+async def forever():
+    try:
+        await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        events.append("cancelled")
+        raise
+
+async def start():
+    var.set("inside")
+    asyncio.get_running_loop().create_task(forever())
+    await asyncio.sleep(0)
+    return var.get()
+
+def observe():
+    return [events, var.get()]
+"#;
+    sandbox.eval_script(script, OutputTarget::discard()).await?;
+
+    let inside: String = call_result(&mut sandbox, "start", []).await?;
+    assert_eq!(inside, "inside");
+    // The task left pending by `start` is cancelled when its loop closes, and
+    // the context variable set inside the run does not leak out.
+    let observed: (Vec<String>, String) = call_result(&mut sandbox, "observe", []).await?;
+    assert_eq!(observed, (vec!["cancelled".into()], "unset".into()));
+    Ok(())
+}
+
+#[tokio::test]
+#[cfg_attr(debug_assertions, ignore = "integration tests run in release mode")]
+async fn integration_python_string_and_key_roundtrip() -> Result<()> {
+    let Some(module) = build_module().await? else {
+        return Ok(());
+    };
+    let mut sandbox = module
+        .instantiate(TestHost::default(), SandboxOptions::default())
+        .await?;
+    let script = r#"
+def ident(value):
+    return value
+
+def inspect(value):
+    keys = value["keys"]
+    return [
+        [keys[k] for k in ("", "caf\u00e9", "k99", "x" * 40)],
+        [s.isascii() for s in value["strings"]],
+    ]
+"#;
+    sandbox.eval_script(script, OutputTarget::discard()).await?;
+
+    // Strings of 256+ ASCII bytes take the SIMD fast path; the rest use
+    // CPython's decoder. Keys exercise the per-decode key cache: repeats,
+    // more distinct keys than slots, and empty, non-ASCII, and too-long keys.
+    let mut keys: serde_json::Map<_, _> = (0..100).map(|i| (format!("k{i}"), i.into())).collect();
+    keys.insert(String::new(), "empty".into());
+    keys.insert("café".into(), "unicode".into());
+    keys.insert("x".repeat(40), "long".into());
+    let records: Vec<_> = (0..50)
+        .map(|i| serde_json::json!({"id": i, "owner": format!("team-{}", i % 3)}))
+        .collect();
+    let strings = [
+        "a".repeat(255),
+        "b".repeat(256),
+        "c".repeat(10_000),
+        format!("{}é", "d".repeat(300)),
+    ];
+    let input = serde_json::json!({"keys": keys, "records": records, "strings": strings});
+    let value = Value::from_serde(&input)?;
+
+    let echoed: serde_json::Value =
+        call_result(&mut sandbox, "ident", [Arg::Positional(value.clone())]).await?;
+    assert_eq!(echoed, input);
+
+    let inspected: serde_json::Value =
+        call_result(&mut sandbox, "inspect", [Arg::Positional(value)]).await?;
+    assert_eq!(
+        inspected,
+        serde_json::json!([["empty", "unicode", 99, "long"], [true, true, true, false]])
+    );
     Ok(())
 }
