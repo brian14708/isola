@@ -69,15 +69,15 @@ impl PyValue<'_> {
         } else if o.is_none() {
             Unexpected::Option
         } else if PyFloat::is_exact_type_of(o) {
-            o.extract::<f64>().map_or_else(
-                |_| Unexpected::Other("object does not fit into a float"),
+            o.extract::<f64>().map_or(
+                Unexpected::Other("object does not fit into a float"),
                 Unexpected::Float,
             )
         } else if PyInt::is_exact_type_of(o) {
             o.extract::<i64>().map_or_else(
                 |_| {
-                    o.extract::<u64>().map_or_else(
-                        |_| Unexpected::Other("object does not fit into an integer"),
+                    o.extract::<u64>().map_or(
+                        Unexpected::Other("object does not fit into an integer"),
                         Unexpected::Unsigned,
                     )
                 },

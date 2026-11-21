@@ -75,7 +75,8 @@ pub async fn write_cache_file_atomic(cache_path: &Path, bytes: &[u8]) -> Result<
         .map_err(Error::from)?;
     match tokio::fs::rename(&tmp_path, cache_path).await {
         Ok(()) => Ok(()),
-        // Windows doesn't atomically replace by default; treat a concurrent winner as success.
+        // Windows doesn't atomically replace by default; treat a concurrent
+        // winner as success.
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
             let _ = tokio::fs::remove_file(&tmp_path).await;
             Ok(())
