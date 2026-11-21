@@ -404,7 +404,7 @@ pub unsafe extern "C" fn isola_context_initialize(
     let path = c_try!(unsafe { require_cstr(path, "path must not be NULL") });
     let path = c_try!(
         path.to_str()
-            .map_or_else(|_| Err(Error::InvalidArgument("Invalid path string")), Ok)
+            .map_or(Err(Error::InvalidArgument("Invalid path string")), Ok)
     );
     c_try!(ctx.load(path));
     ErrorCode::Ok
@@ -772,7 +772,7 @@ pub unsafe extern "C" fn isola_sandbox_load_script(
     let input = c_try!(
         input
             .to_str()
-            .map_or_else(|_| Err(Error::InvalidArgument("Invalid input string")), Ok)
+            .map_or(Err(Error::InvalidArgument("Invalid input string")), Ok)
     );
     c_try!(sandbox.load_script(input, timeout_in_ms));
     ErrorCode::Ok
