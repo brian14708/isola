@@ -68,7 +68,7 @@ wit-bindgen = { version = "0.63", default-features = false }
 wit-component = "0.263"
 wit-parser = "0.263"
 xshell = "0.2"
-zstd = { version = "0.13", default-features = false }
+zstd = { version = "0.14", default-features = false }
 
 [profile.release]
 lto = "thin"
