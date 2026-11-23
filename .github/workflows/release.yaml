@@ -131,7 +131,7 @@ jobs:
       id-token: write
     steps:
       - name: Setup uv
-        uses: astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@v10.4.0
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
